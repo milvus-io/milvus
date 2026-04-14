@@ -112,6 +112,73 @@ func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection not found")
 }
 
+func TestCreateSnapshotTask_PreExecute_ProtectionNegative(t *testing.T) {
+	task := &createSnapshotTask{
+		req: &milvuspb.CreateSnapshotRequest{
+			Name:                        "test_snapshot",
+			DbName:                      "default",
+			CollectionName:              "test_collection",
+			CompactionProtectionSeconds: -1,
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "non-negative"))
+}
+
+func TestCreateSnapshotTask_PreExecute_ProtectionExceedsMax(t *testing.T) {
+	task := &createSnapshotTask{
+		req: &milvuspb.CreateSnapshotRequest{
+			Name:                        "test_snapshot",
+			DbName:                      "default",
+			CollectionName:              "test_collection",
+			CompactionProtectionSeconds: 7*24*3600 + 1, // 7 days + 1 second
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "must not exceed"))
+}
+
+func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
+	task := &createSnapshotTask{
+		req: &milvuspb.CreateSnapshotRequest{
+			Name:                        "test_snapshot",
+			DbName:                      "default",
+			CollectionName:              "test_collection",
+			CompactionProtectionSeconds: 0,
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
+	task := &createSnapshotTask{
+		req: &milvuspb.CreateSnapshotRequest{
+			Name:                        "test_snapshot",
+			DbName:                      "default",
+			CollectionName:              "test_collection",
+			CompactionProtectionSeconds: 3600, // 1 hour
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), task.collectionID)
+}
+
 func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	task := &createSnapshotTask{

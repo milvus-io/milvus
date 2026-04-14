@@ -95,3 +95,22 @@ func TestIsMilvusError_WrappedChain(t *testing.T) {
 	assert.False(t, IsMilvusError(errors.New("plain error")))
 	assert.False(t, IsMilvusError(nil))
 }
+
+func TestWrapErrCompactionBlocked(t *testing.T) {
+	// Without extra message: only the reason is attached to ErrCompactionBlocked.
+	err := WrapErrCompactionBlocked("collection 100 has pending snapshot")
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCompactionBlocked))
+	assert.Contains(t, err.Error(), "collection 100 has pending snapshot")
+	// Sanity: callers should NOT mistake this for a service-internal failure.
+	assert.False(t, errors.Is(err, ErrServiceInternal))
+	// Business-level rejection is marked retryable so compaction scheduler can back off.
+	assert.False(t, IsNonRetryableErr(err))
+
+	// With extra context message: errors.Wrap joins msg slices with "->".
+	err2 := WrapErrCompactionBlocked("segment 42 protected", "planID=8001", "type=Merge")
+	assert.Error(t, err2)
+	assert.True(t, errors.Is(err2, ErrCompactionBlocked))
+	assert.Contains(t, err2.Error(), "segment 42 protected")
+	assert.Contains(t, err2.Error(), "planID=8001->type=Merge")
+}

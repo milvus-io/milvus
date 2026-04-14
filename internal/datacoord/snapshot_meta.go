@@ -67,8 +67,8 @@ const (
 // SnapshotRefIndex holds segment and build IDs loaded from S3.
 // Loading state is managed per-snapshot to support retry on failure.
 //
-// CONCURRENCY: Protected by RWMutex since SetLoaded (async loader) and
-// ContainsSegment/ContainsBuildID (GC) may run concurrently.
+// CONCURRENCY: Protected by RWMutex since the async loader writes via SetLoaded/SetFailed
+// while snapshotMeta.rebuildAllSegmentProtection reads via GetSegmentIDs/GetBuildIDs.
 type SnapshotRefIndex struct {
 	mu         sync.RWMutex
 	loadState  RefIndexLoadState
@@ -140,6 +140,27 @@ func (r *SnapshotRefIndex) IsFailed() bool {
 	return r.loadState == RefIndexStateFailed
 }
 
+// GetSegmentIDs returns a copy of segment IDs referenced by this snapshot.
+func (r *SnapshotRefIndex) GetSegmentIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.segmentIDs == nil {
+		return nil
+	}
+	return r.segmentIDs.Collect()
+}
+
+// GetBuildIDs returns a copy of the index buildIDs referenced by this snapshot.
+// Used by rebuildAllSegmentProtection to populate buildIDReferencedByGC.
+func (r *SnapshotRefIndex) GetBuildIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.buildIDs == nil {
+		return nil
+	}
+	return r.buildIDs.Collect()
+}
+
 // snapshotMeta manages snapshot metadata both in memory and persistent storage.
 //
 // This is the central coordinator for snapshot operations, maintaining:
@@ -167,6 +188,49 @@ type snapshotMeta struct {
 	// since UniqueSet (map) is not thread-safe for concurrent modifications.
 	// Uses RWMutex to allow concurrent reads (ListSnapshots) while blocking writes.
 	collectionIndexMu sync.RWMutex
+
+	// Protection state, maintained by rebuildAllSegmentProtection under segmentProtectionMu.
+	//
+	// Compaction and GC share the same fail-closed → converge pattern (coarse collection-level
+	// block at startup, progressively narrowed to precise segment/buildID sets as the loader
+	// goroutine reads RefIndexes from S3). They differ in TTL semantics:
+	//
+	//   - Compaction protection is TTL-bound: only snapshots whose CompactionExpireTime is
+	//     still in the future contribute. Once TTL expires, the segment is eligible for
+	//     compaction again even if the snapshot still exists.
+	//
+	//   - GC protection is unconditional: any existing snapshot's referenced segments and
+	//     buildIDs must not be deleted, because the snapshot needs them for PIT recovery
+	//     regardless of CompactionExpireTime.
+	//
+	// These are therefore maintained as two independent sets of precise state under the
+	// same lock, rebuilt atomically by rebuildAllSegmentProtection.
+	segmentProtectionMu sync.RWMutex
+	// ===== Compaction protection (TTL-bound) =====
+	// segmentProtectionUntil: segmentID -> latest active protection expiry (Unix seconds).
+	// When multiple active-TTL snapshots reference the same segment, the latest expiry wins.
+	segmentProtectionUntil map[int64]uint64
+	// compactionBlockedCollections: collections with active compaction-protected snapshots
+	// whose RefIndex hasn't been loaded yet. Fail-closed coarse block.
+	compactionBlockedCollections typeutil.UniqueSet
+	// ===== GC protection (unconditional on TTL) =====
+	// gcBlockedCollections: collections with any snapshot whose RefIndex hasn't been loaded.
+	// Fail-closed coarse block for GC queries: we cannot know which segments/buildIDs an
+	// unloaded RefIndex references, so every candidate in the collection must be kept.
+	gcBlockedCollections typeutil.UniqueSet
+	// segmentReferencedByGC: set of segment IDs referenced by at least one loaded snapshot.
+	// Precise-grained GC protection: once we know a snapshot's referenced segments, we can
+	// point-query this set instead of scanning all snapshots per candidate.
+	segmentReferencedByGC typeutil.UniqueSet
+	// buildIDReferencedByGC: set of index buildIDs referenced by at least one loaded snapshot.
+	buildIDReferencedByGC typeutil.UniqueSet
+
+	// snapshotPendingCollections: collections currently in the process of creating a snapshot.
+	// Blocks compaction commit for these collections to prevent segment state changes
+	// between GenSnapshot (segment list capture) and SaveSnapshot (protection setup).
+	// This is independent of the rebuild pattern above — it is a short-lived flag set by
+	// CreateSnapshot and cleared by its defer.
+	snapshotPendingCollections typeutil.UniqueSet
 
 	// Background RefIndex loader goroutine control
 	loaderCtx    context.Context
@@ -198,15 +262,21 @@ type snapshotMeta struct {
 func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*snapshotMeta, error) {
 	loaderCtx, loaderCancel := context.WithCancel(context.Background())
 	sm := &snapshotMeta{
-		catalog:                catalog,
-		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
-		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
-		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
-		loaderCtx:              loaderCtx,
-		loaderCancel:           loaderCancel,
-		reader:                 NewSnapshotReader(chunkManager),
-		writer:                 NewSnapshotWriter(chunkManager),
+		catalog:                      catalog,
+		snapshotID2Info:              typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:          typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:              typeutil.NewConcurrentMap[string, UniqueID](),
+		collectionID2Snapshots:       typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+		segmentProtectionUntil:       make(map[int64]uint64),
+		compactionBlockedCollections: typeutil.NewUniqueSet(),
+		gcBlockedCollections:         typeutil.NewUniqueSet(),
+		segmentReferencedByGC:        typeutil.NewUniqueSet(),
+		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
+		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		loaderCtx:                    loaderCtx,
+		loaderCancel:                 loaderCancel,
+		reader:                       NewSnapshotReader(chunkManager),
+		writer:                       NewSnapshotWriter(chunkManager),
 	}
 
 	// Reload all snapshots from catalog to populate in-memory cache
@@ -216,7 +286,24 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		return nil, err
 	}
 
-	// Start background RefIndex loader goroutine
+	// Synchronously populate compaction protection state before exposing snapshotMeta
+	// to the rest of DataCoord. This is a pure in-memory operation:
+	//
+	// At this point every RefIndex is in Pending state (freshly created by reload()),
+	// so rebuildAllSegmentProtection will conservatively imprint a collection-level
+	// block for every snapshot with an active CompactionExpireTime (fail-closed).
+	// Segment-level precision is not required on startup — the coarser collection-level
+	// block is a strict superset of the correct segment-level protection.
+	//
+	// The background loader goroutine below will then read RefIndexes from S3 and
+	// progressively transition each collection from coarse collection-level block to
+	// precise segment-level protection. This keeps startup O(N) in-memory instead of
+	// O(N × S3_RTT) I/O-bound, while preserving fail-closed semantics.
+	sm.rebuildAllSegmentProtection()
+
+	// Start background RefIndex loader goroutine. It runs an immediate first load
+	// (to narrow the coarse collection-level blocks to precise segment-level protection
+	// as soon as possible) and then periodically retries any RefIndex still in Failed state.
 	sm.loaderWg.Add(1)
 	go sm.refIndexLoaderLoop()
 
@@ -277,7 +364,14 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 	return nil
 }
 
-// refIndexLoaderLoop periodically loads unloaded RefIndexes in background.
+// refIndexLoaderLoop loads unloaded RefIndexes in the background.
+//
+// newSnapshotMeta imprints a coarse collection-level block for every protected
+// snapshot before returning (fail-closed, no I/O). This loop is responsible for
+// converging from that coarse state to precise segment-level protection:
+//   - first tick: runs immediately, loads RefIndexes from S3, narrows the blocks
+//   - subsequent ticks: periodically retry any RefIndex still in Failed state
+//
 // It runs until loaderCtx is cancelled.
 func (sm *snapshotMeta) refIndexLoaderLoop() {
 	defer sm.loaderWg.Done()
@@ -294,8 +388,15 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 		return interval
 	}
 
-	// Load immediately on startup.
-	sm.loadUnloadedRefIndexes()
+	runOnce := func() {
+		if sm.loadUnloadedRefIndexes() {
+			sm.rebuildAllSegmentProtection()
+		}
+	}
+
+	// Run immediately on startup so convergence from coarse collection-level blocks
+	// to precise segment-level protection does not wait a full interval.
+	runOnce()
 
 	timer := time.NewTimer(getInterval())
 	defer timer.Stop()
@@ -306,7 +407,7 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 			log.Info("RefIndex loader goroutine stopped")
 			return
 		case <-timer.C:
-			sm.loadUnloadedRefIndexes()
+			runOnce()
 			// Reset using the latest refreshable interval.
 			timer.Reset(getInterval())
 		}
@@ -314,7 +415,19 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 }
 
 // loadUnloadedRefIndexes loads all RefIndexes that are Pending or Failed.
-func (sm *snapshotMeta) loadUnloadedRefIndexes() {
+// Returns true if any RefIndex state changed (loaded or failed), indicating
+// that callers should rebuild dependent state like segment protection.
+//
+// Each ReadSnapshot call is bounded by a per-call timeout (dataCoord.snapshot.refIndexLoadTimeout)
+// derived from sm.loaderCtx. WITHOUT this timeout, a single hung S3 read would block
+// the entire Range, no other RefIndex would ever be loaded, rebuildAllSegmentProtection
+// would never be triggered, and every collection with a snapshot would stay in the
+// startup fail-closed coarse block — leaking storage on every collection with snapshots
+// until DataCoord restarts. On timeout the RefIndex is marked Failed and will be
+// retried on the next loader tick.
+func (sm *snapshotMeta) loadUnloadedRefIndexes() bool {
+	changed := false
+	timeout := paramtable.Get().DataCoordCfg.SnapshotRefIndexLoadTimeout.GetAsDurationByParse()
 	sm.snapshotID2RefIndex.Range(func(id UniqueID, refIndex *SnapshotRefIndex) bool {
 		if refIndex.IsLoaded() {
 			return true // Already loaded, skip
@@ -325,11 +438,14 @@ func (sm *snapshotMeta) loadUnloadedRefIndexes() {
 			return true // Snapshot deleted
 		}
 
-		snapshotData, err := sm.reader.ReadSnapshot(sm.loaderCtx, info.GetS3Location(), false)
+		readCtx, cancel := context.WithTimeout(sm.loaderCtx, timeout)
+		snapshotData, err := sm.reader.ReadSnapshot(readCtx, info.GetS3Location(), false)
+		cancel()
 		if err != nil {
 			log.Warn("failed to load RefIndex from S3",
 				zap.String("name", info.GetName()),
 				zap.Int64("id", id),
+				zap.Duration("timeout", timeout),
 				zap.Error(err))
 			refIndex.SetFailed()
 		} else {
@@ -338,9 +454,11 @@ func (sm *snapshotMeta) loadUnloadedRefIndexes() {
 				zap.String("name", info.GetName()),
 				zap.Int64("id", id))
 		}
+		changed = true
 
 		return true
 	})
+	return changed
 }
 
 // Close stops the background RefIndex loader goroutine.
@@ -433,7 +551,16 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// Step 4: Phase 2 (Commit) - Update catalog to COMMITTED state
 	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStateCommitted
 
-	// Insert into in-memory cache (two maps)
+	// Phase 2 window (these 4 in-memory insertions) — invariant note:
+	// Between the first Insert below and registerSnapshotProtection, this snapshot is
+	// visible in snapshotID2Info but has not yet contributed to segmentReferencedByGC /
+	// buildIDReferencedByGC. A concurrent GC in this window would find the segments
+	// unprotected and could delete the files. We rely on snapshotManager.CreateSnapshot
+	// having called SetSnapshotPending(collectionID) BEFORE entering SaveSnapshot and
+	// deferring ClearSnapshotPending until after SaveSnapshot returns; SetSnapshotPending
+	// blocks compaction commit for the collection, which in turn prevents any of this
+	// snapshot's segments from transitioning to Dropped (the only state where GC would
+	// act on them). Therefore this nanosecond-scale window is not actually observable.
 	sm.snapshotID2Info.Insert(snapshot.SnapshotInfo.GetId(), snapshot.SnapshotInfo)
 	sm.snapshotID2RefIndex.Insert(snapshot.SnapshotInfo.GetId(),
 		NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
@@ -441,13 +568,34 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// Build secondary indexes for O(1) lookup
 	sm.addToSecondaryIndexes(snapshot.SnapshotInfo)
 
+	// Register both compaction protection (TTL-bound) and GC protection (unconditional)
+	// for the referenced segments/buildIDs. Must run for ANY snapshot, including those
+	// with CompactionExpireTime==0, because GC protection has no TTL — otherwise the
+	// freshly-created snapshot's referenced files could be deleted by GC.
+	sm.registerSnapshotProtection(snapshot.SnapshotInfo, segmentIDs, buildIDs)
+
 	// Update catalog with COMMITTED state
 	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
-		// Phase 2 failed, but S3 data is written. GC will eventually cleanup.
-		// Remove from memory cache and secondary indexes since commit failed
+		// Phase 2 commit failed, but S3 data and PENDING record are already written.
+		// GC will eventually clean up the PENDING record and its S3 files.
+		//
+		// Roll back all in-memory state that the earlier success-path insertions built:
+		//   - snapshotID2Info / snapshotID2RefIndex / secondary indexes
+		//   - registerSnapshotProtection's contributions to BOTH protection dimensions:
+		//     compaction (segmentProtectionUntil) AND GC (segmentReferencedByGC /
+		//     buildIDReferencedByGC). rebuildAllSegmentProtection recomputes all 5
+		//     pieces of state from the remaining snapshots under a single lock, so
+		//     the rollback is atomic and cannot leak stale GC pins.
+		//
+		// NOTE: between the Remove calls and rebuildAllSegmentProtection, readers can
+		// observe a stale-TRUE protection state (snapshot gone from snapshotID2Info
+		// but its contributions still in the protection sets). This is a safe error:
+		// GC/compaction will conservatively skip a round, and the next rebuild fully
+		// reconciles. The window is nanoseconds, no I/O.
 		sm.snapshotID2Info.Remove(snapshot.SnapshotInfo.GetId())
 		sm.snapshotID2RefIndex.Remove(snapshot.SnapshotInfo.GetId())
 		sm.removeFromSecondaryIndexes(snapshot.SnapshotInfo)
+		sm.rebuildAllSegmentProtection()
 		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
 			zap.Error(err))
 		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
@@ -502,7 +650,21 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 	sm.snapshotID2RefIndex.Remove(snapshot.GetId())
 	sm.removeFromSecondaryIndexes(snapshot)
 
-	// Step 4: Delete S3 data (may fail, GC will retry)
+	// Step 4: Rebuild protection state UNCONDITIONALLY. Must not be gated on
+	// CompactionExpireTime > 0 because:
+	//
+	//   1. GC protection (segmentReferencedByGC/buildIDReferencedByGC) has no TTL —
+	//      even a TTL=0 snapshot contributes, so every drop can leave stale entries.
+	//   2. Even a TTL>0 snapshot with a Failed/Pending RefIndex imprinted a coarse
+	//      collection-level block (compactionBlockedCollections or gcBlockedCollections)
+	//      that a targeted rebuild cannot clear.
+	//
+	// A single rebuildAllSegmentProtection under one lock recomputes all five pieces
+	// of state consistently. Incremental "unregister" is avoided on purpose because
+	// it cannot tell whether another snapshot still references the same segment/buildID.
+	sm.rebuildAllSegmentProtection()
+
+	// Step 5: Delete S3 data (may fail, GC will retry)
 	if err := sm.writer.Drop(ctx, snapshot.GetS3Location()); err != nil {
 		log.Warn("S3 delete failed, will be cleaned by GC",
 			zap.Int64("snapshotID", snapshot.GetId()),
@@ -512,7 +674,7 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 		return nil
 	}
 
-	// Step 5: Delete catalog record (final cleanup)
+	// Step 6: Delete catalog record (final cleanup)
 	if err := sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId()); err != nil {
 		log.Warn("failed to drop snapshot from catalog after S3 cleanup",
 			zap.Int64("snapshotID", snapshot.GetId()),
@@ -695,46 +857,6 @@ func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName stri
 	return info, nil
 }
 
-// GetSnapshotBySegment returns all snapshot IDs that reference a given segment.
-//
-// This is used for garbage collection safety: before deleting a segment, check if
-// any snapshots reference it. If snapshots exist, the segment cannot be deleted.
-//
-// When collectionID >= 0, only snapshots for that collection are checked.
-// When collectionID < 0, all snapshots across all collections are checked.
-//
-// Caller should check IsAllRefIndexLoaded (when collectionID < 0) or
-// IsRefIndexLoadedForCollection (when collectionID >= 0) first to ensure the result is reliable.
-//
-// Parameters:
-//   - ctx: Context for cancellation (currently unused but reserved for future)
-//   - collectionID: Collection ID to filter snapshots, or negative to check all collections
-//   - segmentID: Segment ID to search for in snapshots
-//
-// Returns:
-//   - []UniqueID: List of snapshot IDs that contain this segment (empty if none)
-func (sm *snapshotMeta) GetSnapshotBySegment(ctx context.Context, collectionID, segmentID UniqueID) []UniqueID {
-	snapshotIDs := make([]UniqueID, 0)
-
-	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
-		if collectionID >= 0 && info.GetCollectionId() != collectionID {
-			return true // Skip, different collection
-		}
-
-		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
-		if !exists {
-			return true // RefIndex not found (should not happen)
-		}
-
-		if refIndex.ContainsSegment(segmentID) {
-			snapshotIDs = append(snapshotIDs, id)
-		}
-		return true
-	})
-
-	return snapshotIDs
-}
-
 // GetPendingSnapshots returns all snapshots that are in PENDING state.
 // This is used by GC to find orphaned snapshots that need cleanup.
 // Only returns snapshots that have exceeded the pending timeout.
@@ -870,78 +992,260 @@ func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.Snapshot
 	}
 }
 
-// GetSnapshotByBuildID returns all snapshot IDs that reference a given build ID.
-//
-// This is used for garbage collection safety: before deleting index files for a build,
-// check if any snapshots reference it. If snapshots exist, the files cannot be deleted.
-//
-// BuildID identifies a specific index build task, providing precise file-level protection.
-//
-// Caller should check IsAllRefIndexLoaded or IsRefIndexLoadedForCollection first.
-//
-// Parameters:
-//   - buildID: Build ID to search for in snapshots
-//
-// Returns:
-//   - []UniqueID: List of snapshot IDs that contain this build ID (empty if none)
-func (sm *snapshotMeta) GetSnapshotByBuildID(buildID UniqueID) []UniqueID {
-	snapshotIDs := make([]UniqueID, 0)
-
-	sm.snapshotID2RefIndex.Range(func(id UniqueID, refIndex *SnapshotRefIndex) bool {
-		if refIndex.ContainsBuildID(buildID) {
-			snapshotIDs = append(snapshotIDs, id)
-		}
-		return true
-	})
-
-	return snapshotIDs
+// IsCollectionCompactionBlocked checks if compaction is blocked for a collection.
+// Returns true if:
+//   - A protected snapshot's RefIndex hasn't been loaded yet (fail-closed), OR
+//   - The collection is currently in the process of creating a snapshot (intent-based blocking).
+func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	return sm.compactionBlockedCollections.Contain(collectionID) ||
+		sm.snapshotPendingCollections.Contain(collectionID)
 }
 
-// IsAllRefIndexLoaded checks if all RefIndexes across all snapshots are loaded.
-// Used by GC when querying snapshot references without a specific collectionID.
-func (sm *snapshotMeta) IsAllRefIndexLoaded() bool {
-	allLoaded := true
-	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
-		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
-		if !exists || !refIndex.IsLoaded() {
-			allLoaded = false
-			return false // Stop iteration
-		}
-		return true
-	})
-	return allLoaded
+// SetSnapshotPending marks a collection as having a pending snapshot creation.
+// This blocks compaction commit for the collection to prevent segment state changes
+// during the window between GenSnapshot and SaveSnapshot.
+func (sm *snapshotMeta) SetSnapshotPending(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotPendingCollections.Insert(collectionID)
+	log.Info("collection marked as snapshot pending, compaction blocked",
+		zap.Int64("collectionID", collectionID))
 }
 
-// IsRefIndexLoadedForCollection checks if RefIndexes for a collection are loaded.
-// Used by GC to check if it's safe to query snapshot references for a specific collection.
-func (sm *snapshotMeta) IsRefIndexLoadedForCollection(collectionID int64) bool {
-	sm.collectionIndexMu.RLock()
-	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
-	if !ok {
-		sm.collectionIndexMu.RUnlock()
-		return true // No snapshots for this collection, consider as loaded
+// ClearSnapshotPending removes the pending snapshot mark for a collection.
+// Called after SaveSnapshot completes (success or failure) to unblock compaction.
+func (sm *snapshotMeta) ClearSnapshotPending(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotPendingCollections.Remove(collectionID)
+	log.Info("collection snapshot pending mark cleared, compaction unblocked",
+		zap.Int64("collectionID", collectionID))
+}
+
+// isProtectionActive returns true if the given expiry timestamp represents
+// active (non-zero and not yet expired) compaction protection.
+func isProtectionActive(protectionUntil uint64, now uint64) bool {
+	return protectionUntil > 0 && now < protectionUntil
+}
+
+// upsertMaxProtection sets the protection expiry for a segment to the maximum
+// of the existing and new values. Must be called with segmentProtectionMu held.
+func (sm *snapshotMeta) upsertMaxProtection(segID int64, protectionUntil uint64) {
+	if existing, ok := sm.segmentProtectionUntil[segID]; !ok || protectionUntil > existing {
+		sm.segmentProtectionUntil[segID] = protectionUntil
+	}
+}
+
+// IsSegmentCompactionProtected checks if a segment is protected from compaction
+// by any active snapshot. Returns true if the segment should be excluded from compaction.
+func (sm *snapshotMeta) IsSegmentCompactionProtected(segmentID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	expiryTs, exists := sm.segmentProtectionUntil[segmentID]
+	if !exists {
+		return false
+	}
+	return uint64(time.Now().Unix()) < expiryTs
+}
+
+// IsSegmentGCBlocked reports whether a segment must be kept by GC because of snapshot
+// references, without requiring a separate "is loaded" check by the caller.
+//
+// Fail-closed semantics, layered from coarse to precise:
+//  1. If collectionID is non-negative and that collection is in gcBlockedCollections
+//     (some snapshot's RefIndex has not been loaded from S3 yet), return true — we
+//     cannot know the precise referenced set, so we keep the segment.
+//  2. If collectionID is negative (orphan file walk with no collection context), any
+//     unloaded RefIndex in any collection triggers a fail-closed return.
+//  3. Otherwise, return whether the segment is in segmentReferencedByGC.
+//
+// collectionID == 0 takes the non-negative branch (same as any positive ID). Since
+// Milvus never assigns 0 as a real collection ID, that branch will never match a real
+// snapshot and simply falls through to the precise segmentReferencedByGC check. If the
+// caller truly has no collection context, pass a negative value to hit branch 2.
+//
+// GC semantics are unconditional on TTL: snapshots whose CompactionExpireTime has
+// elapsed still contribute to the precise set, because PIT recovery still needs the
+// underlying files.
+//
+// Cost: O(1) — all state is precomputed by rebuildAllSegmentProtection.
+func (sm *snapshotMeta) IsSegmentGCBlocked(collectionID, segmentID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	if collectionID < 0 {
+		if sm.gcBlockedCollections.Len() > 0 {
+			return true
+		}
+	} else if sm.gcBlockedCollections.Contain(collectionID) {
+		return true
+	}
+	return sm.segmentReferencedByGC.Contain(segmentID)
+}
+
+// IsBuildIDGCBlocked reports whether an index buildID must be kept by GC because of
+// snapshot references. Same fail-closed layering as IsSegmentGCBlocked, including
+// the collectionID semantics: < 0 means "orphan walk, fail-closed globally", and any
+// non-negative value (including 0) narrows the fail-closed path to that collection.
+//
+// BuildIDs are global (an index build is identified by its unique buildID, not scoped
+// to a specific collection). Pass collectionID < 0 when the caller is walking orphan
+// buildIDs without a collection context; pass a specific collectionID when the caller
+// already has per-segment-index context (in which case only that collection's load
+// state gates the fail-closed path).
+//
+// Cost: O(1).
+func (sm *snapshotMeta) IsBuildIDGCBlocked(collectionID, buildID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	if collectionID < 0 {
+		if sm.gcBlockedCollections.Len() > 0 {
+			return true
+		}
+	} else if sm.gcBlockedCollections.Contain(collectionID) {
+		return true
+	}
+	return sm.buildIDReferencedByGC.Contain(buildID)
+}
+
+// registerSnapshotProtection incrementally registers a newly saved snapshot into both
+// protection dimensions under a single lock:
+//
+//   - GC protection (unconditional on TTL): the snapshot's segments and buildIDs are
+//     inserted into segmentReferencedByGC / buildIDReferencedByGC so the underlying
+//     files are pinned against GC, regardless of CompactionExpireTime.
+//   - Compaction protection (TTL-bound): if CompactionExpireTime is still active, the
+//     segments' entries in segmentProtectionUntil are upserted to the max expiry.
+//
+// This is the incremental counterpart to rebuildAllSegmentProtection — we use it on
+// the SaveSnapshot success path to avoid a full O(N) rebuild for a single new snapshot
+// while still keeping both dimensions in sync. rebuildAllSegmentProtection remains the
+// canonical path when state needs to be recomputed (startup, loader progress, rollback,
+// drop), because incremental updates cannot remove another snapshot's contribution.
+func (sm *snapshotMeta) registerSnapshotProtection(
+	info *datapb.SnapshotInfo, segmentIDs, buildIDs []int64,
+) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+
+	// GC protection (unconditional) — runs for every snapshot, TTL=0 included.
+	for _, segID := range segmentIDs {
+		sm.segmentReferencedByGC.Insert(segID)
+	}
+	for _, buildID := range buildIDs {
+		sm.buildIDReferencedByGC.Insert(buildID)
 	}
 
-	allLoaded := true
-	snapshotIDs.Range(func(snapshotID int64) bool {
-		refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotID)
-		// Safety first:
-		// - If snapshotInfo exists but refIndex is missing/not loaded, treat as not loaded to avoid unsafe GC.
-		// - If snapshotInfo doesn't exist (already deleted/cleaned), ignore this snapshotID.
-		if !exists {
-			if _, ok := sm.snapshotID2Info.Get(snapshotID); ok {
-				allLoaded = false
-				return false
+	// Compaction protection (TTL-bound) — only snapshots with active CompactionExpireTime.
+	protectionUntil := info.GetCompactionExpireTime()
+	if isProtectionActive(protectionUntil, uint64(time.Now().Unix())) {
+		for _, segID := range segmentIDs {
+			sm.upsertMaxProtection(segID, protectionUntil)
+		}
+	}
+
+	log.Info("registered snapshot protection",
+		zap.Int64("snapshotID", info.GetId()),
+		zap.Int64("collectionID", info.GetCollectionId()),
+		zap.Uint64("protectionUntil", protectionUntil),
+		zap.Int("numSegments", len(segmentIDs)),
+		zap.Int("numBuildIDs", len(buildIDs)))
+}
+
+// rebuildAllSegmentProtection atomically rebuilds BOTH compaction protection and GC
+// protection state from all snapshots. Called whenever snapshot state changes (on
+// startup, after RefIndex loader makes progress, after SaveSnapshot rollback, after
+// DropSnapshot).
+//
+// A single Range over snapshotID2Info produces 5 pieces of state under one lock,
+// keeping the two protection dimensions consistent:
+//
+//  1. segmentProtectionUntil — TTL-bound segment compaction protection
+//  2. compactionBlockedCollections — fail-closed coarse block for compaction
+//  3. segmentReferencedByGC — precise segment GC protection (no TTL)
+//  4. buildIDReferencedByGC — precise buildID GC protection (no TTL)
+//  5. gcBlockedCollections — fail-closed coarse block for GC
+//
+// Fail-closed design (both dimensions): if a snapshot's RefIndex hasn't been loaded,
+// we don't know which segments/buildIDs it references. In that case the entire
+// collection is coarsely blocked until the loader goroutine finishes, at which point
+// the next rebuild will narrow the coarse block to precise per-segment/buildID sets.
+//
+// TTL asymmetry between the two dimensions:
+//   - Compaction only protects snapshots whose CompactionExpireTime is still active.
+//     Expired-TTL snapshots contribute nothing to segmentProtectionUntil /
+//     compactionBlockedCollections.
+//   - GC protects segments/buildIDs referenced by ANY existing snapshot, regardless
+//     of TTL, because a snapshot always needs its underlying files to serve PIT
+//     recovery. Expired-TTL snapshots still contribute to the GC sets.
+func (sm *snapshotMeta) rebuildAllSegmentProtection() {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+
+	// Reset all protection state — the rebuild produces a complete, consistent snapshot.
+	// NOTE: snapshotPendingCollections is intentionally NOT reset here. It is a short-lived
+	// intent flag owned by SetSnapshotPending/ClearSnapshotPending (scoped to a single
+	// CreateSnapshot call), independent from the snapshot→collection state that this
+	// rebuild derives from snapshotID2Info. Clearing it here would let a concurrent
+	// compaction slip through the GenSnapshot→SaveSnapshot window.
+	sm.segmentProtectionUntil = make(map[int64]uint64)
+	compactionBlocked := typeutil.NewUniqueSet()
+	gcBlocked := typeutil.NewUniqueSet()
+	segRefGC := typeutil.NewUniqueSet()
+	buildRefGC := typeutil.NewUniqueSet()
+
+	now := uint64(time.Now().Unix())
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
+		loaded := exists && refIndex.IsLoaded()
+
+		// ===== GC protection (unconditional on TTL) =====
+		if !loaded {
+			// Fail-closed: we don't know which segments/buildIDs this snapshot references.
+			// Coarse-block the entire collection for GC until the RefIndex loads.
+			gcBlocked.Insert(info.GetCollectionId())
+		} else {
+			// Precise: record every referenced segment/buildID for O(1) lookups.
+			for _, segID := range refIndex.GetSegmentIDs() {
+				segRefGC.Insert(segID)
 			}
+			for _, buildID := range refIndex.GetBuildIDs() {
+				buildRefGC.Insert(buildID)
+			}
+		}
+
+		// ===== Compaction protection (TTL-bound) =====
+		protectionUntil := info.GetCompactionExpireTime()
+		if !isProtectionActive(protectionUntil, now) {
+			// TTL expired or never set — no compaction protection contribution.
 			return true
 		}
 
-		if !refIndex.IsLoaded() {
-			allLoaded = false
-			return false // Stop iteration
+		if !loaded {
+			// Fail-closed: active TTL but RefIndex not loaded.
+			compactionBlocked.Insert(info.GetCollectionId())
+			log.Info("blocking compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("snapshotID", id),
+				zap.Int64("collectionID", info.GetCollectionId()),
+				zap.Uint64("protectionUntil", protectionUntil))
+			return true
+		}
+
+		for _, segID := range refIndex.GetSegmentIDs() {
+			sm.upsertMaxProtection(segID, protectionUntil)
 		}
 		return true
 	})
-	sm.collectionIndexMu.RUnlock()
-	return allLoaded
+
+	sm.compactionBlockedCollections = compactionBlocked
+	sm.gcBlockedCollections = gcBlocked
+	sm.segmentReferencedByGC = segRefGC
+	sm.buildIDReferencedByGC = buildRefGC
+	log.Info("rebuilt all snapshot protection state",
+		zap.Int("compactionProtectedSegments", len(sm.segmentProtectionUntil)),
+		zap.Int("compactionBlockedCollections", sm.compactionBlockedCollections.Len()),
+		zap.Int("gcReferencedSegments", sm.segmentReferencedByGC.Len()),
+		zap.Int("gcReferencedBuildIDs", sm.buildIDReferencedByGC.Len()),
+		zap.Int("gcBlockedCollections", sm.gcBlockedCollections.Len()))
 }

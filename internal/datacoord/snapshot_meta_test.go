@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -113,15 +114,21 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 
 	loaderCtx, loaderCancel := context.WithCancel(context.Background())
 	return &snapshotMeta{
-		catalog:                catalog,
-		snapshotID2Info:        typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
-		snapshotID2RefIndex:    typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
-		collectionID2Snapshots: typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
-		loaderCtx:              loaderCtx,
-		loaderCancel:           loaderCancel,
-		reader:                 NewSnapshotReader(tempChunkManager),
-		writer:                 NewSnapshotWriter(tempChunkManager),
+		catalog:                      catalog,
+		snapshotID2Info:              typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:          typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:              typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
+		collectionID2Snapshots:       typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
+		segmentProtectionUntil:       make(map[int64]uint64),
+		compactionBlockedCollections: typeutil.NewUniqueSet(),
+		gcBlockedCollections:         typeutil.NewUniqueSet(),
+		segmentReferencedByGC:        typeutil.NewUniqueSet(),
+		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
+		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		loaderCtx:                    loaderCtx,
+		loaderCancel:                 loaderCancel,
+		reader:                       NewSnapshotReader(tempChunkManager),
+		writer:                       NewSnapshotWriter(tempChunkManager),
 	}
 }
 
@@ -131,11 +138,28 @@ func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
 	return createTestSnapshotMeta(t)
 }
 
-// insertTestSnapshot inserts snapshot data into snapshotMeta for testing.
-// Use this for setting up test data when you don't need to go through SaveSnapshot.
-func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs []int64) {
+// insertTestSnapshot is a LIGHTWEIGHT helper that only primes the three lookup maps
+// (snapshotID2Info / snapshotID2RefIndex / secondary indexes). It is meant for tests
+// that exercise pure lookup paths (ListSnapshots, name→ID resolution, etc.) where the
+// snapshot protection state is irrelevant.
+//
+// It does NOT maintain any of the protection sets — segmentProtectionUntil,
+// segmentReferencedByGC, buildIDReferencedByGC, compactionBlockedCollections, or
+// gcBlockedCollections are left untouched. If your test needs protection state to
+// reflect the inserted snapshot, one of the following is required:
+//   - call sm.rebuildAllSegmentProtection() after insertion to derive all 5 sets, OR
+//   - call sm.registerSnapshotProtection(info, segmentIDs, buildIDs) for an incremental
+//     update, OR
+//   - use saveTestSnapshots() which goes through the real SaveSnapshot code path.
+//
+// Parameters:
+//   - sm: the snapshotMeta to populate
+//   - info: the snapshot metadata (with Id, Name, CollectionId, etc.)
+//   - segmentIDs: segment IDs the snapshot references (passed to RefIndex)
+//   - buildIDs: index build IDs the snapshot references (passed to RefIndex)
+func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs, buildIDs []int64) {
 	sm.snapshotID2Info.Insert(info.GetId(), info)
-	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, nil))
+	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
 	sm.addToSecondaryIndexes(info)
 }
 
@@ -212,8 +236,8 @@ func TestSnapshotMeta_ListSnapshots_AllCollections(t *testing.T) {
 	snapshot2.SnapshotInfo.Id = 2
 
 	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshot1.SnapshotInfo, nil)
-	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil)
+	insertTestSnapshot(sm, snapshot1.SnapshotInfo, nil, nil)
+	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil, nil)
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -340,86 +364,6 @@ func TestSnapshotMeta_GetSnapshotByName_MultipleSnapshots(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.Equal(t, snapshot2.SnapshotInfo, result)
-}
-
-// --- GetSnapshotBySegment Tests ---
-
-func TestSnapshotMeta_GetSnapshotBySegment_Success(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := typeutil.UniqueID(100)
-	segmentID := typeutil.UniqueID(1001)
-
-	snapshotInfo1 := createTestSnapshotInfoForMeta()
-	snapshotInfo1.CollectionId = 100
-	snapshotInfo1.Id = 1
-
-	snapshotInfo2 := createTestSnapshotInfoForMeta()
-	snapshotInfo2.CollectionId = 100
-	snapshotInfo2.Id = 2
-
-	snapshotInfo3 := createTestSnapshotInfoForMeta()
-	snapshotInfo3.CollectionId = 200 // Different collection
-	snapshotInfo3.Id = 3
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1003, 1004})
-	insertTestSnapshot(sm, snapshotInfo3, []int64{1001})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only snapshot1 matches
-}
-
-func TestSnapshotMeta_GetSnapshotBySegment_EmptyResult(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := UniqueID(100)
-	segmentID := UniqueID(9999) // Non-existent segment
-
-	snapshotInfo := createTestSnapshotInfoForMeta()
-	snapshotInfo.CollectionId = 100
-	snapshotInfo.Id = 1
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo, []int64{1001, 1002})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 0)
-}
-
-func TestSnapshotMeta_GetSnapshotBySegment_MultipleMatches(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := UniqueID(100)
-	segmentID := UniqueID(1001)
-
-	snapshotInfo1 := createTestSnapshotInfoForMeta()
-	snapshotInfo1.CollectionId = 100
-	snapshotInfo1.Id = 1
-
-	snapshotInfo2 := createTestSnapshotInfoForMeta()
-	snapshotInfo2.CollectionId = 100
-	snapshotInfo2.Id = 2
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1001, 1003})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 2)
-	assert.Contains(t, snapshotIDs, UniqueID(1))
-	assert.Contains(t, snapshotIDs, UniqueID(2))
 }
 
 // --- newSnapshotMeta Tests (Mockey-based) ---
@@ -1168,65 +1112,6 @@ func TestSnapshotRefIndex_EmptySets(t *testing.T) {
 	assert.False(t, refIndex.ContainsBuildID(3001))
 }
 
-// --- GetSnapshotByBuildID Tests ---
-
-func TestSnapshotMeta_GetSnapshotByBuildID(t *testing.T) {
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// Insert snapshot with buildIDs
-	info1 := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: 100,
-		Name:         "snap1",
-	}
-	sm.snapshotID2Info.Insert(info1.GetId(), info1)
-	sm.snapshotID2RefIndex.Insert(info1.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1001}, []int64{3001, 3002}))
-	sm.addToSecondaryIndexes(info1)
-
-	// Insert another snapshot with different buildIDs
-	info2 := &datapb.SnapshotInfo{
-		Id:           2,
-		CollectionId: 200,
-		Name:         "snap2",
-	}
-	sm.snapshotID2Info.Insert(info2.GetId(), info2)
-	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1002}, []int64{3003}))
-	sm.addToSecondaryIndexes(info2)
-
-	// Found in first snapshot
-	assert.Equal(t, []UniqueID{1}, sm.GetSnapshotByBuildID(3001))
-	assert.Equal(t, []UniqueID{1}, sm.GetSnapshotByBuildID(3002))
-	// Found in second snapshot
-	assert.Equal(t, []UniqueID{2}, sm.GetSnapshotByBuildID(3003))
-	// Not found in any snapshot
-	assert.Empty(t, sm.GetSnapshotByBuildID(9999))
-}
-
-func TestSnapshotMeta_GetSnapshotByBuildID_EmptySnapshots(t *testing.T) {
-	sm := createTestSnapshotMetaLoaded(t)
-	// No snapshots at all
-	assert.Empty(t, sm.GetSnapshotByBuildID(3001))
-}
-
-func TestSnapshotMeta_GetSnapshotByBuildID_NilBuildIDs(t *testing.T) {
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// Snapshot with nil buildIDs (backward compatibility)
-	info := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: 100,
-		Name:         "old_snap",
-	}
-	sm.snapshotID2Info.Insert(info.GetId(), info)
-	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1001}, nil))
-	sm.addToSecondaryIndexes(info)
-
-	assert.Empty(t, sm.GetSnapshotByBuildID(3001))
-}
-
 // --- Concurrent Operations Tests ---
 
 func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
@@ -1238,16 +1123,17 @@ func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 	snapshotData := createTestSnapshotDataForMeta()
 
 	// Act - simulate concurrent operations
-	insertTestSnapshot(sm, snapshotData.SnapshotInfo, []int64{1001})
+	insertTestSnapshot(sm, snapshotData.SnapshotInfo, []int64{1001}, nil)
+	sm.rebuildAllSegmentProtection()
 
 	// These operations should work concurrently
 	snapshots, err := sm.ListSnapshots(ctx, 0, 0)
-	segmentSnapshots := sm.GetSnapshotBySegment(ctx, 100, 1001)
+	blocked := sm.IsSegmentGCBlocked(100, 1001)
 
 	// Assert
 	assert.NoError(t, err)
 	assert.Len(t, snapshots, 1)
-	assert.Len(t, segmentSnapshots, 1)
+	assert.True(t, blocked)
 }
 
 func TestSnapshotMeta_EmptyMaps(t *testing.T) {
@@ -1257,13 +1143,13 @@ func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
-	segmentSnapshots := sm.GetSnapshotBySegment(ctx, 100, 1001)
+	blocked := sm.IsSegmentGCBlocked(100, 1001)
 	snapshot, getErr := sm.GetSnapshot(ctx, "nonexistent")
 
 	// Assert
 	assert.NoError(t, err)
 	assert.Len(t, snapshots, 0)
-	assert.Len(t, segmentSnapshots, 0)
+	assert.False(t, blocked)
 	assert.Error(t, getErr)
 	assert.Nil(t, snapshot)
 }
@@ -1769,212 +1655,84 @@ func TestSnapshotMeta_Reload_PartialFailure_SetsFailed(t *testing.T) {
 	assert.False(t, refIndex.IsLoaded())
 }
 
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_NoSnapshots(t *testing.T) {
-	// Test that IsRefIndexLoadedForCollection returns true when collection has no snapshots
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// Collection 999 has no snapshots
-	assert.True(t, sm.IsRefIndexLoadedForCollection(999))
-}
-
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_AllLoaded(t *testing.T) {
-	// Test that IsRefIndexLoadedForCollection returns true when all RefIndexes for collection are loaded
-	sm := createTestSnapshotMetaLoaded(t)
-
-	collectionID := int64(100)
-
-	// Add snapshots with loaded RefIndexes for collection 100
-	for i := int64(1); i <= 3; i++ {
-		snapshotInfo := &datapb.SnapshotInfo{
-			Id:           i,
-			CollectionId: collectionID,
-			Name:         fmt.Sprintf("test_snapshot_%d", i),
-		}
-		sm.snapshotID2Info.Insert(snapshotInfo.Id, snapshotInfo)
-		sm.snapshotID2RefIndex.Insert(snapshotInfo.Id, NewLoadedSnapshotRefIndex([]int64{i * 1000}, nil))
-		sm.addToSecondaryIndexes(snapshotInfo)
-	}
-
-	// IsRefIndexLoadedForCollection should return true
-	assert.True(t, sm.IsRefIndexLoadedForCollection(collectionID))
-}
-
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_HasFailed(t *testing.T) {
-	// Test that IsRefIndexLoadedForCollection returns false when collection has failed RefIndex
-	sm := createTestSnapshotMetaLoaded(t)
-
-	collectionID := int64(100)
-
-	// Add a loaded RefIndex
-	snapshot1 := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: collectionID,
-		Name:         "snapshot1",
-	}
-	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
-	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
-	sm.addToSecondaryIndexes(snapshot1)
-
-	// Add a failed RefIndex for same collection
-	snapshot2 := &datapb.SnapshotInfo{
-		Id:           2,
-		CollectionId: collectionID,
-		Name:         "snapshot2",
-	}
-	failedRefIndex := NewSnapshotRefIndex()
-	failedRefIndex.SetFailed()
-	sm.snapshotID2Info.Insert(snapshot2.Id, snapshot2)
-	sm.snapshotID2RefIndex.Insert(snapshot2.Id, failedRefIndex)
-	sm.addToSecondaryIndexes(snapshot2)
-
-	// IsRefIndexLoadedForCollection should return false
-	assert.False(t, sm.IsRefIndexLoadedForCollection(collectionID))
-}
-
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_OtherCollectionFailed(t *testing.T) {
-	// Test that IsRefIndexLoadedForCollection returns true even if other collection has failed RefIndex
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// Add loaded RefIndex for collection 100
-	snapshot1 := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: 100,
-		Name:         "snapshot1",
-	}
-	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
-	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
-	sm.addToSecondaryIndexes(snapshot1)
-
-	// Add failed RefIndex for collection 200
-	snapshot2 := &datapb.SnapshotInfo{
-		Id:           2,
-		CollectionId: 200,
-		Name:         "snapshot2",
-	}
-	failedRefIndex := NewSnapshotRefIndex()
-	failedRefIndex.SetFailed()
-	sm.snapshotID2Info.Insert(snapshot2.Id, snapshot2)
-	sm.snapshotID2RefIndex.Insert(snapshot2.Id, failedRefIndex)
-	sm.addToSecondaryIndexes(snapshot2)
-
-	// Collection 100 should return true (its RefIndex is loaded)
-	assert.True(t, sm.IsRefIndexLoadedForCollection(100))
-
-	// Collection 200 should return false (its RefIndex is failed)
-	assert.False(t, sm.IsRefIndexLoadedForCollection(200))
-}
-
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_MissingRefIndexWithSnapshotInfo(t *testing.T) {
-	// Safety: if snapshotInfo exists but refIndex is missing, treat as not loaded to avoid unsafe GC.
-	sm := createTestSnapshotMetaLoaded(t)
-
-	collectionID := int64(100)
-	snapshot := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: collectionID,
-		Name:         "snapshot_missing_refindex",
-	}
-	sm.snapshotID2Info.Insert(snapshot.Id, snapshot)
-	// Intentionally do NOT insert snapshotID2RefIndex.
-	sm.addToSecondaryIndexes(snapshot)
-
-	assert.False(t, sm.IsRefIndexLoadedForCollection(collectionID))
-}
-
-func TestSnapshotMeta_IsRefIndexLoadedForCollection_MissingRefIndexAndSnapshotInfo(t *testing.T) {
-	// If snapshotInfo is already deleted/cleaned, a stale snapshotID should not block GC forever.
-	sm := createTestSnapshotMetaLoaded(t)
-
-	collectionID := int64(100)
-	staleSnapshotID := int64(1)
-	set := typeutil.NewUniqueSet(staleSnapshotID)
-	sm.collectionID2Snapshots.Insert(collectionID, set)
-	// No snapshotID2Info and no snapshotID2RefIndex for staleSnapshotID.
-
-	assert.True(t, sm.IsRefIndexLoadedForCollection(collectionID))
-}
-
-func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_Found(t *testing.T) {
+// TestSnapshotMeta_LoadUnloadedRefIndexes_HungReadIsBoundedByTimeout asserts that
+// a hung S3 ReadSnapshot is bounded by the per-call timeout
+// (dataCoord.snapshot.refIndexLoadTimeout) and does not block the loader Range.
+//
+// Regression for the third-round review finding: without per-call timeout, a single
+// hung S3 read would freeze the entire loader, no other RefIndex would ever be loaded,
+// rebuildAllSegmentProtection would never be triggered, and every collection with a
+// snapshot would stay in fail-closed coarse block — leaking storage indefinitely.
+func TestSnapshotMeta_LoadUnloadedRefIndexes_HungReadIsBoundedByTimeout(t *testing.T) {
 	ctx := context.Background()
-	sm := createTestSnapshotMetaLoaded(t)
+	sm := createTestSnapshotMeta(t)
 
-	info1 := createTestSnapshotInfoForMeta()
-	info1.CollectionId = 100
-	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001, 1002})
+	// Configure a tiny timeout so the test runs in milliseconds, not seconds.
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.SnapshotRefIndexLoadTimeout.Key, "100ms")
+	defer pt.Reset(pt.DataCoordCfg.SnapshotRefIndexLoadTimeout.Key)
 
-	info2 := createTestSnapshotInfoForMeta()
-	info2.CollectionId = 200
-	info2.Id = 2
-	insertTestSnapshot(sm, info2, []int64{1003, 1004})
+	infoHung := &datapb.SnapshotInfo{
+		Id: 1, CollectionId: 100, Name: "hung", S3Location: "s3://bucket/hung",
+		State: datapb.SnapshotState_SnapshotStateCommitted,
+	}
+	infoFast := &datapb.SnapshotInfo{
+		Id: 2, CollectionId: 200, Name: "fast", S3Location: "s3://bucket/fast",
+		State: datapb.SnapshotState_SnapshotStateCommitted,
+	}
 
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 1001)
-	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(1))
-}
+	mockList := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).Return(
+		[]*datapb.SnapshotInfo{infoHung, infoFast}, nil).Build()
+	defer mockList.UnPatch()
 
-func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_NotFound(t *testing.T) {
-	ctx := context.Background()
-	sm := createTestSnapshotMetaLoaded(t)
+	// Mock ReadSnapshot to BLOCK indefinitely on hung's path until ctx is canceled,
+	// and return a successful (empty) result on fast's path.
+	mockRead := mockey.Mock((*SnapshotReader).ReadSnapshot).To(
+		func(sr *SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+			if metadataFilePath == "s3://bucket/hung" {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			return &SnapshotData{
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 2},
+				SegmentIDs:   []int64{2001},
+				BuildIDs:     []int64{3001},
+			}, nil
+		}).Build()
+	defer mockRead.UnPatch()
 
-	info1 := createTestSnapshotInfoForMeta()
-	info1.CollectionId = 100
-	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001, 1002})
+	require.NoError(t, sm.reload(ctx))
 
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 9999)
-	assert.Len(t, snapshotIDs, 0)
-}
+	// loadUnloadedRefIndexes must return within a reasonable time bounded by the
+	// per-call timeout (100ms × 2 calls = ~200ms expected, allow generous slack).
+	done := make(chan bool)
+	go func() {
+		sm.loadUnloadedRefIndexes()
+		close(done)
+	}()
 
-func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_NoSnapshots(t *testing.T) {
-	ctx := context.Background()
-	sm := createTestSnapshotMetaLoaded(t)
+	select {
+	case <-done:
+		// ok
+	case <-time.After(5 * time.Second):
+		t.Fatal("loadUnloadedRefIndexes did not return within 5s — per-call timeout is missing")
+	}
 
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 1001)
-	assert.Len(t, snapshotIDs, 0)
-}
+	// hung snapshot's RefIndex must be Failed (not Loaded) due to timeout.
+	hungRef, ok := sm.snapshotID2RefIndex.Get(infoHung.Id)
+	require.True(t, ok)
+	assert.True(t, hungRef.IsFailed(),
+		"hung snapshot's RefIndex must transition to Failed after timeout")
+	assert.False(t, hungRef.IsLoaded())
 
-func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_CrossCollection(t *testing.T) {
-	ctx := context.Background()
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// Segment 1001 is in collection 200, not collection 100
-	info1 := createTestSnapshotInfoForMeta()
-	info1.CollectionId = 100
-	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{2001, 2002})
-
-	info2 := createTestSnapshotInfoForMeta()
-	info2.CollectionId = 200
-	info2.Id = 2
-	insertTestSnapshot(sm, info2, []int64{1001, 1002})
-
-	// Should find segment 1001 even though it's in collection 200
-	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 1001)
-	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(2))
-}
-
-func TestSnapshotMeta_IsAllRefIndexLoaded(t *testing.T) {
-	sm := createTestSnapshotMetaLoaded(t)
-
-	// No snapshots — should be considered loaded
-	assert.True(t, sm.IsAllRefIndexLoaded())
-
-	// Add a loaded snapshot
-	info1 := createTestSnapshotInfoForMeta()
-	info1.CollectionId = 100
-	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001})
-	assert.True(t, sm.IsAllRefIndexLoaded())
-
-	// Add a not-loaded snapshot
-	info2 := createTestSnapshotInfoForMeta()
-	info2.CollectionId = 200
-	info2.Id = 2
-	sm.snapshotID2Info.Insert(info2.GetId(), info2)
-	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewSnapshotRefIndex())
-	assert.False(t, sm.IsAllRefIndexLoaded())
+	// fast snapshot's RefIndex must be Loaded — proving the loader did not get
+	// stuck on the hung read and continued to the next snapshot.
+	fastRef, ok := sm.snapshotID2RefIndex.Get(infoFast.Id)
+	require.True(t, ok)
+	assert.True(t, fastRef.IsLoaded(),
+		"fast snapshot must be loaded — hung read did not block the Range")
+	assert.True(t, fastRef.ContainsSegment(2001))
+	assert.True(t, fastRef.ContainsBuildID(3001))
 }
 
 func TestSnapshotMeta_SaveSnapshot_CollectsBuildIDs_AllIndexTypes(t *testing.T) {
@@ -2102,4 +1860,984 @@ func TestSnapshotMeta_SaveSnapshot_SkipsZeroBuildIDs(t *testing.T) {
 	assert.Contains(t, snapshotData.BuildIDs, int64(3001))
 	assert.Contains(t, snapshotData.BuildIDs, int64(4001))
 	assert.Contains(t, snapshotData.BuildIDs, int64(5001))
+}
+
+// --- Compaction Protection Tests ---
+
+func TestSnapshotRefIndex_GetSegmentIDs(t *testing.T) {
+	t.Run("nil segmentIDs", func(t *testing.T) {
+		ri := NewSnapshotRefIndex()
+		assert.Nil(t, ri.GetSegmentIDs())
+	})
+
+	t.Run("empty segmentIDs", func(t *testing.T) {
+		ri := NewLoadedSnapshotRefIndex([]int64{}, nil)
+		ids := ri.GetSegmentIDs()
+		assert.NotNil(t, ids)
+		assert.Empty(t, ids)
+	})
+
+	t.Run("returns copy of segment IDs", func(t *testing.T) {
+		ri := NewLoadedSnapshotRefIndex([]int64{1, 2, 3}, nil)
+		ids := ri.GetSegmentIDs()
+		assert.Len(t, ids, 3)
+		assert.ElementsMatch(t, []int64{1, 2, 3}, ids)
+	})
+}
+
+func TestSnapshotRefIndex_GetBuildIDs(t *testing.T) {
+	t.Run("nil buildIDs", func(t *testing.T) {
+		ri := NewSnapshotRefIndex()
+		assert.Nil(t, ri.GetBuildIDs())
+	})
+
+	t.Run("returns copy of build IDs", func(t *testing.T) {
+		ri := NewLoadedSnapshotRefIndex(nil, []int64{10, 20, 30})
+		ids := ri.GetBuildIDs()
+		assert.Len(t, ids, 3)
+		assert.ElementsMatch(t, []int64{10, 20, 30}, ids)
+	})
+
+	t.Run("loaded with nil buildIDs returns empty", func(t *testing.T) {
+		ri := NewLoadedSnapshotRefIndex([]int64{1}, nil)
+		ids := ri.GetBuildIDs()
+		// NewLoadedSnapshotRefIndex initializes buildIDs as an empty UniqueSet when nil is
+		// passed, so GetBuildIDs returns an empty slice (not nil). This exercises the
+		// non-nil loaded path of GetBuildIDs.
+		assert.NotNil(t, ids)
+		assert.Empty(t, ids)
+	})
+}
+
+func TestSnapshotMeta_IsSegmentCompactionProtected(t *testing.T) {
+	t.Run("unprotected segment", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		assert.False(t, sm.IsSegmentCompactionProtected(999))
+	})
+
+	t.Run("protected segment with future expiry", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600 // 1 hour from now
+		sm.segmentProtectionUntil[1001] = futureTs
+		assert.True(t, sm.IsSegmentCompactionProtected(1001))
+	})
+
+	t.Run("expired protection", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		pastTs := uint64(time.Now().Unix()) - 10 // 10 seconds ago
+		sm.segmentProtectionUntil[1001] = pastTs
+		assert.False(t, sm.IsSegmentCompactionProtected(1001))
+	})
+
+	t.Run("protection exactly at current time", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		// Protection until now means it should NOT be protected (>= means expired)
+		nowTs := uint64(time.Now().Unix())
+		sm.segmentProtectionUntil[1001] = nowTs
+		assert.False(t, sm.IsSegmentCompactionProtected(1001))
+	})
+}
+
+func TestSnapshotMeta_RegisterSnapshotProtection(t *testing.T) {
+	t.Run("TTL=0 still registers GC protection for segments and buildIDs", func(t *testing.T) {
+		// P0 regression: a TTL=0 snapshot must still pin its files against GC,
+		// otherwise the freshly-created snapshot's data could be deleted.
+		sm := createTestSnapshotMetaLoaded(t)
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: 0,
+		}
+		sm.registerSnapshotProtection(info, []int64{1001, 1002}, []int64{2001, 2002})
+
+		// Compaction protection: empty because TTL=0 means "no compaction block".
+		assert.Empty(t, sm.segmentProtectionUntil)
+
+		// GC protection: MUST be populated regardless of TTL.
+		assert.True(t, sm.segmentReferencedByGC.Contain(1001))
+		assert.True(t, sm.segmentReferencedByGC.Contain(1002))
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2001))
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2002))
+
+		// Public API must also report GC-blocked.
+		assert.True(t, sm.IsSegmentGCBlocked(100, 1001))
+		assert.True(t, sm.IsBuildIDGCBlocked(100, 2001))
+	})
+
+	t.Run("TTL>0 registers both compaction and GC protection", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.registerSnapshotProtection(info, []int64{1001, 1002}, []int64{2001})
+
+		// Compaction TTL set on both segments.
+		assert.Equal(t, futureTs, sm.segmentProtectionUntil[1001])
+		assert.Equal(t, futureTs, sm.segmentProtectionUntil[1002])
+
+		// GC protection set on both segments and the buildID.
+		assert.True(t, sm.segmentReferencedByGC.Contain(1001))
+		assert.True(t, sm.segmentReferencedByGC.Contain(1002))
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2001))
+	})
+
+	t.Run("overlapping segments take max compaction expiry and union GC sets", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		// First snapshot protects segment 1001 until T+3600.
+		ts1 := uint64(time.Now().Unix()) + 3600
+		info1 := &datapb.SnapshotInfo{Id: 1, CollectionId: 100, CompactionExpireTime: ts1}
+		sm.registerSnapshotProtection(info1, []int64{1001}, []int64{2001})
+		assert.Equal(t, ts1, sm.segmentProtectionUntil[1001])
+
+		// Second snapshot protects same segment until T+7200 (larger, should win).
+		ts2 := uint64(time.Now().Unix()) + 7200
+		info2 := &datapb.SnapshotInfo{Id: 2, CollectionId: 100, CompactionExpireTime: ts2}
+		sm.registerSnapshotProtection(info2, []int64{1001}, []int64{2002})
+		assert.Equal(t, ts2, sm.segmentProtectionUntil[1001])
+
+		// Third snapshot protects same segment until T+1800 (smaller, must NOT downgrade).
+		ts3 := uint64(time.Now().Unix()) + 1800
+		info3 := &datapb.SnapshotInfo{Id: 3, CollectionId: 100, CompactionExpireTime: ts3}
+		sm.registerSnapshotProtection(info3, []int64{1001}, []int64{2003})
+		assert.Equal(t, ts2, sm.segmentProtectionUntil[1001]) // still ts2
+
+		// GC sets are the union of all three snapshots' buildIDs.
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2001))
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2002))
+		assert.True(t, sm.buildIDReferencedByGC.Contain(2003))
+	})
+}
+
+func TestSnapshotMeta_RebuildAllSegmentProtection(t *testing.T) {
+	t.Run("clears all when no snapshots", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		sm.segmentProtectionUntil[1001] = uint64(time.Now().Unix()) + 3600
+
+		sm.rebuildAllSegmentProtection()
+		assert.Empty(t, sm.segmentProtectionUntil)
+	})
+
+	t.Run("rebuilds from all snapshots", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		ts1 := uint64(time.Now().Unix()) + 3600
+		ts2 := uint64(time.Now().Unix()) + 7200
+
+		info1 := &datapb.SnapshotInfo{Id: 1, CompactionExpireTime: ts1}
+		info2 := &datapb.SnapshotInfo{Id: 2, CompactionExpireTime: ts2}
+
+		sm.snapshotID2Info.Insert(1, info1)
+		sm.snapshotID2Info.Insert(2, info2)
+		sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001, 1002}, nil))
+		sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{1001, 1003}, nil))
+
+		sm.rebuildAllSegmentProtection()
+
+		// 1001 referenced by both, should take max (ts2)
+		assert.Equal(t, ts2, sm.segmentProtectionUntil[1001])
+		// 1002 only in snapshot 1
+		assert.Equal(t, ts1, sm.segmentProtectionUntil[1002])
+		// 1003 only in snapshot 2
+		assert.Equal(t, ts2, sm.segmentProtectionUntil[1003])
+	})
+
+	t.Run("skips expired and unloaded snapshots", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		pastTs := uint64(time.Now().Unix()) - 100
+		futureTs := uint64(time.Now().Unix()) + 3600
+
+		info1 := &datapb.SnapshotInfo{Id: 1, CompactionExpireTime: pastTs} // expired
+		info2 := &datapb.SnapshotInfo{Id: 2, CompactionExpireTime: futureTs}
+		info3 := &datapb.SnapshotInfo{Id: 3, CompactionExpireTime: futureTs} // will be unloaded
+
+		sm.snapshotID2Info.Insert(1, info1)
+		sm.snapshotID2Info.Insert(2, info2)
+		sm.snapshotID2Info.Insert(3, info3)
+		sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+		sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{1002}, nil))
+		sm.snapshotID2RefIndex.Insert(3, NewSnapshotRefIndex()) // not loaded
+
+		sm.rebuildAllSegmentProtection()
+
+		// 1001 from expired snapshot — should not be protected
+		_, exists := sm.segmentProtectionUntil[1001]
+		assert.False(t, exists)
+		// 1002 from valid snapshot
+		assert.Equal(t, futureTs, sm.segmentProtectionUntil[1002])
+		// 1003 from unloaded snapshot — should not be protected at segment level
+		_, exists = sm.segmentProtectionUntil[1003]
+		assert.False(t, exists)
+		// But snapshot 3's collection should be blocked (fail-closed)
+		assert.True(t, sm.compactionBlockedCollections.Contain(info3.GetCollectionId()))
+	})
+}
+
+func TestSnapshotMeta_IsCollectionCompactionBlocked(t *testing.T) {
+	t.Run("not blocked when no protected snapshots", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("blocked when unloaded RefIndex with active protection", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded
+
+		sm.rebuildAllSegmentProtection()
+
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("not blocked when RefIndex is loaded", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+
+		sm.rebuildAllSegmentProtection()
+
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("not blocked when protection expired", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		pastTs := uint64(time.Now().Unix()) - 100
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: pastTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded but expired
+
+		sm.rebuildAllSegmentProtection()
+
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("unblocked after RefIndex loads", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		refIndex := NewSnapshotRefIndex() // not loaded
+		sm.snapshotID2RefIndex.Insert(1, refIndex)
+
+		sm.rebuildAllSegmentProtection()
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Simulate RefIndex loading
+		refIndex.SetLoaded([]int64{1001}, nil)
+		sm.rebuildAllSegmentProtection()
+
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+		// And now segment-level protection should be in place
+		assert.True(t, sm.IsSegmentCompactionProtected(1001))
+	})
+
+	t.Run("multiple collections only blocks affected one", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+
+		// Collection 100: unloaded RefIndex → blocked
+		info1 := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info1)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex())
+
+		// Collection 200: loaded RefIndex → not blocked
+		info2 := &datapb.SnapshotInfo{
+			Id:                   2,
+			CollectionId:         200,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(2, info2)
+		sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{2001}, nil))
+
+		sm.rebuildAllSegmentProtection()
+
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+		assert.False(t, sm.IsCollectionCompactionBlocked(200))
+	})
+
+	t.Run("no RefIndex entry at all blocks collection", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		// Don't insert any RefIndex entry — simulates startup before loader runs
+
+		sm.rebuildAllSegmentProtection()
+
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+	})
+}
+
+func TestSnapshotMeta_SetClearSnapshotPending(t *testing.T) {
+	t.Run("set snapshot pending blocks collection compaction", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+		// Other collections unaffected
+		assert.False(t, sm.IsCollectionCompactionBlocked(200))
+	})
+
+	t.Run("clear snapshot pending unblocks collection compaction", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("snapshot pending does not interfere with RefIndex blocking", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded
+		sm.rebuildAllSegmentProtection()
+
+		// Blocked by RefIndex
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Clear snapshot pending should NOT unblock (still blocked by RefIndex)
+		sm.ClearSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("clear snapshot pending is idempotent", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		// Clear without setting should not panic
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("multiple collections can be snapshot pending simultaneously", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		sm.SetSnapshotPending(200)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+		assert.True(t, sm.IsCollectionCompactionBlocked(200))
+		assert.False(t, sm.IsCollectionCompactionBlocked(300))
+
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+		assert.True(t, sm.IsCollectionCompactionBlocked(200))
+	})
+
+	t.Run("set snapshot pending is idempotent", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		sm.SetSnapshotPending(100) // double set should not panic
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.ClearSnapshotPending(100) // single clear should unblock
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("concurrent set and clear", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		done := make(chan struct{})
+
+		// Concurrent set/clear should not race
+		go func() {
+			for i := 0; i < 100; i++ {
+				sm.SetSnapshotPending(100)
+				sm.ClearSnapshotPending(100)
+			}
+			close(done)
+		}()
+
+		for i := 0; i < 100; i++ {
+			sm.IsCollectionCompactionBlocked(100)
+		}
+		<-done
+		// After all goroutines finish, should be unblocked
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("blocked by both snapshot pending and RefIndex", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded
+		sm.rebuildAllSegmentProtection()
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Clear snapshot pending — still blocked by RefIndex
+		sm.ClearSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Load RefIndex — now unblocked
+		sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+		sm.rebuildAllSegmentProtection()
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+}
+
+func TestSnapshotMeta_SaveSnapshotWithProtection(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	futureTs := uint64(time.Now().Unix()) + 3600
+	snapshot := createTestSnapshotDataForMeta()
+	snapshot.SnapshotInfo.Name = "protected_snapshot"
+	snapshot.SnapshotInfo.Id = 10
+	snapshot.SnapshotInfo.CompactionExpireTime = futureTs
+
+	cleanup := saveTestSnapshots(t, sm, snapshot)
+	defer cleanup()
+
+	// Segments from the snapshot should be protected
+	for _, seg := range snapshot.Segments {
+		assert.True(t, sm.IsSegmentCompactionProtected(seg.GetSegmentId()),
+			"segment %d should be protected", seg.GetSegmentId())
+	}
+}
+
+// P0 regression: a TTL=0 snapshot must still pin its referenced segments and buildIDs
+// against GC, even though it intentionally contributes nothing to compaction protection.
+// Before the fix, SaveSnapshot only called updateSegmentProtection which returned early
+// when CompactionExpireTime==0, leaving segmentReferencedByGC / buildIDReferencedByGC
+// completely empty. That made a freshly-created TTL=0 snapshot immediately eligible for
+// GC deletion.
+func TestSnapshotMeta_SaveSnapshotWithoutProtection(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snapshot := createTestSnapshotDataForMeta()
+	snapshot.SnapshotInfo.Name = "no_protection_snapshot"
+	snapshot.SnapshotInfo.Id = 10
+	snapshot.SnapshotInfo.CompactionExpireTime = 0
+	collID := snapshot.SnapshotInfo.GetCollectionId()
+
+	cleanup := saveTestSnapshots(t, sm, snapshot)
+	defer cleanup()
+
+	// Compaction protection: NOT set (TTL=0 means snapshot does not block compaction).
+	for _, seg := range snapshot.Segments {
+		assert.False(t, sm.IsSegmentCompactionProtected(seg.GetSegmentId()),
+			"segment %d must not be compaction-protected when TTL=0", seg.GetSegmentId())
+	}
+
+	// GC protection: MUST be set. GC protection is unconditional on TTL because the
+	// snapshot still needs its files for PIT recovery regardless of compaction semantics.
+	for _, seg := range snapshot.Segments {
+		segID := seg.GetSegmentId()
+		assert.True(t, sm.IsSegmentGCBlocked(collID, segID),
+			"segment %d must be GC-blocked even when TTL=0", segID)
+		assert.True(t, sm.segmentReferencedByGC.Contain(segID),
+			"segmentReferencedByGC must contain segment %d", segID)
+	}
+	// Every buildID referenced by any index file type must be GC-blocked too.
+	for _, seg := range snapshot.Segments {
+		for _, idxFile := range seg.GetIndexFiles() {
+			buildID := idxFile.GetBuildID()
+			if buildID == 0 {
+				continue
+			}
+			assert.True(t, sm.IsBuildIDGCBlocked(collID, buildID),
+				"buildID %d must be GC-blocked even when TTL=0", buildID)
+		}
+	}
+}
+
+func TestSnapshotMeta_SaveSnapshot_RollbackProtectionOnCommitFailure(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	futureTs := uint64(time.Now().Unix()) + 3600
+	snapshot := createTestSnapshotDataForMeta()
+	snapshot.SnapshotInfo.Name = "rollback_snapshot"
+	snapshot.SnapshotInfo.Id = 15
+	snapshot.SnapshotInfo.CompactionExpireTime = futureTs
+
+	segID := snapshot.Segments[0].GetSegmentId()
+
+	// Mock S3 writer to succeed
+	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, s *SnapshotData) (string, error) {
+		return fmt.Sprintf("s3://bucket/snapshots/%d/metadata.json", s.SnapshotInfo.GetId()), nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// First catalog save (PENDING) succeeds, second (COMMITTED) fails
+	callCount := 0
+	mock2 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, info *datapb.SnapshotInfo) error {
+		callCount++
+		if callCount == 1 {
+			return nil // PENDING save succeeds
+		}
+		return errors.New("catalog commit failed") // COMMITTED save fails
+	}).Build()
+	defer mock2.UnPatch()
+
+	// SaveSnapshot should fail
+	err := sm.SaveSnapshot(context.Background(), snapshot)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "catalog commit failed")
+
+	// Protection should be rolled back — segment should NOT be protected
+	assert.False(t, sm.IsSegmentCompactionProtected(segID),
+		"segment %d should not be protected after rollback", segID)
+
+	// P0 regression: GC protection must also be rolled back. Before the fix, the rollback
+	// path only called rebuildSegmentProtection (targeted, compaction-only), so GC sets
+	// were never reverted — a failed SaveSnapshot would leak segment/buildID entries into
+	// segmentReferencedByGC/buildIDReferencedByGC permanently.
+	assert.False(t, sm.IsSegmentGCBlocked(snapshot.SnapshotInfo.GetCollectionId(), segID),
+		"segment %d must not be GC-blocked after rollback", segID)
+	assert.False(t, sm.segmentReferencedByGC.Contain(segID),
+		"segmentReferencedByGC must not retain rolled-back snapshot's segments")
+
+	// Snapshot should not be in memory
+	_, exists := sm.snapshotID2Info.Get(snapshot.SnapshotInfo.GetId())
+	assert.False(t, exists, "snapshot should not remain in memory after rollback")
+}
+
+func TestSnapshotMeta_DropSnapshot_ClearsProtection(t *testing.T) {
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Create a snapshot with compaction protection
+	futureTs := uint64(time.Now().Unix()) + 3600
+	snapshotData := createTestSnapshotDataForMeta()
+	snapshotData.SnapshotInfo.Name = "protected_drop"
+	snapshotData.SnapshotInfo.Id = 20
+	snapshotData.SnapshotInfo.CompactionExpireTime = futureTs
+
+	cleanup := saveTestSnapshots(t, sm, snapshotData)
+	cleanup() // unpatch save mocks
+
+	// Verify protection is active
+	segID := snapshotData.Segments[0].GetSegmentId()
+	assert.True(t, sm.IsSegmentCompactionProtected(segID))
+
+	// Mock catalog and writer for DropSnapshot
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	// Drop the snapshot
+	err := sm.DropSnapshot(ctx, "protected_drop")
+	assert.NoError(t, err)
+
+	// Protection should be cleared since no remaining snapshots reference this segment
+	assert.False(t, sm.IsSegmentCompactionProtected(segID),
+		"segment %d should no longer be protected after snapshot drop", segID)
+}
+
+// P1 regression: a TTL=0 snapshot contributes to GC protection (unconditional on TTL)
+// but not to compaction protection. DropSnapshot must rebuild state UNCONDITIONALLY,
+// otherwise a drop of a TTL=0 snapshot would leave stale entries in segmentReferencedByGC
+// and buildIDReferencedByGC, permanently pinning files against GC.
+func TestSnapshotMeta_DropSnapshot_ClearsGCProtectionForTTL0(t *testing.T) {
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snapshotData := createTestSnapshotDataForMeta()
+	snapshotData.SnapshotInfo.Name = "ttl0_drop"
+	snapshotData.SnapshotInfo.Id = 21
+	snapshotData.SnapshotInfo.CompactionExpireTime = 0 // no compaction TTL
+
+	cleanup := saveTestSnapshots(t, sm, snapshotData)
+	cleanup()
+
+	segID := snapshotData.Segments[0].GetSegmentId()
+	collID := snapshotData.SnapshotInfo.GetCollectionId()
+
+	// Preconditions: GC protection registered despite TTL=0; no compaction protection.
+	assert.True(t, sm.IsSegmentGCBlocked(collID, segID),
+		"precondition: TTL=0 snapshot must still pin segment against GC")
+	assert.False(t, sm.IsSegmentCompactionProtected(segID),
+		"precondition: TTL=0 snapshot must not set compaction protection")
+
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	err := sm.DropSnapshot(ctx, "ttl0_drop")
+	assert.NoError(t, err)
+
+	// GC protection must be cleared since no other snapshot references this segment.
+	assert.False(t, sm.IsSegmentGCBlocked(collID, segID),
+		"segment %d must be GC-unblocked after dropping the only snapshot referencing it", segID)
+	assert.False(t, sm.segmentReferencedByGC.Contain(segID),
+		"segmentReferencedByGC must not retain dropped snapshot's segments")
+}
+
+func TestSnapshotMeta_DropSnapshot_RetainsProtectionFromOtherSnapshot(t *testing.T) {
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	futureTs1 := uint64(time.Now().Unix()) + 3600
+	futureTs2 := uint64(time.Now().Unix()) + 7200
+
+	// Create two snapshots referencing overlapping segments
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Name = "snap1"
+	snap1.SnapshotInfo.Id = 30
+	snap1.SnapshotInfo.CompactionExpireTime = futureTs1
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Name = "snap2"
+	snap2.SnapshotInfo.Id = 31
+	snap2.SnapshotInfo.CompactionExpireTime = futureTs2
+
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2)
+	cleanup()
+
+	segID := snap1.Segments[0].GetSegmentId()
+	assert.True(t, sm.IsSegmentCompactionProtected(segID))
+
+	// Drop snap1, snap2 still protects the same segment
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	err := sm.DropSnapshot(ctx, "snap1")
+	assert.NoError(t, err)
+
+	// Protection should be retained from snap2 (with higher expiry)
+	assert.True(t, sm.IsSegmentCompactionProtected(segID),
+		"segment %d should still be protected by snap2", segID)
+	assert.Equal(t, futureTs2, sm.segmentProtectionUntil[segID])
+}
+
+// Regression for PR #48227 review comment #3: if a protected snapshot's RefIndex
+// fails to load, the user must still be able to self-rescue a collection from the
+// fail-closed compactionBlockedCollections state by dropping the snapshot. Before
+// the fix, DropSnapshot skipped protection rebuild when RefIndex was not loaded,
+// leaving the collection-level block imprint in place.
+func TestSnapshotMeta_DropSnapshot_ClearsBlockWhenRefIndexFailed(t *testing.T) {
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	futureTs := uint64(time.Now().Unix()) + 3600
+	collectionID := int64(9001)
+	info := &datapb.SnapshotInfo{
+		Id:                   42,
+		Name:                 "stuck_snapshot",
+		CollectionId:         collectionID,
+		CompactionExpireTime: futureTs,
+	}
+
+	// Insert snapshot with a RefIndex that is explicitly Failed (simulating S3 load failure).
+	sm.snapshotID2Info.Insert(info.GetId(), info)
+	failedRef := NewSnapshotRefIndex()
+	failedRef.SetFailed()
+	sm.snapshotID2RefIndex.Insert(info.GetId(), failedRef)
+	sm.addToSecondaryIndexes(info)
+
+	// Simulate what refIndexLoaderLoop / newSnapshotMeta would do on startup:
+	// a failed RefIndex with active protection imprints a collection-level block.
+	sm.rebuildAllSegmentProtection()
+	assert.True(t, sm.IsCollectionCompactionBlocked(collectionID),
+		"precondition: collection must be blocked before drop")
+
+	// Drop the snapshot. Even though RefIndex never loaded, DropSnapshot must
+	// clear the collection-level block so the user can self-rescue.
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	err := sm.DropSnapshot(ctx, "stuck_snapshot")
+	assert.NoError(t, err)
+
+	assert.False(t, sm.IsCollectionCompactionBlocked(collectionID),
+		"collection must be unblocked after dropping the stuck snapshot")
+}
+
+// Regression for PR #48227 review comment #2: newSnapshotMeta must populate
+// compactionBlockedCollections before returning, otherwise DataCoord starts serving
+// compaction during the startup race window with an empty block set (fail-OPEN).
+//
+// The fail-closed guarantee is achieved by a pure in-memory synchronous
+// rebuildAllSegmentProtection call in newSnapshotMeta that imprints a collection-level
+// block for every snapshot whose RefIndex is not yet Loaded. At startup all RefIndexes
+// are in Pending state (set by reload()), so every protected collection is blocked
+// without any S3 I/O. This test asserts the block is in place immediately after
+// newSnapshotMeta returns, with no sleep or wait.
+func TestNewSnapshotMeta_BlockStateReadyBeforeReturn(t *testing.T) {
+	ctx := context.Background()
+	catalog := &kv_datacoord.Catalog{}
+
+	futureTs := uint64(time.Now().Unix()) + 3600
+	protected := &datapb.SnapshotInfo{
+		Id:                   7,
+		Name:                 "proto_blocked",
+		CollectionId:         777,
+		CompactionExpireTime: futureTs,
+		State:                datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:           "s3://bucket/snapshots/777/metadata/7.json",
+	}
+	// Catalog reload returns one active snapshot.
+	mockList := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).Return(
+		[]*datapb.SnapshotInfo{protected}, nil).Build()
+	defer mockList.UnPatch()
+
+	// Make the background loader's ReadSnapshot calls fail deterministically so the
+	// assertion below is race-free: even if the async loader goroutine races ahead of
+	// our assertion, a Failed RefIndex still keeps the collection blocked (IsLoaded()
+	// returns false), which is the exact same state a Pending RefIndex produces.
+	mockRead := mockey.Mock((*SnapshotReader).ReadSnapshot).Return(
+		nil, errors.New("simulated S3 load failure")).Build()
+	defer mockRead.UnPatch()
+
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+
+	sm, err := newSnapshotMeta(ctx, catalog, cm)
+	assert.NoError(t, err)
+	defer sm.Close()
+
+	// Block must already be in place before newSnapshotMeta returns, regardless of
+	// whether the background loader goroutine has scheduled yet.
+	assert.True(t, sm.IsCollectionCompactionBlocked(777),
+		"collection must be blocked synchronously inside newSnapshotMeta")
+}
+
+// ----------------------------------------------------------------------------
+// Unified snapshot protection: GC protection via O(1) precomputed state.
+// ----------------------------------------------------------------------------
+
+// TestSnapshotMeta_IsSegmentGCBlocked_PreciseProtection verifies that once RefIndex
+// loading completes, IsSegmentGCBlocked returns the precise per-segment answer.
+// It must be TRUE for segments referenced by any existing snapshot (regardless of
+// CompactionExpireTime) and FALSE otherwise.
+func TestSnapshotMeta_IsSegmentGCBlocked_PreciseProtection(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Snapshot 1: active TTL + loaded refs.
+	activeTTL := uint64(time.Now().Unix()) + 3600
+	sm.snapshotID2Info.Insert(1, &datapb.SnapshotInfo{
+		Id: 1, CollectionId: 100, CompactionExpireTime: activeTTL,
+	})
+	sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001, 1002}, []int64{2001}))
+
+	// Snapshot 2: EXPIRED TTL but loaded refs. GC must still protect these.
+	expiredTTL := uint64(time.Now().Unix()) - 100
+	sm.snapshotID2Info.Insert(2, &datapb.SnapshotInfo{
+		Id: 2, CollectionId: 200, CompactionExpireTime: expiredTTL,
+	})
+	sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{1003}, []int64{2002}))
+
+	sm.rebuildAllSegmentProtection()
+
+	// Active-TTL snapshot contributes to BOTH compaction and GC protection.
+	assert.True(t, sm.IsSegmentGCBlocked(100, 1001), "active-TTL segment must be GC-blocked")
+	assert.True(t, sm.IsSegmentGCBlocked(100, 1002), "active-TTL segment must be GC-blocked")
+	assert.True(t, sm.IsSegmentCompactionProtected(1001), "active-TTL segment must be compaction-protected")
+
+	// Expired-TTL snapshot: GC protection stays, compaction protection goes away.
+	assert.True(t, sm.IsSegmentGCBlocked(200, 1003),
+		"expired-TTL segment must still be GC-blocked (snapshot still needs files)")
+	assert.False(t, sm.IsSegmentCompactionProtected(1003),
+		"expired-TTL segment must NOT be compaction-protected")
+
+	// Unknown segment: no block.
+	assert.False(t, sm.IsSegmentGCBlocked(100, 9999))
+}
+
+// TestSnapshotMeta_IsSegmentGCBlocked_FailClosedCollection verifies that when a
+// collection has an unloaded (Pending or Failed) RefIndex, every segment in that
+// collection is reported as blocked regardless of the precise referenced set.
+func TestSnapshotMeta_IsSegmentGCBlocked_FailClosedCollection(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Snapshot 1 (coll 100): RefIndex NOT loaded → coarse block.
+	sm.snapshotID2Info.Insert(1, &datapb.SnapshotInfo{
+		Id: 1, CollectionId: 100, CompactionExpireTime: uint64(time.Now().Unix()) + 3600,
+	})
+	sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // Pending
+
+	// Snapshot 2 (coll 200): loaded with precise refs.
+	sm.snapshotID2Info.Insert(2, &datapb.SnapshotInfo{
+		Id: 2, CollectionId: 200,
+	})
+	sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{2001}, nil))
+
+	sm.rebuildAllSegmentProtection()
+
+	// Collection 100 has an unloaded RefIndex → every segment under it is blocked,
+	// even ones we've never heard of.
+	assert.True(t, sm.IsSegmentGCBlocked(100, 42), "unknown segment in blocked collection must be blocked")
+	assert.True(t, sm.IsSegmentGCBlocked(100, 9999), "any segment in blocked collection must be blocked")
+
+	// Collection 200 is fully loaded → precise lookup.
+	assert.True(t, sm.IsSegmentGCBlocked(200, 2001), "referenced segment must be blocked")
+	assert.False(t, sm.IsSegmentGCBlocked(200, 2002), "non-referenced segment must NOT be blocked")
+}
+
+// TestSnapshotMeta_IsSegmentGCBlocked_GlobalFailClosed verifies that passing
+// collectionID < 0 triggers global fail-closed behavior: if ANY collection is in
+// gcBlockedCollections, every segment is treated as blocked.
+func TestSnapshotMeta_IsSegmentGCBlocked_GlobalFailClosed(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// One collection has an unloaded RefIndex.
+	sm.snapshotID2Info.Insert(1, &datapb.SnapshotInfo{
+		Id: 1, CollectionId: 100, CompactionExpireTime: uint64(time.Now().Unix()) + 3600,
+	})
+	sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // Pending
+
+	sm.rebuildAllSegmentProtection()
+
+	// With collectionID = -1, any segment — even one clearly from a different
+	// collection — must be fail-closed because at least one collection is unloaded.
+	assert.True(t, sm.IsSegmentGCBlocked(-1, 42),
+		"orphan segment walk must fail-closed while any collection is unloaded")
+}
+
+// TestSnapshotMeta_IsBuildIDGCBlocked_AllPaths exercises the three branches of
+// IsBuildIDGCBlocked: loaded collection, fail-closed per-collection, fail-closed
+// global (collectionID < 0).
+func TestSnapshotMeta_IsBuildIDGCBlocked_AllPaths(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Loaded snapshot in coll 100 with buildIDs {3001, 3002}.
+	sm.snapshotID2Info.Insert(1, &datapb.SnapshotInfo{Id: 1, CollectionId: 100})
+	sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, []int64{3001, 3002}))
+
+	// Unloaded snapshot in coll 200.
+	sm.snapshotID2Info.Insert(2, &datapb.SnapshotInfo{
+		Id: 2, CollectionId: 200, CompactionExpireTime: uint64(time.Now().Unix()) + 3600,
+	})
+	sm.snapshotID2RefIndex.Insert(2, NewSnapshotRefIndex()) // Pending → coll 200 fail-closed
+
+	sm.rebuildAllSegmentProtection()
+
+	// Per-collection loaded: precise buildID check.
+	assert.True(t, sm.IsBuildIDGCBlocked(100, 3001), "referenced buildID must be blocked")
+	assert.True(t, sm.IsBuildIDGCBlocked(100, 3002))
+	assert.False(t, sm.IsBuildIDGCBlocked(100, 3999), "unknown buildID in loaded collection must NOT be blocked")
+
+	// Per-collection fail-closed: every buildID under a blocked collection returns true.
+	assert.True(t, sm.IsBuildIDGCBlocked(200, 3999), "buildID in blocked collection must be blocked")
+
+	// Global fail-closed (collectionID = -1): any unloaded collection globally blocks.
+	assert.True(t, sm.IsBuildIDGCBlocked(-1, 3999),
+		"orphan buildID walk must fail-closed while any collection is unloaded")
+}
+
+// TestSnapshotMeta_RebuildAllSegmentProtection_UnifiedTwoDimensions verifies that
+// the extended rebuildAllSegmentProtection function atomically populates BOTH the
+// compaction protection state (TTL-bound) and the GC protection state (unconditional
+// on TTL) in a single pass.
+func TestSnapshotMeta_RebuildAllSegmentProtection_UnifiedTwoDimensions(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+
+	now := uint64(time.Now().Unix())
+
+	// Active-TTL, loaded: contributes to BOTH compaction and GC state.
+	sm.snapshotID2Info.Insert(1, &datapb.SnapshotInfo{
+		Id: 1, CollectionId: 100, CompactionExpireTime: now + 3600,
+	})
+	sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, []int64{2001}))
+
+	// Expired-TTL, loaded: GC only (not compaction).
+	sm.snapshotID2Info.Insert(2, &datapb.SnapshotInfo{
+		Id: 2, CollectionId: 100, CompactionExpireTime: now - 100,
+	})
+	sm.snapshotID2RefIndex.Insert(2, NewLoadedSnapshotRefIndex([]int64{1002}, []int64{2002}))
+
+	// Active-TTL, unloaded: both coarse blocks (compaction + GC).
+	sm.snapshotID2Info.Insert(3, &datapb.SnapshotInfo{
+		Id: 3, CollectionId: 200, CompactionExpireTime: now + 3600,
+	})
+	sm.snapshotID2RefIndex.Insert(3, NewSnapshotRefIndex()) // Pending
+
+	// Zero TTL (never set), loaded: GC only. Does not affect compaction state at all.
+	sm.snapshotID2Info.Insert(4, &datapb.SnapshotInfo{
+		Id: 4, CollectionId: 300, CompactionExpireTime: 0,
+	})
+	sm.snapshotID2RefIndex.Insert(4, NewLoadedSnapshotRefIndex([]int64{1003}, []int64{2003}))
+
+	sm.rebuildAllSegmentProtection()
+
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+
+	// Compaction state: only the active-TTL loaded snapshot contributes precisely,
+	// and the active-TTL unloaded snapshot contributes a collection-level block.
+	assert.Equal(t, 1, len(sm.segmentProtectionUntil),
+		"only segment 1001 should have precise compaction protection")
+	_, ok := sm.segmentProtectionUntil[1001]
+	assert.True(t, ok)
+	assert.True(t, sm.compactionBlockedCollections.Contain(200),
+		"coll 200 must be compaction-blocked (active TTL + unloaded)")
+	assert.False(t, sm.compactionBlockedCollections.Contain(100),
+		"coll 100 must NOT be compaction-blocked (both snapshots are loaded)")
+	assert.False(t, sm.compactionBlockedCollections.Contain(300),
+		"coll 300 must NOT be compaction-blocked (no active TTL)")
+
+	// GC state: every loaded snapshot contributes precise refs regardless of TTL,
+	// and the unloaded snapshot contributes only a collection-level block.
+	assert.True(t, sm.segmentReferencedByGC.Contain(1001), "loaded active-TTL seg must be in GC set")
+	assert.True(t, sm.segmentReferencedByGC.Contain(1002), "loaded expired-TTL seg must be in GC set")
+	assert.True(t, sm.segmentReferencedByGC.Contain(1003), "loaded zero-TTL seg must be in GC set")
+	assert.False(t, sm.segmentReferencedByGC.Contain(9999), "unknown seg must NOT be in GC set")
+
+	assert.True(t, sm.buildIDReferencedByGC.Contain(2001))
+	assert.True(t, sm.buildIDReferencedByGC.Contain(2002))
+	assert.True(t, sm.buildIDReferencedByGC.Contain(2003))
+
+	assert.True(t, sm.gcBlockedCollections.Contain(200),
+		"coll 200 must be GC-blocked (unloaded RefIndex)")
+	assert.False(t, sm.gcBlockedCollections.Contain(100),
+		"coll 100 must NOT be GC-blocked (all loaded)")
+	assert.False(t, sm.gcBlockedCollections.Contain(300))
 }
