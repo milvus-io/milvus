@@ -320,8 +320,12 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 	gotInserts, gotDeletes, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
-	// For V3, deltas are nil since deltalogs are stored in manifest
-	s.Nil(gotDeletes)
+	// For V3, delta summary is returned for compaction trigger (no path, only stats)
+	s.NotNil(gotDeletes)
+	s.Equal(1, len(gotDeletes.GetBinlogs()))
+	s.EqualValues(int64(rows), gotDeletes.GetBinlogs()[0].GetEntriesNum())
+	s.NotZero(gotDeletes.GetBinlogs()[0].GetLogID())
+	s.Empty(gotDeletes.GetBinlogs()[0].GetLogPath())
 	// Verify manifest was updated (version should be > -1)
 	_, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
