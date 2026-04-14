@@ -523,6 +523,31 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
+// advanceLastDeltaTimestamp moves lastDeltaTimestamp forward to max(current, max(tss)).
+// Consumers (file-level skip in segment_loader.LoadDeltaLogs, dist_handler reporting to
+// QueryCoord) treat this field as a high-water-mark. Using tss[last] on unsorted batches
+// underestimates the watermark, so we scan for the true max.
+func (s *LocalSegment) advanceLastDeltaTimestamp(tss []typeutil.Timestamp) {
+	if len(tss) == 0 {
+		return
+	}
+	maxTs := tss[0]
+	for _, t := range tss[1:] {
+		if t > maxTs {
+			maxTs = t
+		}
+	}
+	for {
+		cur := s.lastDeltaTimestamp.Load()
+		if maxTs <= cur {
+			return
+		}
+		if s.lastDeltaTimestamp.CompareAndSwap(cur, maxTs) {
+			return
+		}
+	}
+}
+
 // UpdateBloomFilter updates bloom filter with provided pks and charges resource if BF is newly created.
 // This overrides baseSegment.UpdateBloomFilter to handle resource charging for growing segments.
 func (s *LocalSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
@@ -807,12 +832,11 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	s.deltaMut.Lock()
 	defer s.deltaMut.Unlock()
 
-	if s.lastDeltaTimestamp.Load() >= timestamps[len(timestamps)-1] {
-		log.Info("skip delete due to delete record before lastDeltaTimestamp",
-			zap.Int64("segmentID", s.ID()),
-			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
-		return nil
-	}
+	// segcore DeletedRecord::InternalPush is idempotent on (PK, ts):
+	// duplicate deletes against already-deleted rows are discarded internally.
+	// Do NOT add a ts-watermark skip here. In L0-forward + partial-L0-compaction
+	// scenarios, batches contain ts values below the watermark that have NOT yet
+	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
 	GetDynamicPool().Submit(func() (any, error) {
@@ -836,7 +860,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 
 	s.rowNum.Store(-1)
-	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
+	// Track max ts as a high-water-mark (consumed by file-level skip in
+	// LoadDeltaLogs and by dist_handler for QueryCoord reporting). Using
+	// tss[last] on unsorted batches underestimates the watermark.
+	s.advanceLastDeltaTimestamp(timestamps)
 	return nil
 }
 
@@ -957,11 +984,9 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	s.deltaMut.Lock()
 	defer s.deltaMut.Unlock()
 
-	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] {
-		log.Info("skip load delta data due to delete record before lastDeltaTimestamp",
-			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
-		return nil
-	}
+	// See comment in Delete(): segcore dedups at (PK, ts) level, and tss is
+	// NOT sorted across L0 segments (BufferForwarder appends in iteration
+	// order), so comparing against tss[last] is both unnecessary and incorrect.
 
 	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
 	if err != nil {
@@ -1005,7 +1030,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	}
 
 	s.rowNum.Store(-1)
-	s.lastDeltaTimestamp.Store(tss[len(tss)-1])
+	s.advanceLastDeltaTimestamp(tss)
 
 	log.Info("load deleted record done",
 		zap.Int64("rowNum", rowNum),
