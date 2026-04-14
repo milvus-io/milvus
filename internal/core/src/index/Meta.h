@@ -35,6 +35,7 @@ constexpr const char* BITMAP_INDEX_DATA = "bitmap_index_data";
 constexpr const char* BITMAP_INDEX_META = "bitmap_index_meta";
 constexpr const char* BITMAP_INDEX_LENGTH = "bitmap_index_length";
 constexpr const char* BITMAP_INDEX_NUM_ROWS = "bitmap_index_num_rows";
+constexpr const char* BITMAP_INDEX_VALID_BITSET = "valid_bitset";
 
 constexpr const char* INDEX_TYPE = "index_type";
 constexpr const char* METRIC_TYPE = "metric_type";
