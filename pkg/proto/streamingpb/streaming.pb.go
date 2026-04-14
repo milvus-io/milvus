@@ -7,9 +7,9 @@
 package streamingpb
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"

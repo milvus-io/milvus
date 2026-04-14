@@ -7,7 +7,7 @@
 package clusteringpb
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
