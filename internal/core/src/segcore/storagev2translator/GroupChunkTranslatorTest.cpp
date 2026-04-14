@@ -48,6 +48,7 @@
 #include "segcore/Collection.h"
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -119,6 +120,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
+    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
@@ -126,6 +128,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         field_metas,
         column_group_info,
         paths_,
+        std::move(metadata.row_group_meta_list),
         use_mmap,
         true,
         schema_->get_field_ids().size(),
@@ -277,6 +280,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         std::filesystem::path(TestLocalPath) / "gctt_test_multiple_files";
     std::filesystem::create_directory(temp_dir);
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
+    auto metadata =
+        LoadGroupChunkMetadata(multi_file_paths, {}, "test_group_chunk");
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
@@ -284,6 +289,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         field_metas,
         column_group_info,
         multi_file_paths,
+        std::move(metadata.row_group_meta_list),
         use_mmap,
         true,
         schema_->get_field_ids().size(),
