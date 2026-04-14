@@ -106,7 +106,6 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 }
 
 // GetSalvageCheckpoint gets all salvage checkpoints of the wal.
-// Note: Currently only supports local WAL. Remote WAL support requires streaming proto update.
 func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel string) ([]*wal.ReplicateCheckpoint, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
@@ -126,9 +125,21 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 		if !shouldUseRemoteWAL(err) {
 			return nil, err
 		}
-		// The salvage checkpoint is only meaningful on the streaming node that performed the force promote,
-		// so this path should not be reached in practice.
-		return nil, errors.New("GetSalvageCheckpoint is not implemented for remote WAL")
+		handlerService, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := handlerService.GetSalvageCheckpoint(ctx, &streamingpb.GetSalvageCheckpointRequest{
+			Pchannel: types.NewProtoFromPChannelInfo(assign.Channel),
+		})
+		if err != nil {
+			return nil, err
+		}
+		result := make([]*wal.ReplicateCheckpoint, 0, len(resp.GetCheckpoints()))
+		for _, cp := range resp.GetCheckpoints() {
+			result = append(result, utility.NewReplicateCheckpointFromProto(cp))
+		}
+		return result, nil
 	})
 	if err != nil {
 		return nil, err
