@@ -1173,12 +1173,8 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	return &fieldData, nil
 }
 
-func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
-	validData := make([]bool, len(data))
-	for i := range validData {
-		validData[i] = true
-	}
-	return &schemapb.FieldData{
+func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *schemapb.FieldData {
+	fd := &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
 		Field: &schemapb.FieldData_Scalars{
@@ -1191,8 +1187,23 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
-		ValidData: validData,
 	}
+
+	// Only set ValidData when the $meta field is nullable or has a default value.
+	// For 2.5 collections (non-nullable, no default), CheckValidData expects
+	// len(ValidData)==0, so we must NOT set it.
+	for _, f := range schema.Fields {
+		if f.GetIsDynamic() && (f.GetNullable() || f.GetDefaultValue() != nil) {
+			validData := make([]bool, len(data))
+			for i := range validData {
+				validData[i] = true
+			}
+			fd.ValidData = validData
+			break
+		}
+	}
+
+	return fd
 }
 
 // validateFieldDataColumns validates that all required fields are present and no unknown fields exist.
@@ -2406,7 +2417,7 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	for i := range defaultData {
 		defaultData[i] = []byte("{}")
 	}
-	dynamicData := autoGenDynamicFieldData(defaultData)
+	dynamicData := autoGenDynamicFieldData(schema, defaultData)
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
 	return nil
 }
