@@ -164,11 +164,14 @@ struct ArithCompareOperator {
 template <CompareOpType CmpOp>
 struct CompareOpDivFlip {
     static constexpr CompareOpType op =
-        (CmpOp == CompareOpType::LE)   ? CompareOpType::GE
-        : (CmpOp == CompareOpType::LT) ? CompareOpType::GT
-        : (CmpOp == CompareOpType::GE) ? CompareOpType::LE
-        : (CmpOp == CompareOpType::GT) ? CompareOpType::LT
-                                       : CmpOp;
+        (CmpOp == CompareOpType::LE)
+            ? CompareOpType::GE
+            : (CmpOp == CompareOpType::LT)
+                  ? CompareOpType::GT
+                  : (CmpOp == CompareOpType::GE)
+                        ? CompareOpType::LE
+                        : (CmpOp == CompareOpType::GT) ? CompareOpType::LT
+                                                       : CmpOp;
 };
 
 }  // namespace bitset
