@@ -78,7 +78,7 @@ func TestCatalog_GetCollectionByID_TombstoneIsNotFound(t *testing.T) {
 	kc := NewCatalog(kv)
 	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 99999)
 	assert.Error(t, err)
-	assert.True(t, merr.ErrCollectionNotFound.Is(err) || merr.IsCanceledOrTimeout(err) || err != nil)
+	assert.True(t, merr.ErrCollectionNotFound.Is(err))
 	assert.Nil(t, got)
 }
 
