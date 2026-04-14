@@ -40,6 +40,7 @@
 #include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/Meta.h"
+#include "index/MolPatternIndex.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
@@ -405,6 +406,19 @@ IndexFactory::ScalarIndexLoadResource(
         request.max_memory_cost = 2 * index_size_in_bytes;
         request.max_disk_cost = index_size_in_bytes;
         request.has_raw_data = false;
+    } else if (index_type == milvus::index::MOL_PATTERN_INDEX_TYPE) {
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
+        request.has_raw_data = false;
     } else {
         LOG_ERROR(
             "invalid index type to estimate scalar index load resource: {}",
@@ -560,6 +574,16 @@ IndexFactory::CreateGeometryIndex(
 }
 
 IndexBasePtr
+IndexFactory::CreateMolIndex(
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context) {
+    AssertInfo(create_index_info.index_type == MOL_PATTERN_INDEX_TYPE,
+               "Invalid index type for mol index");
+    return std::make_unique<MolPatternIndex<std::string>>(
+        file_manager_context);
+}
+
+IndexBasePtr
 IndexFactory::CreateNestedIndex(
     IndexType index_type,
     int32_t tantivy_index_version,
@@ -583,9 +607,9 @@ IndexFactory::CreateNestedIndexInverted(
             return std::make_unique<InvertedIndexTantivy<bool>>(
                 tantivy_index_version,
                 file_manager_context,
-                false,  // inverted_index_single_segment
-                true,   // user_specified_doc_id
-                true);  // is_nested_index
+                false,
+                true,
+                true);
         case DataType::INT8:
             return std::make_unique<InvertedIndexTantivy<int8_t>>(
                 tantivy_index_version, file_manager_context, false, true, true);
@@ -608,6 +632,9 @@ IndexFactory::CreateNestedIndexInverted(
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
                 tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::MOL: {
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+        }
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }
@@ -675,17 +702,16 @@ IndexFactory::CreateScalarIndex(
         case DataType::TIMESTAMPTZ:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
-        case DataType::ARRAY: {
+        case DataType::ARRAY:
             return CreateCompositeScalarIndex(create_index_info,
                                               file_manager_context);
-        }
-        case DataType::JSON: {
+        case DataType::JSON:
             return CreateJsonIndex(create_index_info, file_manager_context);
-        }
-        case DataType::GEOMETRY: {
+        case DataType::GEOMETRY:
             return CreateGeometryIndex(create_index_info.index_type,
                                        file_manager_context);
-        }
+        case DataType::MOL:
+            return CreateMolIndex(create_index_info, file_manager_context);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
     }

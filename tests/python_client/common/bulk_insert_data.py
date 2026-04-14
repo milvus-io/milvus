@@ -47,6 +47,7 @@ class DataField:
     array_string_field = "array_string"
     new_field = "new_field"
     geo_field = "geo"
+    mol_field = "mol"
     timestamp_field = "timestamptz"
 
 
@@ -146,6 +147,24 @@ def gen_wkt_geometry(nb, bounds=(0, 100, 0, 100)):
         geometries.append(wkt)
 
     return geometries
+
+
+MOL_SMILES_SAMPLES = [
+    "CCO",
+    "c1ccccc1",
+    "c1ccccc1O",
+    "CC(=O)O",
+    "CC(=O)Oc1ccccc1",
+    "c1ccc(O)cc1O",
+    "CCCCCC",
+    "C",
+    "c1ccncc1",
+    "c1ccc2ccccc2c1",
+]
+
+
+def gen_mol_smiles(nb, start=0):
+    return [MOL_SMILES_SAMPLES[(start + i) % len(MOL_SMILES_SAMPLES)] for i in range(nb)]
 
 
 def gen_fp16_vectors(num, dim, for_json=False):
@@ -258,6 +277,9 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                         gen_unique_str(): random.randint(-999999, 9999999),
                     }
                     f.write('"json":' + json.dumps(data) + '')
+                if data_field == DataField.mol_field:
+                    mol = gen_mol_smiles(1, start=i + start_uid)[0]
+                    f.write('"mol":"' + mol + '"')
                 if data_field == DataField.array_bool_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_bool":[]')
@@ -367,6 +389,10 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                     else:
                         f.write('"bool_scalar":[' + ",".join(
                             str(random.choice(["true", "false"])) for i in range(rows)) + "]")
+                    f.write("\n")
+                if data_field == DataField.mol_field:
+                    mols = gen_mol_smiles(rows, start=start_uid)
+                    f.write('"mol":[' + ",".join('"' + m + '"' for m in mols) + "]")
                     f.write("\n")
                 if data_field == DataField.vec_field:
                     # vector columns
@@ -529,6 +555,19 @@ def gen_geometry_in_numpy_file(dir, data_field, rows, start=0, force=False):
     return file_name
 
 
+def gen_mol_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        data = []
+        if rows > 0:
+            data = gen_mol_smiles(rows, start=start)
+        arr = np.array(data)
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
 def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False, nullable=False, **kwargs):
     file_name = f"{data_field}.npy"
     file = f"{dir}/{file_name}"
@@ -655,6 +694,11 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = [random.choice([True, False]) for i in range(start, rows + start)]
             else:
                 data = [None for _ in range(start, rows + start)]
+        elif data_field == DataField.mol_field:
+            if not nullable:
+                data = gen_mol_smiles(rows, start=start)
+            else:
+                data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.json_field:
             if not nullable:
                 data = pd.Series([json.dumps({
@@ -667,6 +711,11 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = pd.Series([json.dumps({
                     gen_unique_str(): None}) for _ in range(start, rows + start)])
                 data =[json.dumps({gen_unique_str():None}) for _ in range(start, rows + start)]
+        elif data_field == DataField.mol_field:
+            if not nullable:
+                data = gen_mol_smiles(rows, start=start)
+            else:
+                data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.array_bool_field:
             if not nullable:
                 data = pd.Series(
@@ -874,6 +923,11 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = gen_wkt_geometry(1)[0]
                 else:
                     d[data_field] = None
+            elif data_field == DataField.mol_field:
+                if not nullable:
+                    d[data_field] = gen_mol_smiles(1, start=r + start)[0]
+                else:
+                    d[data_field] = None
             elif data_field == DataField.timestamp_field:
                 if not nullable:
                     d[data_field] = gen_timestamptz_str()
@@ -991,6 +1045,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 file_name = gen_json_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.geo_field:
                 file_name = gen_geometry_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
+            elif data_field == DataField.mol_field:
+                file_name = gen_mol_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source_new, data_field=data_field,
                                                            rows=rows, force=force, nullable=nullable, shuffle_pk=shuffle_pk)
@@ -1307,6 +1363,9 @@ def gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid):
                     f.write(str(gen_unique_str()))
                 if data_field == DataField.bool_field:
                     f.write(str(random.choice(["true", "false"])))
+                if data_field == DataField.mol_field:
+                    mol = gen_mol_smiles(1, start=i + start_uid)[0]
+                    f.write(mol)
                 if data_field == DataField.vec_field:
                     vectors = gen_float_vectors(1, dim) if float_vector else gen_binary_vectors(1, dim//8)
                     f.write('"' + ','.join(str(x) for x in vectors) + '"')

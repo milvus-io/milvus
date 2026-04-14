@@ -536,6 +536,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		if fieldNumRows == 0 {
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
 		}
+	case schemapb.DataType_Mol:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetMolData().GetData())
 	case schemapb.DataType_FloatVector:
 		if len(fieldData.GetValidData()) > 0 {
 			fieldNumRows = uint64(len(fieldData.GetValidData()))
@@ -633,6 +635,8 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetJsonData().Data)
 		case *schemapb.ScalarField_GeometryData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetGeometryData().Data)
+		case *schemapb.ScalarField_MolData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetMolData().Data)
 		default:
 			return 0, fmt.Errorf("%s is not supported now", scalarType)
 		}

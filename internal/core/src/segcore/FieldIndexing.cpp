@@ -30,6 +30,7 @@
 #include "common/type_c.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
+#include "index/MolPatternIndex.h"
 #include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
@@ -109,6 +110,10 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
         // For geometry fields, append data incrementally to RTree index
         indexing_ptr->AppendSegmentIndex(
             reserved_offset, size, field_raw_data, stream_data);
+    } else if (type == DataType::MOL) {
+        // For mol fields, append data incrementally to MolPattern index
+        indexing_ptr->AppendSegmentIndex(
+            reserved_offset, size, field_raw_data, stream_data);
     }
 }
 
@@ -152,6 +157,9 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
             p);
     } else if (type == DataType::GEOMETRY) {
         // For geometry fields, append data incrementally to RTree index
+        indexing_ptr->AppendSegmentIndex(reserved_offset, size, vec_base, data);
+    } else if (type == DataType::MOL) {
+        // For mol fields, append data incrementally to MolPattern index
         indexing_ptr->AppendSegmentIndex(reserved_offset, size, vec_base, data);
     }
 }
@@ -571,6 +579,7 @@ ScalarFieldIndexing<T>::ScalarFieldIndexing(
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
+      segment_max_row_count_(segment_max_row_count),
       config_(std::make_unique<FieldIndexMeta>(field_index_meta)) {
     recreate_index(field_meta, field_raw_data);
 }
@@ -625,6 +634,27 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
                 field_meta.get_id().get());
             return;
         }
+        if (field_meta.get_data_type() == DataType::MOL) {
+            int32_t n_bit = 0;
+            if (config_) {
+                auto& idx_params = config_->GetIndexParams();
+                auto it = idx_params.find("n_bit");
+                if (it != idx_params.end()) {
+                    n_bit = std::stoi(it->second);
+                }
+            }
+            index_ =
+                std::make_unique<index::MolPatternIndex<std::string>>(
+                    segment_max_row_count_, n_bit);
+            built_ = false;
+            sync_with_index_ = false;
+            index_cur_ = 0;
+            LOG_INFO(
+                "Created MolPattern index for mol fieldID: {}, n_bit={}",
+                field_meta.get_id().get(),
+                n_bit > 0 ? n_bit : 2048);
+            return;
+        }
         index_ = index::CreateStringIndexMarisa();
     } else {
         index_ = index::CreateScalarIndexSort<T>();
@@ -669,6 +699,37 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
             }
             return;
         }
+        if (get_data_type() == DataType::MOL) {
+            auto* mol_index =
+                dynamic_cast<index::MolPatternIndex<std::string>*>(
+                    index_.get());
+            if (!mol_index) {
+                ThrowInfo(UnexpectedError,
+                          "Failed to cast to MolPatternIndex for mol field");
+            }
+            if (!built_) {
+                built_ = true;
+                sync_with_index_ = true;
+            }
+            if (stream_data->has_scalars() &&
+                stream_data->scalars().has_mol_data()) {
+                const auto& mol_array =
+                    stream_data->scalars().mol_data();
+                const auto& valid_data = stream_data->valid_data();
+                for (int64_t i = 0; i < size; ++i) {
+                    bool is_valid = valid_data.empty() || valid_data[i];
+                    std::string pickle_data;
+                    if (is_valid && i < mol_array.data_size()) {
+                        pickle_data = mol_array.data(i);
+                    }
+                    mol_index->AppendMolRow(
+                        reserved_offset + i, pickle_data, is_valid);
+                }
+                index_cur_.fetch_add(size);
+                sync_with_index_.store(true);
+            }
+            return;
+        }
     }
 
     // For other scalar fields, not implemented yet
@@ -705,6 +766,34 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
 
                 process_geometry_data(
                     reserved_offset, size, vec_base, accessor, "FieldData");
+            }
+            return;
+        }
+        if (get_data_type() == DataType::MOL) {
+            auto* mol_index =
+                dynamic_cast<index::MolPatternIndex<std::string>*>(
+                    index_.get());
+            if (!mol_index) {
+                ThrowInfo(UnexpectedError,
+                          "Failed to cast to MolPatternIndex for mol field");
+            }
+            if (!built_) {
+                built_ = true;
+                sync_with_index_ = true;
+            }
+            const void* raw_data = field_data->Data();
+            if (raw_data) {
+                const auto* string_array =
+                    static_cast<const std::string*>(raw_data);
+                for (int64_t i = 0; i < size; ++i) {
+                    bool is_valid = field_data->is_valid(i);
+                    mol_index->AppendMolRow(
+                        reserved_offset + i,
+                        is_valid ? string_array[i] : std::string{},
+                        is_valid);
+                }
+                index_cur_.fetch_add(size);
+                sync_with_index_.store(true);
             }
             return;
         }
@@ -836,6 +925,13 @@ CreateIndex(const FieldMeta& field_meta,
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta, segcore_config);
         case DataType::GEOMETRY:
+            return std::make_unique<ScalarFieldIndexing<std::string>>(
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                field_raw_data);
+        case DataType::MOL:
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta,
                 field_index_meta,

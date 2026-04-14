@@ -447,6 +447,16 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 				return err
 			}
 		}
+	case schemapb.DataType_Mol:
+		for i, singleMol := range singleData.(*MolFieldData).Data {
+			isValid := true
+			if len(singleData.(*MolFieldData).ValidData) != 0 {
+				isValid = singleData.(*MolFieldData).ValidData[i]
+			}
+			if err = eventWriter.AddOneMolToPayload(singleMol, isValid); err != nil {
+				return err
+			}
+		}
 	case schemapb.DataType_BinaryVector:
 		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim, singleData.(*BinaryVectorFieldData).ValidData); err != nil {
 			return err
@@ -732,6 +742,18 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		geometryFieldData.Data = append(geometryFieldData.Data, singleData...)
 		geometryFieldData.ValidData = append(geometryFieldData.ValidData, validData...)
 		insertData.Data[fieldID] = geometryFieldData
+		return len(singleData), nil
+
+	case schemapb.DataType_Mol:
+		singleData := data.([][]byte)
+		if fieldData == nil {
+			fieldData = &MolFieldData{Data: make([][]byte, 0, rowNum)}
+		}
+		molFieldData := fieldData.(*MolFieldData)
+
+		molFieldData.Data = append(molFieldData.Data, singleData...)
+		molFieldData.ValidData = append(molFieldData.ValidData, validData...)
+		insertData.Data[fieldID] = molFieldData
 		return len(singleData), nil
 
 	case schemapb.DataType_BinaryVector:

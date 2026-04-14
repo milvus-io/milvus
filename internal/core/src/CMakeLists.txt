@@ -128,4 +128,10 @@ endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
 
+if(DEFINED RDKIT_INCLUDE_DIR)
+    set(MOL_C_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/common/mol_c.o)
+    target_link_libraries(milvus_core RDKit::RDKit ${MOL_C_OBJECT})
+    add_dependencies(milvus_core mol_c_build)
+    target_link_directories(milvus_core PRIVATE ${CONAN_LIB_DIRS_RDKIT})
+endif()
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")

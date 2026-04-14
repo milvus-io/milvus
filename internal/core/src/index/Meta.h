@@ -55,6 +55,7 @@ constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;
 constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
 constexpr const char* NGRAM_INDEX_TYPE = "NGRAM";
+constexpr const char* MOL_PATTERN_INDEX_TYPE = "PATTERN";
 constexpr const char* MIN_GRAM = "min_gram";
 constexpr const char* MAX_GRAM = "max_gram";
 

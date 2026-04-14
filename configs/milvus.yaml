@@ -484,6 +484,7 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
+    enableMolCache: false # Enable lazy RDKit molecule cache for MOL fields
     tieredStorage:
       warmup:
         # options: sync, async, disable.

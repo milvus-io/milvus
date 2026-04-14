@@ -557,7 +557,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
+	if embedding.HasFunctionsForSearch(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
@@ -800,7 +800,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+	if embedding.HasFunctionsForSearch(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
@@ -1060,12 +1060,25 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 				return err
 			}
 		}
+		if fieldData.Type == schemapb.DataType_Mol {
+			if err := validateMOLFieldSearchResult(&fieldsData[i]); err != nil {
+				log.Warn("fail to validate MOL field search result", zap.Error(err))
+				return err
+			}
+		}
 	}
-	if t.result.GetResults().GetGroupByFieldValue() != nil &&
-		t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Geometry {
-		if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
-			log.Warn("fail to validate geometry field search result", zap.Error(err))
-			return err
+	if t.result.GetResults().GetGroupByFieldValue() != nil {
+		if t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Geometry {
+			if err := validateGeometryFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
+				log.Warn("fail to validate geometry field search result", zap.Error(err))
+				return err
+			}
+		}
+		if t.result.GetResults().GetGroupByFieldValue().GetType() == schemapb.DataType_Mol {
+			if err := validateMOLFieldSearchResult(&t.result.Results.GroupByFieldValue); err != nil {
+				log.Warn("fail to validate MOL field search result", zap.Error(err))
+				return err
+			}
 		}
 	}
 

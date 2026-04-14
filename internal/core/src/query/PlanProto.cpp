@@ -1127,6 +1127,28 @@ ProtoParser::ParseGISFunctionFilterExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseMolFunctionFilterExprs(
+    const proto::plan::MolFunctionFilterExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
+
+    auto expr = std::make_shared<expr::MolFunctionFilterExpr>(
+        columnInfo,
+        expr_pb.op(),
+        expr_pb.smiles_string());
+    return expr;
+}
+
+expr::TypedExprPtr
 ProtoParser::CreateAlwaysTrueExprs() {
     return std::make_shared<expr::AlwaysTrueExpr>();
 }
@@ -1198,6 +1220,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         case ppe::kGisfunctionFilterExpr: {
             result =
                 ParseGISFunctionFilterExprs(expr_pb.gisfunction_filter_expr());
+            break;
+        }
+        case ppe::kMolfunctionFilterExpr: {
+            result =
+                ParseMolFunctionFilterExprs(expr_pb.molfunction_filter_expr());
             break;
         }
         case ppe::kTimestamptzArithCompareExpr: {

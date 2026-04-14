@@ -126,6 +126,12 @@ class IndexFactory {
             storage::FileManagerContext());
 
     IndexBasePtr
+    CreateMolIndex(
+        const CreateIndexInfo& create_index_info,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
     CreateNestedIndex(IndexType index_type,
                       int32_t tantivy_index_version,
                       const storage::FileManagerContext& file_manager_context =

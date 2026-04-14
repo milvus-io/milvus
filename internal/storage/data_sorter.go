@@ -125,6 +125,9 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_Geometry:
 			data := singleData.(*GeometryFieldData).Data
 			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_Mol:
+			data := singleData.(*MolFieldData).Data
+			data[i], data[j] = data[j], data[i]
 		case schemapb.DataType_SparseFloatVector:
 			fieldData := singleData.(*SparseFloatVectorFieldData)
 			fieldData.Contents[i], fieldData.Contents[j] = fieldData.Contents[j], fieldData.Contents[i]

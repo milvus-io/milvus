@@ -199,6 +199,20 @@ message GISFunctionFilterExpr{
   double distance = 4;  // Distance parameter for DWithin
 }
 
+message MolFunctionFilterExpr {
+  ColumnInfo column_info = 1;
+  string smiles_string = 2;
+  enum MolOp {
+    Invalid = 0;
+    Substructure = 1;
+    Superstructure = 2;
+  }
+  MolOp op = 3;
+  reserved 4, 5, 6, 7, 8, 9;
+  reserved "fingerprint_field_id", "fingerprint_type", "fingerprint_dim",
+           "morgan_radius", "rdkit_min_path", "rdkit_max_path";
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -310,6 +324,7 @@ message Expr {
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
+    MolFunctionFilterExpr molfunction_filter_expr = 22;
   };
   bool is_template = 20;
 }

@@ -110,6 +110,17 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::MOL: {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                result = ExecVisitorImpl<std::string>(input);
+            } else {
+                result = ExecVisitorImpl<std::string_view>(input);
+            }
+            break;
+        }
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
@@ -123,10 +134,13 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (auto res = PreCheckNullable(input)) {
         return res;
     }
-    auto valid_res =
-        (input != nullptr)
-            ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
-            : ProcessChunksForValid<T>(UseIndexCursor());
+    // MolPatternIndex does not track null bitmap, so null predicates on
+    // MOL fields must always fall back to raw data valid bitmap.
+    bool use_index = SegmentExpr::UseIndexCursor() &&
+                     expr_->column_.data_type_ != DataType::MOL;
+    auto valid_res = (input != nullptr)
+                         ? ProcessChunksForValidByOffsets<T>(use_index, *input)
+                         : ProcessChunksForValid<T>(use_index);
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();

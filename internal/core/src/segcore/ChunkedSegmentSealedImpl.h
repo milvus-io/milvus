@@ -519,6 +519,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadGeometryCache(FieldId field_id,
                       const std::shared_ptr<ChunkedColumnInterface>& column);
 
+    // Load MOL cache for a field (pre-deserialize pickle to ROMol)
+    void
+    LoadMolCache(FieldId field_id,
+                 const std::shared_ptr<ChunkedColumnInterface>& column);
+
  private:
     void
     load_system_field_internal(

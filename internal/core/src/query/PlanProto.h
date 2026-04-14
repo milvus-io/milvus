@@ -102,6 +102,10 @@ class ProtoParser {
         const proto::plan::GISFunctionFilterExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseMolFunctionFilterExprs(
+        const proto::plan::MolFunctionFilterExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseTermExprs(const proto::plan::TermExpr& expr_pb);
 
     expr::TypedExprPtr

@@ -758,28 +758,6 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			}
 			values[i] = castedValue
 		}
-
-		// For JSON type, ensure all numeric values have consistent type.
-		// If there's a mix of integers and floats, convert all to floats.
-		if typeutil.IsJSONType(dataType) && len(values) > 0 {
-			hasInt := false
-			hasFloat := false
-			for _, val := range values {
-				if IsInteger(val) {
-					hasInt = true
-				} else if IsFloating(val) {
-					hasFloat = true
-				}
-			}
-			// If we have both int and float, convert all ints to floats
-			if hasInt && hasFloat {
-				for i, val := range values {
-					if IsInteger(val) {
-						values[i] = NewFloat(float64(val.GetInt64Val()))
-					}
-				}
-			}
-		}
 	}
 
 	expr := &planpb.Expr{
@@ -826,7 +804,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {
@@ -1986,6 +1964,72 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitMolSubstructure(ctx *parser.MolSubstructureContext) interface{} {
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsMolType(columnInfo.GetDataType())) {
+		return merr.WrapErrParameterInvalidMsg(
+			"mol_contains substructure operation is only supported on MOL fields, got: %s", ctx.GetText())
+	}
+	smilesString, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	molExpr := &planpb.MolFunctionFilterExpr{
+		ColumnInfo:   columnInfo,
+		SmilesString: smilesString,
+		Op:           planpb.MolFunctionFilterExpr_Substructure,
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_MolfunctionFilterExpr{
+			MolfunctionFilterExpr: molExpr,
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitMolSuperstructure(ctx *parser.MolSuperstructureContext) interface{} {
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsMolType(columnInfo.GetDataType())) {
+		return merr.WrapErrParameterInvalidMsg(
+			"mol_contains superstructure operation is only supported on MOL fields, got: %s", ctx.GetText())
+	}
+	smilesString, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	molExpr := &planpb.MolFunctionFilterExpr{
+		ColumnInfo:   columnInfo,
+		SmilesString: smilesString,
+		Op:           planpb.MolFunctionFilterExpr_Superstructure,
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_MolfunctionFilterExpr{
+			MolfunctionFilterExpr: molExpr,
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 // VisitTimestamptzCompareForward handles comparison expressions where the column
 // is on the left side of the operator.
 // Syntax example: column > '2025-01-01' [ + INTERVAL 'P1D' ]
@@ -2233,7 +2277,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {
