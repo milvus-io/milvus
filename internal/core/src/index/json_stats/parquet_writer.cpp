@@ -64,7 +64,7 @@ JsonStatsParquetWriter::UpdatePathSizeMap(
     const std::vector<std::shared_ptr<arrow::Array>>& arrays) {
     auto index = 0;
     for (const auto& group : column_groups_) {
-        auto path = file_paths_[index];
+        const auto& path = file_paths_[index];
         for (const auto& column_index : group) {
             size_t size = GetArrowArrayMemorySize(arrays[column_index]);
             path_size_map_[path] += size;
@@ -93,8 +93,8 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
 
     UpdatePathSizeMap(arrays);
 
-    auto batch =
-        arrow::RecordBatch::Make(schema_, unflushed_row_count_, arrays);
+    auto batch = arrow::RecordBatch::Make(
+        schema_, unflushed_row_count_, std::move(arrays));
     auto status = packed_writer_->Write(batch);
     AssertInfo(
         status.ok(), "failed to write batch, error: {}", status.ToString());
@@ -105,13 +105,13 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
 }
 
 void
-JsonStatsParquetWriter::Init(const ParquetWriteContext& context) {
-    schema_ = context.schema;
-    builders_ = context.builders;
-    builders_map_ = context.builders_map;
-    kv_metadata_ = context.kv_metadata;
-    column_groups_ = context.column_groups;
-    file_paths_ = context.file_paths;
+JsonStatsParquetWriter::Init(ParquetWriteContext context) {
+    schema_ = std::move(context.schema);
+    builders_ = std::move(context.builders);
+    builders_map_ = std::move(context.builders_map);
+    kv_metadata_ = std::move(context.kv_metadata);
+    column_groups_ = std::move(context.column_groups);
+    file_paths_ = std::move(context.file_paths);
     auto result = milvus_storage::PackedRecordBatchWriter::Make(fs_,
                                                                 file_paths_,
                                                                 schema_,
@@ -119,8 +119,8 @@ JsonStatsParquetWriter::Init(const ParquetWriteContext& context) {
                                                                 column_groups_,
                                                                 buffer_size_);
     AssertInfo(result.ok(),
-               "[StorageV2] Failed to create packed writer: " +
-                   result.status().ToString());
+               "[StorageV2] Failed to create packed writer: {}",
+               result.status().ToString());
     packed_writer_ = result.ValueOrDie();
     for (const auto& [key, value] : kv_metadata_) {
         (void)packed_writer_->AddUserMetadata(key, value);
@@ -187,7 +187,8 @@ JsonStatsParquetWriter::AppendRow(
 
 arrow::Status
 JsonStatsParquetWriter::AppendDataToBuilder(
-    const std::string& value, std::shared_ptr<arrow::ArrayBuilder> builder) {
+    const std::string& value,
+    const std::shared_ptr<arrow::ArrayBuilder>& builder) {
     auto type_id = builder->type()->id();
 
     if (value.empty()) {

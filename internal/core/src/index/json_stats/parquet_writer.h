@@ -187,7 +187,7 @@ class JsonStatsParquetWriter {
     ~JsonStatsParquetWriter();
 
     void
-    Init(const ParquetWriteContext& context);
+    Init(ParquetWriteContext context);
 
     void
     AppendValue(const std::string& key, const std::string& value);
@@ -226,7 +226,7 @@ class JsonStatsParquetWriter {
  private:
     arrow::Status
     AppendDataToBuilder(const std::string& value,
-                        std::shared_ptr<arrow::ArrayBuilder> builder);
+                        const std::shared_ptr<arrow::ArrayBuilder>& builder);
 
     // init info
     std::shared_ptr<arrow::Schema> schema_{nullptr};

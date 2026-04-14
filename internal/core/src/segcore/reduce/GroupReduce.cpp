@@ -85,11 +85,12 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
         for (auto offset : final_search_records_[seg_res_idx][j]) {
-            primary_keys[index] = search_result->primary_keys_[offset];
+            primary_keys[index] =
+                std::move(search_result->primary_keys_[offset]);
             distances[index] = search_result->distances_[offset];
             seg_offsets[index] = search_result->seg_offsets_[offset];
             group_by_values[index] =
-                search_result->group_by_values_.value()[offset];
+                std::move(search_result->group_by_values_.value()[offset]);
             if (search_result->element_level_) {
                 element_indices[index] =
                     search_result->element_indices_[offset];

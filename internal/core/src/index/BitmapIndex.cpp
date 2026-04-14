@@ -291,9 +291,6 @@ BitmapIndex<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 BitmapIndex<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     auto binary_set = Serialize(config);
 
     this->file_manager_->AddFile(binary_set);
@@ -588,10 +585,6 @@ template <typename T>
 void
 BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_INFO("load bitmap index with config {}", config.dump());
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -642,8 +635,9 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     } else {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if (bitsets_.find(val) != bitsets_.end()) {
-                res |= bitsets_.at(val);
+            auto it = bitsets_.find(val);
+            if (it != bitsets_.end()) {
+                res |= it->second;
             }
         }
     }
@@ -690,8 +684,9 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
         TargetBitmap res(total_num_rows_, false);
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if (bitsets_.find(val) != bitsets_.end()) {
-                res |= bitsets_.at(val);
+            auto it = bitsets_.find(val);
+            if (it != bitsets_.end()) {
+                res |= it->second;
             }
         }
         res.flip();

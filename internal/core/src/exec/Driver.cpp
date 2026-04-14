@@ -73,7 +73,7 @@ DriverFactory::CreateDriver(
 
     for (size_t i = 0; i < plannodes_.size(); ++i) {
         auto id = operators.size();
-        auto plannode = plannodes_[i];
+        const auto& plannode = plannodes_[i];
         if (auto filterbitsnode =
                 std::dynamic_pointer_cast<const plan::FilterBitsNode>(
                     plannode)) {

@@ -1976,3 +1976,130 @@ func TestSnapshotMeta_IsAllRefIndexLoaded(t *testing.T) {
 	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewSnapshotRefIndex())
 	assert.False(t, sm.IsAllRefIndexLoaded())
 }
+
+func TestSnapshotMeta_SaveSnapshot_CollectsBuildIDs_AllIndexTypes(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	metadataFilePath := "s3://bucket/snapshots/1/metadata/test-uuid.json"
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: createTestSnapshotInfoForMeta(),
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1001,
+				PartitionId: 1,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 3001},
+					{BuildID: 3002},
+				},
+				TextIndexFiles: map[int64]*datapb.TextIndexStats{
+					100: {FieldID: 100, BuildID: 4001},
+					101: {FieldID: 101, BuildID: 4002},
+				},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+					200: {FieldID: 200, BuildID: 5001},
+				},
+			},
+		},
+	}
+
+	// Mock SnapshotWriter.Save
+	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+		return metadataFilePath, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Mock catalog.SaveSnapshot
+	mock2 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshotInfo *datapb.SnapshotInfo) error {
+		return nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Act
+	err := sm.SaveSnapshot(ctx, snapshotData)
+
+	// Assert
+	assert.NoError(t, err)
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.True(t, exists)
+
+	// Vector/scalar index build IDs
+	assert.True(t, refIndex.ContainsBuildID(3001))
+	assert.True(t, refIndex.ContainsBuildID(3002))
+	// Text index build IDs
+	assert.True(t, refIndex.ContainsBuildID(4001))
+	assert.True(t, refIndex.ContainsBuildID(4002))
+	// JSON key index build IDs
+	assert.True(t, refIndex.ContainsBuildID(5001))
+	// Non-existent build IDs
+	assert.False(t, refIndex.ContainsBuildID(9999))
+}
+
+func TestSnapshotMeta_SaveSnapshot_SkipsZeroBuildIDs(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	metadataFilePath := "s3://bucket/snapshots/1/metadata/test-uuid.json"
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: createTestSnapshotInfoForMeta(),
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1001,
+				PartitionId: 1,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 3001},
+				},
+				TextIndexFiles: map[int64]*datapb.TextIndexStats{
+					100: {FieldID: 100, BuildID: 0}, // zero build ID, should be skipped
+					101: {FieldID: 101, BuildID: 4001},
+				},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+					200: {FieldID: 200, BuildID: 0}, // zero build ID, should be skipped
+					201: {FieldID: 201, BuildID: 5001},
+				},
+			},
+		},
+	}
+
+	// Mock SnapshotWriter.Save
+	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+		return metadataFilePath, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Mock catalog.SaveSnapshot
+	mock2 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshotInfo *datapb.SnapshotInfo) error {
+		return nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Act
+	err := sm.SaveSnapshot(ctx, snapshotData)
+
+	// Assert
+	assert.NoError(t, err)
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.True(t, exists)
+
+	// Vector/scalar build IDs are always collected (no zero check)
+	assert.True(t, refIndex.ContainsBuildID(3001))
+	// Non-zero text/JSON build IDs should be collected
+	assert.True(t, refIndex.ContainsBuildID(4001))
+	assert.True(t, refIndex.ContainsBuildID(5001))
+	// Zero build IDs should NOT be in the refIndex
+	assert.False(t, refIndex.ContainsBuildID(0))
+
+	// Verify BuildIDs slice on SnapshotData: should have 3001, 4001, 5001 only (3 items)
+	assert.Len(t, snapshotData.BuildIDs, 3)
+	assert.Contains(t, snapshotData.BuildIDs, int64(3001))
+	assert.Contains(t, snapshotData.BuildIDs, int64(4001))
+	assert.Contains(t, snapshotData.BuildIDs, int64(5001))
+}

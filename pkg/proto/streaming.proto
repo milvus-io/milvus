@@ -363,6 +363,10 @@ service StreamingNodeHandlerService {
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
 
+    // GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+    // Returns an empty list if no force promote has occurred.
+    rpc GetSalvageCheckpoint(GetSalvageCheckpointRequest) returns (GetSalvageCheckpointResponse) {}
+
     // Produce is a bi-directional streaming RPC to send messages to a channel.
     // All messages sent to a channel will be assigned a unique messageID.
     // The messageID is used to identify the message in the channel.
@@ -389,6 +393,16 @@ message GetReplicateCheckpointRequest {
 // GetReplicateCheckpointResponse is the response of GetReplicateCheckpoint service.
 message GetReplicateCheckpointResponse {
   common.ReplicateCheckpoint checkpoint = 1;
+}
+
+// GetSalvageCheckpointRequest is the request of GetSalvageCheckpoint service.
+message GetSalvageCheckpointRequest {
+  PChannelInfo pchannel = 1;
+}
+
+// GetSalvageCheckpointResponse is the response of GetSalvageCheckpoint service.
+message GetSalvageCheckpointResponse {
+  repeated common.ReplicateCheckpoint checkpoints = 1;
 }
 
 // ProduceRequest is the request of the Produce RPC.

@@ -162,7 +162,7 @@ AliyunSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
     if (tokenFile) {
         Aws::String token((std::istreambuf_iterator<char>(tokenFile)),
                           std::istreambuf_iterator<char>());
-        m_token = token;
+        m_token = std::move(token);
     } else {
         AWS_LOGSTREAM_ERROR(STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG,
                             "Can't open token file: " << m_tokenFile);

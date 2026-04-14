@@ -148,7 +148,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index, " + KnowhereStatusString(stat));
+                  "failed to Deserialize index, {}",
+                  KnowhereStatusString(stat));
     span_load_engine->End();
 
     auto local_chunk_manager =
@@ -181,7 +182,8 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to serialize index, " + KnowhereStatusString(stat));
+                  "failed to serialize index, {}",
+                  KnowhereStatusString(stat));
     }
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalFileSize(),
@@ -239,9 +241,9 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_BUILD_THREAD_NUM);
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
@@ -263,7 +265,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build disk index, " + KnowhereStatusString(stat));
+                  "failed to build disk index, {}",
+                  KnowhereStatusString(stat));
 
     // Add valid_data file to index if it was created (nullable vector field)
     if (local_chunk_manager->Exist(valid_data_path)) {
@@ -303,9 +306,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_BUILD_THREAD_NUM);
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
@@ -372,7 +375,8 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build index, " + KnowhereStatusString(stat));
+                  "failed to build index, {}",
+                  KnowhereStatusString(stat));
 
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
@@ -549,9 +553,9 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         // set threads number
         auto num_threads = GetValueFromConfig<std::string>(
             load_config, DISK_ANN_LOAD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_LOAD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_LOAD_THREAD_NUM);
         load_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
 

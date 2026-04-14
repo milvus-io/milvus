@@ -665,10 +665,6 @@ func isElementFilterExpr(expr *ExprWithType) bool {
 	return expr.expr.GetElementFilterExpr() != nil
 }
 
-func isMatchExpr(expr *ExprWithType) bool {
-	return expr.expr.GetMatchExpr() != nil
-}
-
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
@@ -1853,6 +1849,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 	var columnInfo *planpb.ColumnInfo
 	var err error
 	if ctx.StructFieldIdentifier() != nil {
+		// Handle struct_arr[sub_field] syntax: look up the full field name directly
 		identifier := ctx.StructFieldIdentifier().GetText()
 		field, fieldErr := v.schema.GetFieldFromName(identifier)
 		if fieldErr != nil {

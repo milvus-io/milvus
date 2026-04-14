@@ -246,7 +246,7 @@ ProcessAggregates(const proto::plan::QueryPlanNode& query,
     };
 
     for (int i = 0; i < query.aggregates_size(); i++) {
-        auto aggregate = query.aggregates(i);
+        const auto& aggregate = query.aggregates(i);
         auto agg_name = getAggregateOpName(aggregate.op());
         agg_names.emplace_back(agg_name);
         auto input_agg_field_id = aggregate.field_id();
@@ -949,8 +949,7 @@ ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
 
     auto function = factory.GetFilterFunction(func_sig);
     if (function == nullptr) {
-        ThrowInfo(ExprInvalid,
-                  "function " + func_sig.ToString() + " not found. ");
+        ThrowInfo(ExprInvalid, "function {} not found.", func_sig.ToString());
     }
     return std::make_shared<expr::CallExpr>(
         expr_pb.function_name(), parameters, function);
@@ -1218,8 +1217,7 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            ThrowInfo(ExprInvalid,
-                      std::string("unsupported expr proto node: ") + s);
+            ThrowInfo(ExprInvalid, "unsupported expr proto node: {}", s);
         }
     }
     if (type_check(result->type())) {
@@ -1246,6 +1244,43 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
         default:
             ThrowInfo(UnexpectedError, "unknown function type");
     }
+}
+
+std::shared_ptr<plan::PlanNode>
+ProtoParser::ExtractFilterOnlyPlan(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+
+    // Find VectorSearchNode and extract its source subtree.
+    // This preserves the original plan node sequence (pre-filter nodes chain).
+    std::function<std::shared_ptr<plan::PlanNode>(
+        const std::shared_ptr<plan::PlanNode>&)>
+        find_prefilter_subtree =
+            [&](const std::shared_ptr<plan::PlanNode>& node)
+        -> std::shared_ptr<plan::PlanNode> {
+        if (!node) {
+            return nullptr;
+        }
+        if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+            auto sources = node->sources();
+            if (sources.empty()) {
+                return nullptr;
+            }
+            // Return the pre-filter subtree directly without modification
+            return sources[0];
+        }
+        for (const auto& source : node->sources()) {
+            auto result = find_prefilter_subtree(source);
+            if (result) {
+                return result;
+            }
+        }
+        return nullptr;
+    };
+
+    return find_prefilter_subtree(root_node);
 }
 
 }  // namespace milvus::query

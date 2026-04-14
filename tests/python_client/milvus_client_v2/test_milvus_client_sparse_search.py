@@ -342,7 +342,7 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         assert index_info.get("mmap.enabled") == 'True'
 
         # insert second batch
-        second_nb = 2000
+        second_nb = ct.default_nb
         data2 = cf.gen_row_data_by_schema(nb=second_nb, schema=schema, start=first_nb)
         self.insert(client, collection_name, data=data2)
         self.flush(client, collection_name)
@@ -457,7 +457,7 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 2000
+        nb = ct.default_nb
 
         schema = cf.gen_default_sparse_schema(auto_id=False)
         self.create_collection(client, collection_name, schema=schema)

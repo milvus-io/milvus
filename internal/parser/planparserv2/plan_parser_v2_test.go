@@ -1788,6 +1788,10 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(StringArrayField) <= 1`,
 		`array_length(StringArrayField) > 5`,
 		`array_length(StringArrayField) >= 5`,
+		// struct array sub-field
+		`array_length(struct_array[sub_str]) == 3`,
+		`array_length(struct_array[sub_int]) > 1`,
+		`array_length(struct_array[sub_int]) <= 10`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -1925,7 +1929,7 @@ func Test_SegmentScorers(t *testing.T) {
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {
 		fs := &schemapb.FunctionScore{
-			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerank.WeightedName}}}},
+			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "weighted"}}}},
 		}
 		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
 		assert.NoError(t, err)

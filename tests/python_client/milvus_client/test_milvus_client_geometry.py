@@ -32,7 +32,7 @@ def generate_wkt_by_type(
     """
 
     def validate_and_log_wkt(wkt_string: str, geom_type: str) -> str:
-        """Validate WKT using shapely and log debug info"""
+        """Validate WKT using shapely"""
         try:
             geom = wkt.loads(wkt_string)
             if not geom.is_valid:
@@ -436,11 +436,9 @@ def generate_spatial_query_data_for_function(
         # Default case
         query_geom = "POLYGON ((0 0, 50 0, 50 50, 0 50, 0 0))"
 
-    # Validate and log the generated query geometry
+    # Validate the generated query geometry
     try:
         geom = wkt.loads(query_geom)
-        log.debug(f"Generated {spatial_func} query geometry: {query_geom}")
-        log.debug(f"Query geometry validation - Type: {geom.geom_type}, Valid: {geom.is_valid}")
         if not geom.is_valid:
             log.warning(f"Generated invalid query geometry for {spatial_func}: {query_geom}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
     except Exception as e:
@@ -470,11 +468,9 @@ def generate_diverse_base_data(
     min_x, max_x, min_y, max_y = bounds
 
     def validate_and_log_base_wkt(wkt_string: str, geom_type: str, index: int) -> str:
-        """Validate base data WKT using shapely and log debug info"""
+        """Validate base data WKT using shapely"""
         try:
             geom = wkt.loads(wkt_string)
-            log.debug(f"Generated base {geom_type} geometry [{index}]: {wkt_string}")
-            log.debug(f"Base geometry validation [{index}] - Type: {geom.geom_type}, Valid: {geom.is_valid}")
             if not geom.is_valid:
                 log.warning(f"Generated invalid base geometry [{index}]: {wkt_string}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
             return wkt_string
@@ -574,11 +570,9 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
         List of WKT POINT strings with latitude/longitude coordinates
     """
     def validate_and_log_latlon_wkt(wkt_string: str, point_type: str, index: int) -> str:
-        """Validate lat/lon WKT using shapely and log debug info"""
+        """Validate lat/lon WKT using shapely"""
         try:
             geom = wkt.loads(wkt_string)
-            log.debug(f"Generated {point_type} lat/lon point [{index}]: {wkt_string}")
-            log.debug(f"Lat/lon point validation [{index}] - Type: {geom.geom_type}, Valid: {geom.is_valid}")
             if not geom.is_valid:
                 log.warning(f"Generated invalid lat/lon point [{index}]: {wkt_string}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
             return wkt_string
@@ -661,11 +655,9 @@ def generate_dwithin_query_point(center_lat: float = 40.7128, center_lon: float 
     """
     query_wkt = f"POINT ({center_lon:.6f} {center_lat:.6f})"
 
-    # Validate and log the query point
+    # Validate the query point
     try:
         geom = wkt.loads(query_wkt)
-        log.debug(f"Generated DWITHIN query point: {query_wkt}")
-        log.debug(f"DWITHIN query point validation - Type: {geom.geom_type}, Valid: {geom.is_valid}")
         if not geom.is_valid:
             log.warning(f"Generated invalid DWITHIN query point: {query_wkt}, Reason: {geom.is_valid_reason if hasattr(geom, 'is_valid_reason') else 'Unknown'}")
     except Exception as e:
@@ -1307,9 +1299,12 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             # Calculate expected IDs from all data (sealed + growing)
             expected_ids = generate_gt(spatial_func, base_data, query_geom, "geo", "id")
 
-        print(
-            f"Generated query for {spatial_func} ({data_state}, index={with_geo_index}): "
-            f"{len(expected_ids)} expected matches"
+        log.debug(
+            "Generated query for %s (%s, index=%s): %s expected matches",
+            spatial_func,
+            data_state,
+            with_geo_index,
+            len(expected_ids),
         )
         assert len(expected_ids) >= 1, (
             f"{spatial_func} query should return at least 1 result, got {len(expected_ids)}"
@@ -1343,9 +1338,10 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             results_from_sealed = result_ids & sealed_ids
             results_from_growing = result_ids & growing_ids
 
-            print(
-                f"Results from sealed: {len(results_from_sealed)}, "
-                f"from growing: {len(results_from_growing)}"
+            log.debug(
+                "Results from sealed: %s, from growing: %s",
+                len(results_from_sealed),
+                len(results_from_growing),
             )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2746,7 +2742,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         for i in range(10):
             x, y = rng.uniform(-180, 180), rng.uniform(-90, 90)
             point_wkt = f"POINT ({x} {y})"
-            log.debug(f"Point WKT: {point_wkt}")
             initial_data.append(
                 {"id": i, "vector": rng.random(default_dim).tolist(), "geo": point_wkt}
             )
@@ -2761,7 +2756,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         original_geometries = {
             record["id"]: record["geo"] for record in original_records
         }
-        log.debug(f"Original geometries: {original_geometries}")
 
         # Upsert data - update some existing records and add new ones
         upsert_data = []
@@ -2781,7 +2775,6 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             collection_name, filter="", output_fields=["id", "geo"], limit=100
         )
         assert len(results) == 15  # 10 original + 5 new - 0 duplicates = 15 total
-        log.debug(f"Results: {results}")
 
         # Verify that updated records (5-9) have the exact geometry values we upserted
         updated_ids = [5, 6, 7, 8, 9]

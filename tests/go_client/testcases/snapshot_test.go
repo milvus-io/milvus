@@ -23,6 +23,28 @@ import (
 
 var snapshotPrefix = "snapshot"
 
+// flushWithRetry retries Flush if it hits the collection-level rate limiter (default: 0.1 rps),
+// and awaits flush completion before returning.
+func flushWithRetry(ctx context.Context, mc *base.MilvusClient, collName string) error {
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+		if err == nil {
+			return flushTask.Await(ctx)
+		}
+		if i < maxRetries-1 {
+			log.Info("flush rate limited, retrying",
+				zap.String("collection", collName),
+				zap.Int("attempt", i+1),
+				zap.Error(err))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
 // waitForRestoreComplete polls GetRestoreSnapshotState until the restore job completes or fails.
 // Returns the final RestoreSnapshotInfo and any error.
 func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) (*milvuspb.RestoreSnapshotInfo, error) {
@@ -55,6 +77,52 @@ func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID in
 	}
 
 	return nil, fmt.Errorf("timeout waiting for restore to complete: jobID=%d", jobID)
+}
+
+// waitForAllIndexesBuilt polls DescribeIndex for each index in the collection until all indexes
+// have finished building (PendingIndexRows == 0 and TotalRows == IndexedRows).
+// If the collection has no indexes, the function returns immediately.
+func waitForAllIndexesBuilt(ctx context.Context, mc *base.MilvusClient, collName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 2 * time.Second
+
+	// List indexes once — the set of indexes doesn't change during building.
+	indexes, err := mc.ListIndexes(ctx, client.NewListIndexOption(collName))
+	if err != nil {
+		return fmt.Errorf("failed to list indexes for collection %s: %w", collName, err)
+	}
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	for time.Now().Before(deadline) {
+		allFinished := true
+		for _, idxName := range indexes {
+			descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collName, idxName))
+			if err != nil {
+				return fmt.Errorf("failed to describe index %s on collection %s: %w", idxName, collName, err)
+			}
+			if descIdx.PendingIndexRows != 0 || descIdx.TotalRows != descIdx.IndexedRows {
+				log.Info("index not yet finished",
+					zap.String("collection", collName),
+					zap.String("index", idxName),
+					zap.Int64("pendingRows", descIdx.PendingIndexRows),
+					zap.Int64("totalRows", descIdx.TotalRows),
+					zap.Int64("indexedRows", descIdx.IndexedRows))
+				allFinished = false
+				break
+			}
+		}
+		if allFinished {
+			log.Info("all indexes built", zap.String("collection", collName), zap.Int("numIndexes", len(indexes)))
+			// Allow extra time for segment state settling (compaction, delta merge)
+			// after indexes are built but before snapshot can see all segments.
+			time.Sleep(5 * time.Second)
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for indexes to be built on collection %s", collName)
 }
 
 // TestCreateSnapshot tests creating a snapshot for a collection
@@ -140,12 +208,11 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 		require.Equal(t, insertBatchSize, insertRes.IDs.Len())
 	}
 	// Flush to ensure data is persisted
-	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
-	err = flushTask.Await(ctx)
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
 	common.CheckErr(t, err, true)
-	// wait for rate limiter reset before next flush (rate=0.1 means 1 flush per 10s)
-	time.Sleep(10 * time.Second)
 
 	// Verify initial data count
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
@@ -162,9 +229,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	}
 
 	// Flush to ensure deletion is persisted
-	flushTask2, err := mc.Flush(ctx, client.NewFlushOption(collName))
-	common.CheckErr(t, err, true)
-	err = flushTask2.Await(ctx)
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
 
 	// Verify data count after deletion
@@ -305,10 +370,12 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	}
 
 	// Flush to ensure deletion is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
 
-	time.Sleep(10 * time.Second)
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Verify data count after deletion
 	queryRes2, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
@@ -498,11 +565,12 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	}
 
 	// Flush to ensure data is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
 
-	// Wait for flush to complete
-	time.Sleep(10 * time.Second)
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Step 3: Delete some records (3,000 from each batch)
 	for i := 0; i < numOfBatch; i++ {
@@ -513,11 +581,12 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	}
 
 	// Flush to ensure deletion is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
 
-	// Wait for flush to complete
-	time.Sleep(10 * time.Second)
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Step 4: Create snapshot
 	snapshotName := fmt.Sprintf("multi_fields_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
@@ -956,9 +1025,12 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	}
 
 	// Flush to ensure data is persisted and JSON stats are generated
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
-	time.Sleep(10 * time.Second)
+
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Verify initial data count
 	queryRes, err := mc.Query(ctx,
@@ -979,9 +1051,12 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	}
 
 	// Flush to ensure deletion is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
-	time.Sleep(30 * time.Second)
+
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Verify count after deletion
 	queryRes2, err := mc.Query(ctx,
@@ -1108,9 +1183,12 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	}
 
 	// Flush to ensure data is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
-	time.Sleep(10 * time.Second)
+
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Verify initial data count (3 partitions * 3000 = 9000)
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
@@ -1315,9 +1393,12 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
 	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
 
-	_, err = mc.Flush(ctx, client.NewFlushOption(collNameA))
+	err = flushWithRetry(ctx, mc, collNameA)
 	common.CheckErr(t, err, true)
-	time.Sleep(10 * time.Second)
+
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collNameA, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Verify data count in A
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(collNameA).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
@@ -1528,9 +1609,12 @@ func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
 	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, idColumn, jsonColumn, vecColumn))
 	common.CheckErr(t, err, true)
 
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	err = flushWithRetry(ctx, mc, collName)
 	common.CheckErr(t, err, true)
-	time.Sleep(10 * time.Second)
+
+	// Wait for all indexes to be built after flush
+	err = waitForAllIndexesBuilt(ctx, mc, collName, 2*time.Minute)
+	common.CheckErr(t, err, true)
 
 	// Step 4: Verify indexes exist on source
 	originalIndexes, err := mc.ListIndexes(ctx, client.NewListIndexOption(collName))

@@ -84,15 +84,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
 	tso := mocktso.NewAllocator(t)
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
+			catalog:     rootcoord.NewCatalog(catalogKV),
 			names:       testDB,
 			aliases:     newNameDb(),
 			dbName2Meta: make(map[string]*model.Database),
@@ -1444,6 +1442,38 @@ func TestRootCoord_AlterCollectionFunction(t *testing.T) {
 		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AlterCollectionSchema(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(fmt.Errorf("mock broadcast error")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
 	})
 }
 

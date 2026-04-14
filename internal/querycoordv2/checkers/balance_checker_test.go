@@ -59,7 +59,7 @@ func createTestBalanceChecker() *BalanceChecker {
 
 	// Initialize global balancer factory for testing
 	balance.ResetGlobalBalancerFactoryForTest()
-	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, metaInstance, targetMgr)
+	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, targetMgr)
 
 	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
 }
@@ -460,7 +460,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
@@ -547,7 +547,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPrio
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
@@ -606,7 +606,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 

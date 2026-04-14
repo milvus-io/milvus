@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -53,9 +52,10 @@ const (
 	// If the number of estimated search results exceeds this threshold,
 	// a second query request will be initiated to retrieve output fields data.
 	// In this case, the first search will not return any output field from QueryNodes.
-	requeryThreshold = 0.5 * 1024 * 1024
-	radiusKey        = "radius"
-	rangeFilterKey   = "range_filter"
+	requeryThreshold   = 0.5 * 1024 * 1024
+	radiusKey          = "radius"
+	rangeFilterKey     = "range_filter"
+	iterativeFilterKey = "iterative_filter"
 )
 
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
@@ -97,9 +97,9 @@ type searchTask struct {
 	queryInfos      []*planpb.QueryInfo
 	relatedDataSize int64
 
-	// New reranker functions
-	functionScore *rerank.FunctionScore
-	rankParams    *rankParams
+	// Rerank configuration metadata (nil means no rerank)
+	rerankMeta rerankMeta
+	rankParams *rankParams
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -417,17 +417,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	var err error
-	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
-			return err
-		}
+		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
-		if t.functionScore, err = rerank.NewFunctionScoreWithlegacy(t.schema.CollectionSchema, t.request.GetSearchParams()); err != nil {
-			log.Warn("Failed to create function by legacy info", zap.Error(err))
-			return err
-		}
+		t.rerankMeta = newRerankMetaFromLegacy(t.request.GetSearchParams())
 	}
 
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
@@ -462,18 +455,14 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	default:
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
-	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
-
-	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
-		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
-	}
+	t.needRequery = t.needRequery || (t.rerankMeta != nil && len(t.rerankMeta.GetInputFieldNames()) > 0)
 
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, _, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, _, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
 		}
@@ -499,6 +488,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
 			GroupSize:          t.rankParams.GetGroupSize(),
 			IgnoreGrowing:      ignoreGrowing,
+			SearchType:         searchType,
 		}
 
 		// set analyzer name for sub search
@@ -529,15 +519,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
 		}
 
+		var rerankInputFieldIDs []int64
+		if t.rerankMeta != nil {
+			rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
+		}
 		if t.needRequery {
-			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+			plan.OutputFieldIds = rerankInputFieldIDs
 		} else {
 			primaryFieldSchema, err := t.schema.GetPkField()
 			if err != nil {
 				return err
 			}
 			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
-			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+			allFieldIDs.Insert(rerankInputFieldIDs...)
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
@@ -674,25 +668,20 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 
-	plan, queryInfo, offset, isIterator, orderByFields, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
+	plan, queryInfo, offset, isIterator, orderByFields, searchType, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
 	if err != nil {
 		return err
 	}
 	t.orderByFields = orderByFields
 
-	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
-			return err
-		}
+	t.SearchRequest.SearchType = searchType
 
-		if !t.functionScore.IsSupportGroup() && queryInfo.GetGroupByFieldId() > 0 {
-			return merr.WrapErrParameterInvalidMsg("Rerank %s does not support grouping search", t.functionScore.RerankName())
-		}
+	if t.request.FunctionScore != nil {
+		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
 	// order_by and function_score cannot be used together
-	if len(t.orderByFields) > 0 && t.functionScore != nil {
+	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
 		return merr.WrapErrParameterInvalidMsg("order_by and function_score cannot be used together: they specify conflicting sort criteria")
 	}
 
@@ -733,16 +722,29 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
-	t.needRequery = len(vectorOutputFields) > 0
+	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
+	case "always":
+		t.needRequery = true
+	case "outputfields":
+		t.needRequery = len(t.request.GetOutputFields()) > 0
+	case "outputvector":
+		fallthrough
+	default:
+		t.needRequery = len(vectorOutputFields) > 0
+	}
+	var rerankInputFieldIDs []int64
+	if t.rerankMeta != nil {
+		rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
+	}
 	if t.needRequery {
-		plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+		plan.OutputFieldIds = rerankInputFieldIDs
 	} else {
 		primaryFieldSchema, err := t.schema.GetPkField()
 		if err != nil {
 			return err
 		}
 		allFieldIDs := typeutil.NewSet[int64](t.SearchRequest.OutputFieldsId...)
-		allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+		allFieldIDs.Insert(rerankInputFieldIDs...)
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
@@ -829,34 +831,38 @@ func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, error) {
+func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, false, nil, errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, false, nil, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
 	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.largeTopKEnabled)
 	if err != nil {
-		return nil, nil, 0, false, nil, err
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
-		return nil, nil, 0, false, nil, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
 	}
 
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
-		return nil, nil, 0, false, nil, errors.New("not support search_group_by operation based on binary vector column")
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New("not support search_group_by operation based on binary vector column")
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
+
+	hasFilter := dsl != "" || len(exprTemplateValues) > 0
+	searchType := searchInfo.DetermineSearchType(hasFilter)
+
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
@@ -864,13 +870,13 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 			zap.String("dsl", dsl), // may be very large if large term passed.
 			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return nil, nil, 0, false, nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	log.Ctx(t.ctx).Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
-	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, nil
+	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, searchType, nil
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {

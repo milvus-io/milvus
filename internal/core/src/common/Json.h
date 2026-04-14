@@ -54,8 +54,8 @@ isDocEmpty(simdjson::ondemand::document document);
 // This is safe because JSON objects are unordered per RFC 8259, and downstream
 // consumers (Go protobuf → map) do not depend on key ordering.
 inline std::string
-ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
-    simdjson::padded_string padded(json);
+ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
+    simdjson::padded_string padded(json.data(), json.size());
     thread_local simdjson::ondemand::parser parser;
     auto doc = parser.iterate(padded);
     if (doc.error()) {

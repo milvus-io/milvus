@@ -134,7 +134,7 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 	worker cluster.Worker,
 ) error {
 	// after L0 segment feature
-	// growing segemnts should have load stream delete as well
+	// growing segments should have load stream delete as well
 	deleteScope := querypb.DataScope_All
 	switch candidate.Type() {
 	case commonpb.SegmentState_Sealed:

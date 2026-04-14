@@ -62,9 +62,10 @@ StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
     ret.reserve(size);
     valid_res.reserve(size);
     for (auto i = 0; i < size; ++i) {
-        ret.emplace_back(data_ + offsets_[offsets[i]],
-                         offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
-        valid_res.emplace_back(isValid(offsets[i]));
+        auto idx = offsets[i];
+        auto start = offsets_[idx];
+        ret.emplace_back(data_ + start, offsets_[idx + 1] - start);
+        valid_res.emplace_back(isValid(idx));
     }
     return {ret, valid_res};
 }

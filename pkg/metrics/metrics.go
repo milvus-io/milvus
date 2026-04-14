@@ -132,6 +132,7 @@ const (
 	cgoNameLabelName               = `cgo_name`
 	cgoTypeLabelName               = `cgo_type`
 	queueTypeLabelName             = `queue_type`
+	poolNameLabelName              = "pool_name"
 
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
@@ -146,6 +147,7 @@ const (
 	TaskStateLabel = "task_state"
 
 	filesystemKeyLabelName = "fs"
+	reasonLabelName        = "reason"
 )
 
 var (

@@ -172,6 +172,80 @@ func (_c *MockStreamingNodeHandlerServiceClient_GetReplicateCheckpoint_Call) Run
 	return _c
 }
 
+// GetSalvageCheckpoint provides a mock function with given fields: ctx, in, opts
+func (_m *MockStreamingNodeHandlerServiceClient) GetSalvageCheckpoint(ctx context.Context, in *streamingpb.GetSalvageCheckpointRequest, opts ...grpc.CallOption) (*streamingpb.GetSalvageCheckpointResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSalvageCheckpoint")
+	}
+
+	var r0 *streamingpb.GetSalvageCheckpointResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetSalvageCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetSalvageCheckpointResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.GetSalvageCheckpointRequest, ...grpc.CallOption) *streamingpb.GetSalvageCheckpointResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.GetSalvageCheckpointResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.GetSalvageCheckpointRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSalvageCheckpoint'
+type MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetSalvageCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *streamingpb.GetSalvageCheckpointRequest
+//   - opts ...grpc.CallOption
+func (_e *MockStreamingNodeHandlerServiceClient_Expecter) GetSalvageCheckpoint(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call {
+	return &MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call{Call: _e.mock.On("GetSalvageCheckpoint",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call) Run(run func(ctx context.Context, in *streamingpb.GetSalvageCheckpointRequest, opts ...grpc.CallOption)) *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*streamingpb.GetSalvageCheckpointRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call) Return(_a0 *streamingpb.GetSalvageCheckpointResponse, _a1 error) *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, *streamingpb.GetSalvageCheckpointRequest, ...grpc.CallOption) (*streamingpb.GetSalvageCheckpointResponse, error)) *MockStreamingNodeHandlerServiceClient_GetSalvageCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Produce provides a mock function with given fields: ctx, opts
 func (_m *MockStreamingNodeHandlerServiceClient) Produce(ctx context.Context, opts ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_ProduceClient, error) {
 	_va := make([]interface{}, len(opts))

@@ -37,7 +37,7 @@ func TestNewNodeItem(t *testing.T) {
 // TestNodeItem_GetPriority tests priority calculation
 func TestNodeItem_GetPriority(t *testing.T) {
 	item := NewNodeItem(100, 1)
-	item.SetAssignedScore(50)
+	item.AddAssignedScore(50)
 
 	// Priority should be CurrentScore - AssignedScore = 100 - 50 = 50
 	priority := item.getPriority()
@@ -47,7 +47,7 @@ func TestNodeItem_GetPriority(t *testing.T) {
 // TestNodeItem_GetPriorityWithCurrentScoreDelta tests priority calculation with delta
 func TestNodeItem_GetPriorityWithCurrentScoreDelta(t *testing.T) {
 	item := NewNodeItem(100, 1)
-	item.SetAssignedScore(50)
+	item.AddAssignedScore(50)
 
 	// Current priority: 100 - 50 = 50
 	// With delta 20: (100 + 20) - 50 = 70
@@ -58,7 +58,7 @@ func TestNodeItem_GetPriorityWithCurrentScoreDelta(t *testing.T) {
 // TestNodeItem_AddCurrentScoreDelta tests adding delta to current score
 func TestNodeItem_AddCurrentScoreDelta(t *testing.T) {
 	item := NewNodeItem(100, 1)
-	item.SetAssignedScore(50)
+	item.AddAssignedScore(50)
 
 	// Initial priority: 100 - 50 = 50
 	assert.Equal(t, 50, item.getPriority())
@@ -72,12 +72,12 @@ func TestNodeItem_AddCurrentScoreDelta(t *testing.T) {
 	assert.Equal(t, 80, item.getPriority())
 }
 
-// TestNodeItem_SetAssignedScore tests setting assigned score
-func TestNodeItem_SetAssignedScore(t *testing.T) {
+// TestNodeItem_AddAssignedScore tests adding to assigned score
+func TestNodeItem_AddAssignedScore(t *testing.T) {
 	item := NewNodeItem(100, 1)
 
 	// Set assigned score
-	item.SetAssignedScore(40)
+	item.AddAssignedScore(40)
 
 	assert.Equal(t, float64(40), item.GetAssignedScore())
 	// Priority: 100 - 40 = 60
@@ -97,7 +97,7 @@ func TestNodeItem_SetPriority(t *testing.T) {
 // TestNodeItem_String tests string representation
 func TestNodeItem_String(t *testing.T) {
 	item := NewNodeItem(100, 1)
-	item.SetAssignedScore(50)
+	item.AddAssignedScore(50)
 
 	str := item.String()
 	assert.Contains(t, str, "NodeID: 1")
@@ -109,7 +109,7 @@ func TestNodeItem_String(t *testing.T) {
 // TestNodeItem_NegativeScores tests behavior with negative score changes
 func TestNodeItem_NegativeScores(t *testing.T) {
 	item := NewNodeItem(100, 1)
-	item.SetAssignedScore(50)
+	item.AddAssignedScore(50)
 
 	// Subtract from current score
 	item.AddCurrentScoreDelta(-30)

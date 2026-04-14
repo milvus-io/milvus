@@ -27,6 +27,6 @@ std::string
 EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key);
 
 std::shared_ptr<CPluginContext>
-DecodeKeyMetadata(std::string key_metadata);
+DecodeKeyMetadata(const std::string& key_metadata);
 
 }  // namespace milvus::storage

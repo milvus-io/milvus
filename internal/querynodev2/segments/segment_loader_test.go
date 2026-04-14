@@ -367,6 +367,45 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadWithoutBloomFilter() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	ctx := context.Background()
+	msgLength := 100
+
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+
+	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfo)
+	suite.NoError(err)
+	suite.NotNil(bfs)
+	suite.Len(bfs, 1)
+	suite.False(bfs[0].PkCandidateExist()) // metadata-only stub when BF disabled
+}
+
 func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)

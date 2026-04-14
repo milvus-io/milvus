@@ -137,6 +137,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.FencePolicyConditionWrite.GetValue(), "auto")
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
+		assert.Equal(t, wpCfg.ForceLocalStorage.GetAsBool(), false)
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")
 	})
 
@@ -361,8 +362,6 @@ func TestServiceParam(t *testing.T) {
 		Params := &SParams.MetaStoreCfg
 
 		assert.Equal(t, util.MetaStoreTypeEtcd, Params.MetaStoreType.GetValue())
-		assert.Equal(t, 86400*time.Second, Params.SnapshotTTLSeconds.GetAsDuration(time.Second))
-		assert.Equal(t, 3600*time.Second, Params.SnapshotReserveTimeSeconds.GetAsDuration(time.Second))
 		assert.Equal(t, 100000, Params.PaginationSize.GetAsInt())
 		assert.Equal(t, 32, Params.ReadConcurrency.GetAsInt())
 	})

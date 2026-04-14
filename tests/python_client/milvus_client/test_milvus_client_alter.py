@@ -23,7 +23,7 @@ default_nb = 20
 default_dim = 128
 default_limit = 10
 default_warmup_dim = 128
-default_warmup_nb = 2000
+default_warmup_nb = ct.default_nb
 
 
 class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
