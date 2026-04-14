@@ -2401,3 +2401,99 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
 }
+
+func TestIndexMeta_UpdateIndexRowsProgressMetrics(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := newSegmentIndexMeta(catalog)
+
+	const (
+		testCollID  = int64(200)
+		testIndexID = int64(10)
+	)
+	const testIndexName = "vector_idx"
+
+	// Register a live index so IsIndexExist returns true.
+	m.indexes[testCollID] = map[UniqueID]*model.Index{
+		testIndexID: {
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			IndexName:    testIndexName,
+		},
+	}
+
+	t.Run("empty build info emits no metrics", func(t *testing.T) {
+		metrics.IndexRowsProgress.Reset()
+		m.updateIndexRowsProgressMetrics()
+		assert.Equal(t, 0, testutil.CollectAndCount(metrics.IndexRowsProgress))
+	})
+
+	t.Run("finished and pending segments are counted correctly", func(t *testing.T) {
+		metrics.IndexRowsProgress.Reset()
+
+		m.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      1,
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			NumRows:      1000,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		m.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      2,
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			NumRows:      400,
+			IndexState:   commonpb.IndexState_InProgress,
+		})
+		m.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      3,
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			NumRows:      100,
+			IndexState:   commonpb.IndexState_Unissued,
+		})
+
+		m.updateIndexRowsProgressMetrics()
+
+		collIDStr := fmt.Sprint(testCollID)
+		assert.Equal(t, float64(1500), testutil.ToFloat64(metrics.IndexRowsProgress.WithLabelValues(collIDStr, testIndexName, "total_rows")))
+		assert.Equal(t, float64(1000), testutil.ToFloat64(metrics.IndexRowsProgress.WithLabelValues(collIDStr, testIndexName, "indexed_rows")))
+		assert.Equal(t, float64(500), testutil.ToFloat64(metrics.IndexRowsProgress.WithLabelValues(collIDStr, testIndexName, "pending_index_rows")))
+
+		metrics.IndexRowsProgress.Reset()
+	})
+
+	t.Run("deleted segment indexes are skipped", func(t *testing.T) {
+		metrics.IndexRowsProgress.Reset()
+		m2 := newSegmentIndexMeta(catalog)
+		m2.indexes[testCollID] = map[UniqueID]*model.Index{
+			testIndexID: {CollectionID: testCollID, IndexID: testIndexID, IndexName: testIndexName},
+		}
+		m2.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      4,
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			NumRows:      999,
+			IndexState:   commonpb.IndexState_Finished,
+			IsDeleted:    true,
+		})
+		m2.updateIndexRowsProgressMetrics()
+		assert.Equal(t, 0, testutil.CollectAndCount(metrics.IndexRowsProgress))
+		metrics.IndexRowsProgress.Reset()
+	})
+
+	t.Run("segment for unknown index is skipped", func(t *testing.T) {
+		metrics.IndexRowsProgress.Reset()
+		m3 := newSegmentIndexMeta(catalog)
+		// no indexes registered — IsIndexExist will return false
+		m3.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:      5,
+			CollectionID: testCollID,
+			IndexID:      testIndexID,
+			NumRows:      500,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		m3.updateIndexRowsProgressMetrics()
+		assert.Equal(t, 0, testutil.CollectAndCount(metrics.IndexRowsProgress))
+		metrics.IndexRowsProgress.Reset()
+	})
+}
