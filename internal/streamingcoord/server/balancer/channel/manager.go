@@ -622,6 +622,8 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 		return nil
 	}
 
+	// check if the replicate configuration is changed.
+	// if not changed, return it directly.
 	if cm.replicateConfig != nil && proto.Equal(config.GetReplicateConfiguration(), cm.replicateConfig.GetReplicateConfiguration()) {
 		return nil
 	}

@@ -3,12 +3,15 @@ package replication
 import (
 	"context"
 	"fmt"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -60,6 +63,25 @@ func (s *DropReplicateConfigSuite) TestDropAfterSetup() {
 	})
 	s.NoError(err)
 	s.NoError(merr.Error(resp))
+
+	// Verify replicate config is nil via API
+	getCfgResp, err := s.Cluster.MilvusClient.GetReplicateConfiguration(ctx, &milvuspb.GetReplicateConfigurationRequest{})
+	s.NoError(err)
+	s.NoError(merr.Error(getCfgResp.GetStatus()))
+	s.Nil(getCfgResp.GetConfiguration(), "replicate config should be nil after drop")
+
+	// Verify replicate config key is removed from etcd
+	rootPath := s.Cluster.RootPath()
+	configKey := path.Join(rootPath, streamingcoord.ReplicateConfigurationKey)
+	getResp, err := s.Cluster.EtcdCli.Get(ctx, configKey)
+	s.NoError(err)
+	s.Equal(int64(0), getResp.Count, "replicate config key should be removed after drop")
+
+	// Verify all replicate pchannel meta keys are removed from etcd
+	pchannelPrefix := path.Join(rootPath, streamingcoord.ReplicatePChannelMetaPrefix)
+	listResp, err := s.Cluster.EtcdCli.Get(ctx, pchannelPrefix, clientv3.WithPrefix(), clientv3.WithCountOnly())
+	s.NoError(err)
+	s.Equal(int64(0), listResp.Count, "replicate pchannel meta keys should be removed after drop")
 
 	// Step 3: Drop again (idempotent)
 	resp, err = s.Cluster.MilvusClient.UpdateReplicateConfiguration(ctx, &milvuspb.UpdateReplicateConfigurationRequest{
