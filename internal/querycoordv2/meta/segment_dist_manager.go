@@ -127,6 +127,7 @@ type Segment struct {
 	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment, indexID -> FieldIndexInfo
 	JSONStatsField     map[int64]*querypb.JsonStatsInfo  // json index info of loaded segment
 	ManifestPath       string                            // current manifest path of loaded segment
+	DataVersion        int32                             // storage v2 data version of loaded segment
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {

@@ -333,7 +333,13 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		if !existInDist {
 			return false
 		}
-		// Only trigger reopen when dist manifest is older than target manifest.
+		// Trigger reopen when storage v2 data version is behind the target.
+		// DataVersion bumps on storage v2 binlog changes that don't necessarily
+		// move the manifest version.
+		if segInDist.DataVersion < segment.GetDataVersion() {
+			return true
+		}
+		// Trigger reopen when dist manifest is older than target manifest.
 		// If dist manifest is same or newer (e.g., loaded after L0 compaction updated DataCoord),
 		// the data is already up-to-date and no reopen is needed.
 		cmp, err := packed.CompareManifestPath(segInDist.ManifestPath, segment.GetManifestPath())

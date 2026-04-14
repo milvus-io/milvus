@@ -444,6 +444,7 @@ message SegmentInfo {
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
   int32 schema_version = 34;
+  int32 data_version = 35;
 }
 
 message SegmentStartPosition {
