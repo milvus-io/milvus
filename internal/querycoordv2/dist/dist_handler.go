@@ -207,7 +207,7 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 			IndexInfo:          s.GetIndexInfo(),
 			JSONStatsField:     s.GetJsonStatsInfo(),
 			ManifestPath:       s.GetManifestPath(),
-			DataVersion:        s.GetDataVersion(),
+			DataVersion:        s.DataVersion,
 		})
 	}
 

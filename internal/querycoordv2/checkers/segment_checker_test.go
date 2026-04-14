@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1293,7 +1294,7 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 
 	// dist has the segment loaded with an older DataVersion
 	distSegment := utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel")
-	distSegment.DataVersion = 1
+	distSegment.DataVersion = proto.Int32(1)
 	checker.dist.SegmentDistManager.Update(2, distSegment)
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -1324,9 +1325,19 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 
 	// when dist DataVersion catches up, no reopen task should be generated
 	addedTasks = nil
-	distSegment.DataVersion = 2
+	distSegment.DataVersion = proto.Int32(2)
 	checker.dist.SegmentDistManager.Update(2, distSegment)
 	// invalidate version cache to force re-check
+	delete(checker.versionCache, int64(1))
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
+
+	// when dist DataVersion is nil (old QueryNode in mixed-version rollout),
+	// DataVersion must not be used as a Reopen trigger to avoid an infinite loop.
+	addedTasks = nil
+	distSegment.DataVersion = nil
+	checker.dist.SegmentDistManager.Update(2, distSegment)
 	delete(checker.versionCache, int64(1))
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)

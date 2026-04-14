@@ -120,7 +120,16 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 					zap.String("targetManifest", segmentInfo.GetManifestPath()))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
-			// cmp >= 0: dist manifest is same or newer than target, segment data is ready
+			// cmp >= 0: dist manifest is same or newer than target.
+			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
+			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
+			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
+				log.RatedInfo(10, "segment data version is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.Int32("distDataVersion", *segment.DataVersion),
+					zap.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
+				return merr.WrapErrSegmentNotLoaded(segmentID)
+			}
 		}
 	}
 	return nil

@@ -127,7 +127,10 @@ type Segment struct {
 	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment, indexID -> FieldIndexInfo
 	JSONStatsField     map[int64]*querypb.JsonStatsInfo  // json index info of loaded segment
 	ManifestPath       string                            // current manifest path of loaded segment
-	DataVersion        int32                             // storage v2 data version of loaded segment
+	// DataVersion tracks the storage v2 data version of the loaded segment.
+	// nil means the reporting QueryNode does not support DataVersion (mixed-version rollout),
+	// so the field is not comparable.
+	DataVersion *int32
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {
@@ -153,11 +156,16 @@ func newSegmentMetricsFrom(segment *Segment) *metricsinfo.Segment {
 }
 
 func (segment *Segment) Clone() *Segment {
-	return &Segment{
+	clone := &Segment{
 		SegmentInfo: proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo),
 		Node:        segment.Node,
 		Version:     segment.Version,
 	}
+	if segment.DataVersion != nil {
+		v := *segment.DataVersion
+		clone.DataVersion = &v
+	}
+	return clone
 }
 
 type SegmentDistManagerInterface interface {

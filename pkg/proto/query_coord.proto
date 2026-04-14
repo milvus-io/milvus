@@ -701,7 +701,9 @@ message SegmentVersionInfo {
     repeated int64 field_json_index_stats = 10;
     map<int64, JsonStatsInfo> json_stats_info = 11;
     string manifest_path = 12;
-    int32 data_version = 13;
+    // optional so QueryCoord can distinguish "not reported" (old QueryNode)
+    // from an explicit zero value during a mixed-version rollout.
+    optional int32 data_version = 13;
 }
 
 message ChannelVersionInfo {
