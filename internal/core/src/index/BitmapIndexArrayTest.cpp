@@ -515,8 +515,8 @@ class BitmapIndexArrayRegressionTest
 
     std::vector<milvus::Array>
     BuildArrayData(proto::schema::DataType element_type, bool use_mmap) const {
-        auto posting_count = use_mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 50
-                                      : 2;
+        auto posting_count =
+            use_mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 50 : 2;
 
         std::vector<ScalarFieldProto> scalar_arrays(num_rows_);
         switch (element_type) {
@@ -597,7 +597,8 @@ class BitmapIndexArrayRegressionTest
         EXPECT_TRUE(is_not_null[0]) << "empty array row should stay non-null";
 
         EXPECT_FALSE(is_null[1]) << "non-empty array row should stay non-null";
-        EXPECT_TRUE(is_not_null[1]) << "non-empty array row should stay non-null";
+        EXPECT_TRUE(is_not_null[1])
+            << "non-empty array row should stay non-null";
 
         EXPECT_TRUE(is_null[2]) << "null array row should stay null";
         EXPECT_FALSE(is_not_null[2]) << "null array row should stay null";
@@ -618,22 +619,19 @@ TEST_P(BitmapIndexArrayRegressionTest,
     field_schema.set_element_type(param.element_type);
     field_schema.set_nullable(true);
 
-    auto field_meta = storage::FieldDataMeta{collection_id_,
-                                             partition_id_,
-                                             segment_id_,
-                                             field_id_,
-                                             field_schema};
+    auto field_meta = storage::FieldDataMeta{
+        collection_id_, partition_id_, segment_id_, field_id_, field_schema};
     auto index_meta = storage::IndexMeta{
         segment_id_, field_id_, index_build_id, index_version};
 
     auto field_data = BuildFieldData(param.element_type, param.use_mmap);
 
-    std::string root_path = fmt::format(
-        "{}/bitmap_empty_array_regression_{}_{}_{}",
-        TestLocalPath,
-        ElementTypeName(param.element_type),
-        param.use_v3 ? "v3" : "binaryset",
-        param.use_mmap ? "mmap" : "memory");
+    std::string root_path =
+        fmt::format("{}/bitmap_empty_array_regression_{}_{}_{}",
+                    TestLocalPath,
+                    ElementTypeName(param.element_type),
+                    param.use_v3 ? "v3" : "binaryset",
+                    param.use_mmap ? "mmap" : "memory");
     boost::filesystem::remove_all(root_path);
 
     storage::StorageConfig storage_config;
@@ -669,8 +667,9 @@ TEST_P(BitmapIndexArrayRegressionTest,
         config[INDEX_NUM_ROWS_KEY] = num_rows_;
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
 
-        auto build_index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
-            DataType::ARRAY, config, ctx);
+        auto build_index =
+            indexbuilder::IndexFactory::GetInstance().CreateIndex(
+                DataType::ARRAY, config, ctx);
         build_index->Build();
 
         auto create_index_result = build_index->Upload();
@@ -702,7 +701,8 @@ TEST_P(BitmapIndexArrayRegressionTest,
         switch (param.element_type) {
             case proto::schema::DataType::Int32: {
                 auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx);
-                index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+                index->BuildWithFieldData(
+                    std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
@@ -714,7 +714,8 @@ TEST_P(BitmapIndexArrayRegressionTest,
             case proto::schema::DataType::String: {
                 auto index =
                     std::make_unique<index::BitmapIndex<std::string>>(ctx);
-                index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+                index->BuildWithFieldData(
+                    std::vector<FieldDataPtr>{field_data});
                 auto binary_set = index->Serialize({});
 
                 auto loaded_index =
@@ -735,26 +736,28 @@ TEST_P(BitmapIndexArrayRegressionTest,
 INSTANTIATE_TEST_SUITE_P(
     BitmapIndexArrayRegression,
     BitmapIndexArrayRegressionTest,
-    testing::Values(BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::Int32, true, false},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::Int32, true, true},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::Int32, false, false},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::Int32, false, true},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::String, true, false},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::String, true, true},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::String, false, false},
-                    BitmapIndexArrayRegressionParam{
-                        proto::schema::DataType::String, false, true}),
+    testing::Values(
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::Int32, true, false},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::Int32, true, true},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::Int32, false, false},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::Int32, false, true},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::String, true, false},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::String, true, true},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::String, false, false},
+        BitmapIndexArrayRegressionParam{
+            proto::schema::DataType::String, false, true}),
     [](const testing::TestParamInfo<BitmapIndexArrayRegressionParam>& info) {
         auto element_type =
-            info.param.element_type == proto::schema::DataType::Int32 ? "Int32"
-                                                                      : "String";
+            info.param.element_type == proto::schema::DataType::Int32
+                ? "Int32"
+                : "String";
         return fmt::format("{}_{}_{}",
                            element_type,
                            info.param.use_v3 ? "V3" : "BinarySet",
