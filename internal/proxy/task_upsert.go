@@ -306,6 +306,21 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
+		// Ensure dynamic field has ValidData before merge logic, but only when
+		// the field schema actually requires it (nullable or has default value).
+		// For 2.5 collections where $meta is non-nullable with no default,
+		// ValidData must remain empty — CheckValidData expects len==0 for
+		// non-nullable fields.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
+			nRows := int(it.upsertMsg.InsertMsg.NRows())
+			validData := make([]bool, nRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
 		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
 			var err error
