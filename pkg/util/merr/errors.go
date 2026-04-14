@@ -234,6 +234,12 @@ var (
 	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
 	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
+	// ErrCompactionBlocked is returned when a compaction task is legitimately blocked by
+	// snapshot protection (pending snapshot creation or a referenced segment must be kept).
+	// This is a business-level rejection, not an internal fault: the compaction scheduler
+	// should recognize it and retry with low-frequency backoff instead of triggering alerts.
+	// Marked retryable so callers do not misinterpret it as a hard failure.
+	ErrCompactionBlocked = newMilvusError("compaction blocked by snapshot protection", 2317, true)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 

@@ -1472,6 +1472,7 @@ message CreateSnapshotRequest {
   string name = 2;  // user-defined snapshot name
   string description = 3; // user-defined snapshot description
   int64 collection_id= 4; // collection name
+  int64 compaction_protection_seconds = 5; // duration in seconds to protect referenced segments from compaction, 0 = no protection
 }
 
 message DropSnapshotRequest {
@@ -1532,6 +1533,8 @@ message SnapshotInfo {
   string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
   SnapshotState state = 8; // snapshot state for 2PC commit (Pending/Committed)
   int64 pending_start_time = 9; // timestamp when pending started, for GC timeout
+  uint64 compaction_expire_time = 10; // absolute expiry timestamp (Unix seconds) for compaction protection, 0 = no protection
+  reserved 11;
 }
 
 // StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
@@ -1557,8 +1560,7 @@ message SnapshotMetadata {
   repeated string manifest_list = 5;
   repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
   repeated int64 segment_ids = 7;
-  reserved 8; // was index_ids, no longer needed (buildIDs provides more precise GC protection)
-  repeated int64 build_ids = 9;
+  repeated int64 build_ids = 8;
 }
 
 message RestoreSnapshotInfo {

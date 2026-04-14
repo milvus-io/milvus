@@ -619,13 +619,18 @@ Use consistent and descriptive naming:
 - This prevents data loss but increases storage consumption
 
 **GC Protection Mechanism:**
-- **Segment-level protection**: The garbage collector checks `GetSnapshotBySegment()` before deleting any segment
+- **Segment-level protection**: The garbage collector checks `IsSegmentGCBlocked()` before deleting any segment
   - Segments referenced by any snapshot are skipped during GC
   - Protection applies to both metadata (Etcd) and data files (S3)
-- **Build-level protection**: The garbage collector checks `GetSnapshotByBuildID()` before deleting index files
+- **Build-level protection**: The garbage collector checks `IsBuildIDGCBlocked()` before deleting index files
   - Index files referenced by snapshots (identified by buildID) are preserved even after drop index operations
   - BuildID uniquely identifies a specific index build task, providing precise file-level protection
   - Ensures index data availability during snapshot restore
+- **Fail-closed coarse block**: Both checks embed a collection-level fail-closed guard —
+  if any snapshot's RefIndex has not yet loaded from S3, the entire collection is
+  protected until the loader finishes. This prevents data loss during DataCoord startup.
+- **O(1) query cost**: Protection state is precomputed by `rebuildAllSegmentProtection` and
+  stored in in-memory sets, so per-file/per-buildID checks are constant-time set lookups.
 - **Implementation location**: `internal/datacoord/garbage_collector.go`
 
 **Storage Cost Considerations:**

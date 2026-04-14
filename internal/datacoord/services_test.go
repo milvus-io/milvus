@@ -2914,6 +2914,47 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
 		assert.Contains(t, resp.GetReason(), "already exists")
 	})
+
+	// Regression for the defense-in-depth validation added in Server.CreateSnapshot.
+	// Proxy already validates this range, but a misbehaving client could bypass Proxy
+	// by calling DataCoord directly, so the owner of the feature must re-check.
+	t.Run("compaction_protection_seconds_negative", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:                        "bad_request",
+			CollectionId:                100,
+			CompactionProtectionSeconds: -1,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
+		assert.Contains(t, resp.GetReason(), "non-negative")
+	})
+
+	t.Run("compaction_protection_seconds_over_max", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		maxSec := paramtable.Get().DataCoordCfg.SnapshotMaxCompactionProtectionSeconds.GetAsInt64()
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:                        "bad_request",
+			CollectionId:                100,
+			CompactionProtectionSeconds: maxSec + 1,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
+		assert.Contains(t, resp.GetReason(), "must not exceed")
+	})
 }
 
 // --- Test BatchUpdateManifest ---
