@@ -8020,3 +8020,174 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
 }
+
+// Test_MetaNullableCompat_v25_vs_v26 verifies that insert and upsert Validate
+// (specifically fillWithValue) works correctly for both 2.5-style $meta
+// (Nullable=false, no DefaultValue) and 2.6-style $meta (Nullable=true,
+// DefaultValue="{}").
+//
+// Scenario: after upgrading from 2.5 to 2.6, old collections retain their
+// original $meta schema. The proxy code must handle both formats.
+func Test_MetaNullableCompat_v25_vs_v26(t *testing.T) {
+	numRows := 3
+
+	// Build a minimal schema with PK + vector + $meta (dynamic field).
+	// metaNullable/metaDefault control whether the $meta matches 2.5 or 2.6.
+	buildSchema := func(metaNullable bool, metaDefault []byte) *schemapb.CollectionSchema {
+		metaField := &schemapb.FieldSchema{
+			FieldID:   101,
+			Name:      common.MetaFieldName,
+			DataType:  schemapb.DataType_JSON,
+			IsDynamic: true,
+			Nullable:  metaNullable,
+		}
+		if metaDefault != nil {
+			metaField.DefaultValue = &schemapb.ValueField{
+				Data: &schemapb.ValueField_BytesData{BytesData: metaDefault},
+			}
+		}
+		return &schemapb.CollectionSchema{
+			Name:               "compat_test",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				metaField,
+			},
+		}
+	}
+
+	// Simulate SDK-provided $meta data WITHOUT ValidData (the common SDK behavior).
+	sdkMetaFieldData := func() *schemapb.FieldData {
+		jsonRows := make([][]byte, numRows)
+		for i := range jsonRows {
+			jsonRows[i] = []byte(`{"dyn_key":"value"}`)
+		}
+		return &schemapb.FieldData{
+			FieldName: common.MetaFieldName,
+			Type:      schemapb.DataType_JSON,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: jsonRows},
+					},
+				},
+			},
+			IsDynamic: true,
+			// NOTE: no ValidData — this is what the SDK sends
+		}
+	}
+
+	// Auto-generated $meta (when SDK sends no dynamic data) — mirrors autoGenDynamicFieldData.
+	autoGenMetaFieldData := func(schema *schemapb.CollectionSchema) *schemapb.FieldData {
+		defaultData := make([][]byte, numRows)
+		for i := range defaultData {
+			defaultData[i] = []byte("{}")
+		}
+		return autoGenDynamicFieldData(schema, defaultData)
+	}
+
+	t.Run("INSERT_v26_schema_sdk_provided_meta", func(t *testing.T) {
+		schema := buildSchema(true, []byte("{}"))
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		data := []*schemapb.FieldData{sdkMetaFieldData()}
+		err = newValidateUtil().fillWithValue(data, h, numRows)
+		assert.NoError(t, err, "2.6 schema + SDK-provided $meta should pass fillWithValue")
+	})
+
+	t.Run("INSERT_v25_schema_sdk_provided_meta", func(t *testing.T) {
+		schema := buildSchema(false, nil) // 2.5 style
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		data := []*schemapb.FieldData{sdkMetaFieldData()}
+		err = newValidateUtil().fillWithValue(data, h, numRows)
+		assert.NoError(t, err, "2.5 schema + SDK-provided $meta (no ValidData) should pass fillWithValue")
+	})
+
+	t.Run("INSERT_v26_schema_autogen_meta", func(t *testing.T) {
+		schema := buildSchema(true, []byte("{}"))
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		data := []*schemapb.FieldData{autoGenMetaFieldData(schema)}
+		err = newValidateUtil().fillWithValue(data, h, numRows)
+		assert.NoError(t, err, "2.6 schema + auto-generated $meta should pass fillWithValue")
+	})
+
+	t.Run("INSERT_v25_schema_autogen_meta", func(t *testing.T) {
+		// autoGenDynamicFieldData checks schema: for 2.5 (non-nullable, no default),
+		// it does NOT set ValidData. CheckValidData expects len(ValidData)==0.
+		schema := buildSchema(false, nil) // 2.5 style
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		data := []*schemapb.FieldData{autoGenMetaFieldData(schema)}
+		err = newValidateUtil().fillWithValue(data, h, numRows)
+		assert.NoError(t, err, "2.5 schema + auto-generated $meta should pass fillWithValue")
+		// ValidData should remain empty for non-nullable field
+		assert.Empty(t, data[0].GetValidData(), "non-nullable $meta should not have ValidData")
+	})
+
+	t.Run("UPSERT_queryPreExecute_v25_schema", func(t *testing.T) {
+		// Simulates the fixed upsert queryPreExecute path where ValidData is
+		// conditionally auto-filled only for nullable/default-value fields.
+		schema := buildSchema(false, nil) // 2.5 style
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		fieldData := sdkMetaFieldData()
+		fieldSchema, _ := h.GetFieldFromName(common.MetaFieldName)
+
+		// Simulate FIXED queryPreExecute auto-fill (with schema condition)
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
+			validData := make([]bool, numRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
+		// For 2.5 schema: ValidData is NOT set, so this branch is skipped
+		if len(fieldData.GetValidData()) != 0 {
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, numRows)
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, numRows)
+			}
+		}
+		assert.NoError(t, err, "2.5 schema upsert queryPreExecute should not fail")
+		assert.Empty(t, fieldData.GetValidData(), "non-nullable $meta should not have ValidData")
+	})
+
+	t.Run("UPSERT_queryPreExecute_v26_schema", func(t *testing.T) {
+		schema := buildSchema(true, []byte("{}"))
+		h, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		fieldData := sdkMetaFieldData()
+		fieldSchema, _ := h.GetFieldFromName(common.MetaFieldName)
+
+		// Simulate FIXED queryPreExecute auto-fill (with schema condition)
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
+			validData := make([]bool, numRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
+		if len(fieldData.GetValidData()) != 0 {
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, numRows)
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, numRows)
+			}
+		}
+		assert.NoError(t, err, "2.6 schema upsert queryPreExecute should pass")
+		assert.Equal(t, numRows, len(fieldData.GetValidData()), "nullable $meta should have ValidData")
+	})
+}
