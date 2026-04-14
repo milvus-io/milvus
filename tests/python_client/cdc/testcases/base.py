@@ -21,6 +21,31 @@ logger = logging.getLogger(__name__)
 class TestCDCSyncBase:
     """Base class for CDC sync tests with common utilities."""
 
+    SEARCH_OVERLAP_THRESHOLD = 0.8
+
+    FTS_SENTENCES = [
+        "Vector databases enable efficient similarity search at scale.",
+        "Machine learning models produce high-dimensional embeddings for semantic search.",
+        "BM25 is a classic full-text search ranking function used in information retrieval.",
+        "Approximate nearest neighbor algorithms trade accuracy for speed.",
+        "Milvus supports hybrid search combining dense and sparse vectors.",
+        "Transformer models like BERT generate contextual word embeddings.",
+        "Inverted indexes power traditional keyword-based search engines.",
+        "HNSW graph structure allows fast approximate nearest neighbor queries.",
+        "Data replication ensures high availability in distributed databases.",
+        "CDC stands for Change Data Capture, tracking database mutations in real time.",
+        "Sparse vectors represent text documents in a high-dimensional term space.",
+        "Index partitioning improves query throughput in large vector collections.",
+        "Cosine similarity measures the angle between two vectors in embedding space.",
+        "Product quantization compresses vectors to reduce memory footprint.",
+        "Segment-level operations allow incremental updates without full re-indexing.",
+        "Full-text search ranks documents by term frequency and inverse document frequency.",
+        "Recall measures the fraction of true neighbors found by an approximate search.",
+        "Distributed query execution parallelizes workloads across multiple nodes.",
+        "Schema evolution allows adding new fields without dropping existing collections.",
+        "Hybrid ranking merges keyword and semantic scores for improved relevance.",
+    ]
+
     @staticmethod
     def gen_unique_name(
         prefix: str = "", length: int = 8, max_length: int = None
@@ -926,3 +951,429 @@ class TestCDCSyncBase:
         logger.info(
             f"{state_prefix} {client_type.capitalize()} {resource_type} '{resource_name}': {state} {details}"
         )
+
+    # -------------------------------------------------------------------------
+    # Part 1: Additional Schema Factories
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def create_fts_schema(client, analyzer_type="standard"):
+        """Create schema with BM25 full-text search function."""
+        from pymilvus import Function, FunctionType
+
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field(
+            "text_field",
+            DataType.VARCHAR,
+            max_length=2048,
+            enable_analyzer=True,
+            analyzer_params={"type": analyzer_type},
+        )
+        schema.add_field("sparse_output", DataType.SPARSE_FLOAT_VECTOR, is_function_output=True)
+        schema.add_field("dense_vector", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("category", DataType.VARCHAR, max_length=64)
+
+        bm25_fn = Function(
+            name="bm25_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text_field"],
+            output_field_names=["sparse_output"],
+        )
+        schema.add_function(bm25_fn)
+
+        return schema
+
+    @staticmethod
+    def create_dynamic_schema(client):
+        """Create schema with dynamic field enabled."""
+        schema = client.create_schema(enable_dynamic_field=True)
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=256)
+        return schema
+
+    @staticmethod
+    def create_nullable_schema(client):
+        """Create schema with nullable fields."""
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("nullable_int64", DataType.INT64, nullable=True)
+        schema.add_field("nullable_varchar", DataType.VARCHAR, max_length=256, nullable=True)
+        schema.add_field("nullable_float", DataType.FLOAT, nullable=True)
+        schema.add_field("nullable_json", DataType.JSON, nullable=True)
+        schema.add_field(
+            "nullable_array",
+            DataType.ARRAY,
+            element_type=DataType.INT32,
+            max_capacity=100,
+            nullable=True,
+        )
+        return schema
+
+    @staticmethod
+    def create_default_values_schema(client):
+        """Create schema with default values on scalar fields."""
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("default_int64", DataType.INT64, default_value=0)
+        schema.add_field("default_varchar", DataType.VARCHAR, max_length=256, default_value="default")
+        schema.add_field("default_float", DataType.FLOAT, default_value=1.0)
+        schema.add_field("default_bool", DataType.BOOL, default_value=False)
+        return schema
+
+    @staticmethod
+    def create_partition_key_schema(client, key_type="VarChar"):
+        """Create schema with a partition key field."""
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=128)
+        if key_type == "VarChar":
+            schema.add_field(
+                "partition_key_field",
+                DataType.VARCHAR,
+                max_length=256,
+                is_partition_key=True,
+            )
+        else:
+            schema.add_field(
+                "partition_key_field",
+                DataType.INT64,
+                is_partition_key=True,
+            )
+        schema.add_field("data_field", DataType.VARCHAR, max_length=256)
+        return schema
+
+    @staticmethod
+    def create_clustering_key_schema(client):
+        """Create schema with a clustering key field."""
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=128)
+        schema.add_field("clustering_key_field", DataType.INT64, is_clustering_key=True)
+        schema.add_field("data_field", DataType.VARCHAR, max_length=256)
+        return schema
+
+    @staticmethod
+    def create_single_vector_schema(client, vector_type="FLOAT_VECTOR", dim=128):
+        """Create a simple single-vector schema for a given vector type."""
+        schema = client.create_schema()
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        dtype = getattr(DataType, vector_type)
+        if vector_type == "SPARSE_FLOAT_VECTOR":
+            schema.add_field("vector", dtype)
+        else:
+            schema.add_field("vector", dtype, dim=dim)
+        schema.add_field("int_field", DataType.INT64)
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=256)
+        schema.add_field("float_field", DataType.FLOAT)
+        return schema
+
+    # -------------------------------------------------------------------------
+    # Part 2: Additional Data Generators
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def generate_fts_data(cls, count=100) -> List[Dict[str, Any]]:
+        """Generate data for full-text search (FTS) collections."""
+        categories = ["catA", "catB", "catC", "catD"]
+        data = []
+        for i in range(count):
+            base_sentence = cls.FTS_SENTENCES[i % len(cls.FTS_SENTENCES)]
+            record = {
+                "text_field": f"{base_sentence} unique_{i}_{random.randint(10000, 99999)}",
+                "dense_vector": [random.random() for _ in range(128)],
+                "category": random.choice(categories),
+            }
+            data.append(record)
+        return data
+
+    @staticmethod
+    def generate_nullable_data(count=100, null_ratio=0.3) -> List[Dict[str, Any]]:
+        """Generate data with randomly null-ified nullable fields."""
+        data = []
+        for _ in range(count):
+            record: Dict[str, Any] = {
+                "float_vector": [random.random() for _ in range(128)],
+                "nullable_int64": None if random.random() < null_ratio else random.randint(-1000, 1000),
+                "nullable_varchar": None if random.random() < null_ratio else f"varchar_{random.randint(1000, 9999)}",
+                "nullable_float": None if random.random() < null_ratio else random.uniform(-100.0, 100.0),
+                "nullable_json": None if random.random() < null_ratio else {"key": random.randint(1, 100)},
+                "nullable_array": None if random.random() < null_ratio else [random.randint(0, 100) for _ in range(random.randint(1, 10))],
+            }
+            data.append(record)
+        return data
+
+    @staticmethod
+    def generate_dynamic_data(
+        count=100, extra_fields=None
+    ) -> List[Dict[str, Any]]:
+        """Generate data for collections with dynamic fields enabled."""
+        if extra_fields is None:
+            extra_fields = {"extra_int": int, "extra_str": str, "extra_float": float}
+
+        data = []
+        for i in range(count):
+            record: Dict[str, Any] = {
+                "float_vector": [random.random() for _ in range(128)],
+                "varchar_field": f"dynamic_varchar_{i}_{random.randint(1000, 9999)}",
+            }
+            for field_name, field_type in extra_fields.items():
+                if field_type is int:
+                    record[field_name] = random.randint(0, 10000)
+                elif field_type is str:
+                    record[field_name] = f"{field_name}_val_{random.randint(1000, 9999)}"
+                elif field_type is float:
+                    record[field_name] = random.uniform(0.0, 1000.0)
+                else:
+                    record[field_name] = None
+            data.append(record)
+        return data
+
+    @classmethod
+    def generate_single_vector_data(
+        cls, count=100, vector_type="FLOAT_VECTOR", dim=128
+    ) -> List[Dict[str, Any]]:
+        """Generate data for a single-vector collection."""
+        dtype = getattr(DataType, vector_type)
+        vectors = cls._gen_vectors(count, dim, dtype)
+        data = []
+        for i, vec in enumerate(vectors):
+            record = {
+                "vector": vec,
+                "int_field": random.randint(0, 1000),
+                "varchar_field": f"single_vec_{i}_{random.randint(1000, 9999)}",
+                "float_field": random.uniform(0.0, 1000.0),
+            }
+            data.append(record)
+        return data
+
+    # -------------------------------------------------------------------------
+    # Part 3: Verification Helpers
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def verify_data_sampling(
+        cls,
+        upstream_client,
+        downstream_client,
+        collection_name: str,
+        sample_ratio: float = 0.2,
+        output_fields: List[str] = None,
+    ):
+        """
+        Sample a fraction of records and compare them field-by-field between upstream
+        and downstream.
+
+        Returns:
+            (match_count, mismatch_count, mismatch_details)
+        """
+        # Retrieve all PKs from upstream
+        all_up_results = upstream_client.query(
+            collection_name=collection_name,
+            filter="",
+            output_fields=["id"],
+        )
+        all_pks = [r["id"] for r in all_up_results]
+        if not all_pks:
+            logger.warning(f"[VERIFY] No records found in upstream collection '{collection_name}'")
+            return 0, 0, []
+
+        sample_size = max(1, int(len(all_pks) * sample_ratio))
+        sampled_pks = random.sample(all_pks, min(sample_size, len(all_pks)))
+        logger.info(
+            f"[VERIFY] Sampling {len(sampled_pks)} / {len(all_pks)} records from '{collection_name}'"
+        )
+
+        match_count = 0
+        mismatch_count = 0
+        mismatch_details: List[Dict[str, Any]] = []
+
+        for pk in sampled_pks:
+            up_rows = upstream_client.query(
+                collection_name=collection_name,
+                filter=f"id == {pk}",
+                output_fields=output_fields or ["*"],
+            )
+            down_rows = downstream_client.query(
+                collection_name=collection_name,
+                filter=f"id == {pk}",
+                output_fields=output_fields or ["*"],
+            )
+
+            if not up_rows or not down_rows:
+                mismatch_count += 1
+                mismatch_details.append({"pk": pk, "reason": "missing on one side"})
+                continue
+
+            up_row = up_rows[0]
+            down_row = down_rows[0]
+            fields_match = True
+            field_diffs: Dict[str, Any] = {}
+
+            for field, up_val in up_row.items():
+                down_val = down_row.get(field)
+                if isinstance(up_val, float) or isinstance(down_val, float):
+                    try:
+                        if abs(float(up_val) - float(down_val)) > 1e-6:
+                            fields_match = False
+                            field_diffs[field] = {"upstream": up_val, "downstream": down_val}
+                    except (TypeError, ValueError):
+                        if up_val != down_val:
+                            fields_match = False
+                            field_diffs[field] = {"upstream": up_val, "downstream": down_val}
+                else:
+                    if up_val != down_val:
+                        fields_match = False
+                        field_diffs[field] = {"upstream": up_val, "downstream": down_val}
+
+            if fields_match:
+                match_count += 1
+            else:
+                mismatch_count += 1
+                mismatch_details.append({"pk": pk, "field_diffs": field_diffs})
+
+        logger.info(
+            f"[VERIFY] Sampling result — match: {match_count}, mismatch: {mismatch_count}"
+        )
+        return match_count, mismatch_count, mismatch_details
+
+    @classmethod
+    def verify_search_consistency(
+        cls,
+        upstream_client,
+        downstream_client,
+        collection_name: str,
+        vectors: List[Any],
+        anns_field: str,
+        limit: int = 10,
+        metric_type: str = "COSINE",
+    ):
+        """
+        Run search queries on both sides and compute PK overlap ratios.
+
+        Returns:
+            (avg_overlap_ratio, all_upstream_pks, all_downstream_pks)
+        """
+        all_upstream_pks: List[List[Any]] = []
+        all_downstream_pks: List[List[Any]] = []
+        overlap_ratios: List[float] = []
+
+        search_params = {"metric_type": metric_type}
+
+        for vec in vectors:
+            up_results = upstream_client.search(
+                collection_name=collection_name,
+                data=[vec],
+                anns_field=anns_field,
+                search_params=search_params,
+                limit=limit,
+                output_fields=["id"],
+            )
+            down_results = downstream_client.search(
+                collection_name=collection_name,
+                data=[vec],
+                anns_field=anns_field,
+                search_params=search_params,
+                limit=limit,
+                output_fields=["id"],
+            )
+
+            up_pks = set(hit["id"] for hit in up_results[0]) if up_results else set()
+            down_pks = set(hit["id"] for hit in down_results[0]) if down_results else set()
+
+            all_upstream_pks.append(list(up_pks))
+            all_downstream_pks.append(list(down_pks))
+
+            union_size = len(up_pks | down_pks)
+            if union_size > 0:
+                overlap = len(up_pks & down_pks) / union_size
+            else:
+                overlap = 1.0
+            overlap_ratios.append(overlap)
+
+        avg_overlap = sum(overlap_ratios) / len(overlap_ratios) if overlap_ratios else 0.0
+        logger.info(
+            f"[VERIFY] Search consistency for '{collection_name}': avg_overlap={avg_overlap:.4f} "
+            f"over {len(vectors)} queries"
+        )
+        return avg_overlap, all_upstream_pks, all_downstream_pks
+
+    @staticmethod
+    def verify_query_consistency(
+        upstream_client,
+        downstream_client,
+        collection_name: str,
+        filter_expr: str,
+        output_fields: List[str] = None,
+    ):
+        """
+        Query both upstream and downstream with the same filter and compare PK sets.
+
+        Returns:
+            (up_count, down_count, overlap_count, extra_up, extra_down)
+        """
+        up_results = upstream_client.query(
+            collection_name=collection_name,
+            filter=filter_expr,
+            output_fields=output_fields or ["id"],
+        )
+        down_results = downstream_client.query(
+            collection_name=collection_name,
+            filter=filter_expr,
+            output_fields=output_fields or ["id"],
+        )
+
+        up_pks = set(r["id"] for r in up_results)
+        down_pks = set(r["id"] for r in down_results)
+        overlap = up_pks & down_pks
+        extra_up = up_pks - down_pks
+        extra_down = down_pks - up_pks
+
+        logger.info(
+            f"[VERIFY] Query consistency for '{collection_name}' filter='{filter_expr}': "
+            f"upstream={len(up_pks)}, downstream={len(down_pks)}, "
+            f"overlap={len(overlap)}, extra_up={len(extra_up)}, extra_down={len(extra_down)}"
+        )
+        return len(up_pks), len(down_pks), len(overlap), extra_up, extra_down
+
+    @staticmethod
+    def verify_iterator_consistency(
+        upstream_client,
+        downstream_client,
+        collection_name: str,
+        batch_size: int = 100,
+    ):
+        """
+        Iterate through all records on both sides and compare PK sets.
+
+        Returns:
+            (up_count, down_count, match_bool)
+        """
+        def _collect_pks(client):
+            pks = set()
+            iterator = client.query_iterator(
+                collection_name=collection_name,
+                batch_size=batch_size,
+                output_fields=["id"],
+            )
+            while True:
+                batch = iterator.next()
+                if not batch:
+                    iterator.close()
+                    break
+                for row in batch:
+                    pks.add(row["id"])
+            return pks
+
+        up_pks = _collect_pks(upstream_client)
+        down_pks = _collect_pks(downstream_client)
+        match = up_pks == down_pks
+
+        logger.info(
+            f"[VERIFY] Iterator consistency for '{collection_name}': "
+            f"upstream={len(up_pks)}, downstream={len(down_pks)}, match={match}"
+        )
+        return len(up_pks), len(down_pks), match
