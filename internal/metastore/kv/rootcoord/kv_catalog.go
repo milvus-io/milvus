@@ -258,6 +258,13 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
 	}
 
+	// Legacy SuffixSnapshot deletion with ts!=0 overwrote the plain key with a
+	// 3-byte tombstone marker instead of removing it. Treat a tombstone value
+	// as "collection logically deleted" to keep restart safe against stale data.
+	if IsTombstone(collVal) {
+		return nil, merr.WrapErrCollectionNotFound(collectionID, "tombstone")
+	}
+
 	collMeta := &pb.CollectionInfo{}
 	err = proto.Unmarshal([]byte(collVal), collMeta)
 	return collMeta, err
@@ -375,6 +382,9 @@ func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID type
 	}
 	partitions := make([]*model.Partition, 0, len(values))
 	for _, v := range values {
+		if IsTombstone(v) {
+			continue
+		}
 		partitionMeta := &pb.PartitionInfo{}
 		err := proto.Unmarshal([]byte(v), partitionMeta)
 		if err != nil {
@@ -393,6 +403,9 @@ func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.
 
 	ret := make(map[int64][]*model.Partition)
 	for i := 0; i < len(values); i++ {
+		if IsTombstone(values[i]) {
+			continue
+		}
 		partitionMeta := &pb.PartitionInfo{}
 		err := proto.Unmarshal([]byte(values[i]), partitionMeta)
 		if err != nil {
@@ -419,6 +432,9 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	}
 	fields := make([]*model.Field, 0, len(values))
 	for _, v := range values {
+		if IsTombstone(v) {
+			continue
+		}
 		partitionMeta := &schemapb.FieldSchema{}
 		err := proto.Unmarshal([]byte(v), partitionMeta)
 		if err != nil {
@@ -437,6 +453,9 @@ func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Time
 
 	ret := make(map[int64][]*model.Field)
 	for i := 0; i < len(values); i++ {
+		if IsTombstone(values[i]) {
+			continue
+		}
 		fieldMeta := &schemapb.FieldSchema{}
 		err := proto.Unmarshal([]byte(values[i]), fieldMeta)
 		if err != nil {
@@ -463,6 +482,9 @@ func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collection
 	}
 	structFields := make([]*model.StructArrayField, 0, len(values))
 	for _, v := range values {
+		if IsTombstone(v) {
+			continue
+		}
 		partitionMeta := &schemapb.StructArrayFieldSchema{}
 		err := proto.Unmarshal([]byte(v), partitionMeta)
 		if err != nil {
@@ -481,6 +503,9 @@ func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.Uniq
 	}
 	functions := make([]*model.Function, 0, len(values))
 	for _, v := range values {
+		if IsTombstone(v) {
+			continue
+		}
 		functionSchema := &schemapb.FunctionSchema{}
 		err := proto.Unmarshal([]byte(v), functionSchema)
 		if err != nil {
@@ -498,6 +523,9 @@ func (kc *Catalog) batchListFunctions(ctx context.Context, ts typeutil.Timestamp
 	}
 	ret := make(map[int64][]*model.Function)
 	for i := 0; i < len(values); i++ {
+		if IsTombstone(values[i]) {
+			continue
+		}
 		functionSchema := &schemapb.FunctionSchema{}
 		err := proto.Unmarshal([]byte(values[i]), functionSchema)
 		if err != nil {
@@ -884,6 +912,9 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName s
 	}
 
 	for _, val := range vals {
+		if IsTombstone(val) {
+			continue
+		}
 		colMeta := pb.CollectionInfo{}
 		err = proto.Unmarshal([]byte(val), &colMeta)
 		if err != nil {
@@ -901,13 +932,25 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName s
 
 func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
-	_, vals, err := kc.Txn.LoadWithPrefix(ctx, prefix)
+	_, rawVals, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		log.Ctx(ctx).Error("get collections meta fail",
 			zap.String("prefix", prefix),
 			zap.Uint64("timestamp", ts),
 			zap.Error(err))
 		return nil, err
+	}
+
+	// Drop legacy SuffixSnapshot tombstone-valued entries before unmarshaling.
+	// Prior to commit e0873a65d4, deletions at ts!=0 overwrote the plain key with
+	// a 3-byte tombstone marker instead of removing it; those stale values can
+	// still exist in etcd and would break proto.Unmarshal on restart.
+	vals := make([]string, 0, len(rawVals))
+	for _, val := range rawVals {
+		if IsTombstone(val) {
+			continue
+		}
+		vals = append(vals, val)
 	}
 
 	start := time.Now()
