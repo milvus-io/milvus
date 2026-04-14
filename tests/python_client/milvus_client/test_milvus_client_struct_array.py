@@ -2609,9 +2609,14 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
         # Search with EmbeddingList and verify results
         search_vecs = cf.gen_vectors(3, EMB_LIST_DIM, vector_type)
-        embedding_list = EmbeddingList(
-            [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
-        )
+        if vector_type == DataType.BINARY_VECTOR:
+            embedding_list = EmbeddingList(
+                [np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in search_vecs]
+            )
+        else:
+            embedding_list = EmbeddingList(
+                [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
+            )
 
         results, check = self.search(
             client,
