@@ -73,16 +73,28 @@ using namespace milvus::segcore::storagev1translator;
 
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
-    void
-    SetUp() override {
-        bool pk_is_string = GetParam();
-        auto schema = segcore::GenChunkedSegmentTestSchema(pk_is_string);
-        segment = segcore::CreateSealedSegment(
-            schema,
+    segcore::SegmentSealedUPtr
+    CreateSegment(bool is_sorted_by_pk) {
+        auto seg = segcore::CreateSealedSegment(
+            schema_,
             nullptr,
             -1,
             segcore::SegcoreConfig::default_config(),
-            true);
+            is_sorted_by_pk);
+        seg->AddFieldDataInfoForSealed(load_info_);
+        for (auto& [id, info] : load_info_.field_infos) {
+            LoadFieldDataInfo load_field_info;
+            load_field_info.storage_version = 2;
+            load_field_info.field_infos.emplace(id, info);
+            seg->LoadFieldData(load_field_info);
+        }
+        return seg;
+    }
+
+    void
+    SetUp() override {
+        bool pk_is_string = GetParam();
+        schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
 
         // Use globally initialized ArrowFileSystem
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
@@ -110,7 +122,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         auto result = milvus_storage::PackedRecordBatchWriter::Make(
             fs,
             paths,
-            schema->ConvertToArrowSchema(),
+            schema_->ConvertToArrowSchema(),
             storage_config,
             column_groups,
             writer_memory,
@@ -128,13 +140,13 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
         std::sort(str_data.begin(), str_data.end());
 
-        fields = {{"int64", schema->get_field_id(FieldName("int64"))},
-                  {"pk", schema->get_field_id(FieldName("pk"))},
+        fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
+                  {"pk", schema_->get_field_id(FieldName("pk"))},
                   {"ts", TimestampFieldID},
-                  {"string1", schema->get_field_id(FieldName("string1"))},
-                  {"string2", schema->get_field_id(FieldName("string2"))}};
+                  {"string1", schema_->get_field_id(FieldName("string1"))},
+                  {"string2", schema_->get_field_id(FieldName("string2"))}};
 
-        auto arrow_schema = schema->ConvertToArrowSchema();
+        auto arrow_schema = schema_->ConvertToArrowSchema();
         for (int chunk_id = 0; chunk_id < chunk_num;
              chunk_id++, start_id += test_data_count) {
             std::vector<int64_t> test_data(test_data_count);
@@ -170,14 +182,13 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
             // Create record batch
             auto record_batch = arrow::RecordBatch::Make(
-                schema->ConvertToArrowSchema(), test_data_count, arrays);
+                schema_->ConvertToArrowSchema(), test_data_count, arrays);
             row_count += test_data_count;
             EXPECT_TRUE(writer->Write(record_batch).ok());
         }
         EXPECT_TRUE(writer->Close().ok());
 
-        LoadFieldDataInfo load_info;
-        load_info.field_infos.emplace(
+        load_info_.field_infos.emplace(
             int64_t(0),
             FieldBinlogInfo{
                 int64_t(0),
@@ -187,7 +198,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 false,
                 "",
                 std::vector<std::string>({paths[0]})});
-        load_info.field_infos.emplace(
+        load_info_.field_infos.emplace(
             int64_t(102),
             FieldBinlogInfo{
                 int64_t(102),
@@ -197,7 +208,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 false,
                 "",
                 std::vector<std::string>({paths[1]})});
-        load_info.field_infos.emplace(
+        load_info_.field_infos.emplace(
             int64_t(103),
             FieldBinlogInfo{
                 int64_t(103),
@@ -207,14 +218,8 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 false,
                 "",
                 std::vector<std::string>({paths[2]})});
-        load_info.storage_version = 2;
-        segment->AddFieldDataInfoForSealed(load_info);
-        for (auto& [id, info] : load_info.field_infos) {
-            LoadFieldDataInfo load_field_info;
-            load_field_info.storage_version = 2;
-            load_field_info.field_infos.emplace(id, info);
-            segment->LoadFieldData(load_field_info);
-        }
+        load_info_.storage_version = 2;
+        segment = CreateSegment(true);
     }
 
     void
@@ -227,6 +232,8 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     }
 
     segcore::SegmentSealedUPtr segment;
+    SchemaPtr schema_;
+    LoadFieldDataInfo load_info_;
     int chunk_num = 2;
     int test_data_count = 10000;
     std::unordered_map<std::string, FieldId> fields;
@@ -363,4 +370,144 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+// Test DropFieldData behavior based on parquet file structure.
+// In this test setup, the parquet files are organized as:
+//   - paths[0] contains columns {0, 4, 3} = int64, ts, string2 (multi-field column group)
+//   - paths[1] contains column {2} = string1 (single-field group)
+//   - paths[2] contains column {1} = pk (single-field group)
+// When storage_version=2 reads a parquet file with multiple columns, they become
+// a multi-field column group, so DropFieldData should be skipped for those fields.
+
+TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnUnsortedSegment) {
+    auto unsorted_segment = CreateSegment(false);
+    auto* segment_internal =
+        dynamic_cast<SegmentInternalInterface*>(unsorted_segment.get());
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(unsorted_segment.get());
+    ASSERT_NE(segment_internal, nullptr);
+    ASSERT_NE(segment_impl, nullptr);
+
+    PkType existing_pk;
+    PkType missing_pk;
+    std::unique_ptr<IdArray> delete_ids = std::make_unique<IdArray>();
+    if (GetParam()) {
+        existing_pk = std::string("test42");
+        missing_pk = std::string("test_missing");
+        delete_ids->mutable_str_id()->mutable_data()->Add("test42");
+    } else {
+        existing_pk = int64_t(42);
+        missing_pk = int64_t(-1);
+        delete_ids->mutable_int_id()->mutable_data()->Add(42);
+    }
+
+    EXPECT_TRUE(segment_impl->Contain(existing_pk));
+    EXPECT_FALSE(segment_impl->Contain(missing_pk));
+
+    Timestamp delete_ts = MAX_TIMESTAMP;
+    auto status = unsorted_segment->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    BitsetType timestamp_mask(chunk_num * test_data_count);
+    BitsetTypeView timestamp_mask_view(timestamp_mask);
+    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    ASSERT_FALSE(timestamp_mask[41]);
+    ASSERT_TRUE(timestamp_mask[42]);
+
+    timestamp_mask.reset();
+    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    ASSERT_FALSE(timestamp_mask[42]);
+    ASSERT_TRUE(timestamp_mask[43]);
+
+    BitsetType delete_mask(chunk_num * test_data_count);
+    BitsetTypeView delete_mask_view(delete_mask);
+    segment_internal->mask_with_delete(
+        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(1, delete_mask.count());
+    ASSERT_EQ(1, unsorted_segment->get_deleted_count());
+    ASSERT_EQ(chunk_num * test_data_count - 1,
+              unsorted_segment->get_real_count());
+}
+
+// Verify that when delete_ts == insert_ts, the delete does NOT take effect.
+// This tests the same-timestamp correctness check in DeletedRecord when
+// insert_record_.timestamps_ is empty (StorageV2 lazy-init path).
+TEST_P(TestChunkSegmentStorageV2, TestSameTimestampDeleteNotEffective) {
+    auto unsorted_segment = CreateSegment(false);
+
+    // Row 42 has insert timestamp = 42 (from sequential int64 data).
+    // Deleting with the same timestamp should have no effect.
+    std::unique_ptr<IdArray> delete_ids = std::make_unique<IdArray>();
+    if (GetParam()) {
+        delete_ids->mutable_str_id()->mutable_data()->Add("test42");
+    } else {
+        delete_ids->mutable_int_id()->mutable_data()->Add(42);
+    }
+
+    Timestamp delete_ts = 42;  // same as insert timestamp of row 42
+    auto status = unsorted_segment->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    // The delete should not have taken effect because delete_ts == insert_ts
+    ASSERT_EQ(0, unsorted_segment->get_deleted_count());
+    ASSERT_EQ(chunk_num * test_data_count, unsorted_segment->get_real_count());
+}
+
+TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
+    auto sorted_segment = CreateSegment(true);
+    auto* segment_internal =
+        dynamic_cast<SegmentInternalInterface*>(sorted_segment.get());
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(sorted_segment.get());
+    ASSERT_NE(segment_internal, nullptr);
+    ASSERT_NE(segment_impl, nullptr);
+
+    PkType existing_pk;
+    PkType missing_pk;
+    std::unique_ptr<IdArray> delete_ids = std::make_unique<IdArray>();
+    if (GetParam()) {
+        existing_pk = std::string("test42");
+        missing_pk = std::string("test_missing");
+        delete_ids->mutable_str_id()->mutable_data()->Add("test42");
+    } else {
+        existing_pk = int64_t(42);
+        missing_pk = int64_t(-1);
+        delete_ids->mutable_int_id()->mutable_data()->Add(42);
+    }
+
+    EXPECT_TRUE(segment_impl->Contain(existing_pk));
+    EXPECT_FALSE(segment_impl->Contain(missing_pk));
+
+    Timestamp delete_ts = MAX_TIMESTAMP;
+    auto status = sorted_segment->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    BitsetType timestamp_mask(chunk_num * test_data_count);
+    BitsetTypeView timestamp_mask_view(timestamp_mask);
+    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    ASSERT_FALSE(timestamp_mask[41]);
+    ASSERT_TRUE(timestamp_mask[42]);
+
+    timestamp_mask.reset();
+    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    ASSERT_FALSE(timestamp_mask[42]);
+    ASSERT_TRUE(timestamp_mask[43]);
+
+    BitsetType delete_mask(chunk_num * test_data_count);
+    BitsetTypeView delete_mask_view(delete_mask);
+    segment_internal->mask_with_delete(
+        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+    ASSERT_EQ(1, delete_mask.count());
+    ASSERT_EQ(1, sorted_segment->get_deleted_count());
+    ASSERT_EQ(chunk_num * test_data_count - 1,
+              sorted_segment->get_real_count());
+
+    if (!GetParam()) {
+        int64_t seg_offsets[] = {0, 42};
+        auto pk_result = sorted_segment->bulk_subscript(
+            nullptr, fields.at("pk"), seg_offsets, 2);
+        ASSERT_EQ(pk_result->scalars().long_data().data(0), 0);
+        ASSERT_EQ(pk_result->scalars().long_data().data(1), 42);
+    }
 }

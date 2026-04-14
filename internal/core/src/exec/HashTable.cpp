@@ -39,7 +39,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
             std::dynamic_pointer_cast<ColumnVector>(input->child(column_idx));
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
-        hashers[i]->setColumnData(column_ptr);
+        hasher->setColumnData(column_ptr);
     }
     lookup.reset(input->size());
 
@@ -82,7 +82,8 @@ class ProbeState {
     firstProbe(const Table& table) {
         tagsInTable_ = BaseHashTable::loadTags(
             reinterpret_cast<uint8_t*>(table.table_), bucketOffset_);
-        hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
+        hits_ = static_cast<BaseHashTable::MaskType>(
+            milvus::toBitMask(tagsInTable_ == wantedTags_));
         if (hits_) {
             loadNextHit<op>(table);
         }
@@ -116,7 +117,8 @@ class ProbeState {
             }
             bucketOffset_ = table.nextBucketOffset(bucketOffset_);
             tagsInTable_ = table.loadTags(bucketOffset_);
-            hits_ = milvus::toBitMask(tagsInTable_ == wantedTags_);
+            hits_ = static_cast<BaseHashTable::MaskType>(
+                milvus::toBitMask(tagsInTable_ == wantedTags_));
         }
         ThrowInfo(UnexpectedError,
                   "Slots in hash table is not enough for hash operation, fail "

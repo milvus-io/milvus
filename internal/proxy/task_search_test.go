@@ -462,9 +462,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		qt.request.OutputFields = []string{"*"}
 		err = qt.PreExecute(ctx)
 		assert.NoError(t, err)
-		data1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true)
+		data1 := genTestSearchResultData(2, 10, schemapb.DataType_Int32, testInt32Field, fieldNameId[testInt32Field], true)
 		data1.SubResults[0].ReqIndex = 0
-		data2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true)
+		data2 := genTestSearchResultData(2, 10, schemapb.DataType_Int32, testInt32Field, fieldNameId[testInt32Field], true)
 		data1.SubResults[0].ReqIndex = 2
 		qt.resultBuf.Insert(data2)
 
@@ -911,7 +911,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.NotNil(t, st.functionScore)
+		assert.NotNil(t, st.rerankMeta)
 		assert.Equal(t, false, st.SearchRequest.GetIsAdvanced())
 
 		// Verify EntityTtlPhysicalTime is set (issue #47413)
@@ -940,7 +940,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.NotNil(t, st.functionScore)
+		assert.NotNil(t, st.rerankMeta)
 		assert.Equal(t, true, st.SearchRequest.GetIsAdvanced())
 	})
 
@@ -2533,7 +2533,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}}},
@@ -2550,7 +2551,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
 			expectedScores: []float32{-10, -9, -8, -7, -6, -10, -9, -8, -7, -6},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 6, 2, 8, 3, 1, 6, 2, 8, 3}}},
@@ -2567,7 +2569,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
@@ -2834,7 +2837,7 @@ func TestTaskSearch_reduceAdvanceSearchGroupByShortCut(t *testing.T) {
 	groupSize := int64(3)
 
 	reducedRes, err := reduceSearchResult(context.Background(), subSearchResultData,
-		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.L2).WithPkType(schemapb.DataType_Int64).WithGroupByField(groupByField).WithGroupSize(groupSize).WithAdvance(true))
+		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64).WithGroupByField(groupByField).WithGroupSize(groupSize).WithAdvance(true))
 
 	assert.NoError(t, err)
 	// reduce_advance_groupby will only merge results from different delegator without reducing any result
@@ -3292,6 +3295,37 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 				t.Logf("err=%s", err)
 			})
 		}
+
+		t.Run("range_filter_without_radius", func(t *testing.T) {
+			// range_filter without radius should be rejected: range_filter is a secondary
+			// bound that only makes sense when a primary radius boundary is also set.
+			// Without radius, the engine silently ignores range_filter and falls back to
+			// regular top-K search (issue #48915).
+			spRangeFilterOnly := make([]*commonpb.KeyValuePair, len(noRoundDecimal))
+			copy(spRangeFilterOnly, noRoundDecimal)
+			resetSearchParamsValue(spRangeFilterOnly, ParamsKey, `{"nprobe": 10, "range_filter": 0.5}`)
+			searchInfo, err := parseSearchInfo(spRangeFilterOnly, nil, nil, false)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "range_filter")
+			assert.Contains(t, err.Error(), "radius")
+		})
+
+		t.Run("range_filter_with_not_radius_key", func(t *testing.T) {
+			// "not_radius" contains "radius" as a substring; a naive strings.Contains
+			// check would falsely treat this as a range search and skip the validation.
+			// gjson.Get does an exact JSON key lookup so this must still be rejected.
+			spBadKey := make([]*commonpb.KeyValuePair, len(noRoundDecimal))
+			copy(spBadKey, noRoundDecimal)
+			resetSearchParamsValue(spBadKey, ParamsKey, `{"nprobe": 10, "not_radius": 1, "range_filter": 0.5}`)
+			searchInfo, err := parseSearchInfo(spBadKey, nil, nil, false)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "range_filter")
+			assert.Contains(t, err.Error(), "radius")
+		})
 	})
 	t.Run("check iterator and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -5815,5 +5849,139 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		task := makeTask("regular_vec", "scalar_field", commonpb.PlaceholderType_FloatVector)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+			{FieldID: 102, Name: "title", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}}},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	buildTask := func(outputFields []string) *searchTask {
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:   1,
+				PartitionIDs:   []int64{1},
+				DslType:        commonpb.DslType_BoolExprV1,
+				OutputFieldsId: []int64{},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   outputFields,
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "vec"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: outputFields,
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		policy          string
+		outputFields    []string
+		expectedRequery bool
+	}{
+		{
+			name:            "always_policy_no_output",
+			policy:          "always",
+			outputFields:    []string{"pk"},
+			expectedRequery: true,
+		},
+		{
+			name:            "always_policy_with_vector",
+			policy:          "always",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputvector_policy_with_vector",
+			policy:          "outputvector",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputvector_policy_without_vector",
+			policy:          "outputvector",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: false,
+		},
+		{
+			name:            "outputfields_policy_with_scalar",
+			policy:          "outputfields",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputfields_policy_no_output",
+			policy:          "outputfields",
+			outputFields:    []string{},
+			expectedRequery: false,
+		},
+		{
+			name:            "default_fallback_to_outputvector_with_vector",
+			policy:          "unknown_value",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "default_fallback_to_outputvector_without_vector",
+			policy:          "unknown_value",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, tt.policy)
+			defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+			task := buildTask(tt.outputFields)
+			err := task.initSearchRequest(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedRequery, task.needRequery, tt.name)
+		})
+	}
+
+	t.Run("case_insensitive_policy", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "Always")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk"})
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.True(t, task.needRequery, "policy should be case-insensitive")
+	})
+
+	t.Run("outputvector_policy_only_scalar_no_requery", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk"}) // only pk, no vector, no extra output
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.False(t, task.needRequery, "only pk output should not trigger requery under outputvector policy")
 	})
 }

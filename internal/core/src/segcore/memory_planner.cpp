@@ -201,8 +201,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             milvus::storage::GetReaderProperties());
                         AssertInfo(
                             result.ok(),
-                            "[StorageV2] Failed to create row group reader: " +
-                                result.status().ToString());
+                            "[StorageV2] Failed to create row group reader: {}",
+                            result.status().ToString());
                         auto row_group_reader = result.ValueOrDie();
                         auto close_guard =
                             folly::makeGuard([&row_group_reader]() {
@@ -213,20 +213,21 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                 block.offset, block.count);
                         AssertInfo(status.ok(),
                                    "[StorageV2] Failed to set row group offset "
-                                   "and count " +
-                                       std::to_string(block.offset) + " and " +
-                                       std::to_string(block.count) +
-                                       " with error " + status.ToString());
+                                   "and count {} and {} with error {}",
+                                   block.offset,
+                                   block.count,
+                                   status.ToString());
                         auto ret = std::make_shared<ArrowDataWrapper>();
                         for (int64_t i = 0; i < block.count; ++i) {
                             std::shared_ptr<arrow::Table> table;
                             auto status =
                                 row_group_reader->ReadNextRowGroup(&table);
                             AssertInfo(status.ok(),
-                                       "[StorageV2] Failed to read row group " +
-                                           std::to_string(block.offset + i) +
-                                           " from file " + file +
-                                           " with error " + status.ToString());
+                                       "[StorageV2] Failed to read row group "
+                                       "{} from file {} with error {}",
+                                       block.offset + i,
+                                       file,
+                                       status.ToString());
                             ret->arrow_tables.push_back(
                                 {file_idx,
                                  static_cast<size_t>(block.offset + i),
@@ -371,9 +372,11 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                        "count: {}, result size: {}",
                        batch.rg_count,
                        all_tables.size());
+            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
             int64_t table_offset = 0;
             for (const auto& cell : batch.cells) {
+                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
                 cell_result->tables.reserve(cell.rg_count);

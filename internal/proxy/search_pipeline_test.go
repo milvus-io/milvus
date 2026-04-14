@@ -35,8 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
-	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -84,6 +82,7 @@ func (s *SearchPipelineSuite) TestSearchReduceOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}},
+		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.NoError(err)
@@ -124,6 +123,7 @@ func (s *SearchPipelineSuite) TestHybridSearchReduceOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}, {}},
+		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data1, data2})
 	s.NoError(err)
@@ -141,7 +141,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 					{Key: "dim", Value: "4"},
 				},
 			},
-			{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 103, Name: "ts", DataType: schemapb.DataType_Int64},
 		},
 	}
 	functionSchema := &schemapb.FunctionSchema{
@@ -158,11 +158,6 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 			{Key: "function", Value: "gauss"},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
-
 	nq := int64(2)
 	topk := int64(10)
 	offset := int64(0)
@@ -176,22 +171,122 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}},
+		nil,
 	}
 
-	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "intField", 102, false)
+	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 103, false)
 	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.NoError(err)
 
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
 	op := rerankOperator{
-		nq:            nq,
-		topK:          topk,
-		offset:        offset,
-		roundDecimal:  10,
-		functionScore: funcScore,
+		nq:           nq,
+		topK:         topk,
+		offset:       offset,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   newRerankMeta(schema, funcScoreSchema),
 	}
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
 	s.NoError(err)
+}
+
+// TestHybridAssembleOp_MixedFieldsDataLayoutErrors verifies that hybrid
+// assemble fails loud when sub-results have inconsistent FieldsData layouts —
+// specifically when a sub-result contributes reranked IDs but has an empty
+// FieldsData while another sub-result has a populated one.
+//
+// In current proxy flow this state is unreachable: task_search.go sets
+// identical plan.OutputFieldIds for every sub-request and the hybridSearchPipe
+// is only chosen when needRequery=false, where plan.OutputFieldIds always
+// contains at least the PK. Any deviation means an upstream invariant has
+// been broken — silently corrupting the result (the previous code did
+// `continue`, leaving fewer FieldsData rows than reranked IDs and causing PK
+// ↔ field misalignment downstream) is strictly worse than returning an error.
+//
+// Scenario:
+//   - sub[0]: PKs [10, 20], FieldsData = [{long_field: [100, 200]}]
+//   - sub[1]: PKs [30, 40], FieldsData = []                     (empty)
+//   - rerank: PKs [10, 30, 20, 40] (4 ids, picked across both sub-results)
+//
+// Expected: assemble must return an error mentioning the inconsistent
+// sub-result, not silently produce 4 IDs paired with only 2 field rows.
+func (s *SearchPipelineSuite) TestHybridAssembleOp_MixedFieldsDataLayoutErrors() {
+	// sub[0]: 2 IDs with a long field populated.
+	sub0 := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+			Scores: []float32{0.9, 0.8},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// sub[1]: 2 IDs but FieldsData empty — invariant violation that proxy
+	// upstream code is supposed to prevent. We assert assemble catches it
+	// rather than silently dropping rows.
+	sub1 := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{30, 40}},
+				},
+			},
+			Scores:     []float32{0.7, 0.6},
+			FieldsData: nil,
+		},
+	}
+
+	// rank result: rerank picked 4 IDs across both sub-results.
+	rankResult := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       4,
+			Topks:      []int64{4},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 30, 20, 40}},
+				},
+			},
+			Scores: []float32{0.95, 0.85, 0.75, 0.65},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 12345}
+	_, err := op.run(context.Background(), s.span,
+		[]*milvuspb.SearchResults{sub0, sub1}, rankResult)
+
+	s.Require().Error(err,
+		"mixed FieldsData layout must be reported as an error, not silently dropped")
+	// Diagnostic must point at the offending sub-result so an operator can
+	// trace the upstream invariant violation.
+	s.Contains(err.Error(), "FieldsData",
+		"error message must mention FieldsData inconsistency")
 }
 
 func (s *SearchPipelineSuite) TestRequeryOp() {
@@ -1019,10 +1114,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -1042,7 +1134,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 	}
 
 	pipeline, err := newPipeline(searchWithRerankPipe, task)
@@ -1091,10 +1183,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -1118,7 +1207,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 		request:                &milvuspb.SearchRequest{Namespace: nil},
 	}
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
@@ -1374,9 +1463,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, _ := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 	task := &searchTask{
 		ctx:            context.Background(),
 		collectionName: collName,
@@ -1405,10 +1492,8 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			SearchParams: []*commonpb.KeyValuePair{
 				{Key: LimitKey, Value: "10"},
 			},
-			FunctionScore: &schemapb.FunctionScore{
-				Functions: []*schemapb.FunctionSchema{functionSchema},
-			},
-			OutputFields: outputFields,
+			FunctionScore: funcScoreSchema,
+			OutputFields:  outputFields,
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
@@ -1422,7 +1507,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			roundDecimal: 0,
 		},
 		queryInfos:             []*planpb.QueryInfo{{}, {}},
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 		translatedOutputFields: outputFields,
 	}
 	return task

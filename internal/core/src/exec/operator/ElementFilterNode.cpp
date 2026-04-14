@@ -122,7 +122,7 @@ PhyElementFilterNode::GetOutput() {
         auto wrapped_iter = std::make_shared<ElementFilterIterator>(
             base_iter, exec_context, element_exprs_.get());
 
-        wrapped_iterators.push_back(wrapped_iter);
+        wrapped_iterators.push_back(std::move(wrapped_iter));
     }
 
     // Step 3: Update search result with wrapped iterators

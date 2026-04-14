@@ -28,6 +28,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
+#include "fmt/core.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -244,8 +245,9 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             if (!array.ok()) {
                 return milvus::FailureCStatus(
                     milvus::ErrorCode::FileWriteFailed,
-                    "Failed to import array " + std::to_string(i) + ": " +
-                        array.status().ToString());
+                    fmt::format("Failed to import array {}: {}",
+                                i,
+                                array.status().ToString()));
             }
             all_arrays.push_back(array.ValueOrDie());
         }

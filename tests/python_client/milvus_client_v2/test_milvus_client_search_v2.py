@@ -629,7 +629,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 4. repeat with expression template
         expected: all returned IDs satisfy the filter, recall >= 80% for IVF_FLAT
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         search_limit = nb // 2
         enable_dynamic_field = True
@@ -705,7 +705,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 4. release/load and repeat searches to verify JSON index correctness
         expected: all returned IDs satisfy the JSON filter, results consistent before and after JSON indexing
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -892,7 +892,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 2. search with filter "int64_1 <= int64_2", verify all rows match
         expected: all rows returned since int64_1 always equals int64_2
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 2
         nq = 1
         client = self._client()

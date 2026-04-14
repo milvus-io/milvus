@@ -241,3 +241,174 @@ func (s *CompactionSuite) TestL0Compaction() {
 
 	log.Info("Test compaction succeed")
 }
+
+// TestL0CompactionDeltaLogOnV3Segment verifies that after L0 compaction,
+// V3 (manifest) L1 target segments have their Deltalogs populated in etcd.
+// Without the fix, V3 segments would have empty Deltalogs because the
+// compaction result only updated the manifest path, not the deltalog prefix.
+func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	defer cancel()
+	c := s.Cluster
+
+	const (
+		dim       = 128
+		dbName    = ""
+		rowNum    = 50000
+		deleteCnt = 10000
+
+		indexType  = integration.IndexFaissIvfFlat
+		metricType = metric.L2
+		vecType    = schemapb.DataType_FloatVector
+	)
+
+	// Enable L0 compaction with low trigger, disable single compaction
+	// so we can observe the post-L0-compaction state.
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key: "1",
+		paramtable.Get().DataCoordCfg.SingleCompactionRatioThreshold.Key:           "1.0",
+		paramtable.Get().DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:           "99999",
+		paramtable.Get().DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key:          "999999999999",
+	})
+	defer revertGuard()
+
+	collectionName := "TestL0V3DeltaLog_" + funcutil.GenRandomStr()
+
+	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, false, vecType)
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Schema:           marshaledSchema,
+		ShardsNum:        common.DefaultShardsNum,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+	})
+	err = merr.CheckRPCCall(createCollectionStatus, err)
+	s.NoError(err)
+
+	// insert
+	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	err = merr.CheckRPCCall(insertResult, err)
+	s.NoError(err)
+
+	// flush to create L1 segment
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	err = merr.CheckRPCCall(flushResp, err)
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// create index
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
+	})
+	err = merr.CheckRPCCall(createIndexStatus, err)
+	s.NoError(err)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	// load
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(loadStatus, err)
+	s.NoError(err)
+	s.WaitForLoad(ctx, collectionName)
+
+	// delete
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           fmt.Sprintf("%s < %d", integration.Int64Field, deleteCnt),
+	})
+	err = merr.CheckRPCCall(deleteResult, err)
+	s.NoError(err)
+
+	// flush L0
+	flushResp, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	err = merr.CheckRPCCall(flushResp, err)
+	s.NoError(err)
+	flushTs, has = flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// Wait for L0 compaction: L0 segment should be dropped, L1 should remain
+	// with NumOfRows unchanged (single compaction is disabled).
+	var segments []*datapb.SegmentInfo
+	l0CompactionDone := func() bool {
+		segments, err = c.ShowSegments(collectionName)
+		s.NoError(err)
+		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Flushed
+		})
+		// After L0 compaction: only L1 segment(s) should remain flushed,
+		// and no L0 segments should be flushed.
+		hasL0 := lo.SomeBy(flushed, func(seg *datapb.SegmentInfo) bool {
+			return seg.GetLevel() == datapb.SegmentLevel_L0
+		})
+		hasL1 := lo.SomeBy(flushed, func(seg *datapb.SegmentInfo) bool {
+			return seg.GetLevel() == datapb.SegmentLevel_L1
+		})
+		return !hasL0 && hasL1
+	}
+	for !l0CompactionDone() {
+		select {
+		case <-ctx.Done():
+			s.Fail("waiting for L0 compaction timeout")
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+
+	// Verify: L1 segment should have Deltalogs populated with correct entry count
+	flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
+	})
+	s.Require().NotEmpty(flushed, "expected at least one flushed L1 segment")
+
+	for _, seg := range flushed {
+		log.Info("checking L1 segment after L0 compaction",
+			zap.Int64("segmentID", seg.GetID()),
+			zap.Int64("numOfRows", seg.GetNumOfRows()),
+			zap.Int64("storageVersion", seg.GetStorageVersion()),
+			zap.Int("deltalogFieldCount", len(seg.GetDeltalogs())),
+		)
+		s.NotEmpty(seg.GetDeltalogs(), "L1 segment should have Deltalogs after L0 compaction")
+
+		totalDeletedRows := int64(0)
+		for _, dl := range seg.GetDeltalogs() {
+			for _, b := range dl.GetBinlogs() {
+				totalDeletedRows += b.GetEntriesNum()
+			}
+		}
+		s.EqualValues(deleteCnt, totalDeletedRows,
+			"Deltalogs EntriesNum should match deletion count")
+	}
+
+	log.Info("TestL0CompactionDeltaLogOnV3Segment succeed")
+}

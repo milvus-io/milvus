@@ -91,7 +91,9 @@ VectorMemIndex<T>::VectorMemIndex(
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
-               index_type + " doesn't support metric: " + metric_type);
+               "{} doesn't support metric: {}",
+               index_type,
+               metric_type);
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -123,7 +125,9 @@ VectorMemIndex<T>::VectorMemIndex(DataType elem_type,
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
-               index_type + " doesn't support metric: " + metric_type);
+               "{} doesn't support metric: {}",
+               index_type,
+               metric_type);
 
     auto view_data_pack = knowhere::Pack(view_data);
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
@@ -329,7 +333,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                          pending_index_files.end()),
                 load_priority);
             for (auto&& index_data : result) {
-                auto prefix = index_data.first;
+                const auto& prefix = index_data.first;
                 index_data_codecs.insert({prefix, IndexDataCodec{}});
                 auto& index_data_codec = index_data_codecs.at(prefix);
                 index_data_codec.size_ = index_data.second->PayloadSize();
@@ -375,7 +379,8 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build index, " + KnowhereStatusString(stat));
+                  "failed to build index, {}",
+                  KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
     LOG_INFO("build memory index with KNOWHERE done, build_id: {}",
              config.value("build_id", "unknown"));
@@ -558,7 +563,8 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Add(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to append index, " + KnowhereStatusString(stat));
+                  "failed to append index, {}",
+                  KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
 }
 
@@ -656,7 +662,8 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to get vector, " + KnowhereStatusString(res.error()));
+                  "failed to get vector, {}",
+                  KnowhereStatusString(res.error()));
     }
     return this->template DecodeVectorByIdsResult<T>(res.value());
 }
@@ -688,7 +695,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to get vector, " + KnowhereStatusString(res.error()));
+                  "failed to get vector, {}",
+                  KnowhereStatusString(res.error()));
     }
     // release and transfer ownership to the result unique ptr.
     res.value()->SetIsOwner(false);

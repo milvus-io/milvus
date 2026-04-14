@@ -327,6 +327,20 @@ ManifestGroupTranslator::get_cells(
         } catch (...) {
             LOG_WARN("drain channel exception swallowed");
         }
+        try {
+            storage::WaitAllFutures(load_futures);
+        } catch (const std::exception& e) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored background load "
+                "exception after cancellation: {}",
+                key_,
+                e.what());
+        } catch (...) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored unknown background "
+                "load exception after cancellation",
+                key_);
+        }
         throw;
     }
 

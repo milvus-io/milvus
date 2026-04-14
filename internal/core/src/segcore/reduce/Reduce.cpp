@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -31,6 +32,7 @@
 #include "common/Tracer.h"
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
+#include "folly/ScopeGuard.h"
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
@@ -40,6 +42,8 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
+#include "segcore/ReduceUtils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -61,10 +65,11 @@ ReduceHelper::Initialize() {
     std::partial_sum(slice_nqs_.begin(),
                      slice_nqs_.end(),
                      slice_nqs_prefix_sum_.begin() + 1);
-    AssertInfo(slice_nqs_prefix_sum_[num_slices_] == total_nq_,
-               "illegal req sizes, slice_nqs_prefix_sum_[last] = " +
-                   std::to_string(slice_nqs_prefix_sum_[num_slices_]) +
-                   ", total_nq = " + std::to_string(total_nq_));
+    AssertInfo(
+        slice_nqs_prefix_sum_[num_slices_] == total_nq_,
+        "illegal req sizes, slice_nqs_prefix_sum_[last] = {}, total_nq = {}",
+        slice_nqs_prefix_sum_[num_slices_],
+        total_nq_);
 
     // init final_search_records and final_read_topKs
     final_search_records_.resize(num_segments_);
@@ -104,13 +109,13 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto nq = search_result->total_nq_;
     auto topK = search_result->unity_topK_;
     AssertInfo(search_result->seg_offsets_.size() == nq * topK,
-               "wrong seg offsets size, size = " +
-                   std::to_string(search_result->seg_offsets_.size()) +
-                   ", expected size = " + std::to_string(nq * topK));
+               "wrong seg offsets size, size = {}, expected size = {}",
+               search_result->seg_offsets_.size(),
+               nq * topK);
     AssertInfo(search_result->distances_.size() == nq * topK,
-               "wrong distances size, size = " +
-                   std::to_string(search_result->distances_.size()) +
-                   ", expected size = " + std::to_string(nq * topK));
+               "wrong distances size, size = {}, expected size = {}",
+               search_result->distances_.size(),
+               nq * topK);
     std::vector<int64_t> real_topks(nq, 0);
     uint32_t valid_index = 0;
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
@@ -157,23 +162,55 @@ ReduceHelper::FillPrimaryKey() {
     tracer::AutoSpan span("ReduceHelper::FillPrimaryKey",
                           tracer::GetRootSpan());
     // get primary keys for duplicates removal
+    // First pass: filter invalid results and compact the array sequentially
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_) {
-        // skip when results num is 0
         if (search_result->unity_topK_ == 0) {
             continue;
         }
         FilterInvalidSearchResult(search_result);
         LOG_DEBUG("the size of search result: {}",
                   search_result->seg_offsets_.size());
-        auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
-            segment->FillPrimaryKeys(plan_, *search_result);
             search_results_[valid_index++] = search_result;
         }
     }
     search_results_.resize(valid_index);
     num_segments_ = search_results_.size();
+
+    // Second pass: fill primary keys
+    if (num_segments_ > 1) {
+        // Parallel execution using MIDDLE thread pool for multiple segments
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> futures;
+        futures.reserve(num_segments_);
+        for (auto& search_result : search_results_) {
+            auto future = pool.Submit([this, search_result] {
+                auto segment =
+                    static_cast<SegmentInterface*>(search_result->segment_);
+                segment->FillPrimaryKeys(plan_, *search_result);
+            });
+            futures.emplace_back(std::move(future));
+        }
+        auto futures_guard = folly::makeGuard([&futures]() {
+            for (auto& f : futures) {
+                if (f.valid()) {
+                    try {
+                        f.get();
+                    } catch (...) {
+                    }
+                }
+            }
+        });
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else if (num_segments_ == 1) {
+        auto segment =
+            static_cast<SegmentInterface*>(search_results_[0]->segment_);
+        segment->FillPrimaryKeys(plan_, *search_results_[0]);
+    }
 }
 
 void
@@ -196,6 +233,7 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
     if (nq_end - nq_begin <= 1)
         return;
 
+    std::vector<size_t> indices;
     size_t start = nq_begin;
     while (start < nq_end) {
         // find scope with same scores
@@ -207,8 +245,8 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
         }
 
         if (end - start > 1) {
-            // Create lightweight index array for sorting
-            std::vector<size_t> indices(end - start);
+            // Reuse indices vector to avoid repeated heap allocation
+            indices.resize(end - start);
             std::iota(indices.begin(), indices.end(), 0);
 
             // Sort indices by comparing primary keys
@@ -288,9 +326,7 @@ ReduceHelper::RefreshSearchResults() {
     for (int i = 0; i < num_segments_; i++) {
         std::vector<int64_t> real_topks(total_nq_, 0);
         auto search_result = search_results_[i];
-        if (search_result->result_offsets_.size() != 0) {
-            RefreshSingleSearchResult(search_result, i, real_topks);
-        }
+        RefreshSingleSearchResult(search_result, i, real_topks);
         std::partial_sum(real_topks.begin(),
                          real_topks.end(),
                          search_result->topk_per_nq_prefix_sum_.begin() + 1);
@@ -494,9 +530,10 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
         }
         case milvus::DataType::VARCHAR: {
             auto ids = std::make_unique<milvus::proto::schema::StringArray>();
-            std::vector<std::string> string_pks(result_count);
-            // TODO: prevent mem copy
-            *ids->mutable_data() = {string_pks.begin(), string_pks.end()};
+            ids->mutable_data()->Reserve(result_count);
+            for (int i = 0; i < result_count; i++) {
+                ids->mutable_data()->Add();
+            }
             search_result_data->mutable_ids()->set_allocated_str_id(
                 ids.release());
             break;
@@ -536,9 +573,10 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
             for (auto ki = topk_start; ki < topk_end; ki++) {
                 auto loc = search_result->result_offsets_[ki];
                 AssertInfo(loc < result_count && loc >= 0,
-                           "invalid loc when GetSearchResultDataSlice, loc = " +
-                               std::to_string(loc) + ", result_count = " +
-                               std::to_string(result_count));
+                           "invalid loc when GetSearchResultDataSlice, loc = "
+                           "{}, result_count = {}",
+                           loc,
+                           result_count);
                 // set result pks
                 switch (pk_type) {
                     case milvus::DataType::INT64: {
@@ -605,9 +643,9 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
     }
 
     AssertInfo(search_result_data->scores_size() == result_count,
-               "wrong scores size, size = " +
-                   std::to_string(search_result_data->scores_size()) +
-                   ", expected size = " + std::to_string(result_count));
+               "wrong scores size, size = {}, expected size = {}",
+               search_result_data->scores_size(),
+               result_count);
     // fill other wanted data
     FillOtherData(result_count, nq_begin, nq_end, search_result_data);
 

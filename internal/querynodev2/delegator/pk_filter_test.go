@@ -240,7 +240,7 @@ func TestCheckPKFilterVarChar(t *testing.T) {
 func TestPkFromGenericValueUnsupportedType(t *testing.T) {
 	pk, ok := pkFromGenericValue(schemapb.DataType_Bool, &planpb.GenericValue{
 		Val: &planpb.GenericValue_BoolVal{BoolVal: true},
-	}, "boolField == true")
+	})
 	assert.False(t, ok)
 	assert.Nil(t, pk)
 }

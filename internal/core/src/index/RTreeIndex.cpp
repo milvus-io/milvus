@@ -18,6 +18,7 @@
 #include <list>
 #include <map>
 #include <mutex>
+#include <string_view>
 #include <shared_mutex>
 #include <utility>
 
@@ -50,6 +51,8 @@
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+static constexpr size_t kMetaJsonSuffixLen = sizeof(".meta.json") - 1;
 
 static std::string
 GetRTreeTempPrefix() {
@@ -129,17 +132,13 @@ template <typename T>
 void
 RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_DEBUG("Load RTreeIndex with config {}", config.dump());
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
 
     auto index_files_opt =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files_opt.has_value(),
                "index file paths are empty when loading R-Tree index");
 
-    auto files = index_files_opt.value();
+    auto files = std::move(*index_files_opt);
 
     // 1. Extract and load null_offset file(s) if present
     {
@@ -167,9 +166,10 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             null_offset_files.push_back(*it);
             for (auto& f : files) {
                 auto filename = GetFileName(f);
-                static const std::string kName = "index_null_offset";
+                static constexpr std::string_view kName = "index_null_offset";
                 if (filename.size() >= kName.size() &&
-                    filename.substr(0, kName.size()) == kName) {
+                    filename.compare(
+                        0, kName.size(), kName.data(), kName.size()) == 0) {
                     null_offset_files.push_back(f);
                 }
             }
@@ -241,8 +241,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     if (base_path.empty()) {
         for (const auto& p : local_paths) {
             if (ends_with(p, ".meta.json")) {
-                base_path =
-                    p.substr(0, p.size() - std::string(".meta.json").size());
+                base_path = p.substr(0, p.size() - kMetaJsonSuffixLen);
                 break;
             }
         }
@@ -338,9 +337,6 @@ RTreeIndex<T>::finish() {
 template <typename T>
 IndexStatsPtr
 RTreeIndex<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     // 1. Ensure all buffered data flushed to disk
     finish();
 
@@ -720,8 +716,7 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         for (const auto& fn : file_names) {
             auto local = path_ + "/" + fn;
             if (ends_with(local, ".meta.json")) {
-                base_path = local.substr(
-                    0, local.size() - std::string(".meta.json").size());
+                base_path = local.substr(0, local.size() - kMetaJsonSuffixLen);
                 break;
             }
         }

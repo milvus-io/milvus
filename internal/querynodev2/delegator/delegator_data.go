@@ -629,7 +629,7 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log := sd.getLogger(context.Background())
 	start := time.Now()
 	totalL0Rows := 0
-	totalBfHitRows := int64(0)
+	totalForwardRows := int64(0)
 	processedL0Count := 0
 
 	for _, segment := range level0Segments {
@@ -646,14 +646,25 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 					endIdx = len(segmentPks)
 				}
 
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						totalForwardRows += 1
+						if err := fn(segmentPks[i], segmentTss[i]); err != nil {
+							return err
+						}
+					}
+					continue
+				}
+
 				lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
-					if hit {
-						totalBfHitRows += 1
-						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
-							return err
-						}
+					if !hit {
+						continue
+					}
+					totalForwardRows += 1
+					if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
+						return err
 					}
 				}
 			}
@@ -663,9 +674,10 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log.Info("forward delete from L0 segments to worker",
 		zap.Int64("targetSegmentID", candidate.ID()),
 		zap.String("channel", sd.vchannelName),
+		zap.Bool("broadcast", !candidate.PkCandidateExist()),
 		zap.Int("l0SegmentCount", processedL0Count),
 		zap.Int("totalDeleteRowsInL0", totalL0Rows),
-		zap.Int64("totalBfHitRows", totalBfHitRows),
+		zap.Int64("totalForwardRows", totalForwardRows),
 		zap.Int64("totalCost", time.Since(start).Milliseconds()),
 	)
 
@@ -718,6 +730,7 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 
 // processDeleteRecords performs BF checks on delete buffer records and forwards matching deletes
 // via the buffered forwarder. Does NOT require any lock to be held.
+// When candidate has no stats (PkCandidateExist() == false), all deletes are forwarded (broadcast mode).
 // Returns the number of timestamp-hit and bloom-filter-hit rows.
 func (sd *shardDelegator) processDeleteRecords(
 	candidate *pkoracle.BloomFilterSet,
@@ -736,6 +749,17 @@ func (sd *shardDelegator) processDeleteRecords(
 				endIdx := idx + batchSize
 				if endIdx > len(pks) {
 					endIdx = len(pks)
+				}
+
+				// When BF not initialized (bloom filter disabled), forward all deletes
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						bfHit++
+						if err = forwarder.Buffer(pks[i], record.DeleteData.Tss[i]); err != nil {
+							return tsHit, bfHit, err
+						}
+					}
+					continue
 				}
 
 				lc := storage.NewBatchLocationsCache(pks[idx:endIdx])

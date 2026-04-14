@@ -518,3 +518,54 @@ func Test_nextFieldID(t *testing.T) {
 		})
 	}
 }
+
+func Test_nextFunctionID(t *testing.T) {
+	type args struct {
+		coll *model.Collection
+	}
+	tests := []struct {
+		name string
+		args args
+		want int64
+	}{
+		{
+			name: "empty functions list returns StartOfUserFunctionID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: nil,
+				},
+			},
+			want: common.StartOfUserFunctionID + 1,
+		},
+		{
+			name: "single function returns its ID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: []*model.Function{
+						{ID: common.StartOfUserFunctionID + 5},
+					},
+				},
+			},
+			want: common.StartOfUserFunctionID + 6,
+		},
+		{
+			name: "multiple functions returns max ID+1",
+			args: args{
+				coll: &model.Collection{
+					Functions: []*model.Function{
+						{ID: common.StartOfUserFunctionID + 3},
+						{ID: common.StartOfUserFunctionID + 10},
+						{ID: common.StartOfUserFunctionID + 7},
+					},
+				},
+			},
+			want: common.StartOfUserFunctionID + 11,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nextFunctionID(tt.args.coll)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

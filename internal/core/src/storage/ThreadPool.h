@@ -32,6 +32,9 @@
 #include <unordered_map>
 #include <utility>
 
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+
 #include "SafeQueue.h"
 #include "glog/logging.h"
 #include "log/Log.h"
@@ -128,6 +131,12 @@ class ThreadPool {
         std::function<void()> wrap_func = [task_ptr]() { (*task_ptr)(); };
 
         work_queue_.enqueue(wrap_func);
+        if (metric_submitted_) {
+            metric_submitted_->Increment();
+        }
+        if (metric_queue_depth_) {
+            metric_queue_depth_->Set(work_queue_.size());
+        }
 
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -160,6 +169,37 @@ class ThreadPool {
             new_size = max_limit;
         }
         max_threads_size_.store(new_size);
+        if (metric_capacity_) {
+            metric_capacity_->Set(new_size);
+        }
+    }
+
+    void
+    SetMetrics(prometheus::Gauge* capacity,
+               prometheus::Gauge* active,
+               prometheus::Gauge* idle,
+               prometheus::Gauge* queue_depth,
+               prometheus::Counter* submitted,
+               prometheus::Counter* completed) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        metric_capacity_ = capacity;
+        metric_active_ = active;
+        metric_idle_ = idle;
+        metric_queue_depth_ = queue_depth;
+        metric_submitted_ = submitted;
+        metric_completed_ = completed;
+        if (metric_capacity_) {
+            metric_capacity_->Set(max_threads_size_.load());
+        }
+        if (metric_active_) {
+            metric_active_->Set(current_threads_size_ - idle_threads_size_);
+        }
+        if (metric_idle_) {
+            metric_idle_->Set(idle_threads_size_);
+        }
+        if (metric_queue_depth_) {
+            metric_queue_depth_->Set(work_queue_.size());
+        }
     }
 
  public:
@@ -175,6 +215,14 @@ class ThreadPool {
     std::mutex mutex_;
     std::condition_variable condition_lock_;
     std::string name_;
+
+    // Prometheus metrics (set via SetMetrics, nullptr if not wired)
+    prometheus::Gauge* metric_capacity_{nullptr};
+    prometheus::Gauge* metric_active_{nullptr};
+    prometheus::Gauge* metric_idle_{nullptr};
+    prometheus::Gauge* metric_queue_depth_{nullptr};
+    prometheus::Counter* metric_submitted_{nullptr};
+    prometheus::Counter* metric_completed_{nullptr};
 };
 
 }  // namespace milvus

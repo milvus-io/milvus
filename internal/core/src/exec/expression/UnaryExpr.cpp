@@ -723,35 +723,44 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-#define UnaryRangeJSONCompare(cmp)                                  \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = !x.error() && (cmp);                       \
-                break;                                              \
-            }                                                       \
-            res[i] = false;                                         \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// - 'cmp' must reference 'value' (auto-typed as int64_t or double).
+// - 'error_result': result when JSON path is missing or type mismatch.
+#define UnaryRangeJSONCompareCore(cmp, error_result)                   \
+    do {                                                               \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x_num = data[offset].at_numeric(pointer);             \
+            if (x_num.error()) {                                       \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto n = x_num.value();                                    \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = data[offset].template at<GetType>(pointer);       \
+            if (x.error()) {                                           \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
-#define UnaryRangeJSONCompareNotEqual(cmp)                          \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = x.error() || (cmp);                        \
-                break;                                              \
-            }                                                       \
-            res[i] = true;                                          \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
-    } while (false)
+#define UnaryRangeJSONCompare(cmp) UnaryRangeJSONCompareCore(cmp, false)
+
+#define UnaryRangeJSONCompareNotEqual(cmp) UnaryRangeJSONCompareCore(cmp, true)
 
     int processed_cursor = 0;
     auto execute_sub_batch =
@@ -783,7 +792,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() > val);
+                        UnaryRangeJSONCompare(value > val);
                     }
                 }
                 break;
@@ -805,7 +814,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() >= val);
+                        UnaryRangeJSONCompare(value >= val);
                     }
                 }
                 break;
@@ -827,7 +836,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() < val);
+                        UnaryRangeJSONCompare(value < val);
                     }
                 }
                 break;
@@ -849,7 +858,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() <= val);
+                        UnaryRangeJSONCompare(value <= val);
                     }
                 }
                 break;
@@ -877,7 +886,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(x.value() == val);
+                        UnaryRangeJSONCompare(value == val);
                     }
                 }
                 break;
@@ -906,7 +915,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompareNotEqual(x.value() != val);
+                        UnaryRangeJSONCompareNotEqual(value != val);
                     }
                 }
                 break;
@@ -931,7 +940,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         res[i] = false;
                     } else {
                         UnaryRangeJSONCompare(
-                            milvus::query::Match(x.value(), val, op_type));
+                            milvus::query::Match(value, val, op_type));
                     }
                 }
                 break;
@@ -952,7 +961,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                             !bitmap_input[i + processed_cursor]) {
                             continue;
                         }
-                        UnaryRangeJSONCompare(matcher(x.value()));
+                        UnaryRangeJSONCompare(matcher(value));
                     }
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -1418,52 +1427,52 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryIndexFunc<T, proto::plan::GreaterEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryIndexFunc<T, proto::plan::LessThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryIndexFunc<T, proto::plan::LessEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryIndexFunc<T, proto::plan::Equal> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryIndexFunc<T, proto::plan::NotEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PostfixMatch: {
                 UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::InnerMatch: {
                 UnaryIndexFunc<T, proto::plan::InnerMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             default:

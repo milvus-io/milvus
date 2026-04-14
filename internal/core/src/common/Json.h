@@ -54,8 +54,8 @@ isDocEmpty(simdjson::ondemand::document document);
 // This is safe because JSON objects are unordered per RFC 8259, and downstream
 // consumers (Go protobuf → map) do not depend on key ordering.
 inline std::string
-ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
-    simdjson::padded_string padded(json);
+ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
+    simdjson::padded_string padded(json.data(), json.size());
     thread_local simdjson::ondemand::parser parser;
     auto doc = parser.iterate(padded);
     if (doc.error()) {
@@ -301,6 +301,18 @@ class Json {
         }
 
         return doc().at_pointer(pointer).get<T>();
+    }
+
+    // Extract a JSON number in a single parse, preserving the original type.
+    // Returns simdjson::ondemand::number (a tagged union of int64/uint64/double).
+    // Callers should branch on is_int64()/is_uint64()/is_double() to avoid
+    // precision loss when comparing large integers.
+    value_result<simdjson::ondemand::number>
+    at_numeric(std::string_view pointer) const {
+        if (pointer.empty()) {
+            return doc().get_number();
+        }
+        return doc().at_pointer(pointer).get_number();
     }
 
     value_result<std::string>

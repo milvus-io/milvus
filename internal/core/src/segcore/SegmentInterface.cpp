@@ -71,7 +71,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
         bulk_subscript(&op_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
-    ParsePksFromFieldData(results.primary_keys_, *field_data.get());
+    ParsePksFromFieldData(results.primary_keys_, *field_data);
     results.search_storage_cost_.scanned_remote_bytes +=
         op_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
@@ -123,9 +123,11 @@ SegmentInternalInterface::Search(
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
     Timestamp collection_ttl,
-    int64_t entity_ttl_physical_time_us) const {
+    int64_t entity_ttl_physical_time_us,
+    bool filter_only) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -134,6 +136,7 @@ SegmentInternalInterface::Search(
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetFilterOnly(filter_only);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;

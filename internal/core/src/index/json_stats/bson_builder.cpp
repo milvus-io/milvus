@@ -69,7 +69,7 @@ AppendDomElementToBsonDocument(simdjson::dom::element elem,
     } else if (type == element_type::INT64) {
         out.append(kvp(std::string(key), int64_t(elem.get_int64())));
     } else if (type == element_type::UINT64) {
-        out.append(kvp(std::string(key), int64_t(elem.get_uint64())));
+        out.append(kvp(std::string(key), double(elem.get_uint64())));
     } else if (type == element_type::DOUBLE) {
         out.append(kvp(std::string(key), elem.get_double()));
     } else if (type == element_type::BOOL) {
@@ -104,7 +104,7 @@ AppendDomElementToBsonArray(simdjson::dom::element elem,
     } else if (type == element_type::INT64) {
         out.append(int64_t(elem.get_int64()));
     } else if (type == element_type::UINT64) {
-        out.append(int64_t(elem.get_uint64()));
+        out.append(double(elem.get_uint64()));
     } else if (type == element_type::DOUBLE) {
         out.append(elem.get_double());
     } else if (type == element_type::BOOL) {

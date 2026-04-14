@@ -47,7 +47,16 @@ uint64_t
 LocalChunkManager::Size(const std::string& filepath) {
     boost::filesystem::path absPath(filepath);
 
-    if (!Exist(filepath)) {
+    boost::system::error_code exist_err;
+    bool isExist = boost::filesystem::exists(absPath, exist_err);
+    if (exist_err &&
+        exist_err.value() != boost::system::errc::no_such_file_or_directory) {
+        ThrowInfo(FileReadFailed,
+                  fmt::format("local file {} exist interface failed, error: {}",
+                              filepath,
+                              exist_err.message()));
+    }
+    if (!isExist) {
         ThrowInfo(PathNotExist, "invalid local path:" + absPath.string());
     }
     boost::system::error_code err;

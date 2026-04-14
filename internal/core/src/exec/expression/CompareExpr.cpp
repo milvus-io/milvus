@@ -198,14 +198,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
                  ++i) {
-                if (!left(i).has_value() || !right(i).has_value()) {
+                auto left_opt = left(i);
+                auto right_opt = right(i);
+                if (!left_opt.has_value() || !right_opt.has_value()) {
                     res[processed_rows] = false;
                     valid_res[processed_rows] = false;
                 } else {
                     res[processed_rows] = boost::apply_visitor(
                         milvus::query::Relational<decltype(op)>{},
-                        left(i).value(),
-                        right(i).value());
+                        left_opt.value(),
+                        right_opt.value());
                 }
                 processed_rows++;
 
