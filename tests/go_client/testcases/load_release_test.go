@@ -548,3 +548,45 @@ func TestReleasePartitionsNotExist(t *testing.T) {
 	errLoad := mc.ReleasePartitions(ctx, clientv2.NewReleasePartitionsOptions(schema.CollectionName, "parName"))
 	common.CheckErr(t, errLoad, false, "partition not found")
 }
+
+// TestReplicaScaling1To3 verifies that dynamically increasing replica count
+// from 1 to 3 via load() (without release) completes without deadlock.
+// This is the regression test for https://github.com/milvus-io/milvus/issues/48778
+// Requires a cluster with at least 3 QueryNodes.
+func TestReplicaScaling1To3(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert -> flush -> index
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+
+	// Step 1: load with replica=1
+	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Verify search works with replica=1
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+		WithANNSField(common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+	t.Log("replica=1: search OK")
+
+	// Step 2: increase replica to 3 without release (triggers UpdateLoadConfig path)
+	loadTask2, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName).WithReplica(3))
+	common.CheckErr(t, err, true)
+	err = loadTask2.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Step 3: verify search still works after replica scaling
+	searchRes2, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
+		WithANNSField(common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes2, common.DefaultNq, common.DefaultLimit)
+	t.Log("replica=3: search OK, no deadlock")
+}
