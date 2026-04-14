@@ -3126,28 +3126,21 @@ func TestRBAC_Restore_Wildcard(t *testing.T) {
 	}
 
 	require.NoError(t, c.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "wildcard_role"}))
-	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, wildcardGrant, milvuspb.OperatePrivilegeType_Grant))
+	// Wildcard grant targets Global object, so dbID/collectionID are unused
+	// (AlterGrant's dual-write path only kicks in for Collection objects).
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, wildcardGrant, milvuspb.OperatePrivilegeType_Grant, 0, 0))
 	expectedIDKeys, _, err := metaKV.LoadWithPrefix(ctx, GranteeIDPrefix)
 	require.NoError(t, err)
 	require.Len(t, expectedIDKeys, 1)
 	require.True(t, strings.HasSuffix(expectedIDKeys[0], "/"+util.AnyWord),
-		"OperatePrivilege baseline should store wildcard as '/*', got %q", expectedIDKeys[0])
+		"AlterGrant should store wildcard privilege as '/*', got %q", expectedIDKeys[0])
+	require.False(t, strings.Contains(expectedIDKeys[0], util.PrivilegeGroupWord+util.AnyWord),
+		"AlterGrant must not encode wildcard as 'PrivilegeGroup*', got %q", expectedIDKeys[0])
 
-	require.NoError(t, metaKV.RemoveWithPrefix(ctx, ""))
-
-	rbacMeta := &milvuspb.RBACMeta{
-		Roles:  []*milvuspb.RoleEntity{{Name: "wildcard_role"}},
-		Grants: []*milvuspb.GrantEntity{wildcardGrant},
-	}
-	require.NoError(t, c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta))
-
-	restoredIDKeys, _, err := metaKV.LoadWithPrefix(ctx, GranteeIDPrefix)
-	require.NoError(t, err)
-	require.Len(t, restoredIDKeys, 1)
-	assert.True(t, strings.HasSuffix(restoredIDKeys[0], "/"+util.AnyWord),
-		"RestoreRBAC must persist wildcard as '/*', got %q", restoredIDKeys[0])
-	assert.False(t, strings.Contains(restoredIDKeys[0], util.PrivilegeGroupWord+util.AnyWord),
-		"RestoreRBAC must not encode wildcard as 'PrivilegeGroup*', got %q", restoredIDKeys[0])
+	// Note: RestoreRBAC grant preservation is now exercised at the MetaTable layer
+	// (see TestMetaTable_RestoreRBAC_Wildcard in rootcoord package). Catalog.RestoreRBAC
+	// no longer processes grants directly — MetaTable.RestoreRBAC resolves
+	// collection IDs and then calls catalog.AlterGrant per grant.
 }
 
 func TestRBAC_PrivilegeGroup(t *testing.T) {

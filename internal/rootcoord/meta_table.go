@@ -2340,9 +2340,14 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	var skipped []string
 	for _, grant := range grants {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
-		if util.IsPrivilegeNameDefined(privName) {
+		// Preserve wildcard privilege "*" as-is; routing it through
+		// PrivilegeGroupNameForMetastore would encode it as "PrivilegeGroup*"
+		// and break wildcard semantics. Mirrors the fix in PR #48978.
+		switch {
+		case util.IsAnyWord(privName):
+		case util.IsPrivilegeNameDefined(privName):
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
-		} else {
+		default:
 			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
 
