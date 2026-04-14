@@ -62,6 +62,18 @@ def pytest_addoption(parser):
         default="30m",
         help="Duration for test operations (e.g., 30m, 1h, 60s)",
     )
+    parser.addoption(
+        "--is-check",
+        action="store",
+        default="true",
+        help="Whether to assert on checker statistics",
+    )
+    parser.addoption(
+        "--milvus-ns",
+        action="store",
+        default="chaos-testing",
+        help="Kubernetes namespace for Milvus deployment",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -136,6 +148,58 @@ def pchannel_num(request):
 def request_duration(request):
     """Get request duration from command line."""
     return request.config.getoption("--request-duration")
+
+
+@pytest.fixture(scope="session")
+def is_check(request):
+    return request.config.getoption("--is-check").lower() == "true"
+
+
+@pytest.fixture(scope="session")
+def milvus_ns(request):
+    return request.config.getoption("--milvus-ns")
+
+
+@pytest.fixture(scope="session")
+def switchover_helper(request, upstream_client, downstream_client):
+    """Returns a callable that performs CDC topology switchover."""
+    upstream_uri = request.config.getoption("--upstream-uri")
+    upstream_token = request.config.getoption("--upstream-token")
+    downstream_uri = request.config.getoption("--downstream-uri")
+    downstream_token = request.config.getoption("--downstream-token")
+    pchannel_num = int(request.config.getoption("--pchannel-num"))
+    original_source = request.config.getoption("--source-cluster-id")
+    original_target = request.config.getoption("--target-cluster-id")
+
+    # Map cluster IDs to their URIs/tokens
+    cluster_map = {
+        original_source: {"uri": upstream_uri, "token": upstream_token},
+        original_target: {"uri": downstream_uri, "token": downstream_token},
+    }
+
+    def do_switchover(new_source_id, new_target_id):
+        logger.info(f"Performing switchover: {new_source_id} -> {new_target_id}")
+        config = {
+            "clusters": [
+                {
+                    "cluster_id": new_source_id,
+                    "connection_param": cluster_map[new_source_id],
+                    "pchannels": [f"{new_source_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
+                },
+                {
+                    "cluster_id": new_target_id,
+                    "connection_param": cluster_map[new_target_id],
+                    "pchannels": [f"{new_target_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
+                },
+            ],
+            "cross_cluster_topology": [{"source_cluster_id": new_source_id, "target_cluster_id": new_target_id}],
+        }
+        upstream_client.update_replicate_configuration(**config)
+        downstream_client.update_replicate_configuration(**config)
+        logger.info("Switchover completed, waiting 10s for stabilization...")
+        time.sleep(10)
+
+    return do_switchover
 
 
 @pytest.fixture(scope="session", autouse=True)
