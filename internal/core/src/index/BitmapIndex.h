@@ -317,7 +317,9 @@ class BitmapIndex : public ScalarIndex<T> {
     //
     // New bitmap index formats persist valid_bitset_, which is the
     // authoritative source of row validity. Legacy formats do not, so we may
-    // rebuild validity from postings as a backward-compatibility fallback.
+    // rebuild validity from postings as a backward-compatibility fallback for
+    // nullable fields. Non-nullable fields do not persist valid_bitset_ and
+    // are treated as all-valid on load.
     //
     // Rebuilding validity from postings is lossy for ARRAY fields: empty
     // arrays have no element postings, so they cannot be distinguished from
@@ -373,7 +375,9 @@ class BitmapIndex : public ScalarIndex<T> {
     //
     // New bitmap index formats persist valid_bitset_, which is the
     // authoritative source of row validity. Legacy formats do not, so we may
-    // rebuild validity from postings as a backward-compatibility fallback.
+    // rebuild validity from postings as a backward-compatibility fallback for
+    // nullable fields. Non-nullable fields do not persist valid_bitset_ and
+    // are treated as all-valid on load.
     //
     // Rebuilding validity from postings is lossy for ARRAY fields: empty
     // arrays have no element postings, so they cannot be distinguished from

@@ -308,13 +308,15 @@ BitmapIndex<T>::Serialize(const Config& config) {
     SerializeIndexData(data_ptr);
 
     auto index_meta = SerializeIndexMeta();
-    auto valid_bitset = SerializeValidBitsetData();
 
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
-    ret_set.Append(
-        BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
+    if (schema_.nullable()) {
+        auto valid_bitset = SerializeValidBitsetData();
+        ret_set.Append(
+            BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
+    }
 
     LOG_INFO("build bitmap index with cardinality = {}, num_rows = {}",
              data_.size(),
@@ -583,8 +585,8 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                            index_meta_buffer->size);
     auto index_length = index_meta.first;
     total_num_rows_ = index_meta.second;
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    bool rebuild_validity_from_postings = true;
+    valid_bitset_ = TargetBitmap(total_num_rows_, !schema_.nullable());
+    bool rebuild_validity_from_postings = schema_.nullable();
 
     auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
     if (valid_bitset_buffer != nullptr) {
@@ -1369,11 +1371,13 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
     uint8_t* data_ptr = index_data.get();
     SerializeIndexData(data_ptr);
-    auto valid_bitset = SerializeValidBitsetData();
     writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
-    writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
-                       valid_bitset.first.get(),
-                       valid_bitset.second);
+    if (schema_.nullable()) {
+        auto valid_bitset = SerializeValidBitsetData();
+        writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
+                           valid_bitset.first.get(),
+                           valid_bitset.second);
+    }
 
     LOG_INFO("write bitmap index entries with cardinality = {}, num_rows = {}",
              data_.size(),
@@ -1390,8 +1394,8 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     // V3 format: meta is in __meta__ entry
     auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    bool rebuild_validity_from_postings = true;
+    valid_bitset_ = TargetBitmap(total_num_rows_, !schema_.nullable());
+    bool rebuild_validity_from_postings = schema_.nullable();
 
     auto entry_names = reader.GetEntryNames();
     if (std::find(entry_names.begin(),
