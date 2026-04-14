@@ -7700,6 +7700,65 @@ func (_c *MixCoord_OperateUserRole_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// PinSnapshotData provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) PinSnapshotData(_a0 context.Context, _a1 *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PinSnapshotData")
+	}
+
+	var r0 *datapb.PinSnapshotDataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PinSnapshotDataRequest) *datapb.PinSnapshotDataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.PinSnapshotDataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.PinSnapshotDataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_PinSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PinSnapshotData'
+type MixCoord_PinSnapshotData_Call struct {
+	*mock.Call
+}
+
+// PinSnapshotData is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.PinSnapshotDataRequest
+func (_e *MixCoord_Expecter) PinSnapshotData(_a0 interface{}, _a1 interface{}) *MixCoord_PinSnapshotData_Call {
+	return &MixCoord_PinSnapshotData_Call{Call: _e.mock.On("PinSnapshotData", _a0, _a1)}
+}
+
+func (_c *MixCoord_PinSnapshotData_Call) Run(run func(_a0 context.Context, _a1 *datapb.PinSnapshotDataRequest)) *MixCoord_PinSnapshotData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.PinSnapshotDataRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_PinSnapshotData_Call) Return(_a0 *datapb.PinSnapshotDataResponse, _a1 error) *MixCoord_PinSnapshotData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_PinSnapshotData_Call) RunAndReturn(run func(context.Context, *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error)) *MixCoord_PinSnapshotData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PushClientCommand provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -9943,6 +10002,65 @@ func (_c *MixCoord_TruncateCollection_Call) Return(_a0 *milvuspb.TruncateCollect
 }
 
 func (_c *MixCoord_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)) *MixCoord_TruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UnpinSnapshotData provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) UnpinSnapshotData(_a0 context.Context, _a1 *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnpinSnapshotData")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.UnpinSnapshotDataRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.UnpinSnapshotDataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_UnpinSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnpinSnapshotData'
+type MixCoord_UnpinSnapshotData_Call struct {
+	*mock.Call
+}
+
+// UnpinSnapshotData is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.UnpinSnapshotDataRequest
+func (_e *MixCoord_Expecter) UnpinSnapshotData(_a0 interface{}, _a1 interface{}) *MixCoord_UnpinSnapshotData_Call {
+	return &MixCoord_UnpinSnapshotData_Call{Call: _e.mock.On("UnpinSnapshotData", _a0, _a1)}
+}
+
+func (_c *MixCoord_UnpinSnapshotData_Call) Run(run func(_a0 context.Context, _a1 *datapb.UnpinSnapshotDataRequest)) *MixCoord_UnpinSnapshotData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.UnpinSnapshotDataRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_UnpinSnapshotData_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_UnpinSnapshotData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_UnpinSnapshotData_Call) RunAndReturn(run func(context.Context, *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error)) *MixCoord_UnpinSnapshotData_Call {
 	_c.Call.Return(run)
 	return _c
 }

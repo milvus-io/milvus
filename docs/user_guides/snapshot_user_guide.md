@@ -1,5 +1,24 @@
 # Milvus Snapshot User Guide
 
+> **⚠️ Python SDK Support Pending** *(temporary — remove this block when
+> pymilvus catches up)*
+>
+> The Python examples in this document describe the intended API surface. As
+> of this release, pymilvus does not yet expose `collection_name` on the
+> snapshot APIs, so the examples below cannot be executed from Python. The
+> corresponding python_client E2E tests under
+> `tests/python_client/milvus_client/test_milvus_client_snapshot.py` are
+> currently skipped until pymilvus lands SDK support.
+>
+> **Use the Go SDK or HTTP API for snapshot operations today.** The Go
+> examples in this guide are fully functional and covered by the
+> `tests/go_client/testcases/snapshot_test.go` E2E suite.
+>
+> **TODO (when pymilvus adds `collection_name` to snapshot APIs):**
+> 1. Delete this warning block
+> 2. Re-enable the skipped tests in `test_milvus_client_snapshot.py`
+> 3. Verify the Python snippets below actually run against the new SDK
+
 ## Overview
 
 Milvus snapshot feature allows users to create point-in-time copies of collections. This powerful capability enables data backup, versioning, and restoration scenarios. Snapshots capture the complete state of data including vector data, metadata, indexes, and schema information at a specific timestamp.
@@ -91,7 +110,7 @@ err = client.CreateSnapshot(context.Background(), createOpt)
 ```
 
 Parameters:
-- snapshot_name (string): User-defined unique name for the snapshot
+- snapshot_name (string): User-defined name for the snapshot (must be unique within the collection)
 - collection_name (string): Name of the collection to snapshot
 - description (string, optional): Description of the snapshot
 
@@ -128,6 +147,7 @@ Get detailed information about a specific snapshot.
 ```python
 snapshot_info = client.describe_snapshot(
     snapshot_name="backup_20240101",
+    collection_name="my_collection",
     include_collection_info=True
 )
 
@@ -139,7 +159,7 @@ print(f"Description: {snapshot_info.description}")
 
 **Go SDK Example:**
 ```go
-describeOpt := milvusclient.NewDescribeSnapshotOption("backup_20240101")
+describeOpt := milvusclient.NewDescribeSnapshotOption("backup_20240101", "my_collection")
 resp, err := client.DescribeSnapshot(context.Background(), describeOpt)
 
 fmt.Printf("Snapshot ID: %d\n", resp.GetSnapshotInfo().GetId())
@@ -170,7 +190,8 @@ Restore a snapshot to a new collection. This operation is asynchronous and retur
 # Restore snapshot to new collection
 job_id = client.restore_snapshot(
     snapshot_name="backup_20240101",
-    collection_name="restored_collection",
+    collection_name="my_collection",              # source collection (where the snapshot lives)
+    target_collection_name="restored_collection",  # target collection to create
 )
 
 # Wait for restore to complete
@@ -189,7 +210,7 @@ while True:
 
 **Go SDK Example:**
 ```go
-restoreOpt := milvusclient.NewRestoreSnapshotOption("backup_20240101", "restored_collection")
+restoreOpt := milvusclient.NewRestoreSnapshotOption("backup_20240101", "my_collection", "restored_collection")
 
 jobID, err := client.RestoreSnapshot(context.Background(), restoreOpt)
 if err != nil {
@@ -220,7 +241,7 @@ for {
 
 Parameters:
 - snapshot_name (string): Name of the snapshot to restore
-- collection_name (string): Name of the target collection to create
+- collection_name (string): Name of the source collection that owns the snapshot
 
 Returns:
 - job_id (int64): Restore job ID for tracking progress
@@ -231,17 +252,21 @@ Delete a snapshot permanently.
 
 **Python SDK Example:**
 ```python
-client.drop_snapshot(snapshot_name="backup_20240101")
+client.drop_snapshot(
+    snapshot_name="backup_20240101",
+    collection_name="my_collection"
+)
 ```
 
 **Go SDK Example:**
 ```go
-dropOpt := milvusclient.NewDropSnapshotOption("backup_20240101")
+dropOpt := milvusclient.NewDropSnapshotOption("backup_20240101", "my_collection")
 err := client.DropSnapshot(context.Background(), dropOpt)
 ```
 
 Parameters:
 - snapshot_name (string): Name of the snapshot to drop
+- collection_name (string): Name of the collection that owns the snapshot
 
 ### Get Restore Snapshot State
 
@@ -409,6 +434,7 @@ client.create_snapshot(
 # Step 2: Get snapshot metadata to locate data files in S3
 snapshot_info = client.describe_snapshot(
     snapshot_name=snapshot_name,
+    collection_name="user_embeddings",
     include_collection_info=True
 )
 
@@ -440,7 +466,10 @@ result = df.groupBy("partition_id").agg({
 result.write.mode("overwrite").parquet("s3a://analytics-results/daily_stats/")
 
 # Step 4: Clean up snapshot after processing completes
-client.drop_snapshot(snapshot_name=snapshot_name)
+client.drop_snapshot(
+    snapshot_name=snapshot_name,
+    collection_name="user_embeddings"
+)
 ```
 
 **Common Offline Processing Scenarios:**
@@ -494,7 +523,8 @@ client.create_snapshot(
 # Restore for testing with progress tracking
 job_id = client.restore_snapshot(
     snapshot_name="test_dataset_v1",
-    collection_name="test_environment"
+    collection_name="test_collection",             # source collection
+    target_collection_name="test_environment",      # target collection
 )
 
 # Monitor restore progress
@@ -521,7 +551,8 @@ job_ids = []
 for i in range(3):
     job_id = client.restore_snapshot(
         snapshot_name=f"snapshot_v{i}",
-        collection_name=f"test_env_{i}"
+        collection_name="my_collection",
+        target_collection_name=f"test_env_{i}"
     )
     job_ids.append(job_id)
 

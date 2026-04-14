@@ -2,17 +2,22 @@ package datacoord
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -180,8 +185,8 @@ type snapshotMeta struct {
 	snapshotID2RefIndex *typeutil.ConcurrentMap[UniqueID, *SnapshotRefIndex]    // From S3, async loaded
 
 	// Secondary indexes for O(1) lookup performance
-	// snapshotName2ID: snapshot name -> snapshot ID mapping for fast name-based queries
-	snapshotName2ID *typeutil.ConcurrentMap[string, UniqueID]
+	// snapshotName2ID: collection ID -> (snapshot name -> snapshot ID) mapping for fast per-collection name-based queries
+	snapshotName2ID *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]]
 	// collectionID2Snapshots: collection ID -> set of snapshot IDs for fast collection-based listing
 	collectionID2Snapshots *typeutil.ConcurrentMap[UniqueID, typeutil.UniqueSet]
 	// collectionIndexMu protects read-modify-write operations on collectionID2Snapshots
@@ -232,6 +237,32 @@ type snapshotMeta struct {
 	// CreateSnapshot and cleared by its defer.
 	snapshotPendingCollections typeutil.UniqueSet
 
+	// pinMu protects the snapshotID2Info pointer swap and pinID2SnapshotID index.
+	// Critical sections are short — no etcd IO is done under this lock. Actual
+	// serialization of concurrent writers on the same snapshot is done via
+	// per-snapshot locks from pinLocks (see getPinLock). Readers (HasActivePins)
+	// take the read lock to read the swap target; they see either the pre- or
+	// post-swap pointer but never a torn state because the pointer is swapped
+	// atomically under the write lock.
+	pinMu sync.RWMutex
+
+	// pinLocks serializes concurrent Pin/Unpin/cleanExpired writers that target
+	// the same snapshot. Each entry is lazily created via getPinLock and removed
+	// when the snapshot is dropped. A per-snapshot lock lets etcd IO on snapshot
+	// A run in parallel with etcd IO on snapshot B, which pinMu alone (a global
+	// lock previously held during etcd IO) could not.
+	pinLocks *typeutil.ConcurrentMap[UniqueID, *sync.Mutex]
+
+	// pinID2SnapshotID is a reverse index for O(1) Unpin lookup. Maintained
+	// alongside SnapshotInfo.PinIds under pinMu. Populated on reload from
+	// persisted PinIds, and updated on every Pin/Unpin/Drop/cleanExpired.
+	pinID2SnapshotID *typeutil.ConcurrentMap[int64, UniqueID]
+
+	// pinMapsInit guards lazy initialization of pinLocks/pinID2SnapshotID so
+	// tests that construct snapshotMeta literally (without newSnapshotMeta)
+	// can still exercise Pin/Unpin without panicking on nil maps.
+	pinMapsInit sync.Once
+
 	// Background RefIndex loader goroutine control
 	loaderCtx    context.Context
 	loaderCancel context.CancelFunc
@@ -265,7 +296,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		catalog:                      catalog,
 		snapshotID2Info:              typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:          typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:              typeutil.NewConcurrentMap[string, UniqueID](),
+		snapshotName2ID:              typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
 		collectionID2Snapshots:       typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
 		segmentProtectionUntil:       make(map[int64]uint64),
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
@@ -273,6 +304,8 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		segmentReferencedByGC:        typeutil.NewUniqueSet(),
 		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
+		pinLocks:                     typeutil.NewConcurrentMap[UniqueID, *sync.Mutex](),
+		pinID2SnapshotID:             typeutil.NewConcurrentMap[int64, UniqueID](),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
 		reader:                       NewSnapshotReader(chunkManager),
@@ -355,6 +388,12 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 
 		// Build secondary indexes for O(1) lookup
 		sm.addToSecondaryIndexes(snapshot)
+
+		// Rebuild pin reverse index from persisted PinIds so Unpin lookups
+		// are O(1) after restart.
+		for _, pid := range snapshot.GetPinIds() {
+			sm.pinID2SnapshotID.Insert(pid, snapshot.GetId())
+		}
 
 		log.Info("loaded snapshot metadata from catalog",
 			zap.String("name", snapshot.GetName()),
@@ -551,21 +590,21 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// Step 4: Phase 2 (Commit) - Update catalog to COMMITTED state
 	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStateCommitted
 
-	// Phase 2 window (these 4 in-memory insertions) — invariant note:
-	// Between the first Insert below and registerSnapshotProtection, this snapshot is
-	// visible in snapshotID2Info but has not yet contributed to segmentReferencedByGC /
-	// buildIDReferencedByGC. A concurrent GC in this window would find the segments
-	// unprotected and could delete the files. We rely on snapshotManager.CreateSnapshot
-	// having called SetSnapshotPending(collectionID) BEFORE entering SaveSnapshot and
-	// deferring ClearSnapshotPending until after SaveSnapshot returns; SetSnapshotPending
-	// blocks compaction commit for the collection, which in turn prevents any of this
-	// snapshot's segments from transitioning to Dropped (the only state where GC would
-	// act on them). Therefore this nanosecond-scale window is not actually observable.
+	// Update catalog first (catalog is source of truth). Memory cache and
+	// protection state are only populated after the catalog write succeeds, so
+	// a failed commit leaves no in-memory residue to roll back.
+	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
+		// Phase 2 failed, but S3 data and PENDING record are already written.
+		// GC will eventually cleanup via the PENDING marker.
+		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
+			zap.Error(err))
+		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
+	}
+
+	// Catalog committed — safe to insert into in-memory cache and register protection.
 	sm.snapshotID2Info.Insert(snapshot.SnapshotInfo.GetId(), snapshot.SnapshotInfo)
 	sm.snapshotID2RefIndex.Insert(snapshot.SnapshotInfo.GetId(),
 		NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
-
-	// Build secondary indexes for O(1) lookup
 	sm.addToSecondaryIndexes(snapshot.SnapshotInfo)
 
 	// Register both compaction protection (TTL-bound) and GC protection (unconditional)
@@ -573,33 +612,6 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// with CompactionExpireTime==0, because GC protection has no TTL — otherwise the
 	// freshly-created snapshot's referenced files could be deleted by GC.
 	sm.registerSnapshotProtection(snapshot.SnapshotInfo, segmentIDs, buildIDs)
-
-	// Update catalog with COMMITTED state
-	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
-		// Phase 2 commit failed, but S3 data and PENDING record are already written.
-		// GC will eventually clean up the PENDING record and its S3 files.
-		//
-		// Roll back all in-memory state that the earlier success-path insertions built:
-		//   - snapshotID2Info / snapshotID2RefIndex / secondary indexes
-		//   - registerSnapshotProtection's contributions to BOTH protection dimensions:
-		//     compaction (segmentProtectionUntil) AND GC (segmentReferencedByGC /
-		//     buildIDReferencedByGC). rebuildAllSegmentProtection recomputes all 5
-		//     pieces of state from the remaining snapshots under a single lock, so
-		//     the rollback is atomic and cannot leak stale GC pins.
-		//
-		// NOTE: between the Remove calls and rebuildAllSegmentProtection, readers can
-		// observe a stale-TRUE protection state (snapshot gone from snapshotID2Info
-		// but its contributions still in the protection sets). This is a safe error:
-		// GC/compaction will conservatively skip a round, and the next rebuild fully
-		// reconciles. The window is nanoseconds, no I/O.
-		sm.snapshotID2Info.Remove(snapshot.SnapshotInfo.GetId())
-		sm.snapshotID2RefIndex.Remove(snapshot.SnapshotInfo.GetId())
-		sm.removeFromSecondaryIndexes(snapshot.SnapshotInfo)
-		sm.rebuildAllSegmentProtection()
-		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
-			zap.Error(err))
-		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
-	}
 
 	log.Info("snapshot saved successfully with 2PC",
 		zap.String("s3Location", metadataFilePath),
@@ -623,32 +635,74 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
-//   - snapshotName: Unique name of the snapshot to delete
+//   - collectionID: Collection ID to scope the snapshot lookup
+//   - snapshotName: Name of the snapshot to delete (unique within collection)
 //
 // Returns:
 //   - error: Error if snapshot not found or catalog update fails
-func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) error {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
+func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, snapshotName string) error {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
 
-	// Step 1: Lookup snapshot by name
-	snapshot, err := sm.getSnapshotByName(ctx, snapshotName)
+	// Step 1: Lookup snapshot by name within collection
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to get snapshot by name", zap.Error(err))
 		return err
 	}
 
-	// Step 2: Mark as Deleting in catalog (two-phase delete - first phase)
-	// This ensures the snapshot can be cleaned up by GC if S3 deletion fails
-	snapshot.State = datapb.SnapshotState_SnapshotStateDeleting
-	if err := sm.catalog.SaveSnapshot(ctx, snapshot); err != nil {
+	sm.ensurePinMaps()
+
+	// Serialize against concurrent Pin/Unpin/cleanExpired on the same snapshot
+	// via the per-snapshot lock. Pin readers (HasActivePins) take pinMu.RLock
+	// and see either the pre- or post-swap pointer atomically.
+	lock := sm.getPinLock(snapshot.GetId())
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-read under per-snapshot lock in case a concurrent writer just swapped.
+	sm.pinMu.RLock()
+	current, ok := sm.snapshotID2Info.Get(snapshot.GetId())
+	sm.pinMu.RUnlock()
+	if !ok {
+		// Already dropped.
+		return nil
+	}
+
+	// Reject if any pin is still active.
+	if activePins := countActivePins(current); activePins > 0 {
+		return merr.WrapErrSnapshotPinned(snapshotName,
+			fmt.Sprintf("%d active pins, unpin before dropping", activePins))
+	}
+
+	// Clone-and-swap: drop expired pins AND mark Deleting in a single
+	// persisted state so the in-memory view can never disagree with etcd
+	// during the IO window.
+	updated := cloneSnapshotInfo(current)
+	expiredPinIDs := updated.PinIds // all are expired — activePins == 0 above
+	updated.PinIds = nil
+	updated.PinExpireAtMs = nil
+	updated.State = datapb.SnapshotState_SnapshotStateDeleting
+
+	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
 		log.Error("failed to mark snapshot as deleting", zap.Error(err))
 		return err
 	}
 
+	// Swap and drop reverse-index entries for the cleared expired pins.
+	sm.pinMu.Lock()
+	sm.swapSnapshotInfoLocked(current, updated)
+	sm.pinMu.Unlock()
+
 	// Step 3: Remove from in-memory cache and secondary indexes (user immediately sees deletion)
-	sm.snapshotID2Info.Remove(snapshot.GetId())
-	sm.snapshotID2RefIndex.Remove(snapshot.GetId())
-	sm.removeFromSecondaryIndexes(snapshot)
+	sm.snapshotID2Info.Remove(updated.GetId())
+	sm.snapshotID2RefIndex.Remove(updated.GetId())
+	sm.removeFromSecondaryIndexes(updated)
+	for _, pid := range expiredPinIDs {
+		sm.pinID2SnapshotID.Remove(pid)
+	}
+	sm.pinLocks.Remove(updated.GetId())
+	// From here on, reassign so downstream code references the swapped snapshot.
+	snapshot = updated
 
 	// Step 4: Rebuild protection state UNCONDITIONALLY. Must not be gated on
 	// CompactionExpireTime > 0 because:
@@ -686,6 +740,80 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 
 	log.Info("snapshot deleted successfully", zap.Int64("snapshotID", snapshot.GetId()))
 	return nil
+}
+
+// DropSnapshotsByCollection deletes all snapshots belonging to a collection.
+// Used during drop collection cascade cleanup. Each snapshot goes through the
+// same delete flow as individual DropSnapshot.
+//
+// Returns the names of snapshots that were successfully dropped so callers
+// (manager layer) can clear per-snapshot metric series. Snapshots that were
+// skipped (pinned, not-found) or failed are NOT included.
+//
+// Note: a concurrent SaveSnapshot between Step 1 (snapshot ID copy) and Step 3 (drop loop)
+// could create a snapshot that is missed by this cascade. The GC orphan detection serves
+// as a fallback to clean up such snapshots.
+func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectionID int64) ([]string, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
+	// Step 1: Get all snapshot IDs for this collection.
+	// Copy IDs under lock since UniqueSet (raw map) is not thread-safe for concurrent read/write.
+	sm.collectionIndexMu.RLock()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	var ids []int64
+	if ok {
+		ids = snapshotIDs.Collect()
+	}
+	sm.collectionIndexMu.RUnlock()
+	if len(ids) == 0 {
+		log.Info("no snapshots found for collection, skip")
+		return nil, nil
+	}
+
+	// Step 2: Collect snapshot names before deletion (using copied IDs, safe without lock)
+	var snapshotNames []string
+	for _, id := range ids {
+		if info, exists := sm.snapshotID2Info.Get(id); exists {
+			snapshotNames = append(snapshotNames, info.GetName())
+		}
+	}
+
+	// Step 3: Delete each snapshot through the standard flow.
+	// DropSnapshot handles pin check internally (with expired-pin cleanup under pinMu).
+	// Pinned snapshots will return error — treat as non-fatal skip.
+	var errs []error
+	var dropped []string
+	for _, name := range snapshotNames {
+		if err := sm.DropSnapshot(ctx, collectionID, name); err != nil {
+			if errors.Is(err, merr.ErrSnapshotPinned) {
+				log.Info("skip pinned snapshot during collection cleanup, GC will retry after TTL/unpin",
+					zap.String("snapshotName", name),
+					zap.Error(err))
+				continue
+			}
+			if errors.Is(err, merr.ErrSnapshotNotFound) {
+				log.Info("skip not-found snapshot during collection cleanup",
+					zap.String("snapshotName", name),
+					zap.Error(err))
+				continue
+			}
+			errs = append(errs, err)
+			log.Warn("failed to drop snapshot during collection cleanup, continuing",
+				zap.String("snapshotName", name),
+				zap.Error(err))
+			continue
+		}
+		dropped = append(dropped, name)
+		log.Info("dropped snapshot during collection cleanup",
+			zap.String("snapshotName", name))
+	}
+
+	if len(errs) > 0 {
+		return dropped, fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
+			len(errs), len(snapshotNames), collectionID, errors.Join(errs...))
+	}
+
+	return dropped, nil
 }
 
 // ListSnapshots returns snapshot names filtered by collection and/or partition.
@@ -768,8 +896,8 @@ func (sm *snapshotMeta) ListSnapshots(ctx context.Context, collectionID int64, p
 // Returns:
 //   - *datapb.SnapshotInfo: Basic snapshot metadata (name, ID, collection, partitions, S3 location)
 //   - error: Error if snapshot not found
-func (sm *snapshotMeta) GetSnapshot(ctx context.Context, snapshotName string) (*datapb.SnapshotInfo, error) {
-	snapshot, err := sm.getSnapshotByName(ctx, snapshotName)
+func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, snapshotName string) (*datapb.SnapshotInfo, error) {
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		return nil, err
 	}
@@ -800,11 +928,11 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, snapshotName string) (*
 //   - *SnapshotData: Snapshot data (segments only populated when includeSegments=true;
 //     SegmentIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
-func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName string, includeSegments bool) (*SnapshotData, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
+func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*SnapshotData, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
 
 	// Step 1: Get snapshot metadata from memory to find S3 location
-	snapshotInfo, err := sm.getSnapshotByName(ctx, snapshotName)
+	snapshotInfo, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to get snapshot by name", zap.Error(err))
 		return nil, err
@@ -828,30 +956,36 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName strin
 	return snapshotData, nil
 }
 
-// getSnapshotByName is an internal helper that looks up snapshot metadata by name.
+// getSnapshotByName is an internal helper that looks up snapshot metadata by name within a collection.
 //
-// This uses the snapshotName2ID index for O(1) lookup instead of scanning.
+// This uses the per-collection snapshotName2ID index for O(1) lookup instead of scanning.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
-//   - snapshotName: Unique name of the snapshot to find
+//   - collectionID: Collection ID to scope the name lookup
+//   - snapshotName: Name of the snapshot to find (unique within collection)
 //
 // Returns:
 //   - *datapb.SnapshotInfo: Snapshot metadata if found
 //   - error: Error if snapshot not found
-func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName string) (*datapb.SnapshotInfo, error) {
-	// O(1) lookup using name index
-	snapshotID, ok := sm.snapshotName2ID.Get(snapshotName)
+func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, collectionID int64, snapshotName string) (*datapb.SnapshotInfo, error) {
+	// O(1) lookup using per-collection name index
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
 	if !ok {
-		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
+		return nil, merr.WrapErrSnapshotNotFound(snapshotName, fmt.Sprintf("collection %d", collectionID))
+	}
+
+	snapshotID, ok := nameMap.Get(snapshotName)
+	if !ok {
+		return nil, merr.WrapErrSnapshotNotFound(snapshotName, fmt.Sprintf("collection %d", collectionID))
 	}
 
 	// O(1) lookup from primary index
 	info, ok := sm.snapshotID2Info.Get(snapshotID)
 	if !ok {
 		// Index inconsistency: clean up orphan name index entry
-		sm.snapshotName2ID.Remove(snapshotName)
-		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
+		nameMap.Remove(snapshotName)
+		return nil, merr.WrapErrSnapshotNotFound(snapshotName, fmt.Sprintf("collection %d", collectionID))
 	}
 
 	return info, nil
@@ -952,8 +1086,10 @@ func (sm *snapshotMeta) CleanupDeletingSnapshot(ctx context.Context, snapshot *d
 // addToSecondaryIndexes adds a snapshot to the secondary indexes (name and collection).
 // This should be called after inserting into the primary indexes (snapshotID2Info and snapshotID2RefIndex).
 func (sm *snapshotMeta) addToSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
-	// Add to name index (thread-safe via ConcurrentMap)
-	sm.snapshotName2ID.Insert(snapshotInfo.GetName(), snapshotInfo.GetId())
+	// Add to name index (per-collection, thread-safe via ConcurrentMap)
+	collID := snapshotInfo.GetCollectionId()
+	nameMap, _ := sm.snapshotName2ID.GetOrInsert(collID, typeutil.NewConcurrentMap[string, UniqueID]())
+	nameMap.Insert(snapshotInfo.GetName(), snapshotInfo.GetId())
 
 	// Add to collection index (requires lock since UniqueSet is not thread-safe)
 	sm.collectionIndexMu.Lock()
@@ -971,8 +1107,12 @@ func (sm *snapshotMeta) addToSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo)
 // removeFromSecondaryIndexes removes a snapshot from the secondary indexes (name and collection).
 // This should be called when removing from the primary indexes (snapshotID2Info and snapshotID2RefIndex).
 func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
-	// Remove from name index (thread-safe via ConcurrentMap)
-	sm.snapshotName2ID.Remove(snapshotInfo.GetName())
+	// Remove from name index (per-collection, thread-safe via ConcurrentMap).
+	// Do NOT remove empty nameMap to avoid TOCTOU race with concurrent addToSecondaryIndexes.
+	collID := snapshotInfo.GetCollectionId()
+	if nameMap, ok := sm.snapshotName2ID.Get(collID); ok {
+		nameMap.Remove(snapshotInfo.GetName())
+	}
 
 	// Remove from collection index (requires lock since UniqueSet is not thread-safe)
 	sm.collectionIndexMu.Lock()
@@ -1001,6 +1141,46 @@ func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
 	defer sm.segmentProtectionMu.RUnlock()
 	return sm.compactionBlockedCollections.Contain(collectionID) ||
 		sm.snapshotPendingCollections.Contain(collectionID)
+}
+
+// GetActiveCollectionIDs returns the set of collection IDs that have non-Deleting snapshots.
+// Used by GC for orphan snapshot detection.
+func (sm *snapshotMeta) GetActiveCollectionIDs() []int64 {
+	collections := typeutil.NewSet[int64]()
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			collections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+	return collections.Collect()
+}
+
+// GetSnapshotByBuildID returns all snapshot IDs that reference a given build ID.
+//
+// This is used for garbage collection safety: before deleting index files for a build,
+// check if any snapshots reference it. If snapshots exist, the files cannot be deleted.
+//
+// BuildID identifies a specific index build task, providing precise file-level protection.
+//
+// Caller should check IsAllRefIndexLoaded or IsRefIndexLoadedForCollection first.
+//
+// Parameters:
+//   - buildID: Build ID to search for in snapshots
+//
+// Returns:
+//   - []UniqueID: List of snapshot IDs that contain this build ID (empty if none)
+func (sm *snapshotMeta) GetSnapshotByBuildID(buildID UniqueID) []UniqueID {
+	snapshotIDs := make([]UniqueID, 0)
+
+	sm.snapshotID2RefIndex.Range(func(id UniqueID, refIndex *SnapshotRefIndex) bool {
+		if refIndex.ContainsBuildID(buildID) {
+			snapshotIDs = append(snapshotIDs, id)
+		}
+		return true
+	})
+
+	return snapshotIDs
 }
 
 // SetSnapshotPending marks a collection as having a pending snapshot creation.
@@ -1248,4 +1428,361 @@ func (sm *snapshotMeta) rebuildAllSegmentProtection() {
 		zap.Int("gcReferencedSegments", sm.segmentReferencedByGC.Len()),
 		zap.Int("gcReferencedBuildIDs", sm.buildIDReferencedByGC.Len()),
 		zap.Int("gcBlockedCollections", sm.gcBlockedCollections.Len()))
+}
+
+// PinCleanupResult summarizes the per-snapshot outcome of a pin-modifying
+// meta operation. It carries the information the manager layer needs to emit
+// the active-pins gauge without itself touching pinMu or SnapshotInfo.
+type PinCleanupResult struct {
+	CollectionID int64
+	SnapshotName string
+	ActivePins   int // pins remaining after the operation completes
+}
+
+// cloneSnapshotInfo deep-copies a SnapshotInfo so the caller can mutate the
+// clone without racing against readers holding the original pointer. Needed
+// for the clone-and-swap pattern: Pin/Unpin/cleanExpired/DropSnapshot mutate
+// the clone, persist it to etcd OUTSIDE of pinMu, then swap the pointer back
+// into snapshotID2Info atomically.
+func cloneSnapshotInfo(s *datapb.SnapshotInfo) *datapb.SnapshotInfo {
+	if s == nil {
+		return nil
+	}
+	return proto.Clone(s).(*datapb.SnapshotInfo)
+}
+
+// ensurePinMaps lazily initializes pinLocks/pinID2SnapshotID for tests that
+// construct snapshotMeta via struct-literal. newSnapshotMeta always pre-seeds
+// them; in that case this is a no-op.
+func (sm *snapshotMeta) ensurePinMaps() {
+	sm.pinMapsInit.Do(func() {
+		if sm.pinLocks == nil {
+			sm.pinLocks = typeutil.NewConcurrentMap[UniqueID, *sync.Mutex]()
+		}
+		if sm.pinID2SnapshotID == nil {
+			sm.pinID2SnapshotID = typeutil.NewConcurrentMap[int64, UniqueID]()
+		}
+	})
+}
+
+// getPinLock returns (creating if needed) the per-snapshot serialization
+// lock. The lock gates concurrent writers on the same snapshot so clone-and-
+// swap remains linearizable, while letting writers on different snapshots
+// proceed in parallel. Cleaned up on DropSnapshot.
+func (sm *snapshotMeta) getPinLock(snapshotID UniqueID) *sync.Mutex {
+	sm.ensurePinMaps()
+	if l, ok := sm.pinLocks.Get(snapshotID); ok {
+		return l
+	}
+	actual, _ := sm.pinLocks.GetOrInsert(snapshotID, &sync.Mutex{})
+	return actual
+}
+
+// swapSnapshotInfoLocked atomically replaces the live snapshot pointer and
+// reconciles the pinID2SnapshotID reverse index with the new PinIds. Caller
+// must hold pinMu.Lock.
+func (sm *snapshotMeta) swapSnapshotInfoLocked(old, updated *datapb.SnapshotInfo) {
+	sm.ensurePinMaps()
+	sm.snapshotID2Info.Insert(updated.GetId(), updated)
+	// Reconcile reverse index: any pinID present in old but not in new is removed,
+	// any pinID present in new is inserted. Small lists — linear diff is fine.
+	oldPins := make(map[int64]struct{}, len(old.GetPinIds()))
+	for _, p := range old.GetPinIds() {
+		oldPins[p] = struct{}{}
+	}
+	newPins := make(map[int64]struct{}, len(updated.GetPinIds()))
+	for _, p := range updated.GetPinIds() {
+		newPins[p] = struct{}{}
+	}
+	for p := range oldPins {
+		if _, ok := newPins[p]; !ok {
+			sm.pinID2SnapshotID.Remove(p)
+		}
+	}
+	for p := range newPins {
+		sm.pinID2SnapshotID.Insert(p, updated.GetId())
+	}
+}
+
+// PinSnapshot generates a crypto-random pin ID, appends it to the snapshot's
+// pin_ids list with optional TTL, and persists to catalog. Returns the pin ID
+// for later Unpin along with the resulting active-pin count (for metric
+// emission at the caller layer).
+//
+// Uses the clone-and-swap pattern: per-snapshot lock serializes writers on
+// the same snapshot; etcd IO runs OUTSIDE pinMu so Pin/Unpin on other
+// snapshots are not blocked on this write.
+func (sm *snapshotMeta) PinSnapshot(ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, int, error) {
+	sm.pinMu.RLock()
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, name)
+	sm.pinMu.RUnlock()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	lock := sm.getPinLock(snapshot.GetId())
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-read the current pointer under the per-snapshot lock — another
+	// writer may have just swapped it.
+	sm.pinMu.RLock()
+	current, ok := sm.snapshotID2Info.Get(snapshot.GetId())
+	sm.pinMu.RUnlock()
+	if !ok {
+		return 0, 0, merr.WrapErrSnapshotNotFound(name, "snapshot removed before pin")
+	}
+	if current.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
+		return 0, 0, merr.WrapErrSnapshotNotFound(name, "snapshot is being deleted")
+	}
+
+	pinID, err := sm.generatePinID(current)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	updated := cloneSnapshotInfo(current)
+	updated.PinIds = append(updated.PinIds, pinID)
+	if updated.PinExpireAtMs == nil {
+		updated.PinExpireAtMs = make(map[int64]int64)
+	}
+	if ttlSeconds > 0 {
+		updated.PinExpireAtMs[pinID] = time.Now().UnixMilli() + ttlSeconds*1000
+	}
+
+	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
+		return 0, 0, err
+	}
+
+	sm.pinMu.Lock()
+	sm.swapSnapshotInfoLocked(current, updated)
+	sm.pinMu.Unlock()
+
+	active := countActivePins(updated)
+	log.Ctx(ctx).Info("pinned snapshot",
+		zap.String("name", name),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("pinID", pinID),
+		zap.Int64("ttlSeconds", ttlSeconds),
+		zap.Int("pinCount", len(updated.GetPinIds())),
+		zap.Int("activePins", active))
+	return pinID, active, nil
+}
+
+// HasActivePins reports whether the named snapshot currently has any
+// non-expired pins. Takes pinMu.RLock just long enough to snapshot the
+// pointer — no etcd IO under lock.
+//
+// Used by service-layer DropSnapshot as a pre-broadcast pin check. Combined
+// with PinSnapshotData acquiring the shared (collectionID, snapshotName)
+// resource key lock, this gives DropSnapshot an authoritative view of active
+// pins at the moment the exclusive broadcast lock is held — preventing a
+// concurrent Pin from slipping in between the check and the callback.
+func (sm *snapshotMeta) HasActivePins(ctx context.Context, collectionID int64, snapshotName string) (bool, error) {
+	sm.pinMu.RLock()
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
+	sm.pinMu.RUnlock()
+	if err != nil {
+		return false, err
+	}
+	return countActivePins(snapshot) > 0, nil
+}
+
+// countActivePins returns the number of non-expired pins on a snapshot.
+// A pin is active if it has no expiry (permanent) or its expiry is in the
+// future. Pure function over the passed-in SnapshotInfo — the caller is
+// responsible for ensuring the SnapshotInfo pointer is stable (typically by
+// either holding a clone, or operating under pinMu).
+func countActivePins(snapshot *datapb.SnapshotInfo) int {
+	if len(snapshot.GetPinIds()) == 0 {
+		return 0
+	}
+	count := 0
+	now := time.Now().UnixMilli()
+	for _, pid := range snapshot.GetPinIds() {
+		expireAt, ok := snapshot.GetPinExpireAtMs()[pid]
+		if !ok || expireAt <= 0 || expireAt >= now {
+			count++ // permanent pin or not yet expired
+		}
+	}
+	return count
+}
+
+// UnpinSnapshot removes a pin ID from the snapshot's pin_ids list and
+// persists. O(1) lookup via the pinID2SnapshotID reverse index; idempotent
+// if pinID is not found (already unpinned or TTL-expired).
+//
+// Returns (collectionID, snapshotName, activePinCount, err) so the caller
+// layer can emit metrics without touching SnapshotInfo directly.
+func (sm *snapshotMeta) UnpinSnapshot(ctx context.Context, pinID int64) (int64, string, int, error) {
+	sm.ensurePinMaps()
+	snapshotID, ok := sm.pinID2SnapshotID.Get(pinID)
+	if !ok {
+		return 0, "", 0, nil // idempotent
+	}
+
+	lock := sm.getPinLock(snapshotID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	sm.pinMu.RLock()
+	current, ok := sm.snapshotID2Info.Get(snapshotID)
+	sm.pinMu.RUnlock()
+	if !ok {
+		// Snapshot was dropped underneath us; reverse index will have been
+		// cleaned by DropSnapshot. Idempotent.
+		sm.pinID2SnapshotID.Remove(pinID)
+		return 0, "", 0, nil
+	}
+
+	// Pin may have been removed by a concurrent cleanExpired / Drop between
+	// the reverse index lookup and the per-snapshot lock acquisition.
+	if !slices.Contains(current.GetPinIds(), pinID) {
+		sm.pinID2SnapshotID.Remove(pinID)
+		return current.GetCollectionId(), current.GetName(), countActivePins(current), nil
+	}
+
+	updated := cloneSnapshotInfo(current)
+	newPinIds := make([]int64, 0, len(updated.PinIds)-1)
+	for _, pid := range updated.PinIds {
+		if pid != pinID {
+			newPinIds = append(newPinIds, pid)
+		}
+	}
+	updated.PinIds = newPinIds
+	delete(updated.PinExpireAtMs, pinID)
+
+	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
+		return current.GetCollectionId(), current.GetName(), 0, err
+	}
+
+	sm.pinMu.Lock()
+	sm.swapSnapshotInfoLocked(current, updated)
+	sm.pinMu.Unlock()
+
+	active := countActivePins(updated)
+	log.Ctx(ctx).Info("unpinned snapshot",
+		zap.String("name", updated.GetName()),
+		zap.Int64("collectionID", updated.GetCollectionId()),
+		zap.Int64("pinID", pinID),
+		zap.Int("pinCount", len(updated.GetPinIds())),
+		zap.Int("activePins", active))
+	return updated.GetCollectionId(), updated.GetName(), active, nil
+}
+
+// cleanExpiredPinsForCollection removes expired pins from snapshots of a
+// collection. Only removes pins whose TTL has expired; permanent pins (no
+// TTL) are left untouched. Returns per-snapshot outcomes so the caller can
+// update metric gauges without re-reading SnapshotInfo.
+//
+// Uses the same clone-and-swap pattern as Pin/Unpin: one per-snapshot lock
+// + one etcd write per snapshot, no global pinMu held across snapshots.
+func (sm *snapshotMeta) cleanExpiredPinsForCollection(ctx context.Context, collectionID int64) []PinCleanupResult {
+	sm.collectionIndexMu.RLock()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	var ids []int64
+	if ok {
+		ids = snapshotIDs.Collect()
+	}
+	sm.collectionIndexMu.RUnlock()
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var results []PinCleanupResult
+	now := time.Now().UnixMilli()
+	for _, snapshotID := range ids {
+		updatedInfo, changed := sm.cleanExpiredPinsForSnapshot(ctx, snapshotID, now)
+		if changed {
+			results = append(results, PinCleanupResult{
+				CollectionID: updatedInfo.GetCollectionId(),
+				SnapshotName: updatedInfo.GetName(),
+				ActivePins:   countActivePins(updatedInfo),
+			})
+		}
+	}
+	return results
+}
+
+// cleanExpiredPinsForSnapshot applies clone-and-swap to a single snapshot.
+// Returns the (possibly new) SnapshotInfo pointer and whether any state
+// actually changed.
+func (sm *snapshotMeta) cleanExpiredPinsForSnapshot(ctx context.Context, snapshotID UniqueID, now int64) (*datapb.SnapshotInfo, bool) {
+	lock := sm.getPinLock(snapshotID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	sm.pinMu.RLock()
+	current, exists := sm.snapshotID2Info.Get(snapshotID)
+	sm.pinMu.RUnlock()
+	if !exists || len(current.GetPinIds()) == 0 {
+		return current, false
+	}
+
+	var expired []int64
+	for _, pinID := range current.GetPinIds() {
+		expireAt, hasExpiry := current.GetPinExpireAtMs()[pinID]
+		if hasExpiry && expireAt > 0 && expireAt < now {
+			expired = append(expired, pinID)
+		}
+	}
+	if len(expired) == 0 {
+		return current, false
+	}
+
+	expiredSet := make(map[int64]struct{}, len(expired))
+	for _, pid := range expired {
+		expiredSet[pid] = struct{}{}
+	}
+	updated := cloneSnapshotInfo(current)
+	newPinIds := make([]int64, 0, len(updated.PinIds)-len(expired))
+	for _, pid := range updated.PinIds {
+		if _, isExpired := expiredSet[pid]; !isExpired {
+			newPinIds = append(newPinIds, pid)
+		}
+	}
+	updated.PinIds = newPinIds
+	for _, pid := range expired {
+		delete(updated.PinExpireAtMs, pid)
+	}
+
+	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
+		log.Warn("failed to persist expired pin cleanup, will retry",
+			zap.String("name", current.GetName()), zap.Error(err))
+		return current, false
+	}
+
+	sm.pinMu.Lock()
+	sm.swapSnapshotInfoLocked(current, updated)
+	sm.pinMu.Unlock()
+
+	log.Info("cleaned expired pins from snapshot",
+		zap.String("name", updated.GetName()),
+		zap.Int64("collectionID", updated.GetCollectionId()),
+		zap.Int("expiredCount", len(expired)),
+		zap.Int("remainingPins", len(updated.GetPinIds())))
+	return updated, true
+}
+
+// generatePinID generates a cryptographically random positive int64 that
+// doesn't collide with any existing pin ID in the snapshot.
+func (sm *snapshotMeta) generatePinID(snapshot *datapb.SnapshotInfo) (int64, error) {
+	existing := make(map[int64]struct{}, len(snapshot.GetPinIds()))
+	for _, pid := range snapshot.GetPinIds() {
+		existing[pid] = struct{}{}
+	}
+	for i := 0; i < 3; i++ {
+		var b [8]byte
+		if _, err := cryptorand.Read(b[:]); err != nil {
+			return 0, fmt.Errorf("failed to generate random pin ID: %w", err)
+		}
+		id := int64(binary.BigEndian.Uint64(b[:]) >> 1)
+		if id == 0 {
+			id = 1
+		}
+		if _, exists := existing[id]; !exists {
+			return id, nil
+		}
+	}
+	return 0, fmt.Errorf("failed to generate unique pin ID after 3 attempts")
 }

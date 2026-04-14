@@ -4819,6 +4819,7 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
 	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
+	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
@@ -5706,6 +5707,28 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SnapshotMaxCompactionProtectionSeconds.Init(base.mgr)
+
+	p.SnapshotRestorePinTTLSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.restorePinTTLSeconds",
+		Version:      "2.6.11",
+		DefaultValue: "86400",
+		Doc: "TTL (seconds) for pins claimed by snapshot restore jobs on the source snapshot. " +
+			"Acts as a safety-net reaper for orphan pins left behind by crashed datacoord / " +
+			"failed job creation. Default 86400 (24h) is sized well above the worst-case restore " +
+			"wall time — restore copies segments by S3 object reference (no data rewrite), so even " +
+			"multi-TB restores complete in minutes. Minimum enforced value is 300s — values ≤0 " +
+			"(which would create permanent pins with no admin recovery API) and values below 300s " +
+			"are coerced to the default.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 300 {
+				return "86400"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotRestorePinTTLSeconds.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

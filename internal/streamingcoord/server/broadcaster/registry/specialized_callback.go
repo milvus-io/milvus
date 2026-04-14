@@ -67,9 +67,10 @@ var (
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
 	// Snapshot
-	RegisterCreateSnapshotV2AckCallback  = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
-	RegisterDropSnapshotV2AckCallback    = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
-	RegisterRestoreSnapshotV2AckCallback = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
+	RegisterDropSnapshotV2AckCallback              = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
+	RegisterRestoreSnapshotV2AckCallback           = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterDropSnapshotsByCollectionV2AckCallback = registerMessageAckCallback[*message.DropSnapshotsByCollectionMessageHeader, *message.DropSnapshotsByCollectionMessageBody]
 
 	// External Collection
 	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
@@ -130,9 +131,10 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
-		message.MessageTypeCreateSnapshotV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropSnapshotV2:    syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeRestoreSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotV2:              syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRestoreSnapshotV2:           syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotsByCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// External Collection
 		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),

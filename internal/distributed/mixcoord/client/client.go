@@ -2106,6 +2106,28 @@ func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	})
 }
 
+func (c *Client) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest, opts ...grpc.CallOption) (*datapb.PinSnapshotDataResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.PinSnapshotDataResponse, error) {
+		return client.PinSnapshotData(ctx, req)
+	})
+}
+
+func (c *Client) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.UnpinSnapshotData(ctx, req)
+	})
+}
+
 func (c *Client) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

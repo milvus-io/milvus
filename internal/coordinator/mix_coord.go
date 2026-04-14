@@ -1302,6 +1302,14 @@ func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapsh
 	return s.datacoordServer.ListSnapshots(ctx, req)
 }
 
+func (s *mixCoordImpl) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	return s.datacoordServer.PinSnapshotData(ctx, req)
+}
+
+func (s *mixCoordImpl) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.UnpinSnapshotData(ctx, req)
+}
+
 func (s *mixCoordImpl) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
 	return s.datacoordServer.BatchUpdateManifest(ctx, req)
 }
