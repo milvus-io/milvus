@@ -47,6 +47,10 @@ EMB_LIST_INDEX_CONFIGS = {
         "build_params": {"M": 16, "efConstruction": 200},
         "search_params": {"ef": 64},
     },
+    "IVF_FLAT": {
+        "build_params": {"nlist": 128},
+        "search_params": {"nprobe": 10},
+    },
     "IVF_FLAT_CC": {
         "build_params": {"nlist": 128},
         "search_params": {"nprobe": 10},
@@ -2256,15 +2260,13 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                     f"but ratio {ratio} has recall {recall}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index_type", ["HNSW_SQ", "DISKANN"])
+    @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
     def test_search_emb_list_with_different_index_types(self, index_type):
         """
         target: test search with full CRUD path for different emb list index types
         method: insert (flushed + growing) → index → load → search → upsert → delete → search → verify
         expected: all CRUD operations and search work correctly for each index type
         """
-        if index_type == "DISKANN":
-            pytest.xfail("DISKANN emb_list index build fails: https://github.com/milvus-io/milvus/issues/49014")
         collection_name = cf.gen_unique_str(
             f"{prefix}_search_{index_type.lower()}"
         )
@@ -2476,7 +2478,8 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "vector_type",
-        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
+        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR,
+         DataType.BINARY_VECTOR],
     )
     def test_search_emb_list_with_different_vector_types(self, vector_type):
         """
@@ -2484,6 +2487,12 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         method: insert (flushed + growing) → HNSW index → load → search → upsert → delete → search → verify
         expected: all CRUD operations and search work correctly for each vector type
         """
+        # Select metric based on vector type
+        if vector_type == DataType.BINARY_VECTOR:
+            emb_list_metric = "MAX_SIM_HAMMING"
+        else:
+            emb_list_metric = "MAX_SIM_COSINE"
+
         type_name = vector_type.name.lower()
         collection_name = cf.gen_unique_str(f"{prefix}_search_vtype_{type_name}")
         client = self._client()
@@ -2576,7 +2585,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
         assert res["insert_count"] == nb_growing
 
-        # Create HNSW index with MAX_SIM_COSINE (works for float16/bfloat16/int8)
+        # Create HNSW index with appropriate metric for vector type
         index_params = client.prepare_index_params()
         index_params.add_index(
             field_name="normal_vector",
@@ -2588,7 +2597,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             field_name="clips[clip_embedding1]",
             index_name="struct_vector_index",
             index_type="HNSW",
-            metric_type="MAX_SIM_COSINE",
+            metric_type=emb_list_metric,
             params=INDEX_PARAMS,
         )
 
@@ -2609,7 +2618,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             collection_name,
             data=[embedding_list],
             anns_field="clips[clip_embedding1]",
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params={"metric_type": emb_list_metric},
             limit=10,
             output_fields=["id", "clips"],
         )
@@ -2682,7 +2691,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             collection_name,
             data=[embedding_list],
             anns_field="clips[clip_embedding1]",
-            search_params={"metric_type": "MAX_SIM_COSINE"},
+            search_params={"metric_type": emb_list_metric},
             limit=10,
             output_fields=["id"],
         )
