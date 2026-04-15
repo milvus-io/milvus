@@ -745,6 +745,99 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 	})
 }
 
+func (s *ProxyManagementSuite) TestUpdateSegmentColumnGroups() {
+	body := `{
+		"segment_id": 42,
+		"column_groups": {
+			"1000": {
+				"fieldID": 1000,
+				"child_fields": [101, 202]
+			}
+		}
+	}`
+
+	s.Run("normal", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().UpdateSegmentColumnGroups(mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, req *datapb.UpdateSegmentColumnGroupsRequest, options ...grpc.CallOption) (*commonpb.Status, error) {
+				s.Equal(int64(42), req.GetSegmentId())
+				s.Require().Contains(req.GetColumnGroups(), int64(1000))
+				s.Equal(int64(1000), req.GetColumnGroups()[1000].GetFieldID())
+				s.ElementsMatch([]int64{101, 202}, req.GetColumnGroups()[1000].GetChildFields())
+				return merr.Success(), nil
+			})
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups, strings.NewReader(body))
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusOK, recorder.Code)
+	})
+
+	s.Run("bad_json", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups, strings.NewReader("{not json"))
+		s.Require().NoError(err)
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusBadRequest, recorder.Code)
+	})
+
+	s.Run("missing_segment_id", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups,
+			strings.NewReader(`{"column_groups":{"1":{"fieldID":1,"child_fields":[2]}}}`))
+		s.Require().NoError(err)
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusBadRequest, recorder.Code)
+	})
+
+	s.Run("empty_column_groups", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups,
+			strings.NewReader(`{"segment_id": 42}`))
+		s.Require().NoError(err)
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusBadRequest, recorder.Code)
+	})
+
+	s.Run("rpc_error", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().UpdateSegmentColumnGroups(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock"))
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups, strings.NewReader(body))
+		s.Require().NoError(err)
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+
+	s.Run("rpc_failure_status", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().UpdateSegmentColumnGroups(mock.Anything, mock.Anything).
+			Return(merr.Status(merr.ErrServiceNotReady), nil)
+
+		req, err := http.NewRequest(http.MethodPost, management.RouteUpdateSegmentColumnGroups, strings.NewReader(body))
+		s.Require().NoError(err)
+		recorder := httptest.NewRecorder()
+		s.proxy.UpdateSegmentColumnGroups(recorder, req)
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+	})
+}
+
 func TestProxyManagement(t *testing.T) {
 	suite.Run(t, new(ProxyManagementSuite))
 }

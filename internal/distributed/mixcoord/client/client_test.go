@@ -2817,3 +2817,55 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestClient_UpdateSegmentColumnGroups(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	req := &datapb.UpdateSegmentColumnGroupsRequest{
+		SegmentId: 42,
+		ColumnGroups: map[int64]*datapb.FieldBinlog{
+			1000: {FieldID: 1000, ChildFields: []int64{101}},
+		},
+	}
+
+	mockDC.EXPECT().UpdateSegmentColumnGroups(mock1.Anything, mock1.Anything).Return(merr.Success(), nil)
+	resp, err := client.UpdateSegmentColumnGroups(ctx, req)
+	assert.Nil(t, err)
+	assert.True(t, merr.Ok(resp))
+
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().UpdateSegmentColumnGroups(mock1.Anything, mock1.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	rsp, err := client.UpdateSegmentColumnGroups(ctx, req)
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().UpdateSegmentColumnGroups(mock1.Anything, mock1.Anything).Return(merr.Success(), mockErr)
+	_, err = client.UpdateSegmentColumnGroups(ctx, req)
+	assert.NotNil(t, err)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

@@ -3257,3 +3257,165 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Contains(t, resp.GetReason(), "must not exceed")
 	})
 }
+
+// --- Test UpdateSegmentColumnGroups ---
+
+func TestServer_UpdateSegmentColumnGroups(t *testing.T) {
+	ctx := context.Background()
+	const segmentID int64 = 42
+
+	newHealthyServer := func(t *testing.T, segment *SegmentInfo) *Server {
+		t.Helper()
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		if segment != nil {
+			assert.NoError(t, m.AddSegment(ctx, segment))
+		}
+		s := &Server{meta: m}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		return s
+	}
+
+	makeSeg := func(storageVersion int64, binlogs []*datapb.FieldBinlog) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   100,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storageVersion,
+			Binlogs:        binlogs,
+		}}
+	}
+
+	t.Run("not_healthy", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{101}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("empty_column_groups", func(t *testing.T) {
+		s := newHealthyServer(t, makeSeg(storage.StorageV2, nil))
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{SegmentId: segmentID})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("segment_not_found", func(t *testing.T) {
+		s := newHealthyServer(t, nil)
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{101}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("wrong_storage_version", func(t *testing.T) {
+		s := newHealthyServer(t, makeSeg(storage.StorageV1, nil))
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{101}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("map_key_fieldID_mismatch", func(t *testing.T) {
+		s := newHealthyServer(t, makeSeg(storage.StorageV2, nil))
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 999, ChildFields: []int64{101}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("same_fieldID_replaces_in_place", func(t *testing.T) {
+		existing := []*datapb.FieldBinlog{{FieldID: 1000, ChildFields: []int64{101}}}
+		s := newHealthyServer(t, makeSeg(storage.StorageV2, existing))
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{102}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+
+		seg := s.meta.GetSegment(ctx, segmentID)
+		byID := map[int64]*datapb.FieldBinlog{}
+		for _, b := range seg.GetBinlogs() {
+			byID[b.GetFieldID()] = b
+		}
+		assert.Len(t, byID, 1, "exactly one column group with fieldID 1000 should remain")
+		assert.ElementsMatch(t, []int64{102}, byID[1000].GetChildFields())
+		assert.Equal(t, int32(1), seg.GetDataVersion())
+	})
+
+	t.Run("happy_path_removes_child_and_appends", func(t *testing.T) {
+		existing := []*datapb.FieldBinlog{
+			{FieldID: 900, ChildFields: []int64{101, 202}},
+			{FieldID: 901, ChildFields: []int64{303}},
+		}
+		s := newHealthyServer(t, makeSeg(storage.StorageV2, existing))
+
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{101, 303}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+
+		seg := s.meta.GetSegment(ctx, segmentID)
+		assert.NotNil(t, seg)
+		byID := map[int64]*datapb.FieldBinlog{}
+		for _, b := range seg.GetBinlogs() {
+			byID[b.GetFieldID()] = b
+		}
+		assert.ElementsMatch(t, []int64{202}, byID[900].GetChildFields())
+		assert.Empty(t, byID[901].GetChildFields())
+		assert.ElementsMatch(t, []int64{101, 303}, byID[1000].GetChildFields())
+		assert.Equal(t, int32(1), seg.GetDataVersion())
+	})
+
+	t.Run("multi_new_groups", func(t *testing.T) {
+		existing := []*datapb.FieldBinlog{
+			{FieldID: 900, ChildFields: []int64{101, 202, 303}},
+		}
+		s := newHealthyServer(t, makeSeg(storage.StorageV2, existing))
+
+		resp, err := s.UpdateSegmentColumnGroups(ctx, &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: segmentID,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1001: {FieldID: 1001, ChildFields: []int64{101}},
+				1002: {FieldID: 1002, ChildFields: []int64{303}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+
+		seg := s.meta.GetSegment(ctx, segmentID)
+		byID := map[int64]*datapb.FieldBinlog{}
+		for _, b := range seg.GetBinlogs() {
+			byID[b.GetFieldID()] = b
+		}
+		assert.ElementsMatch(t, []int64{202}, byID[900].GetChildFields())
+		assert.ElementsMatch(t, []int64{101}, byID[1001].GetChildFields())
+		assert.ElementsMatch(t, []int64{303}, byID[1002].GetChildFields())
+		assert.Equal(t, int32(1), seg.GetDataVersion())
+	})
+}
