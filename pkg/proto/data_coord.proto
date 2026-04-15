@@ -449,6 +449,15 @@ message SegmentInfo {
   repeated int64 expirQuantiles = 33;
   int32 schema_version = 34;
   int32 data_version = 35;
+  // commit_timestamp is the transaction timestamp for import/CDC segments.
+  // When non-zero, it overrides start_position.Timestamp, dml_position.Timestamp,
+  // and binlog.TimestampFrom/TimestampTo for all temporal decisions (delete
+  // filtering, snapshot visibility, compaction selection, GC).
+  // Zero means normal segment.
+  // Propagated through compaction (max of input segments) because no compaction
+  // type rewrites row timestamps — stale rows always need commit_ts protection
+  // until TTL naturally expires using max(row_ts, commit_ts).
+  uint64 commit_timestamp = 36;
 }
 
 message SegmentStartPosition {
@@ -715,6 +724,11 @@ message CompactionSegmentBinlogs {
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 12;
   bool is_sorted_by_namespace = 13;
+  // commit_timestamp mirrors SegmentInfo.commit_timestamp.
+  // DataNode uses it to protect import/CDC segment rows from premature TTL
+  // expiry during compaction: isEntityExpired uses max(row_ts, commit_ts)
+  // so stale row timestamps never cause rows to be silently dropped.
+  uint64 commit_timestamp = 14;
 }
 
 message CompactionPlan {
@@ -1534,6 +1548,10 @@ message SegmentDescription {
   int64 storage_version = 15; // storage version
   bool is_sorted = 16; // whether the segment is sorted by primary key
   string manifest_path = 17; // StorageV2 manifest file path
+  // commit_timestamp mirrors SegmentInfo.commit_timestamp.
+  // Must be preserved across snapshot/restore so temporal protections
+  // (GC, TTL, MVCC) are not lost on the restored segments.
+  uint64 commit_timestamp = 18;
 }
 
 message CollectionDescription {

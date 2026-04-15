@@ -92,14 +92,14 @@ func mergeSortMultipleSegments(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		segmentReaders[i] = reader
+		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithStorageConfig(compactionParams.StorageConfig))
 		if err != nil {
 			return nil, err
 		}
-		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTTL, currentTime)
+		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTTL, currentTime, s.GetCommitTimestamp())
 	}
 
 	defer func() {

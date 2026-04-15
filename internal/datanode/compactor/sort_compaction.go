@@ -220,7 +220,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	loadDeltaCost := time.Since(phaseStart)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
+	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
@@ -279,6 +279,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	defer rr.Close()
 	initReaderCost := time.Since(phaseStart)
 
+	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	rrs := []storage.RecordReader{rr}
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {

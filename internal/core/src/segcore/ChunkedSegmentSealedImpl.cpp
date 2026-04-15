@@ -1056,8 +1056,13 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                    op_ctx,
                                    is_replace);
             if (field_id == TimestampFieldID) {
-                init_storage_v2_timestamp_index(
-                    column, num_rows, info.warmup_policy);
+                if (commit_ts_ != 0) {
+                    std::vector<Timestamp> ts(num_rows, commit_ts_);
+                    init_storage_v1_timestamp_index(std::move(ts), num_rows);
+                } else {
+                    init_storage_v2_timestamp_index(
+                        column, num_rows, info.warmup_policy);
+                }
             }
         }
 
@@ -1192,6 +1197,9 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
             offset += chunk_ptr->Span().row_count();
         }
 
+        if (commit_ts_ != 0) {
+            std::fill(timestamps.begin(), timestamps.end(), commit_ts_);
+        }
         init_storage_v1_timestamp_index(std::move(timestamps), num_rows);
     } else {
         AssertInfo(system_field_type == SystemFieldType::RowId,
@@ -4444,11 +4452,28 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 }
 
 void
+ChunkedSegmentSealedImpl::SetCommitTimestamp(uint64_t ts) {
+    std::unique_lock lck(mutex_);
+    commit_ts_ = ts;
+}
+
+uint64_t
+ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
+    return commit_ts_;
+}
+
+void
 ChunkedSegmentSealedImpl::SetLoadInfo(
     proto::segcore::SegmentLoadInfo load_info) {
     // reopen_mutex_ serializes with Reopen(pb)/Load/other SetLoadInfo so the
     // published snapshot and use_take_for_output_ bit stay in sync.
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+    auto commit_ts =
+        static_cast<milvus::Timestamp>(load_info.commit_timestamp());
+    {
+        std::unique_lock lck(mutex_);
+        commit_ts_ = commit_ts;
+    }
     auto published =
         std::make_shared<const SegmentLoadInfo>(std::move(load_info), schema_);
     std::atomic_store(&segment_load_info_, published);
@@ -4456,12 +4481,13 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
                                std::memory_order_relaxed);
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
-        "storage_version: {}, use_take_for_output: {}",
+        "storage_version: {}, use_take_for_output: {}, commit_ts: {}",
         id_,
         published->GetNumOfRows(),
         published->GetIndexInfoCount(),
         published->GetStorageVersion(),
-        use_take_for_output_.load(std::memory_order_relaxed));
+        use_take_for_output_.load(std::memory_order_relaxed),
+        commit_ts);
 }
 
 void
@@ -4717,7 +4743,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             op_ctx,
             is_replace);
         if (field_id == TimestampFieldID) {
-            init_storage_v2_timestamp_index(column, load_info->GetNumOfRows());
+            int64_t num_rows = load_info->GetNumOfRows();
+            if (commit_ts_ != 0) {
+                std::vector<Timestamp> ts(num_rows, commit_ts_);
+                init_storage_v1_timestamp_index(std::move(ts), num_rows);
+            } else {
+                init_storage_v2_timestamp_index(column, num_rows);
+            }
         }
     }
 }

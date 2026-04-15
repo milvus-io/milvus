@@ -336,6 +336,9 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
 void
 FreeFlushResult(CFlushResult* result);
 
+CStatus
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);
+
 #ifdef __cplusplus
 }
 #endif

@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -699,5 +700,79 @@ func (s *L0CompactionTaskSuite) TestSelectFlushedSegment_ForceSelectAllFlag() {
 		gotIDs := runSelectWithTriggeredPos()
 		s.ElementsMatch([]int64{200, 201}, gotIDs,
 			"with flag on, resolveLatestDeletePos must lift taskPos so segment 201 is included")
+	})
+}
+
+// TestSelectFlushedSegment_RespectsCommitTimestamp verifies that import segments
+// with a commit_timestamp are excluded from L0 compaction when the trigger
+// position is before the commit_timestamp.
+func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
+	channel := "ch-1"
+
+	// Import segment: start_position.ts=1000, commit_ts=5000.
+	// Its effective timestamp is 5000 (controlled by segmentEffectiveTs).
+	importSeg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              777,
+		CollectionID:    1,
+		PartitionID:     10,
+		InsertChannel:   channel,
+		State:           commonpb.SegmentState_Flushed,
+		Level:           datapb.SegmentLevel_L1,
+		CommitTimestamp: 5000,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+	}}
+
+	// applyFilters applies a SegmentFilter slice to a candidate list,
+	// mirroring what meta.SelectSegments does internally.
+	applyFilters := func(candidates []*SegmentInfo, filters ...SegmentFilter) []*SegmentInfo {
+		var result []*SegmentInfo
+		for _, seg := range candidates {
+			pass := true
+			for _, f := range filters {
+				if !f.Match(seg) {
+					pass = false
+					break
+				}
+			}
+			if pass {
+				result = append(result, seg)
+			}
+		}
+		return result
+	}
+
+	makeTask := func(triggerTs uint64) *l0CompactionTask {
+		mockAlloc := allocator.NewMockAllocator(t)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+				return applyFilters([]*SegmentInfo{importSeg}, filters...)
+			})
+		return newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:       1,
+			TriggerID:    19530,
+			CollectionID: 1,
+			PartitionID:  10,
+			Type:         datapb.CompactionType_Level0DeleteCompaction,
+			Channel:      channel,
+			Pos:          &msgpb.MsgPosition{Timestamp: triggerTs},
+		}, mockAlloc, mockMeta)
+	}
+
+	t.Run("import segment not selected when trigger pos < commit_timestamp", func(t *testing.T) {
+		// triggerTs=3000 < commit_ts=5000 → segment must NOT be selected
+		task := makeTask(3000)
+		selected, _, err := task.selectFlushedSegment()
+		assert.NoError(t, err)
+		assert.Empty(t, selected, "import segment with commit_ts=5000 must not be selected at triggerTs=3000")
+	})
+
+	t.Run("import segment selected when trigger pos > commit_timestamp", func(t *testing.T) {
+		// triggerTs=6000 > commit_ts=5000 → segment must be selected
+		task := makeTask(6000)
+		selected, _, err := task.selectFlushedSegment()
+		assert.NoError(t, err)
+		assert.Len(t, selected, 1, "import segment with commit_ts=5000 must be selected at triggerTs=6000")
+		assert.Equal(t, int64(777), selected[0].GetID())
 	})
 }

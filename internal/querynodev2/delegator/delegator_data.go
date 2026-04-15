@@ -58,6 +58,16 @@ import (
 
 // delegator data related part
 
+// segmentEffectiveTs returns the timestamp for delete-buffer pin/ListAfter.
+// For import segments with commit_timestamp, only deletes from T_commit onwards
+// are applied via the buffer (pre-commit deletes are in the delta log or L0 path).
+func segmentEffectiveTs(info *querypb.SegmentLoadInfo) uint64 {
+	if ts := info.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return info.GetStartPosition().GetTimestamp()
+}
+
 // InsertData
 type InsertData struct {
 	RowIDs       []int64
@@ -559,11 +569,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
 	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
 	for _, info := range req.GetInfos() {
-		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		sd.deleteBuffer.Pin(segmentEffectiveTs(info), info.GetSegmentID())
 	}
 	defer func() {
 		for _, info := range req.GetInfos() {
-			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+			sd.deleteBuffer.Unpin(segmentEffectiveTs(info), info.GetSegmentID())
 		}
 	}()
 
@@ -913,7 +923,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	sd.deleteMut.RLock()
 	snapshots := make([]segDeleteSnapshot, len(infos))
 	for i, info := range infos {
-		records := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		records := sd.deleteBuffer.ListAfter(segmentEffectiveTs(info))
 		// Copy the slice to safely use outside lock scope.
 		// ListAfter returns a new slice from doubleCacheBuffer, but we copy to
 		// ensure no dependency on internal buffer state that may change after unlock.
@@ -976,7 +986,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
 		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
 		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
-		catchUpTs := info.GetStartPosition().GetTimestamp()
+		catchUpTs := segmentEffectiveTs(info)
 		if snapshots[i].snapshotMaxTs > 0 {
 			catchUpTs = snapshots[i].snapshotMaxTs + 1
 		}

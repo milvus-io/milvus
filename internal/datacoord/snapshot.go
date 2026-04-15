@@ -190,6 +190,9 @@ type ManifestEntry struct {
 	StorageVersion int64 `avro:"storage_version"`
 	// IsSorted indicates whether the segment data is sorted by primary key.
 	IsSorted bool `avro:"is_sorted"`
+	// CommitTimestamp mirrors SegmentInfo.commit_timestamp for import/CDC segments.
+	// Preserved so that GC, TTL, and MVCC protections survive snapshot/restore.
+	CommitTimestamp uint64 `avro:"commit_timestamp"`
 }
 
 // AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format.
@@ -863,15 +866,16 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 
 	// Convert ManifestEntry record to protobuf SegmentDescription
 	segment := &datapb.SegmentDescription{
-		SegmentId:      record.SegmentID,
-		PartitionId:    record.PartitionID,
-		SegmentLevel:   datapb.SegmentLevel(record.SegmentLevel),
-		ChannelName:    record.ChannelName,
-		NumOfRows:      record.NumOfRows,
-		StartPosition:  convertAvroToMsgPosition(record.StartPosition),
-		DmlPosition:    convertAvroToMsgPosition(record.DmlPosition),
-		StorageVersion: record.StorageVersion,
-		IsSorted:       record.IsSorted,
+		SegmentId:       record.SegmentID,
+		PartitionId:     record.PartitionID,
+		SegmentLevel:    datapb.SegmentLevel(record.SegmentLevel),
+		ChannelName:     record.ChannelName,
+		NumOfRows:       record.NumOfRows,
+		StartPosition:   convertAvroToMsgPosition(record.StartPosition),
+		DmlPosition:     convertAvroToMsgPosition(record.DmlPosition),
+		StorageVersion:  record.StorageVersion,
+		IsSorted:        record.IsSorted,
+		CommitTimestamp: record.CommitTimestamp,
 	}
 
 	// Convert binlog files (insert data)
@@ -1041,6 +1045,7 @@ func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestE
 		DmlPosition:       convertMsgPositionToAvro(segment.GetDmlPosition()),
 		StorageVersion:    segment.GetStorageVersion(),
 		IsSorted:          segment.GetIsSorted(),
+		CommitTimestamp:   segment.GetCommitTimestamp(),
 	}
 }
 

@@ -1412,6 +1412,22 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
+// Non-zero marks it as committed at that transaction time, overriding
+// start_position.Timestamp for all temporal decisions.
+func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update commit timestamp failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.CommitTimestamp = ts
+		return true
+	}
+}
+
 // UpdateImportSegmentPosition updates the segment's StartPosition and DmlPosition
 // for import segments using actual timestamps from the imported data.
 // Unlike UpdateStartPosition/UpdateDmlPosition, this operator allows nil MsgID
@@ -1913,6 +1929,20 @@ func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, f
 	return fallbackStart, fallbackDml
 }
 
+// normalizePositionTimestamp updates a position's timestamp to commitTs if
+// commitTs is non-zero and larger. Used during compaction completion to
+// normalize import segment positions after row timestamps are rewritten.
+func normalizePositionTimestamp(pos *msgpb.MsgPosition, commitTs uint64) *msgpb.MsgPosition {
+	if commitTs == 0 || pos == nil || pos.Timestamp >= commitTs {
+		return pos
+	}
+	return &msgpb.MsgPosition{
+		ChannelName: pos.ChannelName,
+		MsgID:       pos.MsgID,
+		Timestamp:   commitTs,
+	}
+}
+
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
@@ -1948,13 +1978,23 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
 	}
 
-	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	// Compaction normalizes import segments: row timestamps in the output
+	// binlogs are already rewritten to commit_ts by the compactor, so
+	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
+	// The fallback positions are also normalized to commit_ts for safety
+	// when binlog timestamps are unavailable.
+	maxCommitTs := uint64(0)
+	for _, seg := range compactFromSegInfos {
+		if ts := seg.GetCommitTimestamp(); ts > maxCommitTs {
+			maxCommitTs = ts
+		}
+	}
+	fallbackStart := normalizePositionTimestamp(getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
-	}))
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	})), maxCommitTs)
+	fallbackDml := normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
-	}))
+	})), maxCommitTs)
 
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
@@ -1975,11 +2015,12 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
 			// visible after stats and index
-			IsInvisible:    true,
-			StorageVersion: seg.GetStorageVersion(),
-			ManifestPath:   seg.GetManifest(),
-			ExpirQuantiles: seg.GetExpirQuantiles(),
-			SchemaVersion:  compactFromSegInfos[0].GetSchemaVersion(),
+			IsInvisible:     true,
+			StorageVersion:  seg.GetStorageVersion(),
+			ManifestPath:    seg.GetManifest(),
+			ExpirQuantiles:  seg.GetExpirQuantiles(),
+			SchemaVersion:   compactFromSegInfos[0].GetSchemaVersion(),
+			CommitTimestamp: 0, // Normalized: row timestamps already rewritten
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -2060,13 +2101,23 @@ func (m *meta) completeMixCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
-	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	// Compaction normalizes import segments: row timestamps in the output
+	// binlogs are already rewritten to commit_ts by the compactor, so
+	// recalculateSegmentPosition will pick up commit_ts from output binlogs.
+	// The fallback positions are also normalized to commit_ts for safety
+	// when binlog timestamps are unavailable.
+	maxCommitTs := uint64(0)
+	for _, seg := range compactFromSegInfos {
+		if ts := seg.GetCommitTimestamp(); ts > maxCommitTs {
+			maxCommitTs = ts
+		}
+	}
+	fallbackStart := normalizePositionTimestamp(getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
-	}))
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	})), maxCommitTs)
+	fallbackDml := normalizePositionTimestamp(getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
-	}))
+	})), maxCommitTs)
 
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
@@ -2098,6 +2149,7 @@ func (m *meta) completeMixCompactionMutation(
 				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
 				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
 				SchemaVersion:       compactFromSegInfos[0].GetSchemaVersion(),
+				CommitTimestamp:     0, // Normalized: row timestamps already rewritten
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2731,8 +2783,14 @@ func (m *meta) completeSortCompactionMutation(
 
 	resultSegment := result.GetSegments()[0]
 
+	// Compaction normalizes import segments: row timestamps in the output
+	// binlogs are already rewritten to commit_ts by the compactor, so
+	// recalculateSegmentPosition picks up commit_ts from output binlogs.
+	// The fallback is also normalized to commit_ts for safety.
+	commitTs := oldSegment.GetCommitTimestamp()
 	startPos, dmlPos := recalculateSegmentPosition(resultSegment.GetInsertLogs(), oldSegment.GetInsertChannel(),
-		oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
+		normalizePositionTimestamp(oldSegment.GetStartPosition(), commitTs),
+		normalizePositionTimestamp(oldSegment.GetDmlPosition(), commitTs))
 
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:              oldSegment.GetCollectionID(),
@@ -2764,6 +2822,7 @@ func (m *meta) completeSortCompactionMutation(
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
 		SchemaVersion:             oldSegment.GetSchemaVersion(),
+		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -3031,7 +3090,7 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	}
 
 	for _, segment := range segments {
-		if segment.GetDmlPosition().GetTimestamp() <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+		if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
 			cloned := segment.Clone()
 			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
 			segmentsToDrop = append(segmentsToDrop, cloned)
