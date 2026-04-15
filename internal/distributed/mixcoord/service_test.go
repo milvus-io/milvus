@@ -817,4 +817,17 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(resp.GetJobs()))
 	})
+
+	t.Run("UpdateSegmentColumnGroups", func(t *testing.T) {
+		req := &datapb.UpdateSegmentColumnGroupsRequest{
+			SegmentId: 42,
+			ColumnGroups: map[int64]*datapb.FieldBinlog{
+				1000: {FieldID: 1000, ChildFields: []int64{101}},
+			},
+		}
+		mockMixCoord.EXPECT().UpdateSegmentColumnGroups(mock.Anything, req).Return(merr.Success(), nil)
+		resp, err := server.UpdateSegmentColumnGroups(ctx, req)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+	})
 }

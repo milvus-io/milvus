@@ -165,6 +165,10 @@ func (m *mockMixCoord) GetGcStatus(context.Context) (*datapb.GetGcStatusResponse
 	return &datapb.GetGcStatusResponse{}, nil
 }
 
+func (m *mockMixCoord) UpdateSegmentColumnGroups(context.Context, *datapb.UpdateSegmentColumnGroupsRequest) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{
 		Status:           merr.Success(),
