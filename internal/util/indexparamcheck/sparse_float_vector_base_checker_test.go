@@ -31,6 +31,43 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidParams)
 		assert.Error(t, err)
 	})
+
+	t.Run("valid inverted_index_algo", func(t *testing.T) {
+		for _, algo := range SparseInvertedIndexAlgos {
+			params := map[string]string{
+				common.IndexTypeKey:   "SPARSE_INVERTED_INDEX",
+				Metric:                "IP",
+				SparseInvertedIndexAlgo: algo,
+			}
+			err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+			assert.NoError(t, err, "algo %s should be valid", algo)
+		}
+	})
+
+	t.Run("invalid inverted_index_algo", func(t *testing.T) {
+		for _, algo := range []string{"INVALID_ALGO", "", "taat_naive", "DAAT_WAND_EXTRA"} {
+			params := map[string]string{
+				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+				Metric:                  "IP",
+				SparseInvertedIndexAlgo: algo,
+			}
+			err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+			assert.Error(t, err, "algo %q should be rejected", algo)
+			assert.Contains(t, err.Error(), "not found or not supported", "algo %q should produce a descriptive error", algo)
+		}
+	})
+
+	t.Run("invalid inverted_index_algo for SPARSE_WAND", func(t *testing.T) {
+		cWand, _ := GetIndexCheckerMgrInstance().GetChecker("SPARSE_WAND")
+		params := map[string]string{
+			common.IndexTypeKey:     "SPARSE_WAND",
+			Metric:                  "IP",
+			SparseInvertedIndexAlgo: "INVALID_ALGO",
+		}
+		err := cWand.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sparse inverted index algo INVALID_ALGO not found or not supported")
+	})
 }
 
 func Test_sparseFloatVectorBaseChecker_CheckTrain(t *testing.T) {
@@ -80,6 +117,17 @@ func Test_sparseFloatVectorBaseChecker_CheckTrain(t *testing.T) {
 	t.Run("invalid BM25B", func(t *testing.T) {
 		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidBM25B)
 		assert.Error(t, err)
+	})
+
+	t.Run("invalid inverted_index_algo propagates through CheckTrain", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+			Metric:                  "IP",
+			SparseInvertedIndexAlgo: "INVALID_ALGO",
+		}
+		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sparse inverted index algo INVALID_ALGO not found or not supported")
 	})
 }
 
