@@ -256,6 +256,23 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
     }
 
+    // Two FieldBinlogs at the same group id are equivalent only when their
+    // underlying log files (log_path sequence) match. Compaction/version
+    // bumps can swap files under the same fieldid, and without detecting
+    // that here the loader never evicts the stale column cache.
+    auto same_binlog_files = [](const proto::segcore::FieldBinlog& a,
+                                const proto::segcore::FieldBinlog& b) -> bool {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     std::map<int64_t, int64_t> new_binlog_fields;
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
@@ -268,20 +285,33 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         if (child_fields.empty()) {
             child_fields.emplace_back(new_field_binlog.fieldid());
         }
+
+        auto* cur_field_binlog =
+            GetFieldBinlog(FieldId(new_field_binlog.fieldid()));
+        bool group_files_changed =
+            cur_field_binlog != nullptr &&
+            !same_binlog_files(*cur_field_binlog, new_field_binlog);
+
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             auto iter = current_fields.find(new_field_binlog.fieldid());
-            // Find binlogs to load/replace: fields in new_info not matching current
-            if (iter == current_fields.end() ||
-                iter->second != new_field_binlog.fieldid()) {
-                // Check if this child field already exists in current
-                // (either from binlogs or from default value filling)
-                if (current_fields.find(child_id) != current_fields.end() ||
-                    fields_filled_with_default_.count(FieldId(child_id)) > 0) {
-                    ids_to_replace.emplace_back(child_id);
-                } else {
-                    ids_to_load.emplace_back(child_id);
-                }
+            // A binlog entry needs (re)loading when either
+            //   (a) the group mapping differs between current and new, or
+            //   (b) the group maps the same way but the underlying log
+            //       files changed (e.g. compaction rewrote the segment).
+            bool group_mapping_differs =
+                iter == current_fields.end() ||
+                iter->second != new_field_binlog.fieldid();
+            if (!group_mapping_differs && !group_files_changed) {
+                continue;
+            }
+            // Pre-existing children go to replace (to evict stale cached
+            // columns); genuinely new children go to load.
+            if (current_fields.find(child_id) != current_fields.end() ||
+                fields_filled_with_default_.count(FieldId(child_id)) > 0) {
+                ids_to_replace.emplace_back(child_id);
+            } else {
+                ids_to_load.emplace_back(child_id);
             }
         }
         if (!ids_to_load.empty()) {
@@ -320,6 +350,35 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         }
     }
 
+    // Per-index flag: set when the column group at index i has the same
+    // shape but a different underlying file list between current and new.
+    // Post-compaction manifests frequently keep the column-group layout
+    // identical while pointing at different parquet files; without this
+    // detection the field falls into the else branch below and the
+    // loader never rebuilds the reader.
+    std::vector<bool> group_files_changed(new_column_group->size(), false);
+    size_t shared_cg_count =
+        std::min(cur_column_group->size(), new_column_group->size());
+    for (size_t i = 0; i < shared_cg_count; i++) {
+        const auto& cur_cg = cur_column_group->at(i);
+        const auto& new_cg = new_column_group->at(i);
+        if (!cur_cg || !new_cg) {
+            continue;
+        }
+        const auto& cur_files = cur_cg->files;
+        const auto& new_files = new_cg->files;
+        if (cur_files.size() != new_files.size()) {
+            group_files_changed[i] = true;
+            continue;
+        }
+        for (size_t j = 0; j < cur_files.size(); j++) {
+            if (cur_files[j].path != new_files[j].path) {
+                group_files_changed[i] = true;
+                break;
+            }
+        }
+    }
+
     // Build a set of new FieldIds and find column groups to load/replace
     std::map<int64_t, int> new_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
@@ -337,9 +396,13 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 fields_filled_with_default_.count(FieldId(field_id)) > 0;
             bool is_new_field =
                 iter == cur_field_ids.end() && !was_default_filled;
+            bool same_position_files_changed = iter != cur_field_ids.end() &&
+                                               iter->second == i &&
+                                               group_files_changed[i];
             bool is_replace_field =
                 was_default_filled ||
-                (iter != cur_field_ids.end() && iter->second != i);
+                (iter != cur_field_ids.end() && iter->second != i) ||
+                same_position_files_changed;
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
