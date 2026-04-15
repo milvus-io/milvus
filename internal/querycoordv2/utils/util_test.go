@@ -334,6 +334,77 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_ManifestComparison() {
 	})
 }
 
+func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
+	basePath := "/data/insert_log/col/part/seg"
+	collectionID := int64(100)
+	segmentID := int64(200)
+	nodeID := int64(1)
+	// Use matching manifest in dist and target so DataVersion is the only gate.
+	manifest := packed.MarshalManifestPath(basePath, 5)
+
+	newDistManager := func(distDataVersion *int32) *meta.DistributionManager {
+		dm := meta.NewDistributionManager(session.NewNodeManager())
+		dm.SegmentDistManager.Update(nodeID, &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           segmentID,
+				CollectionID: collectionID,
+			},
+			Node:         nodeID,
+			ManifestPath: manifest,
+			DataVersion:  distDataVersion,
+		})
+		return dm
+	}
+
+	newTargetMgr := func(targetDataVersion int32) meta.TargetManagerInterface {
+		m := meta.NewMockTargetManager(suite.T())
+		m.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, mock.Anything).
+			Return(map[int64]*datapb.SegmentInfo{
+				segmentID: {
+					ID:           segmentID,
+					CollectionID: collectionID,
+					ManifestPath: manifest,
+					DataVersion:  targetDataVersion,
+				},
+			}).Maybe()
+		return m
+	}
+
+	int32Ptr := func(v int32) *int32 { return &v }
+
+	suite.Run("dist data version older than target - not ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(int32Ptr(1)), newTargetMgr(5), meta.NextTarget)
+		suite.Error(err)
+	})
+
+	suite.Run("dist data version equals target - ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(int32Ptr(5)), newTargetMgr(5), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("dist data version newer than target - ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(int32Ptr(10)), newTargetMgr(5), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	// mixed-version rollout: an old QueryNode does not report DataVersion,
+	// so the dist-side pointer is nil. Skip the check rather than loop Reopen forever.
+	suite.Run("dist data version nil (old QueryNode) - ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(nil), newTargetMgr(5), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("dist data version nil and target zero - ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(nil), newTargetMgr(0), meta.NextTarget)
+		suite.NoError(err)
+	})
+}
+
 func TestUtilSuite(t *testing.T) {
 	suite.Run(t, new(UtilTestSuite))
 }
