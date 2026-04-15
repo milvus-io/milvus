@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -837,4 +838,53 @@ func TestFallbackParam(t *testing.T) {
 	params.Save("common.chanNamePrefix.cluster", "foo")
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+}
+
+func TestQueryCoordForceLoadPriority(t *testing.T) {
+	Init()
+	params := Get()
+
+	t.Run("test_default_value", func(t *testing.T) {
+		// Default value should be empty string
+		assert.Equal(t, "", params.QueryCoordCfg.ForceLoadPriority.GetValue())
+	})
+
+	t.Run("test_dynamic_update", func(t *testing.T) {
+		key := params.QueryCoordCfg.ForceLoadPriority.Key
+
+		// Update to LOW
+		params.Save(key, "LOW")
+		assert.Equal(t, "LOW", params.QueryCoordCfg.ForceLoadPriority.GetValue())
+
+		// Update to HIGH
+		params.Save(key, "HIGH")
+		assert.Equal(t, "HIGH", params.QueryCoordCfg.ForceLoadPriority.GetValue())
+
+		// Reset to empty
+		params.Reset(key)
+		assert.Equal(t, "", params.QueryCoordCfg.ForceLoadPriority.GetValue())
+	})
+
+	t.Run("test_normalization_compatibility", func(t *testing.T) {
+		// This simulates how executor.go handles the value
+		key := params.QueryCoordCfg.ForceLoadPriority.Key
+
+		testCases := []struct {
+			input    string
+			expected string
+		}{
+			{"high", "HIGH"},
+			{"  low  ", "LOW"},
+			{"HiGh", "HIGH"},
+			{"", ""},
+		}
+
+		for _, tc := range testCases {
+			params.Save(key, tc.input)
+			rawVal := params.QueryCoordCfg.ForceLoadPriority.GetValue()
+			// Use the same logic as in executor.go
+			standardized := strings.ToUpper(strings.TrimSpace(rawVal))
+			assert.Equal(t, tc.expected, standardized)
+		}
+	})
 }
