@@ -329,6 +329,125 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRawData() {
+	ctx := context.Background()
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	msgLength := 100
+	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("true")
+	defer paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			msgLength,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		vecFields := funcutil.GetVecFieldIDs(suite.schema)
+		indexInfo, err := mock_segcore.GenAndSaveIndex(
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			vecFields[0],
+			msgLength,
+			mock_segcore.IndexFaissIVFFlat,
+			metric.L2,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	suite.NoError(err)
+
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
+	for _, segment := range segments {
+		suite.True(segment.ExistIndex(vecFields[0]))
+		suite.True(segment.HasRawData(vecFields[0]))
+
+		localSegment, ok := segment.(*LocalSegment)
+		suite.True(ok)
+		suite.True(localSegment.HasFieldData(vecFields[0]))
+	}
+}
+
+// Negative counterpart: with the flag off (default) and the index already
+// holding raw data, the loader must skip loading the field data — otherwise
+// the memory-saving behavior relied on by existing deployments is broken.
+func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
+	ctx := context.Background()
+	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
+
+	msgLength := 100
+	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("false")
+	defer paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+
+	for i := 0; i < suite.segmentNum; i++ {
+		segmentID := suite.segmentID + int64(i)
+		binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			msgLength,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+
+		vecFields := funcutil.GetVecFieldIDs(suite.schema)
+		indexInfo, err := mock_segcore.GenAndSaveIndex(
+			suite.collectionID,
+			suite.partitionID,
+			segmentID,
+			vecFields[0],
+			msgLength,
+			mock_segcore.IndexFaissIVFFlat,
+			metric.L2,
+			suite.chunkManager,
+		)
+		suite.NoError(err)
+		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
+	suite.NoError(err)
+
+	vecFields := funcutil.GetVecFieldIDs(suite.schema)
+	for _, segment := range segments {
+		suite.True(segment.ExistIndex(vecFields[0]))
+		suite.True(segment.HasRawData(vecFields[0]))
+
+		localSegment, ok := segment.(*LocalSegment)
+		suite.True(ok)
+		suite.False(localSegment.HasFieldData(vecFields[0]))
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)

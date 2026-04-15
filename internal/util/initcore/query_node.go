@@ -84,6 +84,13 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		log.Warn("visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
 	}
 
+	preferFieldDataWhenIndexHasRawData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+	C.SegcoreSetPreferFieldDataWhenIndexHasRawData(C.bool(preferFieldDataWhenIndexHasRawData))
+	if preferFieldDataWhenIndexHasRawData {
+		log.Ctx(ctx).Info("preferFieldDataWhenIndexHasRawData=true: sealed retrieve will read field data instead of index raw data; " +
+			"both will stay resident in memory, increasing the memory footprint for fields whose index also holds raw data")
+	}
+
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
