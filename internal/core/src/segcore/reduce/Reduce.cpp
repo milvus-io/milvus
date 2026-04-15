@@ -236,9 +236,7 @@ ReduceHelper::RefreshSearchResults() {
     for (int i = 0; i < num_segments_; i++) {
         std::vector<int64_t> real_topks(total_nq_, 0);
         auto search_result = search_results_[i];
-        if (search_result->result_offsets_.size() != 0) {
-            RefreshSingleSearchResult(search_result, i, real_topks);
-        }
+        RefreshSingleSearchResult(search_result, i, real_topks);
         std::partial_sum(real_topks.begin(),
                          real_topks.end(),
                          search_result->topk_per_nq_prefix_sum_.begin() + 1);
