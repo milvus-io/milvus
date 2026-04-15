@@ -1972,6 +1972,9 @@ func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.Re
 	// check if grant can be restored
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if util.IsAnyWord(privName) {
+			continue
+		}
 		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
 			return errors.Newf("privilege [%s] does not exist", privName)
 		}
