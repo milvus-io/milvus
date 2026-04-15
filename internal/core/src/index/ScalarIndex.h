@@ -231,14 +231,20 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
 
-    // V3 streaming upload - subclasses must implement WriteEntries() instead
+    // Packed single-file streaming upload — subclasses must implement
+    // WriteEntries() instead. The current on-disk file format is V3
+    // (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h, and the ".v3"
+    // filename suffix produced by the implementation); the method name is
+    // kept format-agnostic so future format versions can reuse this entry
+    // point and dispatch by reading the file header.
     IndexStatsPtr
-    UploadV3(const Config& config) override;
+    UploadUnified(const Config& config) override;
 
-    // V3 streaming load - loads index from a packed V3 format file
-    // Opens the file and calls LoadEntries() for subclass-specific loading
+    // Packed single-file streaming load — opens the file and calls
+    // LoadEntries() for subclass-specific loading. Currently handles the V3
+    // file format (see UploadUnified above for naming rationale).
     void
-    LoadV3(const Config& config) override;
+    LoadUnified(const Config& config) override;
 
     virtual void
     WriteEntries(storage::IndexEntryWriter* writer) {

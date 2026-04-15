@@ -60,7 +60,7 @@ test_stlsort_for_range(
             CreateScalarSortTestFileManagerContext());
         index->Build(nb, data.data());
 
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         index_files = create_index_result->GetIndexFiles();
     }
     {
@@ -72,7 +72,7 @@ test_stlsort_for_range(
 
         auto index = std::make_shared<index::ScalarIndexSort<int64_t>>(
             CreateScalarSortTestFileManagerContext());
-        index->LoadV3(config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
