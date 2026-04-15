@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
+	"github.com/milvus-io/milvus/internal/querycoordv2/resourcelimit"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -72,6 +73,7 @@ func NewReleaseCollectionJob(ctx context.Context,
 func (job *ReleaseCollectionJob) Execute() error {
 	collectionID := job.result.Message.Header().GetCollectionId()
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", collectionID))
+	resourcelimit.Clear(collectionID)
 
 	if !job.meta.CollectionManager.Exist(job.ctx, collectionID) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
