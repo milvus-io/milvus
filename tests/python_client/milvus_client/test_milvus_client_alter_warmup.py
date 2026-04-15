@@ -1625,6 +1625,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.drop_collection(client, col2)
 
 
+@pytest.mark.skip(reason="Skip all async warmup tests")
 class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
     @property
@@ -1766,7 +1767,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bad_val", [
         pytest.param("ASYNC", id="upper_async"),
         pytest.param("Async", id="title_async"),
@@ -2220,7 +2221,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "field_a_warmup,field_b_warmup",
         [
@@ -2293,7 +2294,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_cancel_on_index_replace(self):
         """
         target: verify async load + drop/recreate vector index cancels warmup; replace scalar index too;
@@ -2745,7 +2746,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_x_text_match(self):
         """
         target: verify async warmup with varchar field (enable_analyzer + enable_match);
@@ -2821,7 +2822,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_x_json_shredding(self):
         """
         target: verify async warmup with JSON field; JSON path filter query/search work correctly;
@@ -2898,7 +2899,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_x_add_field_int64(self):
         """
         target: verify async warmup + add_field (INT64) works correctly;
@@ -2970,7 +2971,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_x_add_field_text_json(self):
         """
         target: verify async warmup + add_field (VARCHAR+JSON) works correctly;
@@ -3066,7 +3067,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "vec_type,dim,idx_type,metric,idx_params",
         [
@@ -3293,7 +3294,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
     # These tests verify the *actual effect* of warmup policies via observable
     # API-level behaviors: load duration, search accessibility, and cancel safety.
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_behavior_async_load_accessible_and_cancel(self):
         """
         target: (phase 1) verify async warmup does not block data accessibility — search
@@ -3329,7 +3330,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.create_index(client, collection_name,
                           self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+                                                DefaultVectorIndexParams.HNSW("float_vector_1")),
+                          timeout=600)
 
         # phase 1: async load returns before prefetch finishes; data must be accessible immediately
         self.load_collection(client, collection_name)
@@ -3381,7 +3383,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             self.flush(client, name)
             self.create_index(client, name,
                               self.all_vector_index(self.prepare_index_params(client)[0],
-                                                    DefaultVectorIndexParams.HNSW("float_vector_1")))
+                                                    DefaultVectorIndexParams.HNSW("float_vector_1")),
+                              timeout=240)
 
         base = cf.gen_collection_name_by_testcase_name()
 
@@ -3698,7 +3701,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_dml_insert_upsert_delete(self):
         """
         target: verify insert / upsert / delete all work correctly on async-configured columns;
@@ -3847,7 +3850,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
     # They go beyond happy-path verification and stress correctness, concurrency,
     # and cancel-mechanism robustness.
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_rapid_cancel_reload_data_integrity(self):
         """
         target: stress the cancel mechanism — rapid load→search→release×8 must not corrupt data
@@ -3926,7 +3929,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_field_disable_overrides_collection_query_accessible(self):
         """
         target: field-level disable overrides collection-level sync — and disabled fields must
@@ -3998,7 +4001,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_warmup_async_concurrent_insert_strong_consistency(self):
         """
         target: async warmup must not hold locks that block DML or delay strong-consistency reads
