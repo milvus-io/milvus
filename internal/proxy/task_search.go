@@ -734,7 +734,16 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
-	t.needRequery = len(vectorOutputFields) > 0
+	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
+	case "always":
+		t.needRequery = true
+	case "outputfields":
+		t.needRequery = len(t.request.GetOutputFields()) > 0
+	case "outputvector":
+		fallthrough
+	default:
+		t.needRequery = len(vectorOutputFields) > 0
+	}
 	if t.needRequery {
 		plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
 	} else {
