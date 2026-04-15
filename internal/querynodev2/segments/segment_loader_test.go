@@ -35,10 +35,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -557,30 +559,26 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	suite.Require().Len(segs, 1)
 	segment := segs[0]
 
-	// Patch readers to observe which branch is exercised.
-	legacyReaderCalled := atomic.NewInt32(0)
-	manifestReaderCalled := atomic.NewInt32(0)
+	readerCalled := atomic.NewInt32(0)
+	manifestCalled := atomic.NewInt32(0)
 
-	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
-			legacyReaderCalled.Inc()
-			return nil, errors.Newf("V1 path-based delta reader should not be called for V3 segments; paths=%v", paths)
-		},
-	).Build()
-	defer patchLegacy.UnPatch()
-
-	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
-		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
-			manifestReaderCalled.Inc()
-			// io.EOF indicates "no deltalogs in manifest" and is handled gracefully by loadDeltalogs.
-			return nil, io.EOF
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			manifestCalled.Inc()
+			// Return empty paths — no delta data in manifest.
+			return nil, nil
 		},
 	).Build()
 	defer patchManifest.UnPatch()
 
-	// Build V3 loadInfo: ManifestPath set, Deltalogs contains a pathless placeholder
-	// (LogID/EntriesNum/MemorySize only — no LogPath). Without the fix, the V1
-	// loop would try to MultiRead an empty path and fail.
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			readerCalled.Inc()
+			return nil, errors.New("should not be called when manifest has no delta paths")
+		},
+	).Build()
+	defer patchReader.UnPatch()
+
 	v3LoadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    suite.segmentID,
 		PartitionID:  suite.partitionID,
@@ -600,10 +598,10 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	loader := suite.loader.(*segmentLoader)
 	err = loader.loadDeltalogs(ctx, segment, v3LoadInfo)
 	suite.NoError(err)
-	suite.EqualValues(0, legacyReaderCalled.Load(),
-		"V1 path-based delta reader must be skipped for V3 segments")
-	suite.EqualValues(1, manifestReaderCalled.Load(),
-		"manifest-based delta reader must be invoked once for V3 segments")
+	suite.EqualValues(1, manifestCalled.Load(),
+		"GetDeltaLogPathsFromManifest must be called for V3 segments")
+	suite.EqualValues(0, readerCalled.Load(),
+		"NewDeltalogReader must not be called when manifest returns no paths")
 }
 
 // TestLoadDeltaLogsV1StillUsesPathRead ensures the skip logic does not break
@@ -643,25 +641,24 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	suite.Require().Len(segs, 1)
 	segment := segs[0]
 
-	legacyReaderCalled := atomic.NewInt32(0)
-	manifestReaderCalled := atomic.NewInt32(0)
+	readerCalled := atomic.NewInt32(0)
+	manifestCalled := atomic.NewInt32(0)
 
-	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
-			legacyReaderCalled.Inc()
-			// Return an empty reader via EOF so the test finishes quickly; we only care that this was invoked.
-			return nil, io.EOF
-		},
-	).Build()
-	defer patchLegacy.UnPatch()
-
-	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
-		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
-			manifestReaderCalled.Inc()
-			return nil, io.EOF
+	patchManifest := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+		func(manifestPath string, storageConfig *indexpb.StorageConfig) ([]string, error) {
+			manifestCalled.Inc()
+			return nil, nil
 		},
 	).Build()
 	defer patchManifest.UnPatch()
+
+	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			readerCalled.Inc()
+			return nil, io.EOF
+		},
+	).Build()
+	defer patchReader.UnPatch()
 
 	v1LoadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:     suite.segmentID,
@@ -674,13 +671,11 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	}
 
 	loader := suite.loader.(*segmentLoader)
-	// NewDeltalogReader returns io.EOF which bubbles up as an error in the V1 branch;
-	// we only need to assert the branch was taken, not that the reader succeeded.
 	_ = loader.loadDeltalogs(ctx, segment, v1LoadInfo)
-	suite.Greater(legacyReaderCalled.Load(), int32(0),
-		"V1 path-based delta reader must be invoked for non-V3 segments")
-	suite.EqualValues(0, manifestReaderCalled.Load(),
-		"manifest-based delta reader must not be invoked when ManifestPath is empty")
+	suite.Greater(readerCalled.Load(), int32(0),
+		"NewDeltalogReader must be invoked for V1 segments")
+	suite.EqualValues(0, manifestCalled.Load(),
+		"GetDeltaLogPathsFromManifest must not be called when ManifestPath is empty")
 }
 
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
