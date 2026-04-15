@@ -2915,6 +2915,59 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.Equal(t, "CreateCollection", privGroups[0].Privileges[0].Name)
 }
 
+func TestRBAC_Restore_Wildcard(t *testing.T) {
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := "/test/rbac/wildcard"
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(context.TODO(), "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV, nil)
+
+	ctx := context.Background()
+
+	wildcardGrant := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "wildcard_role"},
+		Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+		ObjectName: util.AnyWord,
+		DbName:     util.AnyWord,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: util.UserRoot},
+			Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord},
+		},
+	}
+
+	require.NoError(t, c.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: "wildcard_role"}))
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, wildcardGrant, milvuspb.OperatePrivilegeType_Grant))
+	expectedIDKeys, _, err := metaKV.LoadWithPrefix(ctx, GranteeIDPrefix)
+	require.NoError(t, err)
+	require.Len(t, expectedIDKeys, 1)
+	require.True(t, strings.HasSuffix(expectedIDKeys[0], "/"+util.AnyWord),
+		"OperatePrivilege baseline should store wildcard as '/*', got %q", expectedIDKeys[0])
+
+	require.NoError(t, metaKV.RemoveWithPrefix(ctx, ""))
+
+	rbacMeta := &milvuspb.RBACMeta{
+		Roles:  []*milvuspb.RoleEntity{{Name: "wildcard_role"}},
+		Grants: []*milvuspb.GrantEntity{wildcardGrant},
+	}
+	require.NoError(t, c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta))
+
+	restoredIDKeys, _, err := metaKV.LoadWithPrefix(ctx, GranteeIDPrefix)
+	require.NoError(t, err)
+	require.Len(t, restoredIDKeys, 1)
+	assert.True(t, strings.HasSuffix(restoredIDKeys[0], "/"+util.AnyWord),
+		"RestoreRBAC must persist wildcard as '/*', got %q", restoredIDKeys[0])
+	assert.False(t, strings.Contains(restoredIDKeys[0], util.PrivilegeGroupWord+util.AnyWord),
+		"RestoreRBAC must not encode wildcard as 'PrivilegeGroup*', got %q", restoredIDKeys[0])
+}
+
 func TestRBAC_PrivilegeGroup(t *testing.T) {
 	ctx := context.TODO()
 	group1 := "group1"
