@@ -147,6 +147,7 @@ message SearchRequest {
   // When 2, delegator can skip plan unmarshal for segment filter optimization.
   int32 pk_filter = 32;
   SearchType search_type = 33;
+  repeated int64 group_by_field_ids = 34;
 }
 
 message SubSearchResults {

@@ -194,17 +194,20 @@ func TestFieldDataLen(t *testing.T) {
 // --- helper ---
 
 func makeSearchResultsForTrace(topks []int64, ids []int64, gbv *schemapb.FieldData) *milvuspb.SearchResults {
-	return &milvuspb.SearchResults{
-		Results: &schemapb.SearchResultData{
-			Topks: topks,
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{Data: ids},
-				},
+	results := &schemapb.SearchResultData{
+		Topks: topks,
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: ids},
 			},
-			GroupByFieldValue: gbv,
 		},
 	}
+	// Pipeline ops read from the plural channel; the task-output boundary
+	// downgrades to singular for legacy-wire clients after these ops run.
+	if gbv != nil {
+		results.GroupByFieldValues = []*schemapb.FieldData{gbv}
+	}
+	return &milvuspb.SearchResults{Results: results}
 }
 
 // --- TraceMsg: searchReduceOp ---

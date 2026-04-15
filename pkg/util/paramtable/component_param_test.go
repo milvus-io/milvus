@@ -259,6 +259,11 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
 		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
+		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
+		params.Save(Params.MaxSearchAggregationResultEntries.Key, "1024")
+		assert.Equal(t, int64(1024), Params.MaxSearchAggregationResultEntries.GetAsInt64())
+		params.Reset(Params.MaxSearchAggregationResultEntries.Key)
+		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
