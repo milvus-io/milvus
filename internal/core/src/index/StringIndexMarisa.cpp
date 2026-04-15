@@ -117,7 +117,7 @@ StringIndexMarisa::CalculateTotalSize() const {
 
 bool
 valid_str_id(size_t str_id) {
-    return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
+    return str_id != MARISA_NULL_KEY_ID && str_id != MARISA_INVALID_KEY_ID;
 }
 
 void
