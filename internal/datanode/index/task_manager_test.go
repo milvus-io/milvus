@@ -156,3 +156,29 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 	cloned := info.Clone()
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 }
+
+func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
+	buildID := int64(200)
+	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
+
+	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 111, 4)
+	s.manager.StoreIndexTaskExecutionEnd(s.cluster, buildID, 222, 111)
+
+	info := s.manager.GetIndexTaskInfo(s.cluster, buildID)
+	s.Require().NotNil(info)
+	s.Equal(int64(111), info.ExecStartMs)
+	s.Equal(int64(222), info.ExecEndMs)
+	s.Equal(int64(111), info.CostTimeMs)
+	s.Equal(int64(4), info.CostCPUNum)
+
+	info.CostCPUNum = 999
+	reloaded := s.manager.GetIndexTaskInfo(s.cluster, buildID)
+	s.Equal(int64(4), reloaded.CostCPUNum)
+
+	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 333, 8)
+	reloaded = s.manager.GetIndexTaskInfo(s.cluster, buildID)
+	s.Equal(int64(333), reloaded.ExecStartMs)
+	s.Equal(int64(8), reloaded.CostCPUNum)
+	s.Equal(int64(0), reloaded.ExecEndMs)
+	s.Equal(int64(0), reloaded.CostTimeMs)
+}
