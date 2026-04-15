@@ -382,7 +382,7 @@ func TestQueryTask_all(t *testing.T) {
 			}
 			if groupByField != "" {
 				queryParams = append(queryParams, &commonpb.KeyValuePair{
-					Key:   QueryGroupByFieldsKey,
+					Key:   GroupByFieldsKey,
 					Value: groupByField,
 				})
 			}

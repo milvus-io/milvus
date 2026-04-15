@@ -430,6 +430,43 @@ func (s *ConverterSuite) TestFromSearchResultData_GroupByFieldValue_VarChar() {
 	s.Equal("electronics", chunk.Value(2))
 }
 
+func (s *ConverterSuite) TestFromSearchResultData_PluralGroupByFieldValuesEmptyNamesUseFieldIDs() {
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{0.9, 0.8},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+			},
+		},
+		GroupByFieldValues: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_VarChar,
+				FieldId: 200,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A", "B"}}},
+				}},
+			},
+			{
+				Type:    schemapb.DataType_VarChar,
+				FieldId: 201,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"X", "Y"}}},
+				}},
+			},
+		},
+	}
+
+	df, err := FromSearchResultData(resultData, s.pool, nil)
+	s.Require().NoError(err)
+	defer df.Release()
+
+	s.True(df.HasColumn("$group_by_200"))
+	s.True(df.HasColumn("$group_by_201"))
+}
+
 func (s *ConverterSuite) TestGroupByFieldValue_RoundTrip() {
 	resultData := &schemapb.SearchResultData{
 		NumQueries: 2,
@@ -479,11 +516,13 @@ func (s *ConverterSuite) TestGroupByFieldValue_RoundTrip() {
 	})
 	s.Require().NoError(err)
 
-	// Verify GroupByFieldValue is set correctly
-	s.Require().NotNil(exported.GroupByFieldValue)
-	s.Equal("category_id", exported.GroupByFieldValue.FieldName)
-	s.Equal(schemapb.DataType_Int64, exported.GroupByFieldValue.Type)
-	s.Equal([]int64{10, 10, 20, 10, 20}, exported.GroupByFieldValue.GetScalars().GetLongData().GetData())
+	// Unified channel: chain writes the group-by column to the plural slot.
+	// The task output stage downgrades to singular for legacy-wire requests.
+	s.Require().Len(exported.GroupByFieldValues, 1)
+	gbv := exported.GroupByFieldValues[0]
+	s.Equal("category_id", gbv.FieldName)
+	s.Equal(schemapb.DataType_Int64, gbv.Type)
+	s.Equal([]int64{10, 10, 20, 10, 20}, gbv.GetScalars().GetLongData().GetData())
 
 	// Verify GroupByField is NOT in FieldsData
 	for _, fd := range exported.FieldsData {
@@ -529,9 +568,9 @@ func (s *ConverterSuite) TestGroupByFieldValue_RoundTrip_VarChar() {
 	})
 	s.Require().NoError(err)
 
-	s.Require().NotNil(exported.GroupByFieldValue)
+	s.Require().Len(exported.GroupByFieldValues, 1)
 	s.Equal([]string{"electronics", "clothing", "food"},
-		exported.GroupByFieldValue.GetScalars().GetStringData().GetData())
+		exported.GroupByFieldValues[0].GetScalars().GetStringData().GetData())
 	s.Len(exported.FieldsData, 0)
 }
 

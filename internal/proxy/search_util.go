@@ -25,13 +25,13 @@ import (
 )
 
 type rankParams struct {
-	limit            int64
-	offset           int64
-	roundDecimal     int64
-	groupByFieldId   int64
-	groupByFieldName string
-	groupSize        int64
-	strictGroupSize  bool
+	limit             int64
+	offset            int64
+	roundDecimal      int64
+	groupByFieldIds   []int64
+	groupByFieldNames []string
+	groupSize         int64
+	strictGroupSize   bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -55,18 +55,36 @@ func (r *rankParams) GetRoundDecimal() int64 {
 	return 0
 }
 
+// GetGroupByFieldId returns the first group-by field id, or -1 when none is set.
+// Kept as a single-field convenience for call sites that have not yet migrated
+// to the multi-field plural accessor.
 func (r *rankParams) GetGroupByFieldId() int64 {
-	if r != nil {
-		return r.groupByFieldId
+	if r != nil && len(r.groupByFieldIds) > 0 {
+		return r.groupByFieldIds[0]
 	}
 	return -1
 }
 
+// GetGroupByFieldName returns the first group-by field name, or "" when none is set.
 func (r *rankParams) GetGroupByFieldName() string {
-	if r != nil {
-		return r.groupByFieldName
+	if r != nil && len(r.groupByFieldNames) > 0 {
+		return r.groupByFieldNames[0]
 	}
 	return ""
+}
+
+func (r *rankParams) GetGroupByFieldIds() []int64 {
+	if r != nil {
+		return r.groupByFieldIds
+	}
+	return nil
+}
+
+func (r *rankParams) GetGroupByFieldNames() []string {
+	if r != nil {
+		return r.groupByFieldNames
+	}
+	return nil
 }
 
 func (r *rankParams) GetGroupSize() int64 {
@@ -122,7 +140,7 @@ type SearchInfo struct {
 // because the DSL/expression is not available inside parseSearchInfo.
 func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
 	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
-	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0
+	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0 || len(s.planInfo.GetGroupByFieldIds()) > 0
 	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
 		return internalpb.SearchType_DEFAULT
 	}
@@ -523,6 +541,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
+	var groupByFieldIds []int64
 	var strictGroupSize bool
 	var jsonPath string
 	var jsonType schemapb.DataType
@@ -530,13 +549,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var isRangeSearch bool
 	var isIterativeFilter bool
 	if isAdvanced {
-		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
+		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupByFieldIds(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
 		groupByInfo, err := parseGroupByInfo(searchParamsPair, schema)
 		if err != nil {
 			return nil, err
 		}
-		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
+		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupByFieldIds(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
 		jsonPath, jsonType, strictCast = groupByInfo.GetJSONPath(), groupByInfo.GetJSONType(), groupByInfo.GetStrictCast()
 		if jsonPath != "" {
 			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByFieldId)
@@ -587,6 +606,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			SearchParams:         searchParamStr,
 			RoundDecimal:         roundDecimal,
 			GroupByFieldId:       groupByFieldId,
+			GroupByFieldIds:      groupByFieldIds,
 			GroupSize:            groupSize,
 			StrictGroupSize:      strictGroupSize,
 			Hints:                hints,
@@ -695,27 +715,45 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 type groupByInfo struct {
-	groupByFieldId   int64
-	groupByFieldName string
-	groupSize        int64
-	strictGroupSize  bool
-	jsonPath         string
-	jsonType         schemapb.DataType
-	strictCast       bool
+	groupByFieldIds   []int64
+	groupByFieldNames []string
+	groupSize         int64
+	strictGroupSize   bool
+	jsonPath          string
+	jsonType          schemapb.DataType
+	strictCast        bool
 }
 
+// GetGroupByFieldId returns the first group-by field id, or -1 when none is set.
+// The -1 sentinel is required by plan_parser_v2 (segment-scorer vs group_by
+// mutex check). Kept aligned with rankParams.GetGroupByFieldId().
 func (g *groupByInfo) GetGroupByFieldId() int64 {
-	if g != nil {
-		return g.groupByFieldId
+	if g != nil && len(g.groupByFieldIds) > 0 {
+		return g.groupByFieldIds[0]
 	}
-	return 0
+	return -1
 }
 
+// GetGroupByFieldName returns the first group-by field name, or "" when none is set.
 func (g *groupByInfo) GetGroupByFieldName() string {
-	if g != nil {
-		return g.groupByFieldName
+	if g != nil && len(g.groupByFieldNames) > 0 {
+		return g.groupByFieldNames[0]
 	}
 	return ""
+}
+
+func (g *groupByInfo) GetGroupByFieldIds() []int64 {
+	if g != nil {
+		return g.groupByFieldIds
+	}
+	return nil
+}
+
+func (g *groupByInfo) GetGroupByFieldNames() []string {
+	if g != nil {
+		return g.groupByFieldNames
+	}
+	return nil
 }
 
 func (g *groupByInfo) GetGroupSize() int64 {
@@ -825,19 +863,41 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
 	ret := &groupByInfo{}
 
-	// 1. parse group_by_field
-	groupByFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair)
-	if err != nil {
-		groupByFieldName = ""
+	// 1. parse group-by field name(s).
+	// `group_by_field` (singular, legacy SDK) wins over `group_by_fields` (plural, new SDK).
+	// When both are set the plural list is silently ignored to preserve old-client behavior.
+	var groupByFieldNames []string
+	if legacy, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair); err == nil {
+		if trimmed := strings.TrimSpace(legacy); trimmed != "" {
+			groupByFieldNames = []string{trimmed}
+		}
 	}
-	groupByFieldId, jsonPath, err := parseGroupByField(groupByFieldName, schema)
-	if err != nil {
-		return nil, err
+	if len(groupByFieldNames) == 0 {
+		if plural, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, searchParamsPair); err == nil {
+			for _, f := range strings.Split(plural, ",") {
+				if trimmed := strings.TrimSpace(f); trimmed != "" {
+					groupByFieldNames = append(groupByFieldNames, trimmed)
+				}
+			}
+		}
 	}
-	ret.groupByFieldId = groupByFieldId
-	ret.groupByFieldName = groupByFieldName
-	if jsonPath != "" {
-		ret.jsonPath = jsonPath
+
+	// Resolve each name to fieldId (and optional jsonPath).
+	// Multi-field + jsonPath is rejected because this layer carries a single jsonPath.
+	for _, name := range groupByFieldNames {
+		fieldId, jsonPath, err := parseGroupByField(name, schema)
+		if err != nil {
+			return nil, err
+		}
+		ret.groupByFieldIds = append(ret.groupByFieldIds, fieldId)
+		ret.groupByFieldNames = append(ret.groupByFieldNames, name)
+		if jsonPath != "" {
+			if len(groupByFieldNames) > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("group_by with json path is not supported for multi-field group_by, field:%s", name))
+			}
+			ret.jsonPath = jsonPath
+		}
 	}
 
 	// 2. parse group size
@@ -956,13 +1016,13 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	return &rankParams{
-		limit:            limit,
-		offset:           offset,
-		roundDecimal:     roundDecimal,
-		groupByFieldId:   groupByInfo.GetGroupByFieldId(),
-		groupByFieldName: groupByInfo.GetGroupByFieldName(),
-		groupSize:        groupByInfo.GetGroupSize(),
-		strictGroupSize:  groupByInfo.GetStrictGroupSize(),
+		limit:             limit,
+		offset:            offset,
+		roundDecimal:      roundDecimal,
+		groupByFieldIds:   groupByInfo.GetGroupByFieldIds(),
+		groupByFieldNames: groupByInfo.GetGroupByFieldNames(),
+		groupSize:         groupByInfo.GetGroupSize(),
+		strictGroupSize:   groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

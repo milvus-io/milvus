@@ -1997,46 +1997,47 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval                ParamItem `refreshable:"false"`
-	HealthCheckTimeout              ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize        ParamItem `refreshable:"true"`
-	MaxNameLength                   ParamItem `refreshable:"true"`
-	MaxUsernameLength               ParamItem `refreshable:"true"`
-	MinPasswordLength               ParamItem `refreshable:"true"`
-	MaxPasswordLength               ParamItem `refreshable:"true"`
-	MaxFieldNum                     ParamItem `refreshable:"true"`
-	MaxVectorFieldNum               ParamItem `refreshable:"true"`
-	MaxShardNum                     ParamItem `refreshable:"true"`
-	MaxDimension                    ParamItem `refreshable:"true"`
-	GinLogging                      ParamItem `refreshable:"false"`
-	GinLogSkipPaths                 ParamItem `refreshable:"false"`
-	MaxUserNum                      ParamItem `refreshable:"true"`
-	MaxRoleNum                      ParamItem `refreshable:"true"`
-	NameValidationAllowedChars      ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars  ParamItem `refreshable:"true"`
-	MaxTaskNum                      ParamItem `refreshable:"false"`
-	DDLConcurrency                  ParamItem `refreshable:"true"`
-	DCLConcurrency                  ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval        ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy          ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval    ParamItem `refreshable:"false"`
-	CostMetricsExpireTime           ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum         ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor         ParamItem `refreshable:"false"`
-	RetryTimesOnReplica             ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck         ParamItem `refreshable:"true"`
-	ReplicaBlacklistDuration        ParamItem `refreshable:"true"`
-	ReplicaBlacklistCleanupInterval ParamItem `refreshable:"true"`
-	PartitionNameRegexp             ParamItem `refreshable:"true"`
-	MustUsePartitionKey             ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
-	ResolveAliasForPrivilege        ParamItem `refreshable:"true"`
-	MaxVarCharLength                ParamItem `refreshable:"false"`
-	MaxTextLength                   ParamItem `refreshable:"false"`
-	MaxIndexParamsSize              ParamItem `refreshable:"true"`
-	MaxResultEntries                ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider     ParamItem `refreshable:"true"`
+	TimeTickInterval                  ParamItem `refreshable:"false"`
+	HealthCheckTimeout                ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize          ParamItem `refreshable:"true"`
+	MaxNameLength                     ParamItem `refreshable:"true"`
+	MaxUsernameLength                 ParamItem `refreshable:"true"`
+	MinPasswordLength                 ParamItem `refreshable:"true"`
+	MaxPasswordLength                 ParamItem `refreshable:"true"`
+	MaxFieldNum                       ParamItem `refreshable:"true"`
+	MaxVectorFieldNum                 ParamItem `refreshable:"true"`
+	MaxShardNum                       ParamItem `refreshable:"true"`
+	MaxDimension                      ParamItem `refreshable:"true"`
+	GinLogging                        ParamItem `refreshable:"false"`
+	GinLogSkipPaths                   ParamItem `refreshable:"false"`
+	MaxUserNum                        ParamItem `refreshable:"true"`
+	MaxRoleNum                        ParamItem `refreshable:"true"`
+	NameValidationAllowedChars        ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
+	MaxTaskNum                        ParamItem `refreshable:"false"`
+	DDLConcurrency                    ParamItem `refreshable:"true"`
+	DCLConcurrency                    ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
+	CostMetricsExpireTime             ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	RetryTimesOnReplica               ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval   ParamItem `refreshable:"true"`
+	PartitionNameRegexp               ParamItem `refreshable:"true"`
+	MustUsePartitionKey               ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                   ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck             ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege          ParamItem `refreshable:"true"`
+	MaxVarCharLength                  ParamItem `refreshable:"false"`
+	MaxTextLength                     ParamItem `refreshable:"false"`
+	MaxIndexParamsSize                ParamItem `refreshable:"true"`
+	MaxResultEntries                  ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
+	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2520,6 +2521,18 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxResultEntries.Init(base.mgr)
+
+	p.MaxSearchAggregationResultEntries = ParamItem{
+		Key:          "proxy.maxSearchAggregationResultEntries",
+		Version:      "3.0.0",
+		DefaultValue: "10000",
+		Doc: `maximum number of SearchAggregation result entries, calculated as Nq * DerivedTopK * DerivedGroupSize.
+DerivedTopK is the product of all aggregation level sizes. DerivedGroupSize is the max top_hits size across all levels, or 1 when top_hits is absent.
+If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
+Disabled if the value is less or equal to 0.`,
+		Export: true,
+	}
+	p.MaxSearchAggregationResultEntries.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",

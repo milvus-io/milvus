@@ -414,7 +414,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 	}
 
 	// parse group by fields
-	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(QueryGroupByFieldsKey, queryParamsPair)
+	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldsKey, queryParamsPair)
 	var groupByFields []string
 	if err == nil {
 		splitFields := strings.Split(groupByFieldsStr, ",")
