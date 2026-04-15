@@ -786,6 +786,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	log.Info("job index building")
 
 	// check index building
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(tsoutil.GetCurrentTime(), nil).Maybe()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)

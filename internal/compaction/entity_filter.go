@@ -16,20 +16,25 @@ type EntityFilter interface {
 	GetMissingDeleteCount() int
 }
 
-func NewEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time) EntityFilter {
-	return newEntityFilter(deletedPkTs, ttl, currTime)
+func NewEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time, commitTs typeutil.Timestamp) EntityFilter {
+	return newEntityFilter(deletedPkTs, ttl, currTime, commitTs)
 }
 
 type EntityFilterImpl struct {
 	deletedPkTs map[interface{}]typeutil.Timestamp // pk2ts
 	ttl         int64                              // nanoseconds
 	currentTime time.Time
+	// commitTs is SegmentInfo.commit_timestamp for import/CDC segments.
+	// When non-zero, row timestamps in binlogs are stale (they predate the
+	// actual write time). isEntityExpired uses max(row_ts, commitTs) so that
+	// no row is prematurely expired due to a stale timestamp.
+	commitTs typeutil.Timestamp
 
 	expiredCount int
 	deletedCount int
 }
 
-func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time) *EntityFilterImpl {
+func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time, commitTs typeutil.Timestamp) *EntityFilterImpl {
 	if deletedPkTs == nil {
 		deletedPkTs = make(map[interface{}]typeutil.Timestamp)
 	}
@@ -37,6 +42,7 @@ func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, 
 		deletedPkTs: deletedPkTs,
 		ttl:         ttl,
 		currentTime: currTime,
+		commitTs:    commitTs,
 	}
 }
 
@@ -96,7 +102,11 @@ func (filter *EntityFilterImpl) isEntityExpired(entityTs typeutil.Timestamp) boo
 	if filter.ttl <= 0 {
 		return false
 	}
-	entityTime, _ := tsoutil.ParseTS(entityTs)
+
+	// For import/CDC segments, row timestamps in binlogs may predate the actual
+	// commit time.  Use whichever is larger so a row is never marked expired
+	// due to an outdated timestamp alone.
+	entityTime, _ := tsoutil.ParseTS(tsoutil.EffectiveTimestamp(entityTs, filter.commitTs))
 
 	// this dur can represents 292 million years before or after 1970, enough for milvus
 	// ttl calculation

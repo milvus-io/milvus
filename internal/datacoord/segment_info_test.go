@@ -6,6 +6,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -275,5 +276,59 @@ func TestValidateManifestSegment(t *testing.T) {
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "statslogs")
 		assert.Contains(t, msg, "textStatsLogs")
+	})
+}
+
+func TestSegmentEffectiveTs(t *testing.T) {
+	t.Run("returns commit_timestamp when non-zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}
+		assert.Equal(t, uint64(5000), segmentEffectiveTs(seg))
+	})
+	t.Run("returns start_position.Timestamp when commit_timestamp is zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+		}
+		assert.Equal(t, uint64(1000), segmentEffectiveTs(seg))
+	})
+}
+
+func TestSegmentEffectiveDmlTs(t *testing.T) {
+	t.Run("returns commit_timestamp when non-zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			DmlPosition:     &msgpb.MsgPosition{Timestamp: 2000},
+			CommitTimestamp: 5000,
+		}
+		assert.Equal(t, uint64(5000), segmentEffectiveDmlTs(seg))
+	})
+	t.Run("returns dml_position.Timestamp when commit_timestamp is zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			DmlPosition: &msgpb.MsgPosition{Timestamp: 2000},
+		}
+		assert.Equal(t, uint64(2000), segmentEffectiveDmlTs(seg))
+	})
+}
+
+func TestGetEarliestTs_CommitTimestamp(t *testing.T) {
+	t.Run("returns commit_timestamp when non-zero, ignoring stale binlog timestamps", func(t *testing.T) {
+		seg := NewSegmentInfo(&datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{TimestampFrom: 100, TimestampTo: 200}}},
+			},
+			CommitTimestamp: 9999,
+		})
+		assert.Equal(t, uint64(9999), seg.GetEarliestTs())
+	})
+
+	t.Run("falls back to binlog TimestampFrom when commit_timestamp is zero", func(t *testing.T) {
+		seg := NewSegmentInfo(&datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{TimestampFrom: 100, TimestampTo: 200}}},
+				{Binlogs: []*datapb.Binlog{{TimestampFrom: 50, TimestampTo: 150}}},
+			},
+		})
+		assert.Equal(t, uint64(50), seg.GetEarliestTs())
 	})
 }

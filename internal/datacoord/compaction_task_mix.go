@@ -418,6 +418,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)

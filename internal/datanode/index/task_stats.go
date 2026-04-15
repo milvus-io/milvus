@@ -227,7 +227,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime)
+	entityFilter := compaction.NewEntityFilter(deletePKs, st.req.GetCollectionTtl(), st.currentTime, 0)
 
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
