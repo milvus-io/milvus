@@ -50,7 +50,8 @@ namespace milvus::segcore {
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
-                                          SearchResult& results) const {
+                                          SearchResult& results,
+                                          milvus::OpContext* op_ctx) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
@@ -66,21 +67,30 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
 
-    milvus::OpContext op_ctx;
-    auto field_data =
-        bulk_subscript(&op_ctx, pk_field_id, results.seg_offsets_.data(), size);
+    segcore::CheckCancellation(op_ctx, get_segment_id(), "FillPrimaryKeys");
+    // Use a per-call OpContext for storage_usage; sharing op_ctx across
+    // segments would make each segment's search_storage_cost_ accumulate
+    // every prior segment's bytes, inflating GetTotalStorageCost().
+    milvus::OpContext local_ctx;
+    if (op_ctx != nullptr) {
+        local_ctx.cancellation_token = op_ctx->cancellation_token;
+        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+    }
+    auto field_data = bulk_subscript(
+        &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
     ParsePksFromFieldData(results.primary_keys_, *field_data);
     results.search_storage_cost_.scanned_remote_bytes +=
-        op_ctx.storage_usage.scanned_cold_bytes.load();
+        local_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
-        op_ctx.storage_usage.scanned_total_bytes.load();
+        local_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 void
 SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
-                                          SearchResult& results) const {
+                                          SearchResult& results,
+                                          milvus::OpContext* op_ctx) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
@@ -88,15 +98,23 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                "Size of result distances is not equal to size of ids");
 
     std::unique_ptr<DataArray> field_data;
-    milvus::OpContext op_ctx;
+    // See FillPrimaryKeys: per-call OpContext so storage_usage stays scoped
+    // to this segment's fills.
+    milvus::OpContext local_ctx;
+    if (op_ctx != nullptr) {
+        local_ctx.cancellation_token = op_ctx->cancellation_token;
+        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+    }
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
+        segcore::CheckCancellation(
+            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
         auto& field_meta = plan->schema_->operator[](field_id);
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&op_ctx,
+            field_data = bulk_subscript(&local_ctx,
                                         field_id,
                                         results.seg_offsets_.data(),
                                         size,
@@ -105,14 +123,14 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             field_data = bulk_subscript(
-                &op_ctx, field_id, results.seg_offsets_.data(), size);
+                &local_ctx, field_id, results.seg_offsets_.data(), size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
     results.search_storage_cost_.scanned_remote_bytes +=
-        op_ctx.storage_usage.scanned_cold_bytes.load();
+        local_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
-        op_ctx.storage_usage.scanned_total_bytes.load();
+        local_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 std::unique_ptr<SearchResult>

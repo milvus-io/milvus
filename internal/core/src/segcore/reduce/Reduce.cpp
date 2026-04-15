@@ -237,7 +237,7 @@ ReduceHelper::FillPrimaryKey() {
             auto future = pool.Submit([this, search_result] {
                 auto segment =
                     static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result);
+                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
             });
             futures.emplace_back(std::move(future));
         }
@@ -257,7 +257,7 @@ ReduceHelper::FillPrimaryKey() {
     } else if (num_segments_ == 1) {
         auto segment =
             static_cast<SegmentInterface*>(search_results_[0]->segment_);
-        segment->FillPrimaryKeys(plan_, *search_results_[0]);
+        segment->FillPrimaryKeys(plan_, *search_results_[0], op_ctx_);
     }
 }
 
@@ -737,20 +737,45 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
 void
 ReduceHelper::FillEntryData() {
     tracer::AutoSpan span("ReduceHelper::FillEntryData", tracer::GetRootSpan());
-    for (auto search_result : search_results_) {
+    auto run_one = [](SearchResult* search_result,
+                      milvus::query::Plan* plan,
+                      milvus::OpContext* op_ctx) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
             search_result->segment_);
-        std::chrono::high_resolution_clock::time_point get_target_entry_start =
-            std::chrono::high_resolution_clock::now();
-        segment->FillTargetEntry(plan_, *search_result);
-        std::chrono::high_resolution_clock::time_point get_target_entry_end =
-            std::chrono::high_resolution_clock::now();
-        double get_entry_cost =
-            std::chrono::duration<double, std::micro>(get_target_entry_end -
-                                                      get_target_entry_start)
-                .count();
+        auto start = std::chrono::high_resolution_clock::now();
+        segment->FillTargetEntry(plan, *search_result, op_ctx);
+        auto end = std::chrono::high_resolution_clock::now();
+        double cost =
+            std::chrono::duration<double, std::micro>(end - start).count();
         milvus::monitor::internal_core_search_get_target_entry_latency.Observe(
-            get_entry_cost / 1000);
+            cost / 1000);
+    };
+
+    if (search_results_.size() > 1) {
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> futures;
+        futures.reserve(search_results_.size());
+        for (auto search_result : search_results_) {
+            futures.emplace_back(pool.Submit([run_one, search_result, this] {
+                run_one(search_result, plan_, op_ctx_);
+            }));
+        }
+        auto futures_guard = folly::makeGuard([&futures]() {
+            for (auto& f : futures) {
+                if (f.valid()) {
+                    try {
+                        f.get();
+                    } catch (...) {
+                    }
+                }
+            }
+        });
+        for (auto& f : futures) {
+            f.get();
+        }
+    } else if (search_results_.size() == 1) {
+        run_one(search_results_[0], plan_, op_ctx_);
     }
 }
 

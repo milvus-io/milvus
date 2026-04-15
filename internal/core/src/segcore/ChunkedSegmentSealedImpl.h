@@ -494,7 +494,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Uses existing vtable slot — no layout change.
     void
     FillTargetEntry(const query::Plan* plan,
-                    SearchResult& results) const override;
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     TryTakeForSearch(const query::Plan* plan,
