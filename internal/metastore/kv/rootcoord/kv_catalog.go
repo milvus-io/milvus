@@ -1622,14 +1622,17 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
-		if util.IsPrivilegeNameDefined(privName) {
+		switch {
+		case util.IsAnyWord(privName):
+		case util.IsPrivilegeNameDefined(privName):
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
-		} else if _, ok := existPrivGroupMap[privName]; ok {
+		default:
+			if _, ok := existPrivGroupMap[privName]; !ok {
+				log.Ctx(ctx).Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
+				err = errors.Newf("privilege group [%s] does not exist", privName)
+				return err
+			}
 			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
-		} else {
-			log.Ctx(ctx).Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
-			err = errors.Newf("privilege group [%s] does not exist", privName)
-			return err
 		}
 		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
 		if err != nil {
