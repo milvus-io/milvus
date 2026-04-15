@@ -408,6 +408,17 @@ func (mp *MilvusProcess) getClient(ctx context.Context) (nodeClient, error) {
 	}
 }
 
+// GetEnv returns a copy of the process's configured environment variables.
+// The copy can be used to create a new process with the same environment
+// (e.g., overriding specific keys like METRICS_PORT).
+func (mp *MilvusProcess) GetEnv() map[string]string {
+	result := make(map[string]string, len(mp.env))
+	for k, v := range mp.env {
+		result[k] = v
+	}
+	return result
+}
+
 // getAddress gets the address of the Milvus process
 func (mp *MilvusProcess) GetAddress(ctx context.Context) (string, error) {
 	var key string

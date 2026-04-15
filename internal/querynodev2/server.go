@@ -183,8 +183,11 @@ func (node *QueryNode) initSession() error {
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
 	node.session.Register()
-	// start liveness check
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
+	// Embedded QueryNode inside StreamingNode should not report a separate node count;
+	// the StreamingNode registers milvus_num_node with its own role instead.
+	if !sessionutil.IsEmbeddedQueryNode() {
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
+	}
 	return nil
 }
 

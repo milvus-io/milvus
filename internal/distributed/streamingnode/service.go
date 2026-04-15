@@ -46,6 +46,7 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -251,6 +252,7 @@ func (s *Server) start() (err error) {
 	}
 	// Register current server to etcd.
 	s.session.Register()
+	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.StreamingNodeRole).Inc()
 
 	s.componentState.OnInitialized(s.session.ServerID)
 	return nil

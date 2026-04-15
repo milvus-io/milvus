@@ -73,6 +73,14 @@ func EnableEmbededQueryNodeLabel() {
 	os.Setenv(NewServerLabel(typeutil.QueryNodeRole, LabelStreamingNodeEmbeddedQueryNode), "1")
 }
 
+// IsEmbeddedQueryNode reports whether this process is running the QueryNode
+// as an embedded component inside a StreamingNode, rather than as a standalone
+// QueryNode. It is set before any component is started (in GetMilvusRoles),
+// so it is safe to call from QueryNode.Register() without a race condition.
+func IsEmbeddedQueryNode() bool {
+	return os.Getenv(NewServerLabel(typeutil.QueryNodeRole, LabelStreamingNodeEmbeddedQueryNode)) == "1"
+}
+
 // EnableStandaloneLabel set server labels for standalone.
 func EnableStandaloneLabel() {
 	os.Setenv(NewServerLabel("", LabelStandalone), "1")
