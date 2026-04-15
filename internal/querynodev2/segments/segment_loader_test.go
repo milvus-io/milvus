@@ -19,10 +19,12 @@ package segments
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -520,6 +522,165 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 		err := suite.loader.LoadDeltaLogs(ctx, seg, loadInfos[i])
 		suite.NoError(err)
 	}
+}
+
+// TestLoadDeltaLogsV3PlaceholderSkipsPathRead verifies that for V3 (manifest)
+// segments, the pathless Deltalogs summary placeholder in SegmentLoadInfo is
+// treated as metadata-only and does NOT trigger the V1 path-based delta
+// download loop. The real delta data for V3 segments is loaded via
+// NewDeltalogReaderFromManifest instead.
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
+	ctx := context.Background()
+
+	// Load a base segment so we have a concrete LocalSegment to run loadDeltalogs against.
+	msgLength := 4
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.Require().NoError(err)
+
+	segs, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	})
+	suite.Require().NoError(err)
+	suite.Require().Len(segs, 1)
+	segment := segs[0]
+
+	// Patch readers to observe which branch is exercised.
+	legacyReaderCalled := atomic.NewInt32(0)
+	manifestReaderCalled := atomic.NewInt32(0)
+
+	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			legacyReaderCalled.Inc()
+			return nil, errors.Newf("V1 path-based delta reader should not be called for V3 segments; paths=%v", paths)
+		},
+	).Build()
+	defer patchLegacy.UnPatch()
+
+	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
+		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
+			manifestReaderCalled.Inc()
+			// io.EOF indicates "no deltalogs in manifest" and is handled gracefully by loadDeltalogs.
+			return nil, io.EOF
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	// Build V3 loadInfo: ManifestPath set, Deltalogs contains a pathless placeholder
+	// (LogID/EntriesNum/MemorySize only — no LogPath). Without the fix, the V1
+	// loop would try to MultiRead an empty path and fail.
+	v3LoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		ManifestPath: "/tmp/fake/manifest.json?version=0",
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{
+				LogID:      1234,
+				EntriesNum: 10,
+				MemorySize: 1024,
+				// LogPath intentionally empty — this is the summary placeholder.
+			}},
+		}},
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
+
+	loader := suite.loader.(*segmentLoader)
+	err = loader.loadDeltalogs(ctx, segment, v3LoadInfo)
+	suite.NoError(err)
+	suite.EqualValues(0, legacyReaderCalled.Load(),
+		"V1 path-based delta reader must be skipped for V3 segments")
+	suite.EqualValues(1, manifestReaderCalled.Load(),
+		"manifest-based delta reader must be invoked once for V3 segments")
+}
+
+// TestLoadDeltaLogsV1StillUsesPathRead ensures the skip logic does not break
+// the legacy V1 path: when ManifestPath is empty, the path-based delta reader
+// is still exercised.
+func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
+	ctx := context.Background()
+
+	msgLength := 4
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.Require().NoError(err)
+
+	deltaLogs, err := mock_segcore.SaveDeltaLog(suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		suite.chunkManager,
+	)
+	suite.Require().NoError(err)
+
+	segs, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	})
+	suite.Require().NoError(err)
+	suite.Require().Len(segs, 1)
+	segment := segs[0]
+
+	legacyReaderCalled := atomic.NewInt32(0)
+	manifestReaderCalled := atomic.NewInt32(0)
+
+	patchLegacy := mockey.Mock(storage.NewDeltalogReader).To(
+		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+			legacyReaderCalled.Inc()
+			// Return an empty reader via EOF so the test finishes quickly; we only care that this was invoked.
+			return nil, io.EOF
+		},
+	).Build()
+	defer patchLegacy.UnPatch()
+
+	patchManifest := mockey.Mock(storage.NewDeltalogReaderFromManifest).To(
+		func(pkType schemapb.DataType, manifestPath string, option ...storage.RwOption) (storage.RecordReader, error) {
+			manifestReaderCalled.Inc()
+			return nil, io.EOF
+		},
+	).Build()
+	defer patchManifest.UnPatch()
+
+	v1LoadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		Deltalogs:     deltaLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		// ManifestPath left empty → V1 path.
+	}
+
+	loader := suite.loader.(*segmentLoader)
+	// NewDeltalogReader returns io.EOF which bubbles up as an error in the V1 branch;
+	// we only need to assert the branch was taken, not that the reader succeeded.
+	_ = loader.loadDeltalogs(ctx, segment, v1LoadInfo)
+	suite.Greater(legacyReaderCalled.Load(), int32(0),
+		"V1 path-based delta reader must be invoked for non-V3 segments")
+	suite.EqualValues(0, manifestReaderCalled.Load(),
+		"manifest-based delta reader must not be invoked when ManifestPath is empty")
 }
 
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
