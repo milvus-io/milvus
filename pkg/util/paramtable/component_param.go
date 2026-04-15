@@ -3499,7 +3499,8 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFPreload ParamItem `refreshable:"true"`
+	IDFPreload        ParamItem `refreshable:"true"`
+	IDFReadBufferSize ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
@@ -3513,6 +3514,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
 	p.IDFPreload.Init(base.mgr)
+
+	p.IDFReadBufferSize = ParamItem{
+		Key:          "queryNode.idfOracle.readBufferSize",
+		Version:      "2.6.14",
+		Export:       true,
+		DefaultValue: "4194304",
+		Doc:          "Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.",
+	}
+	p.IDFReadBufferSize.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
