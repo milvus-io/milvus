@@ -516,8 +516,7 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
     }
 
     for (const auto str_id : ids) {
-        for (size_t j = csr_index_ptr_[str_id];
-             j < csr_index_ptr_[str_id + 1];
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
              j++) {
             auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
@@ -572,8 +571,7 @@ StringIndexMarisa::Range(const std::string& lower_bound_value,
         }
     }
     for (const auto str_id : ids) {
-        for (size_t j = csr_index_ptr_[str_id];
-             j < csr_index_ptr_[str_id + 1];
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
              j++) {
             auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
@@ -590,8 +588,7 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
-        for (size_t j = csr_index_ptr_[str_id];
-             j < csr_index_ptr_[str_id + 1];
+        for (size_t j = csr_index_ptr_[str_id]; j < csr_index_ptr_[str_id + 1];
              j++) {
             auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
@@ -636,7 +633,8 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
         for (size_t kid = 0; kid < csr_num_keys_; kid++) {
             auto start = csr_index_ptr_[kid];
             auto end = csr_index_ptr_[kid + 1];
-            if (start == end) continue;
+            if (start == end)
+                continue;
             auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && matcher(val.value())) {
                 for (size_t j = start; j < end; j++) {
@@ -648,7 +646,8 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
         for (size_t kid = 0; kid < csr_num_keys_; kid++) {
             auto start = csr_index_ptr_[kid];
             auto end = csr_index_ptr_[kid + 1];
-            if (start == end) continue;
+            if (start == end)
+                continue;
             auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && match_fn(val.value())) {
                 for (size_t j = start; j < end; j++) {
@@ -822,10 +821,10 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     {
         auto file_writer = storage::FileWriter(
             file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        reader.ReadEntryStream(
-            MARISA_TRIE_INDEX, [&](const uint8_t* data, size_t len) {
-                file_writer.Write(data, len);
-            });
+        reader.ReadEntryStream(MARISA_TRIE_INDEX,
+                               [&](const uint8_t* data, size_t len) {
+                                   file_writer.Write(data, len);
+                               });
         file_writer.Finish();
     }
 
@@ -852,16 +851,20 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 str_ids_path,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
             reader.ReadEntryStream(
-                MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
-                    fw.Write(d, len);
-                });
+                MARISA_STR_IDS,
+                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             fw.Finish();
         }
         auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
-        auto* mapped = mmap(NULL, str_ids_bytes, PROT_READ, MAP_PRIVATE,
-                            str_ids_file.Descriptor(), 0);
+        auto* mapped = mmap(NULL,
+                            str_ids_bytes,
+                            PROT_READ,
+                            MAP_PRIVATE,
+                            str_ids_file.Descriptor(),
+                            0);
         AssertInfo(mapped != MAP_FAILED,
-                   "failed to mmap str_ids: {}", strerror(errno));
+                   "failed to mmap str_ids: {}",
+                   strerror(errno));
         str_ids_file.Close();
         str_ids_mmap_data_ = static_cast<char*>(mapped);
         str_ids_mmap_size_ = str_ids_bytes;
@@ -874,10 +877,10 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         size_t write_offset = 0;
         reader.ReadEntryStream(
             MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
-                memcpy(reinterpret_cast<uint8_t*>(str_ids_.data()) +
-                           write_offset,
-                       d,
-                       len);
+                memcpy(
+                    reinterpret_cast<uint8_t*>(str_ids_.data()) + write_offset,
+                    d,
+                    len);
                 write_offset += len;
             });
         str_ids_ptr_ = str_ids_.data();
@@ -899,22 +902,25 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                     csr_path,
                     storage::io::GetPriorityFromLoadPriority(load_priority));
                 reader.ReadEntryStream(
-                    MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
-                        fw.Write(d, len);
-                    });
+                    MARISA_CSR_INDEX,
+                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
                 reader.ReadEntryStream(
-                    MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
-                        fw.Write(d, len);
-                    });
+                    MARISA_CSR_OFFSETS,
+                    [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
                 fw.Finish();
             }
 
             csr_mmap_size_ = idx_bytes + off_bytes;
             auto csr_file = File::Open(csr_path, O_RDONLY);
-            auto* mapped = mmap(NULL, csr_mmap_size_, PROT_READ, MAP_PRIVATE,
-                                csr_file.Descriptor(), 0);
+            auto* mapped = mmap(NULL,
+                                csr_mmap_size_,
+                                PROT_READ,
+                                MAP_PRIVATE,
+                                csr_file.Descriptor(),
+                                0);
             AssertInfo(mapped != MAP_FAILED,
-                       "failed to mmap CSR: {}", strerror(errno));
+                       "failed to mmap CSR: {}",
+                       strerror(errno));
             csr_file.Close();
             csr_mmap_data_ = static_cast<char*>(mapped);
             csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
@@ -930,7 +936,8 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             reader.ReadEntryStream(
                 MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
                     memcpy(reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
-                           d, len);
+                           d,
+                           len);
                     wo += len;
                 });
 
@@ -939,9 +946,9 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
-                    memcpy(
-                        reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
-                        d, len);
+                    memcpy(reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
+                           d,
+                           len);
                     wo += len;
                 });
 
