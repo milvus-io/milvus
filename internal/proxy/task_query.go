@@ -89,7 +89,7 @@ type queryTask struct {
 }
 
 func (t *queryTask) getQueryLabel() string {
-	if label := t.RetrieveRequest.GetQueryLabel(); label != "" {
+	if label := t.GetQueryLabel(); label != "" {
 		return label
 	}
 	return metrics.QueryLabel
@@ -763,7 +763,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.RetrieveRequest.PkFilter = checkSegmentFilter(t.plan)
+	t.PkFilter = checkSegmentFilter(t.plan)
 	// Set username for this query request,
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
 		t.Username = username

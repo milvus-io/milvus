@@ -674,7 +674,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	t.orderByFields = orderByFields
 
-	t.SearchRequest.SearchType = searchType
+	t.SearchType = searchType
 
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)

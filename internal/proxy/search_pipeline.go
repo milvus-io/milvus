@@ -770,7 +770,7 @@ type hybridAssembleOperator struct {
 
 func newHybridAssembleOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &hybridAssembleOperator{
-		collectionID: t.SearchRequest.GetCollectionID(),
+		collectionID: t.GetCollectionID(),
 	}, nil
 }
 

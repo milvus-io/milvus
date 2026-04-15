@@ -82,11 +82,12 @@ func (c *Core) validateResourceGroups(ctx context.Context, properties []*commonp
 	var rgs []string
 	var err error
 
-	if level == "database" {
+	switch level {
+	case "database":
 		rgs, err = common.DatabaseLevelResourceGroups(properties)
-	} else if level == "collection" {
+	case "collection":
 		rgs, err = common.CollectionLevelResourceGroups(properties)
-	} else {
+	default:
 		return fmt.Errorf("invalid level %s for resource group validation", level)
 	}
 

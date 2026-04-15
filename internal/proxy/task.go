@@ -808,7 +808,7 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in alter collection schema task")
 	}
 
-	action := t.AlterCollectionSchemaRequest.GetAction()
+	action := t.GetAction()
 	if action == nil {
 		return merr.WrapErrParameterInvalidMsg("action is nil in alter schema task")
 	}
@@ -882,7 +882,7 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
-	action := t.AlterCollectionSchemaRequest.GetAction()
+	action := t.GetAction()
 	if action != nil {
 		addRequest := action.GetAddRequest()
 		if addRequest != nil {
@@ -895,7 +895,7 @@ func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
 	}
 	var err error
 	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
-	return merr.CheckRPCCall(t.AlterCollectionSchemaResponse.GetAlterStatus(), err)
+	return merr.CheckRPCCall(t.GetAlterStatus(), err)
 }
 
 func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {

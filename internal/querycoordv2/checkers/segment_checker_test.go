@@ -1257,9 +1257,9 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -1270,8 +1270,8 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// target carries a newer DataVersion than the loaded segment in dist
 	segments := []*datapb.SegmentInfo{
