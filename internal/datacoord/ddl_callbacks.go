@@ -18,10 +18,14 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -32,6 +36,7 @@ func RegisterDDLCallbacks(s *Server) {
 	}
 	ddlCallback.registerIndexCallbacks()
 	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
+	ddlCallback.registerSnapshotCallbacks()
 }
 
 type DDLCallbacks struct {
@@ -43,6 +48,13 @@ func (c *DDLCallbacks) registerIndexCallbacks() {
 	registry.RegisterAlterIndexV2AckCallback(c.alterIndexV2AckCallback)
 	registry.RegisterDropIndexV2AckCallback(c.dropIndexV2Callback)
 }
+
+func (c *DDLCallbacks) registerSnapshotCallbacks() {
+	registry.RegisterCreateSnapshotV2AckCallback(c.createSnapshotV2AckCallback)
+	registry.RegisterDropSnapshotV2AckCallback(c.dropSnapshotV2AckCallback)
+	registry.RegisterRestoreSnapshotV2AckCallback(c.restoreSnapshotV2AckCallback)
+}
+
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
 func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
@@ -57,4 +69,99 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 		return nil, err
 	}
 	return broadcaster, nil
+}
+
+// startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
+// It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
+// without performing resource validation.
+// Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
+func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+
+	b, err := broadcast.StartBroadcastWithResourceKeys(
+		ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+		message.NewExclusiveSnapshotNameResourceKey(snapshotName),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info("broadcast started for restore snapshot",
+		zap.Int64("collectionID", collectionID),
+		zap.String("snapshotName", snapshotName))
+	return b, nil
+}
+
+// validateRestoreSnapshotResources validates that all required resources exist for restore.
+// This includes snapshot, collection, partitions, and indexes.
+func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
+	// ========== Validate Snapshot Exists ==========
+	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, snapshotData.SnapshotInfo.GetName())
+	if err != nil {
+		return fmt.Errorf("snapshot %s does not exist for collection %d: %w",
+			snapshotData.SnapshotInfo.GetName(), collectionID, err)
+	}
+	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
+
+	// ========== Validate Collection Exists ==========
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+	log.Info("collection validated",
+		zap.String("dbName", dbName),
+		zap.String("collectionName", collectionName))
+
+	// ========== Validate Partitions Exist ==========
+	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
+	if err != nil {
+		return fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+	}
+
+	// Build set of existing partition names
+	existingPartitions := make(map[string]bool)
+	for _, name := range partitionsResp.GetPartitionNames() {
+		existingPartitions[name] = true
+	}
+
+	// Check all snapshot partitions exist
+	for partName := range snapshotData.Collection.GetPartitions() {
+		if !existingPartitions[partName] {
+			return fmt.Errorf("partition %s does not exist in collection %d",
+				partName, collectionID)
+		}
+	}
+	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
+
+	// ========== Validate Indexes Exist ==========
+	for _, indexInfo := range snapshotData.Indexes {
+		// Check if index exists for this field
+		indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+
+		indexFound := false
+		for _, idx := range indexes {
+			if idx.FieldID == indexInfo.GetFieldID() && idx.IndexName == indexInfo.GetIndexName() {
+				indexFound = true
+				break
+			}
+		}
+		if !indexFound {
+			return fmt.Errorf("index %s for field %d does not exist in collection %d",
+				indexInfo.GetIndexName(), indexInfo.GetFieldID(), collectionID)
+		}
+	}
+	log.Info("indexes validated", zap.Int("count", len(snapshotData.Indexes)))
+
+	return nil
 }

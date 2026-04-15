@@ -57,6 +57,11 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
 	for _, collection := range collections {
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Info("skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -126,7 +131,8 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-			!segment.GetIsInvisible()
+			!segment.GetIsInvisible() &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	views := make([]CompactionView, 0)

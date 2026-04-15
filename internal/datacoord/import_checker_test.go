@@ -65,6 +65,8 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 
@@ -582,6 +584,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
 
 	alloc := allocator.NewMockAllocator(t)
 

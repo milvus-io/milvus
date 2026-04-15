@@ -71,6 +71,8 @@ const (
 	RoleConfigObjectName = "object_name"
 	RoleConfigDBName     = "db_name"
 	RoleConfigPrivilege  = "privilege"
+
+	PreserveFieldIdsKey = "preserve_field_ids"
 )
 
 var (
@@ -160,6 +162,12 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -193,6 +201,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(),
 		commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 	}
 	ReadWritePrivilegeGroup = []string{
 		commonpb.ObjectPrivilege_PrivilegeQuery.String(),
@@ -226,6 +236,10 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeRenameCollection.String(),
 		commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 		commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
+		commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 	}
 	AdminPrivilegeGroup = []string{
 		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
@@ -283,6 +297,11 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String(),
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
 		commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
+		commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
+		commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
 	}
 )
 

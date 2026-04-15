@@ -115,6 +115,65 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 	return _c
 }
 
+// GenSnapshot provides a mock function with given fields: ctx, collectionID
+func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*SnapshotData, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GenSnapshot")
+	}
+
+	var r0 *SnapshotData
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*SnapshotData, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *SnapshotData); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SnapshotData)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// NMockHandler_GenSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GenSnapshot'
+type NMockHandler_GenSnapshot_Call struct {
+	*mock.Call
+}
+
+// GenSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *NMockHandler_Expecter) GenSnapshot(ctx interface{}, collectionID interface{}) *NMockHandler_GenSnapshot_Call {
+	return &NMockHandler_GenSnapshot_Call{Call: _e.mock.On("GenSnapshot", ctx, collectionID)}
+}
+
+func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, collectionID int64)) *NMockHandler_GenSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64) (*SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollection provides a mock function with given fields: ctx, collectionID
 func (_m *NMockHandler) GetCollection(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 	ret := _m.Called(ctx, collectionID)
@@ -283,6 +342,65 @@ func (_c *NMockHandler_GetDataVChanPositions_Call) Return(_a0 *datapb.VchannelIn
 }
 
 func (_c *NMockHandler_GetDataVChanPositions_Call) RunAndReturn(run func(RWChannel, int64) *datapb.VchannelInfo) *NMockHandler_GetDataVChanPositions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDeltaLogFromCompactTo provides a mock function with given fields: ctx, segmentID
+func (_m *NMockHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID int64) ([]*datapb.FieldBinlog, error) {
+	ret := _m.Called(ctx, segmentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDeltaLogFromCompactTo")
+	}
+
+	var r0 []*datapb.FieldBinlog
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*datapb.FieldBinlog, error)); ok {
+		return rf(ctx, segmentID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*datapb.FieldBinlog); ok {
+		r0 = rf(ctx, segmentID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.FieldBinlog)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, segmentID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// NMockHandler_GetDeltaLogFromCompactTo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDeltaLogFromCompactTo'
+type NMockHandler_GetDeltaLogFromCompactTo_Call struct {
+	*mock.Call
+}
+
+// GetDeltaLogFromCompactTo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segmentID int64
+func (_e *NMockHandler_Expecter) GetDeltaLogFromCompactTo(ctx interface{}, segmentID interface{}) *NMockHandler_GetDeltaLogFromCompactTo_Call {
+	return &NMockHandler_GetDeltaLogFromCompactTo_Call{Call: _e.mock.On("GetDeltaLogFromCompactTo", ctx, segmentID)}
+}
+
+func (_c *NMockHandler_GetDeltaLogFromCompactTo_Call) Run(run func(ctx context.Context, segmentID int64)) *NMockHandler_GetDeltaLogFromCompactTo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *NMockHandler_GetDeltaLogFromCompactTo_Call) Return(_a0 []*datapb.FieldBinlog, _a1 error) *NMockHandler_GetDeltaLogFromCompactTo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *NMockHandler_GetDeltaLogFromCompactTo_Call) RunAndReturn(run func(context.Context, int64) ([]*datapb.FieldBinlog, error)) *NMockHandler_GetDeltaLogFromCompactTo_Call {
 	_c.Call.Return(run)
 	return _c
 }

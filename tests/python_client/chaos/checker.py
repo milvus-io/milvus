@@ -257,6 +257,8 @@ class Op(Enum):
     alter_collection = 'alter_collection'
     add_field = 'add_field'
     rename_collection = 'rename_collection'
+    snapshot = 'snapshot'
+    restore_snapshot = 'restore_snapshot'
     unknown = 'unknown'
 
 
@@ -2440,6 +2442,328 @@ class AlterCollectionChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP)
+
+
+class SnapshotChecker(Checker):
+    """Check snapshot create/restore operations succeed on a shared collection.
+
+    This is a lightweight checker that only verifies snapshot operations complete
+    successfully, without checking data correctness. It can safely share a
+    collection with other checkers since it does not depend on data consistency.
+
+    Each cycle: create snapshot -> restore to new collection -> wait for completion -> cleanup
+    """
+
+    def __init__(self, collection_name=None, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("SnapshotChecker_")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.snapshot_name = None
+        self.restored_collection = None
+
+    @trace()
+    def snapshot(self):
+        try:
+            # 1. Create snapshot
+            self.snapshot_name = cf.gen_unique_str("snapshot_")
+            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            log.info(f"[SnapshotChecker] Created snapshot {self.snapshot_name} for {self.c_name}")
+
+            # 2. Restore to new collection
+            self.restored_collection = cf.gen_unique_str("restored_")
+            job_id = self.milvus_client.restore_snapshot(
+                self.snapshot_name, self.restored_collection
+            )
+            log.info(f"[SnapshotChecker] Started restore job {job_id}")
+
+            # 3. Wait for restore completion
+            start_time = time.time()
+            restore_timeout = 300
+            while time.time() - start_time < restore_timeout:
+                state = self.milvus_client.get_restore_snapshot_state(job_id)
+                log.debug(f"[SnapshotChecker] Restore state: {state.state}")
+                if state.state == "RestoreSnapshotCompleted":
+                    log.info(f"[SnapshotChecker] Restore completed in {time.time()-start_time:.1f}s")
+                    return None, True
+                if state.state == "RestoreSnapshotFailed":
+                    return f"Restore failed: {state.reason}", False
+                time.sleep(2)
+
+            return f"Restore timeout after {restore_timeout}s", False
+
+        except Exception as e:
+            log.error(f"[SnapshotChecker] Snapshot failed: {e}")
+            return str(e), False
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        try:
+            if self.restored_collection:
+                self.milvus_client.drop_collection(self.restored_collection)
+                log.debug(f"[SnapshotChecker] Dropped restored collection {self.restored_collection}")
+                self.restored_collection = None
+        except Exception as e:
+            log.warning(f"[SnapshotChecker] Failed to drop restored collection: {e}")
+        try:
+            if self.snapshot_name:
+                self.milvus_client.drop_snapshot(self.snapshot_name)
+                log.debug(f"[SnapshotChecker] Dropped snapshot {self.snapshot_name}")
+                self.snapshot_name = None
+        except Exception as e:
+            log.warning(f"[SnapshotChecker] Failed to drop snapshot: {e}")
+
+    @exception_handler()
+    def run_task(self):
+        return self.snapshot()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 3)
+
+
+class SnapshotRestoreChecker(Checker):
+    """Check snapshot restore with data verification using an independent collection.
+
+    This checker uses its own dedicated collection (not shared with other checkers)
+    and performs all DML operations internally, so no external locking is needed.
+
+    Each cycle:
+    1. Performs DML operations (insert/upsert/delete) on its own collection
+    2. Flushes and captures state
+    3. Creates snapshot and restores to a new collection
+    4. Verifies data correctness after restore
+    5. Cleans up snapshot and restored collection
+    """
+
+    def __init__(self, collection_name=None, schema=None):
+        # Always use a dedicated collection for snapshot testing
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("SnapshotRestoreChecker_")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.snapshot_name = None
+        self.restored_collection = None
+        self.snapshot_row_count = 0
+        self.snapshot_sample_pks = []
+
+    def _do_insert(self, nb=100):
+        """Insert rows into the checker's own collection."""
+        data = cf.gen_row_data_by_schema(nb=nb, schema=self.get_schema())
+        for i, d in enumerate(data):
+            pk = int(time.time() * 1000000) + i
+            d[self.int64_field_name] = pk
+        self.milvus_client.insert(self.c_name, data)
+        log.debug(f"[SnapshotRestoreChecker] Inserted {nb} rows")
+
+    def _do_upsert(self, nb=10):
+        """Upsert rows in the checker's own collection."""
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=f"{self.int64_field_name} >= 0",
+            output_fields=[self.int64_field_name],
+            limit=nb
+        )
+        if not res:
+            return
+        pks = [r[self.int64_field_name] for r in res]
+        data = cf.gen_row_data_by_schema(nb=len(pks), schema=self.get_schema())
+        for i, d in enumerate(data):
+            d[self.int64_field_name] = pks[i]
+        self.milvus_client.upsert(self.c_name, data)
+        log.debug(f"[SnapshotRestoreChecker] Upserted {len(pks)} rows")
+
+    def _do_delete(self, nb=5):
+        """Delete rows from the checker's own collection, keeping at least 100 rows."""
+        count_res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter="",
+            output_fields=["count(*)"]
+        )
+        row_count = count_res[0]["count(*)"] if count_res else 0
+        if row_count <= 100:
+            return
+        res = self.milvus_client.query(
+            collection_name=self.c_name,
+            filter=f"{self.int64_field_name} >= 0",
+            output_fields=[self.int64_field_name],
+            limit=nb
+        )
+        if not res:
+            return
+        pks_to_delete = [r[self.int64_field_name] for r in res]
+        filter_expr = f"{self.int64_field_name} in {pks_to_delete}"
+        self.milvus_client.delete(self.c_name, filter=filter_expr)
+        log.debug(f"[SnapshotRestoreChecker] Deleted {len(pks_to_delete)} rows")
+
+    def _do_dml_operations(self):
+        """Execute a random DML operation on the checker's own collection."""
+        op = random.choice(['insert', 'upsert', 'delete'])
+        try:
+            if op == 'insert':
+                self._do_insert(nb=10)
+            elif op == 'upsert':
+                self._do_upsert(nb=5)
+            elif op == 'delete':
+                self._do_delete(nb=5)
+        except Exception as e:
+            log.warning(f"[SnapshotRestoreChecker] DML operation {op} failed: {e}")
+
+    def _capture_snapshot_state(self):
+        """Capture current collection state after flush."""
+        try:
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter="",
+                output_fields=["count(*)"],
+                consistency_level="Strong"
+            )
+            self.snapshot_row_count = res[0]["count(*)"] if res else 0
+
+            if self.snapshot_row_count > 0:
+                sample_size = min(50, self.snapshot_row_count)
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f"{self.int64_field_name} >= 0",
+                    output_fields=[self.int64_field_name],
+                    limit=sample_size,
+                    consistency_level="Strong"
+                )
+                self.snapshot_sample_pks = [r[self.int64_field_name] for r in res]
+            else:
+                self.snapshot_sample_pks = []
+
+            log.info(f"[SnapshotRestoreChecker] Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}")
+        except Exception as e:
+            log.warning(f"Failed to capture snapshot state: {e}")
+            self.snapshot_row_count = 0
+            self.snapshot_sample_pks = []
+
+    def _verify_restored_data(self, restored_name):
+        """Verify data correctness after restore."""
+        try:
+            self.milvus_client.load_collection(restored_name)
+        except Exception as e:
+            log.warning(f"Failed to load restored collection: {e}")
+            return False, f"Failed to load restored collection: {e}"
+
+        try:
+            res = self.milvus_client.query(
+                collection_name=restored_name,
+                filter="",
+                output_fields=["count(*)"],
+                consistency_level="Strong"
+            )
+            actual_count = res[0]["count(*)"] if res else 0
+
+            log.info(f"[SnapshotRestoreChecker] Verify restored data: expected={self.snapshot_row_count}, actual={actual_count}")
+
+            if actual_count != self.snapshot_row_count:
+                return False, f"Row count mismatch: expected {self.snapshot_row_count}, got {actual_count}"
+
+            if self.snapshot_sample_pks:
+                filter_expr = f"{self.int64_field_name} in {self.snapshot_sample_pks}"
+                res = self.milvus_client.query(
+                    collection_name=restored_name,
+                    filter=filter_expr,
+                    output_fields=[self.int64_field_name],
+                    consistency_level="Strong"
+                )
+                found_pks = {r[self.int64_field_name] for r in res}
+                expected_pks = set(self.snapshot_sample_pks)
+
+                if found_pks != expected_pks:
+                    missing = expected_pks - found_pks
+                    return False, f"Missing PKs after restore: {missing}"
+
+            return True, f"Data verified: row_count={actual_count}, sample_pks={len(self.snapshot_sample_pks)}"
+        except Exception as e:
+            return False, f"Verification failed: {e}"
+
+    @trace()
+    def restore_snapshot(self):
+        try:
+            # 1. Execute DML operations to modify collection state
+            for _ in range(3):
+                self._do_dml_operations()
+                time.sleep(0.1)
+
+            # 2. Flush and capture state (no lock needed - this is our own collection)
+            self.milvus_client.flush(collection_name=self.c_name)
+            log.debug(f"Flushed collection {self.c_name}")
+            time.sleep(1)
+
+            self._capture_snapshot_state()
+            row_count_before = self.snapshot_row_count
+            log.info(f"State before snapshot: row_count={row_count_before}, sample_pks={len(self.snapshot_sample_pks)}")
+
+            # 3. Create snapshot
+            self.snapshot_name = cf.gen_unique_str("snapshot_")
+            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
+
+            # 4. Restore to new collection
+            self.restored_collection = cf.gen_unique_str("restored_")
+            job_id = self.milvus_client.restore_snapshot(
+                self.snapshot_name, self.restored_collection
+            )
+            log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
+
+            # 5. Wait for restore completion
+            start_time = time.time()
+            restore_timeout = 300
+            while time.time() - start_time < restore_timeout:
+                state = self.milvus_client.get_restore_snapshot_state(job_id)
+                log.debug(f"Restore state: {state.state}")
+                if state.state == "RestoreSnapshotCompleted":
+                    log.info(f"Restore job {job_id} completed in {time.time()-start_time:.1f}s")
+                    break
+                if state.state == "RestoreSnapshotFailed":
+                    return f"Restore failed: {state.reason}", False
+                time.sleep(2)
+            else:
+                return f"Restore timeout after {restore_timeout}s", False
+
+            # 6. Verify data correctness
+            verified, msg = self._verify_restored_data(self.restored_collection)
+            if not verified:
+                return msg, False
+
+            log.info(f"Snapshot restore verified successfully: {msg}")
+            return None, True
+
+        except Exception as e:
+            log.error(f"Snapshot restore failed: {e}")
+            return str(e), False
+        finally:
+            self._cleanup()
+
+    def _cleanup(self):
+        """Cleanup snapshot and restored collection."""
+        try:
+            if self.restored_collection:
+                self.milvus_client.drop_collection(self.restored_collection)
+                log.debug(f"Dropped restored collection {self.restored_collection}")
+                self.restored_collection = None
+        except Exception as e:
+            log.warning(f"Failed to drop restored collection: {e}")
+
+        try:
+            if self.snapshot_name:
+                self.milvus_client.drop_snapshot(self.snapshot_name)
+                log.debug(f"Dropped snapshot {self.snapshot_name}")
+                self.snapshot_name = None
+        except Exception as e:
+            log.warning(f"Failed to drop snapshot: {e}")
+
+    @exception_handler()
+    def run_task(self):
+        return self.restore_snapshot()
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 3)
 
 
 class TestResultAnalyzer(unittest.TestCase):
