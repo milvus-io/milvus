@@ -262,6 +262,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 				retErr = fmt.Errorf("%s", reason)
 			}
 		}()
+
 		log.Info("executing external collection task in pool",
 			zap.Int64("taskID", taskID),
 			zap.Int64("collectionID", req.GetCollectionID()))

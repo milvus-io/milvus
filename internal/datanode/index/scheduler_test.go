@@ -23,10 +23,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -229,4 +234,73 @@ func TestIndexTaskScheduler(t *testing.T) {
 	for _, task := range tasks {
 		assert.Equal(t, task.GetState(), indexpb.JobState_JobStateFinished)
 	}
+}
+
+func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int64) *indexBuildTask {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID: "test-cluster",
+		BuildID:   buildID,
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "STL_SORT"},
+		},
+		Field: &schemapb.FieldSchema{
+			FieldID:  100,
+			DataType: schemapb.DataType_Int64,
+		},
+	}
+	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
+		State: commonpb.IndexState_InProgress,
+	})
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+}
+
+func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("success records execution cost", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1001)
+
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(nil).Build()
+		defer preMock.UnPatch()
+		executeMock := mockey.Mock((*indexBuildTask).Execute).Return(nil).Build()
+		defer executeMock.UnPatch()
+		postMock := mockey.Mock((*indexBuildTask).PostExecute).Return(nil).Build()
+		defer postMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1001)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Finished, info.State)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(1), info.CostCPUNum)
+	})
+
+	t.Run("pre execute failure still records execution end", func(t *testing.T) {
+		manager := NewTaskManager(context.Background())
+		task := newSchedulerIndexBuildTask(t, manager, 1002)
+		expectedErr := errors.New("pre execute failed")
+
+		preMock := mockey.Mock((*indexBuildTask).PreExecute).Return(expectedErr).Build()
+		defer preMock.UnPatch()
+
+		scheduler := NewTaskScheduler(context.Background())
+		scheduler.processTask(task)
+
+		info := manager.GetIndexTaskInfo("test-cluster", 1002)
+		assert.NotNil(t, info)
+		assert.Equal(t, commonpb.IndexState_Retry, info.State)
+		assert.Equal(t, expectedErr.Error(), info.FailReason)
+		assert.Greater(t, info.ExecStartMs, int64(0))
+		assert.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
+		assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
+		assert.Equal(t, int64(1), info.CostCPUNum)
+	})
 }

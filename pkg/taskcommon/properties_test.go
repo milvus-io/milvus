@@ -58,3 +58,29 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "UnknownType", taskType)
 }
+
+func TestProperties_CostFields(t *testing.T) {
+	t.Run("append and get", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCostTime(123)
+		props.AppendCostCPUNum(4)
+
+		assert.Equal(t, int64(123), props.GetCostTime())
+		assert.Equal(t, int64(4), props.GetCostCPUNum())
+	})
+
+	t.Run("missing keys", func(t *testing.T) {
+		props := NewProperties(nil)
+		assert.Equal(t, int64(0), props.GetCostTime())
+		assert.Equal(t, int64(0), props.GetCostCPUNum())
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		props := NewProperties(map[string]string{
+			CostTimeKey:   "abc",
+			CostCPUNumKey: "xyz",
+		})
+		assert.Equal(t, int64(0), props.GetCostTime())
+		assert.Equal(t, int64(0), props.GetCostCPUNum())
+	})
+}
