@@ -138,18 +138,33 @@ func (s *globalTaskScheduler) Stop() {
 }
 
 func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+	var bestFitNodeID int64 = NullNodeID
+	var bestFitAvailable int64 = -1
 	var fallbackNodeID int64 = NullNodeID
-	var maxAvailable int64 = -1
+	var fallbackAvailable int64 = -1
 
 	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
+		if ws.AvailableSlots <= 0 {
+			continue
 		}
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
+
+		if ws.AvailableSlots >= taskSlot {
+			if ws.AvailableSlots > bestFitAvailable {
+				bestFitAvailable = ws.AvailableSlots
+				bestFitNodeID = nodeID
+			}
+			continue
+		}
+
+		if ws.AvailableSlots > fallbackAvailable {
+			fallbackAvailable = ws.AvailableSlots
 			fallbackNodeID = nodeID
 		}
+	}
+
+	if bestFitNodeID != NullNodeID {
+		workerSlots[bestFitNodeID].AvailableSlots -= taskSlot
+		return bestFitNodeID
 	}
 
 	if fallbackNodeID != NullNodeID {

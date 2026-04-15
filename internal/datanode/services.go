@@ -46,10 +46,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+var (
+	getDataNodeTotalMemory = hardware.GetMemoryCount
+	getDataNodeFreeMemory  = hardware.GetFreeMemoryCount
 )
 
 // importStateV2ToCopySegmentTaskState converts ImportTaskStateV2 to CopySegmentTaskState
@@ -674,12 +680,30 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		availableSlots = 0
 	}
 
+	totalMemory := getDataNodeTotalMemory()
+	freeMemory := getDataNodeFreeMemory()
+	freeMemoryRatio := 1.0
+	slotProtectThreshold := paramtable.Get().DataNodeCfg.SlotProtectFreeMemoryRatio.GetAsFloat()
+	memoryProtectionTriggered := false
+	if totalMemory > 0 {
+		freeMemoryRatio = float64(freeMemory) / float64(totalMemory)
+		if freeMemoryRatio < slotProtectThreshold {
+			availableSlots = 0
+			memoryProtectionTriggered = true
+		}
+	}
+
 	log.Ctx(ctx).Info("query slots done",
 		zap.Int64("totalSlots", totalSlots),
 		zap.Int64("availableSlots", availableSlots),
 		zap.Int64("indexStatsUsed", indexStatsUsed),
 		zap.Int64("compactionUsed", compactionUsed),
 		zap.Int64("importUsed", importUsed),
+		zap.Uint64("totalMemory", totalMemory),
+		zap.Uint64("freeMemory", freeMemory),
+		zap.Float64("freeMemoryRatio", freeMemoryRatio),
+		zap.Float64("slotProtectThreshold", slotProtectThreshold),
+		zap.Bool("memoryProtectionTriggered", memoryProtectionTriggered),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
