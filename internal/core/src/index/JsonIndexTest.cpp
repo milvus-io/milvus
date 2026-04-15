@@ -41,7 +41,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "pb/plan.pb.h"
@@ -143,55 +143,6 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 }
 
 }  // namespace
-
-TEST(JsonIndexTest, TestJSONErrRecorder) {
-    std::vector<std::string> json_raw_data = {
-        R"(1)",
-        R"({"a": true})",
-        R"({"a": 1.0})",
-        R"({"a": 1})",
-        R"({"a": null})",
-        R"({"a": [1,2,3]})",
-        R"({"a": [1.0,2,3]})",
-        R"({"a": {"b": 1}})",
-        R"({"a": "1"})",
-        R"({"a": 1, "a": 1.0})",
-    };
-
-    std::string json_path = "/a";
-    auto schema = std::make_shared<Schema>();
-    auto json_fid = schema->AddDebugField("json", DataType::JSON);
-
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::JSON);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
-
-    index::CreateIndexInfo cii_double;
-    cii_double.index_type = index::INVERTED_INDEX_TYPE;
-    cii_double.json_cast_type = JsonCastType::FromString("DOUBLE");
-    cii_double.json_path = json_path;
-    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        cii_double, file_manager_ctx);
-    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
-        static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
-
-    std::vector<milvus::Json> jsons;
-    for (auto& json : json_raw_data) {
-        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
-    }
-
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
-    json_index->BuildWithFieldData({json_field});
-
-    auto error_map = json_index->GetErrorRecorder().GetErrorMap();
-    EXPECT_EQ(error_map.size(), 2);
-    EXPECT_EQ(error_map[simdjson::error_code::INCORRECT_TYPE].count, 5);
-    EXPECT_EQ(error_map[simdjson::error_code::NO_SUCH_FIELD].count, 2);
-}
 
 TEST(JsonIndexTest, TestJsonContains) {
     std::vector<std::string> json_raw_data = {

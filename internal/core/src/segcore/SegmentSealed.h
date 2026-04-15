@@ -20,7 +20,7 @@
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Index.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/JsonFlatIndex.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"

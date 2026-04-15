@@ -93,6 +93,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 		mockHandler,
 		nil, // broker
 		nil, // getChannelsFunc
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -144,6 +145,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
@@ -171,6 +173,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -205,6 +208,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -242,6 +246,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -287,6 +292,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -324,6 +330,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
@@ -369,6 +376,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
@@ -423,6 +431,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		mockHandler,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
@@ -455,6 +464,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 		nil,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
@@ -489,6 +499,7 @@ func TestSnapshotManager_DropSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -515,6 +526,7 @@ func TestSnapshotManager_DropSnapshot_NotFound_Idempotent(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute - should succeed even if snapshot doesn't exist (idempotent)
@@ -547,6 +559,7 @@ func TestSnapshotManager_DropSnapshot_Error(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -582,6 +595,7 @@ func TestSnapshotManager_GetSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -609,6 +623,7 @@ func TestSnapshotManager_GetSnapshot_NotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -651,6 +666,7 @@ func TestSnapshotManager_DescribeSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -678,6 +694,7 @@ func TestSnapshotManager_DescribeSnapshot_NotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -711,6 +728,7 @@ func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -738,6 +756,7 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -785,6 +804,7 @@ func TestSnapshotManager_GetRestoreState_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -815,6 +835,7 @@ func TestSnapshotManager_GetRestoreState_NotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -866,6 +887,7 @@ func TestSnapshotManager_ListRestoreJobs_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute - no filter
@@ -925,6 +947,7 @@ func TestSnapshotManager_ListRestoreJobs_FilterByCollectionID(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute - filter by collection ID 100
@@ -987,7 +1010,7 @@ func TestSnapshotManager_ListRestoreJobs_FilterByDbID(t *testing.T) {
 	m.collections.Insert(200, &collectionInfo{ID: 200, DatabaseID: 1})
 	m.collections.Insert(300, &collectionInfo{ID: 300, DatabaseID: 2})
 
-	sm := NewSnapshotManager(m, nil, &copySegmentMeta{}, nil, nil, nil, nil)
+	sm := NewSnapshotManager(m, nil, &copySegmentMeta{}, nil, nil, nil, nil, nil)
 
 	t.Run("dbID_filter", func(t *testing.T) {
 		// dbID=1 should return jobs for collections 100 and 200
@@ -1944,6 +1967,7 @@ func TestNewSnapshotManager(t *testing.T) {
 		mockHandler,
 		mockBroker,
 		getChannelsFunc,
+		nil, // indexEngineVersionManager
 	)
 
 	assert.NotNil(t, sm)
@@ -2777,6 +2801,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	err := sm.DropSnapshotsByCollection(ctx, 100)
@@ -2793,6 +2818,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Error(t *testing.T) {
 	sm := NewSnapshotManager(
 		nil,
 		&snapshotMeta{},
+		nil,
 		nil,
 		nil,
 		nil,
@@ -2815,6 +2841,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_NoSnapshots(t *testing.T) {
 	sm := NewSnapshotManager(
 		nil,
 		&snapshotMeta{},
+		nil,
 		nil,
 		nil,
 		nil,

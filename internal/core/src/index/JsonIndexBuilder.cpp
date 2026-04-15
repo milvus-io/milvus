@@ -14,6 +14,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -155,5 +156,129 @@ ProcessJsonFieldData<std::string>(
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
+
+namespace {
+
+template <typename T>
+DataType
+GetMilvusDataType() {
+    if constexpr (std::is_same_v<T, bool>) {
+        return DataType::BOOL;
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+        return DataType::INT64;
+    } else if constexpr (std::is_same_v<T, double>) {
+        return DataType::DOUBLE;
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        return DataType::VARCHAR;
+    } else {
+        static_assert(sizeof(T) == 0, "unsupported type for JSON conversion");
+    }
+}
+
+}  // namespace
+
+template <typename T>
+JsonToTypedResult
+ConvertJsonToTypedFieldData(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function) {
+    int64_t total_rows = 0;
+    for (const auto& data : json_field_datas) {
+        total_rows += data->get_num_rows();
+    }
+
+    auto data_type = GetMilvusDataType<T>();
+    auto field_data = std::make_shared<FieldData<T>>(
+        data_type, /*nullable=*/true, total_rows);
+
+    // Use FixedVector to avoid std::vector<bool> specialization
+    FixedVector<T> values(total_rows);
+    std::vector<uint8_t> valid_data((total_rows + 7) / 8, 0);
+    std::vector<size_t> non_exist_offsets;
+
+    ProcessJsonFieldData<T>(
+        json_field_datas,
+        schema,
+        nested_path,
+        cast_type,
+        cast_function,
+        [&values, &valid_data](const T* data, int64_t size, int64_t offset) {
+            if (size > 0) {
+                values[offset] = data[0];
+                valid_data[offset / 8] |= (1 << (offset % 8));
+            }
+        },
+        [](int64_t) {},
+        // non_exist_adder: track offsets where the path truly doesn't exist
+        [&non_exist_offsets](int64_t offset) {
+            non_exist_offsets.push_back(offset);
+        },
+        [](const Json&, const std::string&, simdjson::error_code) {});
+
+    const void* data_ptr = values.data();
+    FieldDataBase* base_ptr = field_data.get();
+    base_ptr->FillFieldData(
+        data_ptr, valid_data.data(), (ssize_t)total_rows, (ssize_t)0);
+
+    return JsonToTypedResult{
+        .field_data = field_data,
+        .non_exist_offsets = std::move(non_exist_offsets),
+    };
+}
+
+template JsonToTypedResult
+ConvertJsonToTypedFieldData<bool>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+// NOTE: int64_t instantiation is kept solely for ExprJsonIndexTest.cpp which
+// uses JsonIndexTestFixture parameterized over <bool, int64_t, double,
+// std::string>. JSON cast_type does NOT support INT64 — that test uses
+// DOUBLE cast with int64 query values, and static_casts the resulting index
+// to JsonInvertedIndex<int64_t>* which is UB in principle but harmless in
+// practice. Remove this instantiation when that test is cleaned up.
+template JsonToTypedResult
+ConvertJsonToTypedFieldData<int64_t>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+template JsonToTypedResult
+ConvertJsonToTypedFieldData<double>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+template JsonToTypedResult
+ConvertJsonToTypedFieldData<std::string>(
+    const std::vector<std::shared_ptr<FieldDataBase>>& json_field_datas,
+    const proto::schema::FieldSchema& schema,
+    const std::string& nested_path,
+    const JsonCastType& cast_type,
+    JsonCastFunction cast_function);
+
+namespace json {
+
+bool
+IsDataTypeSupported(JsonCastType cast_type, DataType data_type, bool is_array) {
+    bool cast_type_is_array =
+        cast_type.data_type() == JsonCastType::DataType::ARRAY;
+    auto type = cast_type.ToMilvusDataType();
+    return is_array == cast_type_is_array &&
+           (type == data_type ||
+            (data_type == DataType::INT64 && type == DataType::DOUBLE));
+}
+
+}  // namespace json
 
 }  // namespace milvus::index

@@ -4160,17 +4160,29 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+# Valid (index_type, json_cast_type) combinations for JSON path index
+# @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool", "ARRAY_DOUBLE"])
+_json_path_index_params_query = [
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "ARRAY_DOUBLE"),
+    ("STL_SORT", "DOUBLE"),
+]
+
+
 class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params_query, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params_query])
+    def json_index_params(self, request):
         yield request.param
 
-    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool", "ARRAY_DOUBLE"])
-    @pytest.fixture(scope="function", params=["DOUBLE", "ARRAY_DOUBLE"])
-    def supported_json_cast_type(self, request):
-        yield request.param
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
 
     """
     ******************************************************************

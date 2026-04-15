@@ -179,17 +179,11 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         [this](int64_t offset) { this->null_offset_.push_back(offset); },
         // handle non exist
         [](int64_t offset) {},
-        // handle error
-        [this](const Json& json,
-               const std::string& nested_path,
-               simdjson::error_code error) {
-            this->error_recorder_.Record(json, nested_path, error);
-        });
+        // handle error (silently skip — error stats not tracked)
+        [](const Json&, const std::string&, simdjson::error_code) {});
 
     avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
     LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);
-
-    error_recorder_.PrintErrStats();
 }
 
 BinarySet
