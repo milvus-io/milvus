@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -676,6 +677,25 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.Error(merr.CheckRPCCall(resp, err))
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
+	})
+
+	s.Run("query index task with cost", func() {
+		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_Finished})
+		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
+		s.node.taskManager.StoreIndexTaskExecutionEnd("cluster-0", 101, 180, 80)
+
+		req := &workerpb.QueryTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
+				taskcommon.TaskIDKey:    "101",
+			},
+		}
+		resp, err := s.node.QueryTask(s.ctx, req)
+		s.NoError(merr.CheckRPCCall(resp, err))
+		props := taskcommon.NewProperties(resp.GetProperties())
+		s.Equal(int64(80), props.GetCostTime())
+		s.Equal(int64(3), props.GetCostCPUNum())
 	})
 
 	s.Run("invalid task type", func() {
