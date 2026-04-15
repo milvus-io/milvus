@@ -32,10 +32,38 @@ type Candidate interface {
 	ID() int64
 	Partition() int64
 	Type() commonpb.SegmentState
+
+	// PkCandidateExist reports whether the candidate has been initialized with PK data.
+	// This is a precondition for MayPkExist / BatchPkExist calls.
+	// BloomFilterSet: true when bloom filter data has been loaded.
+	PkCandidateExist() bool
+
+	// UpdatePkCandidate feeds new primary keys into the candidate.
+	// BloomFilterSet: updates the bloom filter with the provided keys.
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+
+	// Stats returns PK statistics (min/max PK) if available, nil otherwise.
+	Stats() *storage.PkStatistics
+
+	// GetMinPk returns the global minimum PK across all statistics (current + historical),
+	// or nil if no statistics are available.
+	GetMinPk() *storage.PrimaryKey
+
+	// GetMaxPk returns the global maximum PK across all statistics (current + historical),
+	// or nil if no statistics are available.
+	GetMaxPk() *storage.PrimaryKey
+
+	// Charge charges memory resources consumed by this candidate.
+	// No-op is valid for candidates without trackable resources.
+	Charge()
+
+	// Refund releases memory resources previously charged by this candidate.
+	// No-op is valid for candidates without trackable resources.
+	Refund()
 }
 
 // Refundable is an optional interface for candidates that need resource cleanup.
-// BloomFilterSet implements this interface to refund charged memory resources.
+// Kept for backward compatibility; all Candidate implementations now provide Refund().
 type Refundable interface {
 	Refund()
 }

@@ -197,11 +197,34 @@ func (s *baseSegment) BloomFilterExist() bool {
 	return s.bloomFilterSet.BloomFilterExist()
 }
 
+func (s *baseSegment) PkCandidateExist() bool {
+	return s.bloomFilterSet.PkCandidateExist()
+}
+
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
 	}
 	s.bloomFilterSet.UpdateBloomFilter(pks)
+}
+
+func (s *baseSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
+	s.bloomFilterSet.UpdatePkCandidate(pks)
+}
+
+func (s *baseSegment) Stats() *storage.PkStatistics {
+	return s.bloomFilterSet.Stats()
+}
+
+func (s *baseSegment) Charge() {
+	s.bloomFilterSet.Charge()
+}
+
+func (s *baseSegment) Refund() {
+	s.bloomFilterSet.Refund()
 }
 
 func (s *baseSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {

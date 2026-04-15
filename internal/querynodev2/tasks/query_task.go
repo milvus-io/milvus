@@ -52,7 +52,7 @@ type QueryTask struct {
 	collection     *segments.Collection
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
-	plan           *planpb.PlanNode // use to do the bloom filter
+	plan           *planpb.PlanNode // used by RunQNQueryPipeline for reduce
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -125,7 +125,7 @@ func (t *QueryTask) Execute() error {
 	}
 	defer retrievePlan.Delete()
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan)
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err

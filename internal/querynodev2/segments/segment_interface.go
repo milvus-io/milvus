@@ -97,6 +97,13 @@ type Segment interface {
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
+	// pkoracle.Candidate extensions
+	PkCandidateExist() bool
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+	Stats() *storage.PkStatistics
+	Charge()
+	Refund()
+
 	// Get min/max
 	GetMinPk() *storage.PrimaryKey
 	GetMaxPk() *storage.PrimaryKey

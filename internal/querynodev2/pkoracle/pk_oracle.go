@@ -24,23 +24,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// PkOracle interface for pk oracle.
+// PkOracle provides PK-to-segment mapping backed by bloom filters.
 type PkOracle interface {
-	// GetCandidates returns segment candidates of which pk might belongs to.
+	// Get returns segment IDs whose bloom filters report the PK as possibly present.
 	Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error)
+	// BatchGet checks multiple PKs against all candidates and returns per-segment hit bitmaps.
 	BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool
-	// RegisterCandidate adds candidate into pkOracle.
+	// Register adds a candidate (segment) into the oracle.
 	Register(candidate Candidate, workerID int64) error
-	// RemoveCandidate removes candidate and returns the removed candidates.
+	// Remove removes matching candidates and returns them for resource cleanup.
 	Remove(filters ...CandidateFilter) []Candidate
-	// CheckCandidate checks whether candidate with provided key exists.
+	// Exists checks whether a candidate with the given identity is registered.
 	Exists(candidate Candidate, workerID int64) bool
 	// Range iterates over all candidates without removing them.
 	Range(fn func(candidate Candidate) bool)
 	// RefundRemoved refunds resources for BloomFilterSet candidates.
 	RefundRemoved(candidates []Candidate)
-	// RemoveAndRefundAll removes all candidates and refunds resources for BloomFilterSet candidates.
-	// Used during shutdown to clean up and refund resources.
+	// RemoveAndRefundAll removes all candidates and refunds resources.
+	// Used during shutdown to clean up.
 	RemoveAndRefundAll()
 }
 
@@ -94,7 +95,7 @@ func (pko *pkOracle) candidateKey(candidate Candidate, workerID int64) string {
 	return fmt.Sprintf("%s-%d-%d", candidate.Type().String(), workerID, candidate.ID())
 }
 
-// Register register candidate
+// Register adds candidate with the given workerID.
 func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
 	pko.candidates.Insert(pko.candidateKey(candidate, workerID), candidateWithWorker{
 		Candidate: candidate,
@@ -113,7 +114,8 @@ func (pko *pkOracle) Remove(filters ...CandidateFilter) []Candidate {
 				return true
 			}
 		}
-		if _, ok := pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID)); ok {
+		// Remove by iterated key to avoid recomputing key from candidate fields.
+		if _, ok := pko.candidates.GetAndRemove(key); ok {
 			removed = append(removed, candidate.Candidate)
 		}
 		return true
