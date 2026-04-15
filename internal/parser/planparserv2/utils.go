@@ -42,6 +42,8 @@ var (
 	)
 )
 
+var likeEscapeCharacters = map[byte]bool{'%': true, '_': true}
+
 func IsBool(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:
@@ -894,4 +896,27 @@ func parseISODuration(durationStr string) (*planpb.Interval, error) {
 	}
 
 	return interval, nil
+}
+
+func prepareSpecialEscapeCharactersForConvertingEscapeSingle(literal string, escapeCharacters map[byte]bool) string {
+	literalLength := len(literal)
+
+	var result strings.Builder
+	result.Grow(literalLength * 2)
+
+	for i := 0; i < literalLength; i++ {
+		curr := literal[i]
+		result.WriteByte(curr)
+
+		if curr == '\\' && i+1 < literalLength {
+			next := literal[i+1]
+			if escapeCharacters[next] {
+				result.WriteByte('\\')
+			}
+			result.WriteByte(next)
+			i++
+		}
+	}
+
+	return result.String()
 }
