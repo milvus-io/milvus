@@ -26,27 +26,27 @@ linters:
         main:
           deny:
             - pkg: errors
-              desc: not allowed
+              desc: not allowed, use github.com/cockroachdb/errors
             - pkg: github.com/pkg/errors
-              desc: not allowed
+              desc: not allowed, use github.com/cockroachdb/errors
             - pkg: github.com/pingcap/errors
-              desc: not allowed
+              desc: not allowed, use github.com/cockroachdb/errors
             - pkg: golang.org/x/xerrors
-              desc: not allowed
+              desc: not allowed, use github.com/cockroachdb/errors
             - pkg: github.com/go-errors/errors
-              desc: not allowed
+              desc: not allowed, use github.com/cockroachdb/errors
             - pkg: io/ioutil
-              desc: deprecated
+              desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
             - pkg: github.com/tikv/client-go/rawkv
-              desc: not allowed
+              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
             - pkg: github.com/tikv/client-go/v2/rawkv
-              desc: not allowed
+              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
             - pkg: github.com/gogo/protobuf
-              desc: deprecated
+              desc: not allowed, gogo protobuf is deprecated
             - pkg: github.com/golang/protobuf/proto
-              desc: deprecated
+              desc: not allowed, protobuf v1 is deprecated, use google.golang.org/protobuf/proto instead
             - pkg: github.com/pingcap/log
-              desc: not allowed
+              desc: not allowed, use github.com/milvus-io/milvus/pkg/v2/log
     forbidigo:
       forbid:
         - pattern: ^time\.Tick$
