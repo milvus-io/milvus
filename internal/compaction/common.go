@@ -21,11 +21,11 @@ import (
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -68,7 +68,16 @@ func readFromSegment(
 	option ...storage.RwOption,
 ) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
 	if segment.GetManifest() != "" {
-		return readDeltalogsV2(ctx, pkType, segment.GetManifest(), option...)
+		storageConfig := storage.GetStorageConfig(option...)
+		paths, err := packed.GetDeltaLogPathsFromManifest(segment.GetManifest(), storageConfig)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(paths) == 0 {
+			log.Ctx(ctx).Info("no delta log paths found in manifest")
+			return []storage.PrimaryKey{}, []typeutil.Timestamp{}, nil
+		}
+		return readDeltalogsV2(ctx, pkType, paths, option...)
 	}
 	return readDeltalogsV1(ctx, pkType, segment.GetDeltalogs(), option...)
 }
@@ -103,20 +112,16 @@ func readDeltalogsV1(
 	return allPks, allTss, nil
 }
 
-// readDeltalogsV2 reads deltalogs from V2 format (manifest-based).
+// readDeltalogsV2 reads deltalogs from V2 format (parquet files at given paths).
 func readDeltalogsV2(
 	ctx context.Context,
 	pkType schemapb.DataType,
-	manifestPath string,
+	paths []string,
 	option ...storage.RwOption,
 ) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
-	log := log.Ctx(ctx)
-	reader, err := storage.NewDeltalogReaderFromManifest(pkType, manifestPath, option...)
+	reader, err := storage.NewDeltalogReader(pkType, paths,
+		append(option, storage.WithVersion(storage.StorageV3))...)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			log.Info("new detalog reader returns EOF, no deltalog found")
-			return []storage.PrimaryKey{}, []typeutil.Timestamp{}, nil
-		}
 		return nil, nil, err
 	}
 	defer reader.Close()
@@ -126,7 +131,7 @@ func readDeltalogsV2(
 		return nil, nil, err
 	}
 
-	log.Info("read V2 deltalogs from manifest", zap.Int("entries", len(pks)))
+	log.Ctx(ctx).Info("read V2 deltalogs", zap.Int("entries", len(pks)))
 	return pks, tss, nil
 }
 
