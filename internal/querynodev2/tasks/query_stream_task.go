@@ -3,14 +3,11 @@ package tasks
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
@@ -29,7 +26,6 @@ func NewQueryStreamTask(ctx context.Context,
 		collection:     collection,
 		segmentManager: manager,
 		req:            req,
-		plan:           &planpb.PlanNode{},
 		srv:            srv,
 		minMsgSize:     minMsgSize,
 		maxMsgSize:     maxMsgSize,
@@ -42,7 +38,6 @@ type QueryStreamTask struct {
 	collection     *segments.Collection
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
-	plan           *planpb.PlanNode
 	srv            streamrpc.QueryStreamServer
 	minMsgSize     int
 	maxMsgSize     int
@@ -61,9 +56,6 @@ func (t *QueryStreamTask) IsGpuIndex() bool {
 
 // PreExecute the task, only call once.
 func (t *QueryStreamTask) PreExecute() error {
-	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -84,7 +76,7 @@ func (t *QueryStreamTask) Execute() error {
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
 
-	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan, srv)
+	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
 	defer t.segmentManager.Segment.Unpin(segments)
 	if err != nil {
 		return err

@@ -3457,7 +3457,7 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
-	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
+	EnableSegmentFilter            ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -4665,13 +4665,15 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
-	p.EnableSparseFilterInQuery = ParamItem{
-		Key:          "queryNode.enableSparseFilterInQuery",
-		Version:      "2.6.2",
+	p.EnableSegmentFilter = ParamItem{
+		Key:          "queryNode.enableSegmentFilter",
+		FallbackKeys: []string{"queryNode.enableSparseFilterInQuery"},
+		Version:      "2.6.11",
 		DefaultValue: "true",
-		Doc:          "Enable use sparse filter in query.",
+		Doc:          "Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).",
+		Export:       true,
 	}
-	p.EnableSparseFilterInQuery.Init(base.mgr)
+	p.EnableSegmentFilter.Init(base.mgr)
 
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",

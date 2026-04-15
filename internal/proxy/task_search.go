@@ -729,6 +729,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t.SearchRequest.PkFilter = checkSegmentFilter(plan)
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}

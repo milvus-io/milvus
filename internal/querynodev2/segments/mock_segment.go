@@ -2315,6 +2315,86 @@ func (_c *MockSegment_Version_Call) RunAndReturn(run func() int64) *MockSegment_
 	return _c
 }
 
+// PkCandidateExist provides a mock function with no fields
+func (_m *MockSegment) PkCandidateExist() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PkCandidateExist")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_PkCandidateExist_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PkCandidateExist'
+type MockSegment_PkCandidateExist_Call struct {
+	*mock.Call
+}
+
+// PkCandidateExist is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) PkCandidateExist() *MockSegment_PkCandidateExist_Call {
+	return &MockSegment_PkCandidateExist_Call{Call: _e.mock.On("PkCandidateExist")}
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) Run(run func()) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) Return(_a0 bool) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_PkCandidateExist_Call) RunAndReturn(run func() bool) *MockSegment_PkCandidateExist_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdatePkCandidate provides a mock function with given fields: pks
+func (_m *MockSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
+	_m.Called(pks)
+}
+
+// Stats provides a mock function with no fields
+func (_m *MockSegment) Stats() *storage.PkStatistics {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stats")
+	}
+
+	var r0 *storage.PkStatistics
+	if rf, ok := ret.Get(0).(func() *storage.PkStatistics); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.PkStatistics)
+		}
+	}
+
+	return r0
+}
+
+// Charge provides a mock function with no fields
+func (_m *MockSegment) Charge() {
+	_m.Called()
+}
+
+// Refund provides a mock function with no fields
+func (_m *MockSegment) Refund() {
+	_m.Called()
+}
+
 // NewMockSegment creates a new instance of MockSegment. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockSegment(t interface {

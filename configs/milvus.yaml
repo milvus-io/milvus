@@ -583,6 +583,7 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
+  enableSegmentFilter: true # Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool

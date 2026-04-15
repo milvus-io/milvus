@@ -43,7 +43,7 @@ var _ Candidate = (*BloomFilterSet)(nil)
 type BloomFilterSet struct {
 	statsMutex   sync.RWMutex
 	segmentID    int64
-	paritionID   int64
+	partitionID  int64
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
@@ -85,22 +85,22 @@ func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	return hits
 }
 
-// ID implement candidate.
+// ID implements Candidate.
 func (s *BloomFilterSet) ID() int64 {
 	return s.segmentID
 }
 
-// Partition implements candidate.
+// Partition implements Candidate.
 func (s *BloomFilterSet) Partition() int64 {
-	return s.paritionID
+	return s.partitionID
 }
 
-// Type implements candidate.
+// Type implements Candidate.
 func (s *BloomFilterSet) Type() commonpb.SegmentState {
 	return s.segType
 }
 
-// Get stats
+// Stats returns the current bloom filter statistics.
 func (s *BloomFilterSet) Stats() *storage.PkStatistics {
 	return s.currentStat
 }
@@ -108,6 +108,16 @@ func (s *BloomFilterSet) Stats() *storage.PkStatistics {
 // Have BloomFilter exist
 func (s *BloomFilterSet) BloomFilterExist() bool {
 	return s.currentStat != nil || s.historyStats != nil
+}
+
+// PkCandidateExist implements Candidate, aliasing BloomFilterExist.
+func (s *BloomFilterSet) PkCandidateExist() bool {
+	return s.BloomFilterExist()
+}
+
+// UpdatePkCandidate implements Candidate, aliasing UpdateBloomFilter.
+func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
+	s.UpdateBloomFilter(pks)
 }
 
 // UpdateBloomFilter updates currentStats with provided pks.
@@ -141,6 +151,54 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 			panic("failed to update bloomfilter")
 		}
 	}
+}
+
+// GetMinPk returns the global minimum PK across all statistics (current + historical).
+// Returns nil if no statistics with a valid MinPK are available.
+func (s *BloomFilterSet) GetMinPk() *storage.PrimaryKey {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	var minPk storage.PrimaryKey
+	if s.currentStat != nil && s.currentStat.MinPK != nil {
+		minPk = s.currentStat.MinPK
+	}
+	for _, stat := range s.historyStats {
+		if stat == nil || stat.MinPK == nil {
+			continue
+		}
+		if minPk == nil || stat.MinPK.LT(minPk) {
+			minPk = stat.MinPK
+		}
+	}
+	if minPk == nil {
+		return nil
+	}
+	return &minPk
+}
+
+// GetMaxPk returns the global maximum PK across all statistics (current + historical).
+// Returns nil if no statistics with a valid MaxPK are available.
+func (s *BloomFilterSet) GetMaxPk() *storage.PrimaryKey {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	var maxPk storage.PrimaryKey
+	if s.currentStat != nil && s.currentStat.MaxPK != nil {
+		maxPk = s.currentStat.MaxPK
+	}
+	for _, stat := range s.historyStats {
+		if stat == nil || stat.MaxPK == nil {
+			continue
+		}
+		if maxPk == nil || stat.MaxPK.GT(maxPk) {
+			maxPk = stat.MaxPK
+		}
+	}
+	if maxPk == nil {
+		return nil
+	}
+	return &maxPk
 }
 
 // AddHistoricalStats add loaded historical stats.
@@ -249,12 +307,10 @@ func (s *BloomFilterSet) memSizeLocked() int64 {
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.
-func NewBloomFilterSet(segmentID int64, paritionID int64, segType commonpb.SegmentState) *BloomFilterSet {
-	bfs := &BloomFilterSet{
-		segmentID:  segmentID,
-		paritionID: paritionID,
-		segType:    segType,
+func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.SegmentState) *BloomFilterSet {
+	return &BloomFilterSet{
+		segmentID:   segmentID,
+		partitionID: partitionID,
+		segType:     segType,
 	}
-	// does not need to init current
-	return bfs
 }

@@ -77,6 +77,12 @@ const (
 	// AllPartitionsID indicates data applies to all partitions.
 	AllPartitionsID = int64(-1)
 
+	// PkFilter values for SearchRequest/RetrieveRequest.PkFilter field.
+	// Proxy sets this to let delegator skip plan unmarshal when no PK predicate exists.
+	PkFilterNotChecked  = int32(0) // old proxy or not checked (backward compat)
+	PkFilterHasPkFilter = int32(1) // plan contains optimizable PK predicate
+	PkFilterNoPkFilter  = int32(2) // plan has no PK predicate, skip segment filter
+
 	// InvalidFieldID indicates that the field does not exist . It will be set when the field is not found.
 	InvalidFieldID = int64(-1)
 
