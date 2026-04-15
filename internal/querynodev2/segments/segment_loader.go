@@ -1381,26 +1381,32 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	for _, deltalog := range deltaLogs {
-		err := func() error {
-			opts := []storage.RwOption{
-				storage.WithDownloader(
-					func(ctx context.Context, paths []string) ([][]byte, error) {
-						return loader.cm.MultiRead(ctx, paths)
-					},
-				),
-			}
-			paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
-				return binlog.GetLogPath()
-			})
-			reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+	// For V3 (manifest) segments, Deltalogs is a pathless placeholder used only
+	// for compaction-trigger decisions. The real delta data is referenced by
+	// the manifest and loaded below.
+	isV3 := loadInfo.GetManifestPath() != ""
+	if !isV3 {
+		for _, deltalog := range deltaLogs {
+			err := func() error {
+				opts := []storage.RwOption{
+					storage.WithDownloader(
+						func(ctx context.Context, paths []string) ([][]byte, error) {
+							return loader.cm.MultiRead(ctx, paths)
+						},
+					),
+				}
+				paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
+					return binlog.GetLogPath()
+				})
+				reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+				if err != nil {
+					return err
+				}
+				return readDeltaRecords(reader)
+			}()
 			if err != nil {
 				return err
 			}
-			return readDeltaRecords(reader)
-		}()
-		if err != nil {
-			return err
 		}
 	}
 
