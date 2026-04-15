@@ -448,10 +448,9 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	var operators []UpdateOperator
 	for _, seg := range outputSegs {
 		if seg.GetManifest() != "" {
-			// V2: Update manifest path (deltalog is inside manifest)
 			operators = append(operators, UpdateManifest(seg.GetSegmentID(), seg.GetManifest()))
-		} else {
-			// V1: Add deltalogs directly
+		}
+		if len(seg.GetDeltalogs()) > 0 {
 			operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
 		}
 	}

@@ -116,6 +116,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		)
 	}()
 
+	var deltaSummary *datapb.FieldBinlog
 	err = retry.Do(ctx, func() error {
 		bw.resetForRetry()
 
@@ -132,8 +133,8 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 			log.Warn("failed to process stats blob", zap.Error(innerErr))
 			return classifyLoonErr(innerErr)
 		}
-		// writeDelta for V3 updates manifest and returns nil FieldBinlog
-		if manifest, innerErr = bw.writeDelta(ctx, pack); innerErr != nil {
+		// writeDelta for V3 updates manifest and returns delta summary
+		if manifest, deltaSummary, innerErr = bw.writeDelta(ctx, pack); innerErr != nil {
 			log.Warn("failed to process delta blob", zap.Error(innerErr))
 			return classifyLoonErr(innerErr)
 		}
@@ -148,8 +149,8 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		return
 	}
 
-	// For V3, deltas and stats are in manifest
-	deltas = nil
+	// For V3, stats are in manifest; delta summary is returned for compaction trigger
+	deltas = deltaSummary
 	manifest = bw.manifestPath
 	size = bw.sizeWritten
 	return
@@ -281,27 +282,28 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 }
 
 // writeDelta writes deltalog to storage and updates the manifest.
-// For V3, deltalogs are stored in the manifest, not returned as FieldBinlog.
-func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (string, error) {
+// Returns the updated manifest path and a pathless delta summary FieldBinlog
+// containing only EntriesNum and MemorySize for compaction trigger decisions.
+func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (string, *datapb.FieldBinlog, error) {
 	if pack.deltaData == nil || pack.deltaData.RowCount == 0 {
-		return bw.manifestPath, nil
+		return bw.manifestPath, nil, nil
 	}
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(bw.schema)
 	if err != nil {
-		return "", fmt.Errorf("primary key field not found: %w", err)
+		return "", nil, fmt.Errorf("primary key field not found: %w", err)
 	}
 
 	// Allocate log ID for deltalog
 	logID, err := bw.allocator.AllocOne()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Build deltalog path under basePath/_delta/
 	basePath, _, err := packed.UnmarshalManifestPath(bw.manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+		return "", nil, fmt.Errorf("failed to parse manifest path: %w", err)
 	}
 	deltaPath := metautil.BuildDeltaLogPathV3(basePath, logID)
 
@@ -312,22 +314,22 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (str
 		storage.WithStorageConfig(bw.storageConfig),
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to create deltalog writer: %w", err)
+		return "", nil, fmt.Errorf("failed to create deltalog writer: %w", err)
 	}
 
 	// Build Arrow record from delete data using existing utility
 	record, _, _, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
 	if err != nil {
-		return "", fmt.Errorf("failed to build delete record: %w", err)
+		return "", nil, fmt.Errorf("failed to build delete record: %w", err)
 	}
 	defer record.Release()
 
 	// Write and close
 	if err := writer.Write(record); err != nil {
-		return "", fmt.Errorf("failed to write delta record: %w", err)
+		return "", nil, fmt.Errorf("failed to write delta record: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("failed to close delta writer: %w", err)
+		return "", nil, fmt.Errorf("failed to close delta writer: %w", err)
 	}
 
 	// Update manifest with the new deltalog
@@ -337,13 +339,21 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (str
 		[]packed.DeltaLogEntry{{Path: deltaPath, NumEntries: pack.deltaData.RowCount}},
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to add deltalog to manifest: %w", err)
+		return "", nil, fmt.Errorf("failed to add deltalog to manifest: %w", err)
 	}
 
 	bw.manifestPath = newManifest
 	bw.sizeWritten += pack.deltaData.Size()
 
-	return newManifest, nil
+	// Return delta summary for compaction trigger decisions (no path, only stats)
+	summary := &datapb.FieldBinlog{
+		Binlogs: []*datapb.Binlog{{
+			LogID:      logID,
+			EntriesNum: pack.deltaData.RowCount,
+			MemorySize: int64(writer.GetWrittenUncompressed()),
+		}},
+	}
+	return newManifest, summary, nil
 }
 
 // writeStats overrides the base class to write bloom filter stats into the
