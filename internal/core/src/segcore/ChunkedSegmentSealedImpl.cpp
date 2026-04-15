@@ -4590,12 +4590,15 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
 void
 ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
-                                          SearchResult& results) const {
+                                          SearchResult& results,
+                                          milvus::OpContext* op_ctx) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
                "Size of result distances is not equal to size of ids");
+
+    segcore::CheckCancellation(op_ctx, get_segment_id(), "FillTargetEntry");
 
     // Try take() for external fields; fills output_fields_data_ for
     // external fields only. Non-external fields still go through
@@ -4604,18 +4607,27 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
         TryTakeForSearch(plan, results.seg_offsets_.data(), size, results);
 
     std::unique_ptr<DataArray> field_data;
-    milvus::OpContext op_ctx;
+    // Per-call OpContext keeps storage_usage scoped to this segment;
+    // sharing op_ctx across segments would double-count bytes. See
+    // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
+    milvus::OpContext local_ctx;
+    if (op_ctx != nullptr) {
+        local_ctx.cancellation_token = op_ctx->cancellation_token;
+        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+    }
     for (auto field_id : plan->target_entries_) {
         // Skip fields already filled by take
         if (used_take && results.output_fields_data_.count(field_id) > 0) {
             continue;
         }
+        segcore::CheckCancellation(
+            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
         auto& field_meta = plan->schema_->operator[](field_id);
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&op_ctx,
+            field_data = bulk_subscript(&local_ctx,
                                         field_id,
                                         results.seg_offsets_.data(),
                                         size,
@@ -4624,14 +4636,14 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             field_data = bulk_subscript(
-                &op_ctx, field_id, results.seg_offsets_.data(), size);
+                &local_ctx, field_id, results.seg_offsets_.data(), size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
     results.search_storage_cost_.scanned_remote_bytes +=
-        op_ctx.storage_usage.scanned_cold_bytes.load();
+        local_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
-        op_ctx.storage_usage.scanned_total_bytes.load();
+        local_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----

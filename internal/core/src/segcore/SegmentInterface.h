@@ -83,10 +83,14 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
     virtual void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+    FillPrimaryKeys(const query::Plan* plan,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual void
-    FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
+    FillTargetEntry(const query::Plan* plan,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const = 0;
 
     virtual bool
     Contain(const PkType& pk) const = 0;
@@ -418,11 +422,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     FillPrimaryKeys(const query::Plan* plan,
-                    SearchResult& results) const override;
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
 
     void
     FillTargetEntry(const query::Plan* plan,
-                    SearchResult& results) const override;
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const override;
 
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;

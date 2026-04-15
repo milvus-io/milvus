@@ -33,14 +33,16 @@ class GroupReduceHelper : public ReduceHelper {
         int64_t* slice_nqs,
         int64_t* slice_topKs,
         int64_t slice_num,
-        tracer::TraceContext* trace_ctx)
+        tracer::TraceContext* trace_ctx,
+        milvus::OpContext* op_ctx = nullptr)
         : ReduceHelper(search_results,
                        plan,
                        placeholder_group,
                        slice_nqs,
                        slice_topKs,
                        slice_num,
-                       trace_ctx) {
+                       trace_ctx,
+                       op_ctx) {
     }
 
  protected:

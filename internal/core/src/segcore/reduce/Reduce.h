@@ -20,6 +20,7 @@
 #include <variant>
 #include <vector>
 
+#include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/Tracer.h"
 #include "common/TypeTraits.h"
@@ -46,13 +47,15 @@ class ReduceHelper {
         int64_t* slice_nqs,
         int64_t* slice_topKs,
         int64_t slice_num,
-        tracer::TraceContext* trace_ctx)
+        tracer::TraceContext* trace_ctx,
+        milvus::OpContext* op_ctx = nullptr)
         : search_results_(search_results),
           plan_(plan),
           placeholder_group_(placeholder_group),
           slice_nqs_(slice_nqs, slice_nqs + slice_num),
           slice_topKs_(slice_topKs, slice_topKs + slice_num),
-          trace_ctx_(trace_ctx) {
+          trace_ctx_(trace_ctx),
+          op_ctx_(op_ctx) {
         Initialize();
     }
 
@@ -175,6 +178,7 @@ class ReduceHelper {
     std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
     tracer::TraceContext* trace_ctx_;
     StorageCost total_search_storage_cost_;
+    milvus::OpContext* op_ctx_{nullptr};
 };
 
 }  // namespace milvus::segcore
