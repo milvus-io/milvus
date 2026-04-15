@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
@@ -46,6 +47,10 @@ type L0PreImportTask struct {
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
 	req          *datapb.PreImportRequest
+	execStartMs  int64
+	execEndMs    int64
+	costTimeMs   int64
+	costCPUNum   int64
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -75,6 +80,10 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
 		req:          req,
+		execStartMs:  0,
+		execEndMs:    0,
+		costTimeMs:   0,
+		costCPUNum:   0,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -105,6 +114,22 @@ func (t *L0PreImportTask) GetBufferSize() int64 {
 	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 }
 
+func (t *L0PreImportTask) GetExecStartMs() int64 {
+	return t.execStartMs
+}
+
+func (t *L0PreImportTask) GetExecEndMs() int64 {
+	return t.execEndMs
+}
+
+func (t *L0PreImportTask) GetCostTime() int64 {
+	return t.costTimeMs
+}
+
+func (t *L0PreImportTask) GetCostCPUNum() int64 {
+	return t.costCPUNum
+}
+
 func (t *L0PreImportTask) Cancel() {
 	t.cancel()
 }
@@ -119,6 +144,10 @@ func (t *L0PreImportTask) Clone() Task {
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
 		req:           t.req,
+		execStartMs:   t.execStartMs,
+		execEndMs:     t.execEndMs,
+		costTimeMs:    t.costTimeMs,
+		costCPUNum:    t.costCPUNum,
 		manager:       t.manager,
 		cm:            t.cm,
 	}
@@ -126,13 +155,22 @@ func (t *L0PreImportTask) Clone() Task {
 
 func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
+	parallel := int64(len(t.GetFileStats()))
+	poolCap := int64(GetExecPool().Cap())
+	costCPUNum := taskcost.EstimateConcurrentWorkers(parallel, poolCap)
+	startMs := taskcost.NowMs()
 	log.Info("start to preimport l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
+		zap.Int64("costCPUNum", costCPUNum),
 		zap.Any("files", t.req.GetImportFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_InProgress),
+		UpdateExecutionStart(startMs),
+		UpdateCostCPUNum(costCPUNum),
+	)
 	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
@@ -185,6 +223,25 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 		})
 		futures = append(futures, f)
 	}
+	go func(taskID int64, fs []*conc.Future[any], expectedCostCPUNum int64) {
+		err := conc.BlockOnAll(fs...)
+		endMs := taskcost.NowMs()
+		costTime := taskcost.CalcCostTimeMs(startMs, endMs)
+		if err != nil {
+			t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+			log.Warn("l0 preimport task finished with error", WrapLogFields(t,
+				zap.Error(err),
+				zap.Int64("costTime", costTime),
+				zap.Int64("costCPUNum", expectedCostCPUNum),
+			)...)
+			return
+		}
+		t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+		log.Info("l0 preimport task finished", WrapLogFields(t,
+			zap.Int64("costTime", costTime),
+			zap.Int64("costCPUNum", expectedCostCPUNum),
+		)...)
+	}(t.GetTaskID(), futures, costCPUNum)
 	return futures
 }
 

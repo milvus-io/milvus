@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -48,6 +49,10 @@ type ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	execStartMs  int64
+	execEndMs    int64
+	costTimeMs   int64
+	costCPUNum   int64
 
 	allocator  allocator.Interface
 	manager    TaskManager
@@ -80,6 +85,10 @@ func NewImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		execStartMs:  0,
+		execEndMs:    0,
+		costTimeMs:   0,
+		costCPUNum:   0,
 		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
@@ -133,6 +142,22 @@ func (t *ImportTask) GetBufferSize() int64 {
 	return taskBufferSize
 }
 
+func (t *ImportTask) GetExecStartMs() int64 {
+	return t.execStartMs
+}
+
+func (t *ImportTask) GetExecEndMs() int64 {
+	return t.execEndMs
+}
+
+func (t *ImportTask) GetCostTime() int64 {
+	return t.costTimeMs
+}
+
+func (t *ImportTask) GetCostCPUNum() int64 {
+	return t.costCPUNum
+}
+
 func (t *ImportTask) Cancel() {
 	t.cancel()
 }
@@ -153,6 +178,10 @@ func (t *ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		execStartMs:  t.execStartMs,
+		execEndMs:    t.execEndMs,
+		costTimeMs:   t.costTimeMs,
+		costCPUNum:   t.costCPUNum,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,
@@ -163,13 +192,22 @@ func (t *ImportTask) Clone() Task {
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := t.GetBufferSize()
+	parallel := int64(len(t.req.GetFiles()))
+	poolCap := int64(GetExecPool().Cap())
+	costCPUNum := taskcost.EstimateConcurrentWorkers(parallel, poolCap)
+	startMs := taskcost.NowMs()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
+		zap.Int64("costCPUNum", costCPUNum),
 		zap.Any("files", t.req.GetFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_InProgress),
+		UpdateExecutionStart(startMs),
+		UpdateCostCPUNum(costCPUNum),
+	)
 
 	req := t.req
 
@@ -210,6 +248,25 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		})
 		futures = append(futures, f)
 	}
+	go func(taskID int64, fs []*conc.Future[any], expectedCostCPUNum int64) {
+		err := conc.BlockOnAll(fs...)
+		endMs := taskcost.NowMs()
+		costTime := taskcost.CalcCostTimeMs(startMs, endMs)
+		if err != nil {
+			t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+			log.Warn("import task finished with error", WrapLogFields(t,
+				zap.Error(err),
+				zap.Int64("costTime", costTime),
+				zap.Int64("costCPUNum", expectedCostCPUNum),
+			)...)
+			return
+		}
+		t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+		log.Info("import task finished", WrapLogFields(t,
+			zap.Int64("costTime", costTime),
+			zap.Int64("costCPUNum", expectedCostCPUNum),
+		)...)
+	}(t.GetTaskID(), futures, costCPUNum)
 	return futures
 }
 

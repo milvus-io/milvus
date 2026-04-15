@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -44,6 +45,10 @@ type TaskInfo struct {
 	CollID          int64
 	KeptSegments    []int64
 	UpdatedSegments []*datapb.SegmentInfo
+	ExecStartMs     int64
+	ExecEndMs       int64
+	CostTimeMs      int64
+	CostCPUNum      int64
 }
 
 // Clone creates a deep copy so callers can freely mutate the result.
@@ -55,6 +60,10 @@ func (t *TaskInfo) Clone() *TaskInfo {
 		CollID:          t.CollID,
 		KeptSegments:    cloneSegmentIDs(t.KeptSegments),
 		UpdatedSegments: cloneSegments(t.UpdatedSegments),
+		ExecStartMs:     t.ExecStartMs,
+		ExecEndMs:       t.ExecEndMs,
+		CostTimeMs:      t.CostTimeMs,
+		CostCPUNum:      t.CostCPUNum,
 	}
 }
 
@@ -184,6 +193,8 @@ func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	execEndMs int64,
+	costTimeMs int64,
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -193,6 +204,8 @@ func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
 		info.FailReason = failReason
 		info.KeptSegments = append([]int64(nil), keptSegments...)
 		info.UpdatedSegments = cloneSegments(updatedSegments)
+		info.ExecEndMs = execEndMs
+		info.CostTimeMs = costTimeMs
 	}
 }
 
@@ -239,16 +252,31 @@ func (m *ExternalCollectionManager) SubmitTask(
 	// Submit to pool
 	m.pool.Submit(func() (any, error) {
 		defer cancel()
+
+		startMs := taskcost.NowMs()
+		costCPUNum := taskcost.EstimateConcurrentWorkers(1, int64(m.pool.Cap()))
+		m.mu.Lock()
+		if latest, ok := m.tasks[makeTaskKey(clusterID, taskID)]; ok {
+			latest.ExecStartMs = startMs
+			latest.CostCPUNum = costCPUNum
+		}
+		m.mu.Unlock()
+
 		log.Info("executing external collection task in pool",
 			zap.Int64("taskID", taskID),
-			zap.Int64("collectionID", req.GetCollectionID()))
+			zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Int64("costCPUNum", costCPUNum))
 
 		// Execute the task
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
-			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
+			endMs := taskcost.NowMs()
+			costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil, endMs, costTimeMs)
 			log.Warn("external collection task failed",
 				zap.Int64("taskID", taskID),
+				zap.Int64("costTimeMs", costTimeMs),
+				zap.Int64("costCPUNum", costCPUNum),
 				zap.Error(err))
 			return nil, err
 		}
@@ -259,9 +287,13 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
+		endMs := taskcost.NowMs()
+		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments(), endMs, costTimeMs)
 		log.Info("external collection task completed",
-			zap.Int64("taskID", taskID))
+			zap.Int64("taskID", taskID),
+			zap.Int64("costTimeMs", costTimeMs),
+			zap.Int64("costCPUNum", costCPUNum))
 		return nil, nil
 	})
 

@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -84,6 +85,10 @@ type CopySegmentTask struct {
 	state          datapb.ImportTaskStateV2            // Current task state (Pending/InProgress/Completed/Failed)
 	reason         string                              // Failure reason if state is Failed
 	slots          int64                               // Resource slots allocated for this task
+	execStartMs    int64                               // Task execution start time (Unix ms)
+	execEndMs      int64                               // Task execution end time (Unix ms)
+	costTimeMs     int64                               // Task execution duration in milliseconds
+	costCPUNum     int64                               // Estimated concurrent workers consumed by this task
 	segmentResults map[int64]*datapb.CopySegmentResult // Results for each target segment
 	req            *datapb.CopySegmentRequest          // Original request with source/target pairs
 	manager        TaskManager                         // Task manager for state updates and coordination
@@ -166,6 +171,10 @@ func NewCopySegmentTask(
 		state:          datapb.ImportTaskStateV2_Pending,
 		reason:         "",
 		slots:          req.GetTaskSlot(),
+		execStartMs:    0,
+		execEndMs:      0,
+		costTimeMs:     0,
+		costCPUNum:     0,
 		segmentResults: segmentResults,
 		req:            req,
 		manager:        manager,
@@ -224,6 +233,22 @@ func (t *CopySegmentTask) GetBufferSize() int64 {
 	return 0 // Copy task doesn't use memory buffer (direct file copy)
 }
 
+func (t *CopySegmentTask) GetExecStartMs() int64 {
+	return t.execStartMs
+}
+
+func (t *CopySegmentTask) GetExecEndMs() int64 {
+	return t.execEndMs
+}
+
+func (t *CopySegmentTask) GetCostTime() int64 {
+	return t.costTimeMs
+}
+
+func (t *CopySegmentTask) GetCostCPUNum() int64 {
+	return t.costCPUNum
+}
+
 // Cancel aborts the task execution by canceling the context.
 // This will interrupt any ongoing file copy operations.
 func (t *CopySegmentTask) Cancel() {
@@ -250,6 +275,10 @@ func (t *CopySegmentTask) Clone() Task {
 		state:          t.state,
 		reason:         t.reason,
 		slots:          t.slots,
+		execStartMs:    t.execStartMs,
+		execEndMs:      t.execEndMs,
+		costTimeMs:     t.costTimeMs,
+		costCPUNum:     t.costCPUNum,
 		segmentResults: results,
 		req:            t.req,
 		manager:        t.manager,
@@ -295,15 +324,10 @@ func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResul
 // Returns:
 //   - []*conc.Future[any]: Futures for all segment copy operations (nil if validation fails)
 func (t *CopySegmentTask) Execute() []*conc.Future[any] {
-	log.Info("start copy segment task", WrapLogFields(t)...)
-
-	// Step 1: Update task state to InProgress
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
-
 	sources := t.req.GetSources()
 	targets := t.req.GetTargets()
 
-	// Step 2: Validate input
+	// Step 1: Validate input
 	if len(sources) == 0 {
 		reason := "no source segments to copy"
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
@@ -316,6 +340,21 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		return nil
 	}
 
+	parallel := int64(len(sources))
+	poolCap := int64(GetExecPool().Cap())
+	costCPUNum := taskcost.EstimateConcurrentWorkers(parallel, poolCap)
+	startMs := taskcost.NowMs()
+	log.Info("start copy segment task", WrapLogFields(t,
+		zap.Int64("costCPUNum", costCPUNum),
+	)...)
+
+	// Step 2: Update task state to InProgress
+	t.manager.Update(t.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_InProgress),
+		UpdateExecutionStart(startMs),
+		UpdateCostCPUNum(costCPUNum),
+	)
+
 	// Step 3: Submit all segment pairs to execution pool for parallel processing
 	futures := make([]*conc.Future[any], 0, len(sources))
 	for i := range sources {
@@ -326,6 +365,26 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		})
 		futures = append(futures, future)
 	}
+
+	go func(taskID int64, fs []*conc.Future[any], expectedCostCPUNum int64) {
+		err := conc.BlockOnAll(fs...)
+		endMs := taskcost.NowMs()
+		costTime := taskcost.CalcCostTimeMs(startMs, endMs)
+		if err != nil {
+			t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+			log.Warn("copy segment task finished with error", WrapLogFields(t,
+				zap.Error(err),
+				zap.Int64("costTime", costTime),
+				zap.Int64("costCPUNum", expectedCostCPUNum),
+			)...)
+			return
+		}
+		t.manager.Update(taskID, UpdateExecutionEnd(endMs, costTime))
+		log.Info("copy segment task finished", WrapLogFields(t,
+			zap.Int64("costTime", costTime),
+			zap.Int64("costCPUNum", expectedCostCPUNum),
+		)...)
+	}(t.GetTaskID(), futures, costCPUNum)
 
 	return futures
 }

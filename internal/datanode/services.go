@@ -837,6 +837,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
+		if task := node.importTaskMgr.Get(taskID); task != nil {
+			resProperties.AppendCostTime(task.GetCostTime())
+			resProperties.AppendCostCPUNum(task.GetCostCPUNum())
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Import:
 		resp, err := node.QueryImport(ctx, &datapb.QueryImportRequest{ClusterID: clusterID, TaskID: taskID})
@@ -846,6 +853,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
+		if task := node.importTaskMgr.Get(taskID); task != nil {
+			resProperties.AppendCostTime(task.GetCostTime())
+			resProperties.AppendCostCPUNum(task.GetCostCPUNum())
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Compaction:
 		resp, err := node.GetCompactionState(ctx, &datapb.CompactionStateRequest{PlanID: taskID})
@@ -855,6 +869,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties := taskcommon.NewProperties(nil)
 		if len(resp.GetResults()) > 0 {
 			resProperties.AppendTaskState(taskcommon.FromCompactionState(resp.GetResults()[0].GetState()))
+		}
+		if costTimeMs, costCPUNum, ok := node.compactionExecutor.GetTaskCost(taskID); ok {
+			resProperties.AppendCostTime(costTimeMs)
+			resProperties.AppendCostCPUNum(costCPUNum)
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
 		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Index:
@@ -868,6 +889,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendTaskState(taskcommon.State(results[0].GetState()))
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
+		if taskInfo := node.taskManager.GetIndexTaskInfo(clusterID, taskID); taskInfo != nil {
+			resProperties.AppendCostTime(taskInfo.CostTimeMs)
+			resProperties.AppendCostCPUNum(taskInfo.CostCPUNum)
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Stats:
 		resp, err := node.queryStatsTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
@@ -880,6 +908,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendTaskState(results[0].GetState())
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
+		if taskInfo := node.taskManager.GetStatsTaskInfo(clusterID, taskID); taskInfo != nil {
+			resProperties.AppendCostTime(taskInfo.CostTimeMs)
+			resProperties.AppendCostCPUNum(taskInfo.CostCPUNum)
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Analyze:
 		resp, err := node.queryAnalyzeTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
@@ -891,6 +926,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		if len(results) > 0 {
 			resProperties.AppendTaskState(results[0].GetState())
 			resProperties.AppendReason(results[0].GetFailReason())
+		}
+		if taskInfo := node.taskManager.GetAnalyzeTaskInfo(clusterID, taskID); taskInfo != nil {
+			resProperties.AppendCostTime(taskInfo.CostTimeMs)
+			resProperties.AppendCostCPUNum(taskInfo.CostCPUNum)
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
 		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.ExternalCollection:
@@ -905,6 +947,8 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties := taskcommon.NewProperties(nil)
 			resProperties.AppendTaskState(taskcommon.Failed)
 			resProperties.AppendReason("task result not found")
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
 			return wrapQueryTaskResult(resp, resProperties)
 		}
 		resp := &datapb.UpdateExternalCollectionResponse{
@@ -917,6 +961,8 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
+		resProperties.AppendCostTime(info.CostTimeMs)
+		resProperties.AppendCostCPUNum(info.CostCPUNum)
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.CopySegment:
 		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
@@ -929,6 +975,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(taskcommon.FromCopySegmentState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
+		if task := node.importTaskMgr.Get(taskID); task != nil {
+			resProperties.AppendCostTime(task.GetCostTime())
+			resProperties.AppendCostCPUNum(task.GetCostCPUNum())
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
