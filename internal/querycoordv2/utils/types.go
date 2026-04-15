@@ -86,6 +86,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		StorageVersion: segment.GetStorageVersion(),
 		IsSorted:       segment.GetIsSorted(),
 		ManifestPath:   segment.GetManifestPath(),
+		DataVersion:    segment.GetDataVersion(),
 	}
 
 	// Deltalogs are always populated (delta log loading has its own manifest path)
