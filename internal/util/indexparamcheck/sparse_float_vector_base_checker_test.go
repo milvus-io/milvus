@@ -35,8 +35,8 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 	t.Run("valid inverted_index_algo", func(t *testing.T) {
 		for _, algo := range SparseInvertedIndexAlgos {
 			params := map[string]string{
-				common.IndexTypeKey:   "SPARSE_INVERTED_INDEX",
-				Metric:                "IP",
+				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+				Metric:                  "IP",
 				SparseInvertedIndexAlgo: algo,
 			}
 			err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
@@ -67,6 +67,33 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 		err := cWand.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "sparse inverted index algo INVALID_ALGO not found or not supported")
+	})
+
+	t.Run("metric error takes priority over algo error", func(t *testing.T) {
+		// If both metric and algo are invalid, the metric check fires first.
+		params := map[string]string{
+			common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+			Metric:                  "L2",
+			SparseInvertedIndexAlgo: "INVALID_ALGO",
+		}
+		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "metric type")
+		assert.NotContains(t, err.Error(), "inverted_index_algo")
+	})
+
+	t.Run("error message contains full supported list", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+			Metric:                  "IP",
+			SparseInvertedIndexAlgo: "UNKNOWN",
+		}
+		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+		assert.Error(t, err)
+		// Verify the error message lists every supported algorithm.
+		for _, supported := range SparseInvertedIndexAlgos {
+			assert.Contains(t, err.Error(), supported)
+		}
 	})
 }
 
