@@ -137,6 +137,16 @@ var (
 	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
 	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
 
+	// Permanent errors - resource doesn't exist or access denied
+	ErrIoPermissionDenied   = newMilvusError("permission denied", 1005, false)
+	ErrIoBucketNotFound     = newMilvusError("bucket not found", 1006, false)
+	ErrIoInvalidCredentials = newMilvusError("invalid credentials", 1007, false)
+
+	// Client validation errors - request is malformed
+	ErrIoInvalidArgument = newMilvusError("invalid argument", 1010, false)
+	ErrIoInvalidRange    = newMilvusError("invalid range", 1011, false)
+	ErrIoEntityTooLarge  = newMilvusError("entity too large", 1012, false)
+
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)
 	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false)
@@ -222,6 +232,12 @@ var (
 	ErrCompactionResult                           = newMilvusError("illegal compaction results", 2314, false)
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
 	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
+	// ErrCompactionBlocked is returned when a compaction task is legitimately blocked by
+	// snapshot protection (pending snapshot creation or a referenced segment must be kept).
+	// This is a business-level rejection, not an internal fault: the compaction scheduler
+	// should recognize it and retry with low-frequency backoff instead of triggering alerts.
+	// Marked retryable so callers do not misinterpret it as a hard failure.
+	ErrCompactionBlocked = newMilvusError("compaction blocked by snapshot protection", 2317, true)
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 

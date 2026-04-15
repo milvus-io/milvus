@@ -101,9 +101,10 @@ type meta struct {
 	compactionTaskMeta *compactionTaskMeta
 	statsTaskMeta      *statsTaskMeta
 
-	// File Resource Meta
 	resourceMeta map[string]*model.FileResource
 	resourceLock lock.RWMutex
+	// Snapshot Meta
+	snapshotMeta *snapshotMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -120,6 +121,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetSnapshotMeta() *snapshotMeta {
+	return m.snapshotMeta
 }
 
 type channelCPs struct {
@@ -188,6 +193,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -200,6 +210,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
+		snapshotMeta:       spm,
 		resourceMeta:       make(map[string]*model.FileResource),
 	}
 	err = mt.reloadFromKV(ctx, broker)
@@ -1929,6 +1940,43 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 
+	// Snapshot compaction protection exists to keep the sealed-segment list stable during
+	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
+	// L0 segments are transient delete-log carriers, not part of that stable list, and
+	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
+	// So L0 delete compaction is outside the protection's concern and must not be blocked.
+	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
+		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
+			log.Info("compaction rejected: collection has pending snapshot or unloaded RefIndex",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.String("type", t.GetType().String()),
+				zap.Int64("collectionID", t.GetCollectionID()),
+				zap.String("channel", t.GetChannel()),
+				zap.Int64s("inputSegments", t.GetInputSegments()),
+			)
+			return merr.WrapErrCompactionBlocked(
+				fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
+					t.GetCollectionID()))
+		}
+
+		// Check if any input segment is protected by a snapshot.
+		for _, segmentID := range t.GetInputSegments() {
+			if m.isSegmentCompactionProtected(segmentID) {
+				log.Info("compaction rejected: input segment is protected by snapshot",
+					zap.Int64("planID", t.GetPlanID()),
+					zap.String("type", t.GetType().String()),
+					zap.Int64("collectionID", t.GetCollectionID()),
+					zap.String("channel", t.GetChannel()),
+					zap.Int64("segmentID", segmentID),
+					zap.Int64s("inputSegments", t.GetInputSegments()),
+				)
+				return merr.WrapErrCompactionBlocked(
+					fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
+			}
+		}
+	}
+
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.segments.GetSegment(segmentID)
 		if !isSegmentHealthy(segment) {
@@ -2122,6 +2170,29 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
 }
 
+// isSegmentCompactionProtected checks if a segment is protected from compaction by a snapshot.
+func (m *meta) isSegmentCompactionProtected(segmentID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsSegmentCompactionProtected(segmentID)
+}
+
+// isCollectionCompactionBlocked checks if compaction is blocked for a collection
+// because a protected snapshot's RefIndex hasn't been loaded yet (fail-closed).
+func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+}
+
+// GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.
+// This is consumed exclusively by the L0 compaction policy, which only acts on L0 segments.
+// Snapshot compaction protection targets L1/L2 segments referenced by snapshots, so it must
+// NOT filter segments here: doing so would prevent L0 delete-log compaction and cause
+// delta log accumulation, query latency spikes, and write stalls on collections with
+// active snapshots.
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
 	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
@@ -2132,10 +2203,6 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 
 	ret := make(map[int64][]*SegmentInfo)
 	for _, seg := range allSegs {
-		if _, ok := ret[seg.CollectionID]; !ok {
-			ret[seg.CollectionID] = make([]*SegmentInfo, 0)
-		}
-
 		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
 	}
 

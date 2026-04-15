@@ -76,6 +76,11 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		if policy.currentCount >= maxCount {
 			break
 		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Info("skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, err := policy.triggerOneCollection(ctx, collection.ID, maxCount)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -120,7 +125,8 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 			!segment.isCompacting &&
 			!segment.GetIsImporting() &&
 			segment.GetLevel() != datapb.SegmentLevel_L0 &&
-			segment.GetStorageVersion() != targetVersion
+			segment.GetStorageVersion() != targetVersion &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID())
 	}))
 
 	views := make([]CompactionView, 0, len(segments))

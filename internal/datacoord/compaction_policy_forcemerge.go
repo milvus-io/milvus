@@ -73,6 +73,11 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("targetSize", targetSize))
+	if policy.meta.isCollectionCompactionBlocked(collectionID) {
+		log.Info("skip force merge compaction for collection due to unloaded protected snapshot RefIndex",
+			zap.Int64("collectionID", collectionID))
+		return nil, 0, nil
+	}
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		return nil, 0, err
@@ -107,7 +112,8 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 			isFlushed(segment) &&
 			!segment.isCompacting &&
 			!segment.GetIsImporting() &&
-			segment.GetLevel() != datapb.SegmentLevel_L0
+			segment.GetLevel() != datapb.SegmentLevel_L0 &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID())
 	}))
 
 	if len(segments) == 0 {

@@ -2699,3 +2699,121 @@ func TestClient_TruncateCollection(t *testing.T) {
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestClient_GetRestoreSnapshotState(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &datapb.RestoreSnapshotInfo{
+			JobId:    1,
+			State:    datapb.RestoreSnapshotState_RestoreSnapshotExecuting,
+			Progress: 50,
+		},
+	}, nil)
+	resp, err := client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), resp.GetInfo().GetJobId())
+	assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotExecuting, resp.GetInfo().GetState())
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.RestoreSnapshotInfo{
+			{JobId: 1, State: datapb.RestoreSnapshotState_RestoreSnapshotCompleted},
+			{JobId: 2, State: datapb.RestoreSnapshotState_RestoreSnapshotExecuting},
+		},
+	}, nil)
+	resp, err := client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(resp.GetJobs()))
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

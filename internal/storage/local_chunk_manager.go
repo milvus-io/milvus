@@ -269,6 +269,43 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 	return removeErr
 }
 
+func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	// Read source file
+	srcFile, err := Open(srcFilePath)
+	if err != nil {
+		return merr.WrapErrIoFailed(srcFilePath, err)
+	}
+	defer srcFile.Close()
+
+	// Create destination directory if not exists
+	dstDir := path.Dir(dstFilePath)
+	exist, err := lcm.Exist(ctx, dstDir)
+	if err != nil {
+		return err
+	}
+	if !exist {
+		err := os.MkdirAll(dstDir, os.ModePerm)
+		if err != nil {
+			return merr.WrapErrIoFailed(dstFilePath, err)
+		}
+	}
+
+	// Create destination file
+	dstFile, err := os.Create(dstFilePath)
+	if err != nil {
+		return merr.WrapErrIoFailed(dstFilePath, err)
+	}
+	defer dstFile.Close()
+
+	// Copy content
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return merr.WrapErrIoFailed(dstFilePath, err)
+	}
+
+	return nil
+}
+
 type LocalReader struct {
 	*os.File
 }
