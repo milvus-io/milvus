@@ -1264,3 +1264,7 @@ func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.
 func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	return s.datacoordServer.ListSnapshots(ctx, req)
 }
+
+func (s *mixCoordImpl) UpdateSegmentColumnGroups(ctx context.Context, req *datapb.UpdateSegmentColumnGroupsRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.UpdateSegmentColumnGroups(ctx, req)
+}

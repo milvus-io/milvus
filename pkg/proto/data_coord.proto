@@ -119,6 +119,9 @@ service DataCoord {
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
+
+  // storage-v2 column group maintenance
+  rpc UpdateSegmentColumnGroups(UpdateSegmentColumnGroupsRequest) returns(common.Status){}
 }
 
 service DataNode {
@@ -1521,4 +1524,12 @@ message ListRestoreSnapshotJobsRequest {
 message ListRestoreSnapshotJobsResponse {
   common.Status status = 1;
   repeated RestoreSnapshotInfo jobs = 2; // list of restore snapshot jobs
+}
+
+message UpdateSegmentColumnGroupsRequest {
+  common.MsgBase base = 1;
+  int64 segment_id = 2;
+  // key   = top-level fieldID of the column group (group ID).
+  // value = the full FieldBinlog for the new group, including child_fields and binlogs.
+  map<int64, FieldBinlog> column_groups = 3;
 }

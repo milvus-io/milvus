@@ -19,12 +19,14 @@ package proxy
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
@@ -92,6 +94,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 		management.Register(&management.Handler{
 			Path:        management.RouteBackupEZ,
 			HandlerFunc: proxy.BackupEZ,
+		})
+		management.Register(&management.Handler{
+			Path:        management.RouteUpdateSegmentColumnGroups,
+			HandlerFunc: proxy.UpdateSegmentColumnGroups,
 		})
 	})
 }
@@ -617,4 +623,50 @@ func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"msg": "OK", "ezk": "%s"}`, resp.Ezk)))
+}
+
+// UpdateSegmentColumnGroups forwards a storage-v2 column-group update request
+// to datacoord. The HTTP body is a protojson-encoded
+// UpdateSegmentColumnGroupsRequest.
+func (node *Proxy) UpdateSegmentColumnGroups(w http.ResponseWriter, req *http.Request) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to read request body, %s"}`, err.Error())))
+		return
+	}
+	defer req.Body.Close()
+
+	grpcReq := &datapb.UpdateSegmentColumnGroupsRequest{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(body, grpcReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to parse request body, %s"}`, err.Error())))
+		return
+	}
+	grpcReq.Base = commonpbutil.NewMsgBase()
+
+	if grpcReq.GetSegmentId() == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"msg": "segment_id is required"}`))
+		return
+	}
+	if len(grpcReq.GetColumnGroups()) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"msg": "column_groups must not be empty"}`))
+		return
+	}
+
+	resp, err := node.mixCoord.UpdateSegmentColumnGroups(req.Context(), grpcReq)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to update segment column groups, %s"}`, err.Error())))
+		return
+	}
+	if !merr.Ok(resp) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to update segment column groups, %s"}`, resp.GetReason())))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"msg": "OK"}`))
 }
