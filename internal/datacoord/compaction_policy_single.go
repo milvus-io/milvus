@@ -55,6 +55,11 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	views := make([]CompactionView, 0)
 	sortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Ctx(ctx).Info("skip single compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -103,6 +108,11 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil
 	}
+	if policy.meta.isSegmentCompactionProtected(segment.GetID()) {
+		log.Info("skip sort compaction for snapshot-protected segment",
+			zap.Int64("segmentID", segment.GetID()))
+		return nil
+	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 	if err != nil {
@@ -144,7 +154,8 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg)
+			return canTriggerSortCompaction(seg) &&
+				!policy.meta.isSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")
@@ -233,7 +244,8 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
-			!segment.GetIsInvisible()
+			!segment.GetIsInvisible() &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	for _, group := range partSegments {

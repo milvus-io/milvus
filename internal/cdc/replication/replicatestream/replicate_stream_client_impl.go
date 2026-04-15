@@ -19,14 +19,11 @@ package replicatestream
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -158,12 +155,6 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 	} else if errors.Is(chErr, ErrReplicationRemoved) {
 		logger.Info("close replicate stream client due to replication removed")
 		return false
-	} else if isStreamIdleTimeout(chErr) {
-		// Stream idle timeout is expected when no data is being replicated on the source channel.
-		// See isStreamIdleTimeout for details.
-		logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(chErr))
-		r.metrics.OnDisconnect()
-		return true
 	} else {
 		logger.Warn("restart replicate stream client due to unexpected error", zap.Error(chErr))
 		r.metrics.OnDisconnect()
@@ -293,11 +284,7 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	defer func() {
 		if err != nil && !errors.Is(err, ErrReplicationRemoved) {
-			if isStreamIdleTimeout(err) {
-				logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
-			} else {
-				logger.Warn("recv loop closed by unexpected error", zap.Error(err))
-			}
+			logger.Warn("recv loop closed by unexpected error", zap.Error(err))
 		} else {
 			logger.Info("recv loop closed", zap.Error(err))
 		}
@@ -309,11 +296,7 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 		default:
 			resp, err := r.client.Recv()
 			if err != nil {
-				if isStreamIdleTimeout(err) {
-					logger.Info("replicate stream closed due to stream idle timeout, will reconnect", zap.Error(err))
-				} else {
-					logger.Warn("replicate stream recv failed", zap.Error(err))
-				}
+				logger.Warn("replicate stream recv failed", zap.Error(err))
 				return err
 			}
 			lastConfirmedMessageInfo := resp.GetReplicateConfirmedMessageInfo()
@@ -381,18 +364,4 @@ func (r *replicateStreamClient) BlockUntilFinish() {
 func (r *replicateStreamClient) Close() {
 	r.cancel()
 	<-r.finishedCh
-}
-
-// isStreamIdleTimeout checks if the error is a gRPC "stream timeout" error.
-// This is typically caused by envoy sidecar's stream_idle_timeout (default 5m):
-// when no application-level DATA frames flow on a gRPC bidirectional stream,
-// envoy considers the stream idle and terminates it, even though gRPC transport-level
-// keepalive pings are still active (PING frames don't reset stream_idle_timeout).
-// This is expected when no data is being replicated on the source channel.
-func isStreamIdleTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	s, ok := status.FromError(err)
-	return ok && s.Code() == codes.Unknown && strings.Contains(s.Message(), "stream timeout")
 }

@@ -130,6 +130,24 @@ func NewExclusivePrivilegeResourceKey() ResourceKey {
 	}
 }
 
+// NewSharedSnapshotNameResourceKey creates a shared snapshot name resource key.
+func NewSharedSnapshotNameResourceKey(snapshotName string) ResourceKey {
+	return ResourceKey{
+		Domain: messagespb.ResourceDomain_ResourceDomainSnapshotName,
+		Key:    snapshotName,
+		Shared: true,
+	}
+}
+
+// NewExclusiveSnapshotNameResourceKey creates an exclusive snapshot name resource key.
+func NewExclusiveSnapshotNameResourceKey(snapshotName string) ResourceKey {
+	return ResourceKey{
+		Domain: messagespb.ResourceDomain_ResourceDomainSnapshotName,
+		Key:    snapshotName,
+		Shared: false,
+	}
+}
+
 // Deprecated: NewImportJobIDResourceKey creates a key for import job resource.
 func NewImportJobIDResourceKey(importJobID int64) ResourceKey {
 	return ResourceKey{

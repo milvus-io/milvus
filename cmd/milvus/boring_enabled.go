@@ -29,9 +29,10 @@ static int enableOpenSSLFIPS() {
 import "C"
 
 import (
-	"crypto/boring"
 	"log"
 	"sync"
+
+	"crypto/boring"
 )
 
 func boringEnabled() bool {

@@ -123,6 +123,12 @@ type Server struct {
 	importInspector  ImportInspector
 	importChecker    ImportChecker
 
+	copySegmentMeta      CopySegmentMeta
+	copySegmentInspector CopySegmentInspector
+	copySegmentChecker   CopySegmentChecker
+
+	snapshotManager SnapshotManager
+
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
@@ -323,6 +329,39 @@ func (s *Server) initDataCoord() error {
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler)
+
+	// Initialize copy segment meta and components
+	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
+	if err != nil {
+		return err
+	}
+	s.copySegmentInspector = NewCopySegmentInspector(
+		s.ctx,
+		s.meta,
+		s.copySegmentMeta,
+		s.globalScheduler,
+	)
+
+	s.copySegmentChecker = NewCopySegmentChecker(
+		s.ctx,
+		s.meta,
+		s.broker,
+		s.allocator,
+		s.copySegmentMeta,
+	)
+	log.Info("init copy segment inspector and checker done")
+
+	// Initialize snapshot manager
+	s.snapshotManager = NewSnapshotManager(
+		s.meta,
+		s.meta.snapshotMeta,
+		s.copySegmentMeta,
+		s.allocator,
+		s.handler,
+		s.broker,
+		s.getChannelsByCollectionID,
+	)
+	log.Info("init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -645,6 +684,11 @@ func (s *Server) startServerLoop() {
 	s.globalScheduler.Start()
 	go s.importInspector.Start()
 	go s.importChecker.Start()
+
+	// Start copy segment inspector and checker
+	go s.copySegmentInspector.Start()
+	go s.copySegmentChecker.Start()
+
 	s.garbageCollector.start()
 }
 
@@ -959,12 +1003,22 @@ func (s *Server) Stop() error {
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
 
+	if s.meta != nil {
+		s.meta.GetSnapshotMeta().Close()
+		log.Info("datacoord snapshot meta closed")
+	}
+
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
+
+	// Stop copy segment components
+	s.copySegmentInspector.Close()
+	s.copySegmentChecker.Close()
+	log.Info("datacoord copy segment inspector and checker stopped")
 
 	s.stopCompaction()
 	log.Info("datacoord compaction stopped")

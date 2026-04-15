@@ -2189,8 +2189,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
-		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2218,8 +2218,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
-		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2247,8 +2247,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
-		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2275,8 +2275,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
-		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2291,8 +2291,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 	})
 	t.Run("json data is string", func(t *testing.T) {
 		data := "abcdefg"
+		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
 		schema := newTestSchema()
-		jsonFieldData := autoGenDynamicFieldData(schema, [][]byte{[]byte(data)})
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",

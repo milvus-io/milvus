@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
@@ -45,20 +44,6 @@ func (hs *handlerServiceImpl) GetReplicateCheckpoint(ctx context.Context, req *s
 		return nil, err
 	}
 	return &streamingpb.GetReplicateCheckpointResponse{Checkpoint: cp.IntoProto()}, nil
-}
-
-// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
-func (hs *handlerServiceImpl) GetSalvageCheckpoint(ctx context.Context, req *streamingpb.GetSalvageCheckpointRequest) (*streamingpb.GetSalvageCheckpointResponse, error) {
-	wal, err := hs.walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(req.GetPchannel()))
-	if err != nil {
-		return nil, err
-	}
-	cps := wal.GetSalvageCheckpoint()
-	protoCps := make([]*commonpb.ReplicateCheckpoint, 0, len(cps))
-	for _, cp := range cps {
-		protoCps = append(protoCps, cp.IntoProto())
-	}
-	return &streamingpb.GetSalvageCheckpointResponse{Checkpoints: protoCps}, nil
 }
 
 // Produce creates a new producer for the channel on this log node.

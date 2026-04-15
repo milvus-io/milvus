@@ -353,10 +353,22 @@ func buildPreImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", PreImportTaskPrefix, taskID)
 }
 
+func buildCopySegmentJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", CopySegmentJobPrefix, jobID)
+}
+
+func buildCopySegmentTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", CopySegmentTaskPrefix, taskID)
+}
+
 func buildAnalyzeTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", AnalyzeTaskPrefix, taskID)
 }
 
 func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
+}
+
+func buildSnapshotKey(collectionID int64, snapshotID int64) string {
+	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
 }
