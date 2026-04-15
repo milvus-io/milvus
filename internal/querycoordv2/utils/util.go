@@ -109,6 +109,15 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 				log.RatedInfo(10, "segment is not updated", zap.Int64("segmentID", segmentID))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
+			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
+			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
+			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
+				log.RatedInfo(10, "segment data version is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.Int32("distDataVersion", *segment.DataVersion),
+					zap.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
+				return merr.WrapErrSegmentNotLoaded(segmentID)
+			}
 		}
 	}
 	return nil

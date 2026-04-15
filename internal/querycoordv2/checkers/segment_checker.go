@@ -331,7 +331,19 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	}
 	isSegmentUpdate := func(segment *datapb.SegmentInfo) bool {
 		segInDist, existInDist := distMap[segment.ID]
-		return existInDist && segInDist.ManifestPath != segment.GetManifestPath()
+		if !existInDist {
+			return false
+		}
+		// Trigger reopen when storage v2 data version is behind the target.
+		// DataVersion bumps on storage v2 binlog changes that don't necessarily
+		// move the manifest version.
+		// Skip when the QueryNode did not report DataVersion (nil pointer from
+		// proto3 optional): during a mixed-version rollout an old QueryNode has
+		// no way to advance DataVersion, so triggering Reopen would loop forever.
+		if segInDist.DataVersion != nil && *segInDist.DataVersion < segment.GetDataVersion() {
+			return true
+		}
+		return segInDist.ManifestPath != segment.GetManifestPath()
 	}
 
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
