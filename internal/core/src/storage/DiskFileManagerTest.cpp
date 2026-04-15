@@ -281,7 +281,7 @@ TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     std::vector<int64_t> values = {1, 2, 3};
     index.Build(values.size(), values.data());
 
-    auto stats = index.UploadV3({});
+    auto stats = index.UploadUnified({});
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
 
@@ -1062,7 +1062,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1072,7 +1072,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1124,7 +1124,7 @@ TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1134,7 +1134,7 @@ TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1168,7 +1168,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1178,7 +1178,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1210,7 +1210,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1220,7 +1220,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 

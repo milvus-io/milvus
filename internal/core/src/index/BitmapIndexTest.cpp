@@ -202,7 +202,7 @@ class BitmapIndexTest : public testing::Test {
             milvus::proto::common::LoadPriority::HIGH;
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index_->LoadV3(config);
+        index_->LoadUnified(config);
     }
 
     virtual void

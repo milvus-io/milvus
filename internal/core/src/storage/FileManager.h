@@ -226,8 +226,8 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     std::unique_ptr<IndexEntryWriter>
-    CreateIndexEntryWriterV3(const std::string& filename,
-                             bool is_index_file = true) {
+    CreateIndexEntryWriterUnified(const std::string& filename,
+                                  bool is_index_file = true) {
         if (plugin_context_) {
             auto cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
             if (cipher_plugin) {

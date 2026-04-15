@@ -150,7 +150,7 @@ TextMatchIndex::Load(const Config& config) {
         if (filename.size() > 3 &&
             filename.substr(filename.size() - 3) == ".v3") {
             LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
-            InvertedIndexTantivy<std::string>::LoadV3(config);
+            InvertedIndexTantivy<std::string>::LoadUnified(config);
             return;
         }
     }

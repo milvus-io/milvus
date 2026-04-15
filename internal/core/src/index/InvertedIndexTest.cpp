@@ -200,7 +200,7 @@ test_run() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->LoadV3(config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {
@@ -596,7 +596,7 @@ test_string() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->LoadV3(config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {
