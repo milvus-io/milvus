@@ -434,6 +434,8 @@ message SegmentInfo {
   // we could keep the fullpath since one segment shall only have one active manifest
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
+
+  int32 data_version = 35;
 }
 
 message SegmentStartPosition {
