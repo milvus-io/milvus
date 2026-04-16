@@ -52,7 +52,7 @@ func getTLSCreds(certFile string, keyFile string, nodeType string) credentials.T
 
 func EnableInternalTLS(NodeType string) grpc.ServerOption {
 	log := log.Ctx(context.TODO())
-	var Params *paramtable.ComponentParam = paramtable.Get()
+	Params := paramtable.Get()
 	certFile := Params.InternalTLSCfg.InternalTLSServerPemPath.GetValue()
 	keyFile := Params.InternalTLSCfg.InternalTLSServerKeyPath.GetValue()
 	internaltlsEnabled := Params.InternalTLSCfg.InternalTLSEnabled.GetAsBool()

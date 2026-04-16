@@ -323,7 +323,7 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 		State:        datapb.ImportTaskStateV2_Pending,
 	})
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	err = s.importMeta.AddTask(context.TODO(), pendingImportTask)
+	_ = s.importMeta.AddTask(context.TODO(), pendingImportTask)
 
 	// Mock scheduler expectations
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)

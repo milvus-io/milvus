@@ -545,9 +545,10 @@ func TestListCommandsWithInfo(t *testing.T) {
 	// Verify command info
 	var cmdInfo, cfgInfo *CommandInfoData
 	for _, info := range infos {
-		if info.CommandID == cmdID {
+		switch info.CommandID {
+		case cmdID:
 			cmdInfo = info
-		} else if info.CommandID == cfgID {
+		case cfgID:
 			cfgInfo = info
 		}
 	}

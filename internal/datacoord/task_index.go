@@ -295,7 +295,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	if it.indexEngineVersionManager.GetIndexNonEncoding() {
 		indexNonEncoding = "true"
 	}
-	indexParams = append(indexParams, &commonpb.KeyValuePair{
+	params = append(params, &commonpb.KeyValuePair{
 		Key:   common.IndexNonEncoding,
 		Value: indexNonEncoding,
 	})

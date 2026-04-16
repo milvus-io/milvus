@@ -4,7 +4,7 @@ import "context"
 
 // NewAsyncTaskNotifier creates a new async task notifier.
 func NewAsyncTaskNotifier[T any]() *AsyncTaskNotifier[T] {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in struct and called via Cancel()
 	return &AsyncTaskNotifier[T]{
 		ctx:    ctx,
 		cancel: cancel,

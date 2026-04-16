@@ -69,7 +69,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			}
 		case models.TruncateParamKey:
 			if param.Value != "NONE" && param.Value != "START" && param.Value != "END" {
-				return nil, fmt.Errorf("Illegal parameters, %s only supports [NONE, START, END]", models.TruncateParamKey)
+				return nil, fmt.Errorf("illegal parameters, %s only supports [NONE, START, END]", models.TruncateParamKey)
 			}
 			truncate = param.Value
 		default:
@@ -87,7 +87,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 
 	embdType := models.GetEmbdType(fieldSchema.DataType)
 	if embdType == models.UnsupportEmbd {
-		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+		return nil, fmt.Errorf("unsupport output type: %s", fieldSchema.DataType)
 	}
 
 	outputType := func() string {
@@ -149,22 +149,22 @@ func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, text
 		}
 		if provider.embdType == models.Float32Embd {
 			if end-i != len(resp.Embeddings.Float) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
+				return nil, fmt.Errorf("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Float))
 			}
 			for _, item := range resp.Embeddings.Float {
 				if len(item) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item))
 				}
 			}
 			embRet.Append(resp.Embeddings.Float)
 		} else {
 			if end-i != len(resp.Embeddings.Int8) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Int8))
+				return nil, fmt.Errorf("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings.Int8))
 			}
 			for _, item := range resp.Embeddings.Int8 {
 				if len(item) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item))
 				}
 			}

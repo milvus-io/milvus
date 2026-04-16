@@ -71,14 +71,14 @@ type clientManager struct {
 func loadConfig(config map[string]string) (*clientConfig, error) {
 	endpoint := config["endpoint"]
 	if endpoint == "" {
-		return nil, fmt.Errorf("Zilliz client config error, lost endpoint config")
+		return nil, fmt.Errorf("zilliz client config error, lost endpoint config")
 	}
 	enableTLSStr := config["enableTLS"]
 	enableTLS := false
 	if enableTLSStr != "" {
 		var err error
 		if enableTLS, err = strconv.ParseBool(enableTLSStr); err != nil {
-			return nil, fmt.Errorf("Zilliz client config err: enableTLS:%s is not bool, err:%w", enableTLSStr, err)
+			return nil, fmt.Errorf("zilliz client config err: enableTLS:%s is not bool, err:%w", enableTLSStr, err)
 		}
 	}
 	if enableTLS {
@@ -192,7 +192,7 @@ func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, i
 	}
 	conn, err := mgr.GetConn(clientConf)
 	if err != nil {
-		return nil, fmt.Errorf("Connect model serving failed, err:%w", err)
+		return nil, fmt.Errorf("connect model serving failed, err:%w", err)
 	}
 	return &ZillizClient{
 		modelDeploymentID: modelDeploymentID,

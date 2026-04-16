@@ -119,11 +119,12 @@ func TestManager(t *testing.T) {
 			session.RegisterCleanup(func() {
 				count.Dec()
 			}, 0)
-			if i%3 == 0 {
+			switch i % 3 {
+			case 0:
 				err := session.RequestCommitAndWait(context.Background(), 0)
 				session.CommitDone()
 				assert.NoError(t, err)
-			} else if i%3 == 1 {
+			case 1:
 				err := session.RequestRollback(context.Background(), 0)
 				assert.NoError(t, err)
 				session.RollbackDone()

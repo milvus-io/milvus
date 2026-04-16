@@ -176,7 +176,7 @@ type GrpcServerConfig struct {
 }
 
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultServerMaxSendSize, 10)
 	p.ServerMaxSendSize = ParamItem{
@@ -257,7 +257,7 @@ type GrpcClientConfig struct {
 }
 
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultClientMaxSendSize, 10)
 	p.ClientMaxSendSize = ParamItem{

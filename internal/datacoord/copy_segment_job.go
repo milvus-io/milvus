@@ -63,14 +63,14 @@ type UpdateCopySegmentJobAction func(job CopySegmentJob)
 
 func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
-		job.(*copySegmentJob).CopySegmentJob.State = state
+		job.(*copySegmentJob).State = state
 		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
 			state == datapb.CopySegmentJobState_CopySegmentJobFailed {
 			// Set cleanup ts based on copy segment task retention
 			dur := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
 			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
-			job.(*copySegmentJob).CopySegmentJob.CleanupTs = cleanupTs
+			job.(*copySegmentJob).CleanupTs = cleanupTs
 			log.Info("set copy segment job cleanup ts",
 				zap.Int64("jobID", job.GetJobId()),
 				zap.Time("cleanupTime", cleanupTime),
@@ -81,26 +81,26 @@ func UpdateCopyJobState(state datapb.CopySegmentJobState) UpdateCopySegmentJobAc
 
 func UpdateCopyJobReason(reason string) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
-		job.(*copySegmentJob).CopySegmentJob.Reason = reason
+		job.(*copySegmentJob).Reason = reason
 	}
 }
 
 func UpdateCopyJobProgress(copied, total int64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
-		job.(*copySegmentJob).CopySegmentJob.CopiedSegments = copied
-		job.(*copySegmentJob).CopySegmentJob.TotalSegments = total
+		job.(*copySegmentJob).CopiedSegments = copied
+		job.(*copySegmentJob).TotalSegments = total
 	}
 }
 
 func UpdateCopyJobCompleteTs(completeTs uint64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
-		job.(*copySegmentJob).CopySegmentJob.CompleteTs = completeTs
+		job.(*copySegmentJob).CompleteTs = completeTs
 	}
 }
 
 func UpdateCopyJobTotalRows(totalRows int64) UpdateCopySegmentJobAction {
 	return func(job CopySegmentJob) {
-		job.(*copySegmentJob).CopySegmentJob.TotalRows = totalRows
+		job.(*copySegmentJob).TotalRows = totalRows
 	}
 }
 

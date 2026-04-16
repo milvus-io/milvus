@@ -108,14 +108,14 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 	testCollection := utils.CreateTestCollection(suite.collectionID, 1)
 	testCollection.Status = querypb.LoadStatus_Loaded
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, testCollection)
+	err = suite.meta.PutCollection(suite.ctx, testCollection)
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 
 	suite.nextTargetChannels = []*datapb.VchannelInfo{
@@ -368,7 +368,7 @@ func (suite *TargetObserverSuite) TestTriggerRelease() {
 	suite.NoError(err)
 
 	// manually release partition
-	partitions := suite.meta.CollectionManager.GetPartitionsByCollection(ctx, suite.collectionID)
+	partitions := suite.meta.GetPartitionsByCollection(ctx, suite.collectionID)
 	partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 { return partition.PartitionID })
 	suite.observer.ReleasePartition(suite.collectionID, partitionIDs[0])
 
@@ -439,14 +439,14 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 
-	err = suite.meta.CollectionManager.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
+	err = suite.meta.PutCollection(suite.ctx, utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)
-	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
+	err = suite.meta.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := suite.meta.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
-	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
+	err = suite.meta.Put(suite.ctx, replicas...)
 	suite.NoError(err)
 }
 

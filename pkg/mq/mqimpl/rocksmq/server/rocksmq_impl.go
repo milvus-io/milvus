@@ -101,7 +101,7 @@ func constructKey(metaName, topic string) string {
 func parsePageID(key string) (int64, error) {
 	stringSlice := strings.Split(key, "/")
 	if len(stringSlice) != 3 {
-		return 0, fmt.Errorf("Invalid page id %s ", key)
+		return 0, fmt.Errorf("invalid page id %s ", key)
 	}
 	return strconv.ParseInt(stringSlice[2], 10, 64)
 }
@@ -1179,7 +1179,7 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, firstID UniqueI
 		}
 
 		// find min id of all consumer
-		var minBeginID UniqueID = lastID
+		minBeginID := lastID
 		var err error
 		consumers.Range(func(c *Consumer) bool {
 			if c.GroupName != groupName {

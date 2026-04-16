@@ -610,21 +610,21 @@ func (ms *MqTtMsgStream) continueBuffering(endTs, size uint64, startTime time.Ti
 	}
 
 	// pursuit mode not enabled
-	if !paramtable.Get().ServiceParam.MQCfg.EnablePursuitMode.GetAsBool() {
+	if !paramtable.Get().MQCfg.EnablePursuitMode.GetAsBool() {
 		return false
 	}
 
 	// buffer full
-	if size > paramtable.Get().ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64() {
+	if size > paramtable.Get().MQCfg.PursuitBufferSize.GetAsUint64() {
 		return false
 	}
 
-	if time.Since(startTime) > paramtable.Get().ServiceParam.MQCfg.PursuitBufferTime.GetAsDuration(time.Second) {
+	if time.Since(startTime) > paramtable.Get().MQCfg.PursuitBufferTime.GetAsDuration(time.Second) {
 		return false
 	}
 
 	endTime, _ := tsoutil.ParseTS(endTs)
-	return time.Since(endTime) > paramtable.Get().ServiceParam.MQCfg.PursuitLag.GetAsDuration(time.Second)
+	return time.Since(endTime) > paramtable.Get().MQCfg.PursuitLag.GetAsDuration(time.Second)
 }
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {

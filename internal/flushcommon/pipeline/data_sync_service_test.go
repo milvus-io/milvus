@@ -320,7 +320,7 @@ type DataSyncServiceSuite struct {
 
 func (s *DataSyncServiceSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
-	s.MockDataSuiteBase.PrepareData()
+	s.PrepareData()
 }
 
 func (s *DataSyncServiceSuite) SetupTest() {

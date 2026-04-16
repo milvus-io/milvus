@@ -161,7 +161,7 @@ func (p *Pipeline) GetOutput(msg OpMsg) (any, bool) {
 func (p *Pipeline) String() string {
 	buf := bytes.NewBufferString(fmt.Sprintf("Pipeline[%s]:\n", p.name))
 	for i, node := range p.nodes {
-		buf.WriteString(fmt.Sprintf("  %d. %s: %v -> %v\n", i+1, node.name, node.inputs, node.outputs))
+		fmt.Fprintf(buf, "  %d. %s: %v -> %v\n", i+1, node.name, node.inputs, node.outputs)
 	}
 	return buf.String()
 }

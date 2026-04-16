@@ -18,11 +18,11 @@ package external
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -109,9 +109,7 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	require.Eventually(t, func() bool {
 		info := manager.Get(clusterID, taskID)
@@ -200,8 +198,8 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		return info != nil
 	}, time.Second, 10*time.Millisecond)
 
-	cancelled := manager.CancelTask(clusterID, taskID)
-	assert.True(t, cancelled)
+	canceled := manager.CancelTask(clusterID, taskID)
+	assert.True(t, canceled)
 
 	require.Eventually(t, func() bool {
 		select {
@@ -401,9 +399,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 
 	close(unblock)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	// Task should have executed before close
 	assert.True(t, executed.Load())
