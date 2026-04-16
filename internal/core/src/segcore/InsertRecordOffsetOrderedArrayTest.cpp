@@ -157,17 +157,13 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
     this->seal();
 
     // Build ArrayOffsets: each doc has array_len elements
-    std::vector<int32_t> element_row_ids;
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
-        for (int e = 0; e < array_len; e++) {
-            element_row_ids.push_back(doc);
-        }
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 15
 
@@ -275,17 +271,13 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
 
     // Build ArrayOffsets: each doc has array_len elements
     // doc0: [elem0, elem1], doc1: [elem2, elem3], doc2: [elem4, elem5]
-    std::vector<int32_t> element_row_ids;
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
-        for (int e = 0; e < array_len; e++) {
-            element_row_ids.push_back(doc);
-        }
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 6
 
