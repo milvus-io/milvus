@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var (
+const (
 	DefaultResourceGroupName           = common.DefaultResourceGroupName
 	defaultResourceGroupCapacity int32 = 1000000
 )

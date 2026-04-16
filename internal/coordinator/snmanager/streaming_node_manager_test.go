@@ -114,14 +114,18 @@ func TestStreamingNodeManager(t *testing.T) {
 	assert.Len(t, nodesByRG, 1)
 	assert.True(t, nodesByRG["cached_rg"].Contain(10))
 
-	// Simulate error from balancer - should fall back to cached nodes
+	// Simulate error from balancer - should fall back to cached nodes.
+	// This exercises the fetchStreamingNodes() error path where GetAvailableStreamingNodes
+	// returns an error and the function returns s.previousNodesByRG (the cache).
 	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Unset()
 	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(nil, errors.New("balancer shutting down"))
 	nodesByRG = m.GetStreamingQueryNodeIDsByResourceGroup()
 	assert.Len(t, nodesByRG, 1)
 	assert.True(t, nodesByRG["cached_rg"].Contain(10))
+	// Verify no new or stale nodes appear
+	assert.False(t, nodesByRG["cached_rg"].Contain(1))
 
-	// Also verify GetStreamingQueryNodeIDs uses cache fallback
+	// Also verify GetStreamingQueryNodeIDs uses cache fallback on the same error
 	streamingNodes = m.GetStreamingQueryNodeIDs()
 	assert.Equal(t, 1, streamingNodes.Len())
 	assert.True(t, streamingNodes.Contain(10))

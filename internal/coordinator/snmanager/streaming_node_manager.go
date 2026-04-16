@@ -183,8 +183,12 @@ func (s *StreamingNodeManager) fetchStreamingNodes() map[int64]*types.StreamingN
 		// when the streaming coord is on shutdown, the balancer will return an error,
 		// causing panic, so we need to return the previous nodes.
 		streamingNodes = s.previousNodesByRG
-	} else {
-		s.previousNodesByRG = streamingNodes
+	}
+	// Deep copy into cache to prevent callers from mutating the cached map.
+	s.previousNodesByRG = make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(streamingNodes))
+	for k, v := range streamingNodes {
+		copied := *v
+		s.previousNodesByRG[k] = &copied
 	}
 	return streamingNodes
 }

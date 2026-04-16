@@ -1403,12 +1403,24 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
+		// Redact sensitive config keys (passwords, secrets, tokens).
+		normalizedKey := strings.ToLower(key)
+		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
+			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
+			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
+			continue
+		}
 		source, value, err := paramMgr.GetConfig(key)
 		if err != nil {
 			results = append(results, configResult{Key: key, Error: err.Error()})
 		} else {
 			results = append(results, configResult{Key: key, Value: value, Source: source})
 		}
+	}
+
+	if len(results) == 0 {
+		writeJSONError(writer, "no valid keys provided", http.StatusBadRequest)
+		return
 	}
 
 	writeJSONResponse(writer, http.StatusOK, map[string]interface{}{
