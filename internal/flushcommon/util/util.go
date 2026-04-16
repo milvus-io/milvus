@@ -49,6 +49,7 @@ type PipelineParams struct {
 	Allocator          allocator.Interface
 	MsgHandler         MsgHandler
 	SchemaManager      metacache.SchemaManager
+	ErrorHandler       func(error) // Called on unrecoverable write errors; if nil, the caller should panic.
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

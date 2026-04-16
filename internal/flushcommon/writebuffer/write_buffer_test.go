@@ -66,7 +66,8 @@ func (s *WriteBufferSuite) TestHasSegment() {
 
 	s.False(s.wb.HasSegment(segmentID))
 
-	s.wb.getOrCreateBuffer(segmentID, 0)
+	_, err := s.wb.getOrCreateBuffer(segmentID, 0)
+	s.Require().NoError(err)
 
 	s.True(s.wb.HasSegment(segmentID))
 }

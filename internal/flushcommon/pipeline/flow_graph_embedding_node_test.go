@@ -142,7 +142,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			metaCache.EXPECT().GetSchema(mock.Anything).Return(collSchema)
 
 			t.Run("normal case", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -184,7 +184,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			})
 
 			t.Run("with close msg", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -202,7 +202,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			})
 
 			t.Run("prepare insert failed", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -223,8 +223,109 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 				})
 			})
 
+			// Regression coverage for PR #48928 review comment on flow_graph_embedding_node.go:223.
+			// With a non-nil errHandler, Operate must NOT panic — instead it calls the handler
+			// with the underlying error and returns a close-msg so the flowgraph shuts down.
+			// Placed before the "embedding failed" subtest because that subtest mutates the
+			// shared collSchema function Type to 0, which would subsequently break newEmbeddingNode.
+			t.Run("prepare insert failed with errHandler", func(t *testing.T) {
+				var (
+					handlerCalled int
+					capturedErr   error
+				)
+				handler := func(err error) {
+					handlerCalled++
+					capturedErr = err
+				}
+				node, err := newEmbeddingNode("test-channel", metaCache, handler)
+				assert.NoError(t, err)
+				defer node.Free()
+
+				var output []Msg
+				assert.NotPanics(t, func() {
+					output = node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(false),
+							InsertMessages: []*msgstream.InsertMsg{{
+								BaseMsg: msgstream.BaseMsg{},
+								InsertRequest: &msgpb.InsertRequest{
+									FieldsData: []*schemapb.FieldData{{
+										FieldId: 1100, // invalid fieldID — forces PrepareInsert to fail
+									}},
+								},
+							}},
+						},
+					})
+				})
+				assert.Equal(t, 1, handlerCalled, "errHandler should be invoked exactly once")
+				assert.Error(t, capturedErr)
+				assert.Equal(t, 1, len(output))
+				closeMsg, ok := output[0].(*FlowGraphMsg)
+				assert.True(t, ok)
+				assert.True(t, closeMsg.IsCloseMsg(),
+					"on failure, errHandler path must return a close msg to trigger flowgraph shutdown")
+			})
+
+			t.Run("embedding failed with errHandler", func(t *testing.T) {
+				var (
+					handlerCalled int
+					capturedErr   error
+				)
+				handler := func(err error) {
+					handlerCalled++
+					capturedErr = err
+				}
+				node, err := newEmbeddingNode("test-channel", metaCache, handler)
+				assert.NoError(t, err)
+				defer node.Free()
+
+				// Break the function runner to force Embedding() to fail. Restore the schema
+				// type on exit so this subtest does not leak mutation into sibling subtests.
+				runnerSchema := node.functionRunners[0].GetSchema()
+				originalType := runnerSchema.Type
+				runnerSchema.Type = 0
+				defer func() { runnerSchema.Type = originalType }()
+
+				var output []Msg
+				assert.NotPanics(t, func() {
+					output = node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(false),
+							InsertMessages: []*msgstream.InsertMsg{{
+								BaseMsg: msgstream.BaseMsg{},
+								InsertRequest: &msgpb.InsertRequest{
+									SegmentID:  1,
+									Version:    msgpb.InsertDataVersion_ColumnBased,
+									Timestamps: []uint64{1, 1, 1},
+									FieldsData: []*schemapb.FieldData{
+										{
+											FieldId: 100,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+											},
+										}, {
+											FieldId: 101,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}}}},
+											},
+										},
+									},
+								},
+							}},
+						},
+					})
+				})
+				assert.Equal(t, 1, handlerCalled, "errHandler should be invoked exactly once")
+				assert.Error(t, capturedErr)
+				assert.Equal(t, 1, len(output))
+				closeMsg, ok := output[0].(*FlowGraphMsg)
+				assert.True(t, ok)
+				assert.True(t, closeMsg.IsCloseMsg(),
+					"on failure, errHandler path must return a close msg to trigger flowgraph shutdown")
+			})
+
 			t.Run("embedding failed", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 

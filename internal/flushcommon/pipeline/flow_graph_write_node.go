@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -29,6 +30,15 @@ type writeNode struct {
 	updater     util.StatsUpdater
 	metacache   metacache.MetaCache
 	pkField     *schemapb.FieldSchema
+	errHandler  func(error) // Called on unrecoverable write errors; if nil, panics (DataNode compat).
+}
+
+func (wNode *writeNode) handleError(err error) {
+	if wNode.errHandler != nil {
+		wNode.errHandler(err)
+		return
+	}
+	panic(err)
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -87,7 +97,8 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 			var err error
 			if insertData, err = writebuffer.PrepareInsert(wNode.metacache.GetSchema(fgMsg.TimeTick()), wNode.pkField, fgMsg.InsertMessages); err != nil {
 				log.Error("failed to prepare data", zap.Error(err))
-				panic(err)
+				wNode.handleError(err)
+				return []Msg{&FlowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}}
 			}
 		}
 		fgMsg.InsertData = insertData
@@ -96,7 +107,8 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
 	if err != nil {
 		log.Error("failed to buffer data", zap.Error(err))
-		panic(err)
+		wNode.handleError(err)
+		return []Msg{&FlowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}}
 	}
 
 	stats := lo.FilterMap(
@@ -143,6 +155,7 @@ func newWriteNode(
 	writeBufferManager writebuffer.BufferManager,
 	updater util.StatsUpdater,
 	config *nodeConfig,
+	errHandler func(error),
 ) (*writeNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
@@ -162,5 +175,6 @@ func newWriteNode(
 		updater:     updater,
 		metacache:   config.metacache,
 		pkField:     pkField,
+		errHandler:  errHandler,
 	}, nil
 }

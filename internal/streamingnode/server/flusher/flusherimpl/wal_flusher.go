@@ -83,6 +83,19 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 		impl.logger.Warn("wal flusher is canceled before executing", zap.Error(err))
 	}()
 
+	// Create a derived context with cancel-cause so that DSS write failures can trigger flusher shutdown.
+	//
+	// Context split:
+	//   - failCtx: gates the OUTER scanner loop only (the select below). When a DSS async
+	//     failure fires failCancel, we stop pulling new messages from the scanner and exit.
+	//   - impl.notifier.Context(): governs every INNER per-message operation (dispatch,
+	//     HandleMessage, broadcast, ObserveMessage). Once a message is pulled from the scanner
+	//     we MUST complete its delivery atomically — otherwise partial MsgPack delivery races
+	//     with ObserveMessage advancing the recovery-storage checkpoint, which would cause the
+	//     re-opened flusher to skip partially-flushed data. See PR #48928 review discussion.
+	failCtx, failCancel := context.WithCancelCause(impl.notifier.Context())
+	defer failCancel(nil)
+
 	// because current flusher is build asynchronously,
 	// so we need to enter slowdown mode to protect the wal from being overloaded before the recovery-storage scanner is started.
 	// recovery-storage scanner will protect the wal from being overloaded after the recovery-storage is started.
@@ -96,7 +109,7 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	impl.logger.Info("wal ready for flusher recovery")
 
 	var checkpoint message.MessageID
-	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
+	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot, failCancel)
 	if err != nil {
 		return errors.Wrap(err, "when build flusher components")
 	}
@@ -115,7 +128,11 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 
 	for {
 		select {
-		case <-impl.notifier.Context().Done():
+		case <-failCtx.Done():
+			// Check if the flusher was stopped due to a DSS write failure.
+			if cause := context.Cause(failCtx); cause != nil && !errors.Is(cause, context.Canceled) {
+				impl.logger.Warn("wal flusher stopped due to DSS write failure, will trigger re-consumption", zap.Error(cause))
+			}
 			return nil
 		case msg, ok := <-scanner.Chan():
 			if !ok {
@@ -123,8 +140,10 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 				return nil
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
-			if err := impl.dispatch(msg); err != nil {
-				// The error is always context canceled.
+			// Pass the stable notifier context (NOT failCtx) into dispatch, so that a concurrent
+			// DSS failure firing failCancel mid-dispatch cannot interrupt in-flight per-message
+			// delivery. An async DSS failure only affects the next scanner iteration via failCtx.Done().
+			if err := impl.dispatch(impl.notifier.Context(), msg); err != nil {
 				return nil
 			}
 		}
@@ -144,7 +163,7 @@ func (impl *WALFlusherImpl) Close() {
 }
 
 // buildFlusherComponents builds the components of the flusher.
-func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, message.MessageID, error) {
+func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot, failCancel context.CancelCauseFunc) (*flusherComponents, message.MessageID, error) {
 	// Get all existed vchannels of the pchannel.
 	vchannels := lo.Keys(snapshot.VChannels)
 	impl.logger.Info("fetch vchannel done", zap.Int("vchannelNum", len(vchannels)))
@@ -191,6 +210,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		logger:                     impl.logger,
 		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
 		rs:                         impl.RecoveryStorage,
+		failCancel:                 failCancel,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {
@@ -222,7 +242,15 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 }
 
 // dispatch dispatches the message to the related handler for flusher components.
-func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
+//
+// The caller MUST pass a stable context that is not canceled by the DSS failure handler
+// (typically impl.notifier.Context()). Dispatch of a single WAL message must be atomic:
+// either every target vchannel receives every MsgPack AND ObserveMessage advances the
+// recovery checkpoint, or none of it happens. Passing a cancellable failCtx here would
+// allow a mid-dispatch cancel to leave some vchannels written and some not, while
+// ObserveMessage still unconditionally advances the recovery-storage checkpoint, causing
+// the re-opened flusher to skip data that was never actually flushed.
+func (impl *WALFlusherImpl) dispatch(ctx context.Context, msg message.ImmutableMessage) (err error) {
 	if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() {
 		// Currently, milvus use the timetick to synchronize the system periodically,
 		// so the wal will still produce empty timetick message after the last write operation is done.
@@ -244,7 +272,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
 	// only for truncate api now.
 	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
-		if err := impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+		if err := impl.RecoveryStorage.ObserveMessage(ctx, msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 			return err
 		}
@@ -252,7 +280,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// TODO: We will merge the flusher into recovery storage in future.
 		// Currently, flusher works as a separate component.
 		defer func() {
-			if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			if err = impl.RecoveryStorage.ObserveMessage(ctx, msg); err != nil {
 				impl.logger.Warn("failed to observe message", zap.Error(err))
 			}
 		}()
@@ -279,5 +307,5 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
 		}()
 	}
-	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
+	return impl.flusherComponents.HandleMessage(ctx, msg)
 }

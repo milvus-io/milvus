@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -41,12 +42,13 @@ type embeddingNode struct {
 	metaCache   metacache.MetaCache
 	pkField     *schemapb.FieldSchema
 	channelName string
+	errHandler  func(error) // Called on unrecoverable write errors; if nil, panics (DataNode compat).
 
 	// embeddingType EmbeddingType
 	functionRunners map[int64]function.FunctionRunner
 }
 
-func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embeddingNode, error) {
+func newEmbeddingNode(channelName string, metaCache metacache.MetaCache, errHandler func(error)) (*embeddingNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -55,6 +57,7 @@ func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embed
 		BaseNode:        baseNode,
 		channelName:     channelName,
 		metaCache:       metaCache,
+		errHandler:      errHandler,
 		functionRunners: make(map[int64]function.FunctionRunner),
 	}
 
@@ -199,6 +202,14 @@ func (eNode *embeddingNode) Embedding(datas []*writebuffer.InsertData) error {
 	return nil
 }
 
+func (eNode *embeddingNode) handleError(err error) {
+	if eNode.errHandler != nil {
+		eNode.errHandler(err)
+		return
+	}
+	panic(err)
+}
+
 func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*FlowGraphMsg)
 
@@ -211,13 +222,15 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 		var err error
 		if insertData, err = writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages); err != nil {
 			log.Error("failed to prepare insert data", zap.Error(err))
-			panic(err)
+			eNode.handleError(err)
+			return []Msg{&FlowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}}
 		}
 	}
 
 	if err := eNode.Embedding(insertData); err != nil {
 		log.Warn("failed to embedding insert data", zap.Error(err))
-		panic(err)
+		eNode.handleError(err)
+		return []Msg{&FlowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}}
 	}
 
 	fgMsg.InsertData = insertData

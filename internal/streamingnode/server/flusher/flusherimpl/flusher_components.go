@@ -3,6 +3,7 @@ package flusherimpl
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -37,6 +39,17 @@ type flusherComponents struct {
 	logger                     *log.MLogger
 	recoveryCheckPointTimeTick uint64 // The time tick of the recovery storage.
 	rs                         recovery.RecoveryStorage
+	failCancel                 context.CancelCauseFunc // Cancels the flusher context on DSS write failure.
+}
+
+// makeWriteFailureHandler creates an error handler for a specific vchannel's DSS.
+// When invoked, it cancels the flusher's context to trigger flusher shutdown and WAL re-consumption.
+func (impl *flusherComponents) makeWriteFailureHandler(vchannel string) func(error) {
+	return func(err error) {
+		impl.logger.Warn("DSS write failure, triggering flusher restart",
+			zap.String("vchannel", vchannel), zap.Error(err))
+		impl.failCancel(errors.Wrapf(err, "DSS write failure on vchannel %s", vchannel))
+	}
 }
 
 // WhenCreateCollection handles the create collection message.
@@ -60,6 +73,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 	}
 
 	msgChan := make(chan *msgstream.MsgPack, 10)
+	failureHandler := impl.makeWriteFailureHandler(createCollectionMsg.VChannel())
 	ds := pipeline.NewEmptyStreamingNodeDataSyncService(
 		context.Background(), // There's no any rpc in this function, so the context is not used here.
 		&util.PipelineParams{
@@ -72,6 +86,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 			SchemaManager:      newVersionedSchemaManager(createCollectionMsg.VChannel(), impl.rs),
+			ErrorHandler:       failureHandler,
 		},
 		msgChan,
 		&datapb.VchannelInfo{
@@ -99,6 +114,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			}
 		},
 		nil,
+		writebuffer.WithErrorHandler(failureHandler),
 	)
 	impl.addNewDataSyncService(createCollectionMsg, msgChan, ds)
 }
@@ -114,6 +130,11 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 }
 
 // HandleMessage handles the plain message.
+//
+// Contract: ctx MUST be a stable context that is not canceled by the DSS failure
+// handler (i.e. not failCtx from WALFlusherImpl.Execute). Per-message delivery needs
+// to be atomic across all vchannels; a mid-call cancel leaves partial state that
+// diverges from the recovery-storage checkpoint. See wal_flusher.go dispatch() doc.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	// AlterReplicateConfig is a coordinator-only message, skip it in flusher.
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
@@ -130,6 +151,11 @@ func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.Im
 }
 
 // broadcastToAllDataSyncService broadcasts the message to all data sync services.
+//
+// Contract: callers MUST pass a stable context — not one canceled by the DSS failure
+// handler — because a mid-loop cancel leaves earlier vchannels written and later ones
+// skipped, while ObserveMessage (deferred in the caller) still advances the recovery
+// checkpoint, causing data loss on flusher restart. See wal_flusher.go dispatch() doc.
 func (impl *flusherComponents) broadcastToAllDataSyncService(ctx context.Context, msg message.ImmutableMessage) error {
 	for _, ds := range impl.dataServices {
 		if err := ds.HandleMessage(ctx, msg); err != nil {
@@ -246,6 +272,8 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 	input := make(chan *msgstream.MsgPack, 10)
 	schemaManager := newVersionedSchemaManager(recoverInfo.GetInfo().GetChannelName(), impl.rs)
 	schema := schemaManager.GetSchema(0)
+	vchannel := recoverInfo.GetInfo().GetChannelName()
+	failureHandler := impl.makeWriteFailureHandler(vchannel)
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx,
 		&util.PipelineParams{
 			Ctx:                context.Background(),
@@ -256,7 +284,8 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
-			SchemaManager:      newVersionedSchemaManager(recoverInfo.GetInfo().GetChannelName(), impl.rs),
+			SchemaManager:      newVersionedSchemaManager(vchannel, impl.rs),
+			ErrorHandler:       failureHandler,
 		},
 		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: schema},
 		input,
@@ -273,6 +302,7 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			}
 		},
 		nil,
+		writebuffer.WithErrorHandler(failureHandler),
 	)
 	if err != nil {
 		return nil, err
