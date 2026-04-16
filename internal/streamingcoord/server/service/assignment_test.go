@@ -85,7 +85,8 @@ func TestAssignmentService(t *testing.T) {
 
 	// Test update replicate configuration
 
-	// Test illegal replicate configuration
+	// Test drop replicate configuration (empty config = drop/clear signal)
+	// When currentConfig is nil, drop is idempotent no-op (treated as "same").
 	cfg := &commonpb.ReplicateConfiguration{}
 	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
 		PChannelView: &channel.PChannelView{
@@ -97,7 +98,7 @@ func TestAssignmentService(t *testing.T) {
 	_, err = as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
 		Configuration: cfg,
 	})
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	//
 	cfg = &commonpb.ReplicateConfiguration{
