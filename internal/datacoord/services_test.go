@@ -3976,7 +3976,6 @@ func TestServer_CreateExternalCollection_NoOp(t *testing.T) {
 	assert.False(t, merr.Ok(resp.GetStatus()))
 }
 
-
 func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 	t.Run("dbID_flows_through_when_collectionID_is_zero", func(t *testing.T) {
 		ctx := context.Background()
