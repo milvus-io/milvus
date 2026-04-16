@@ -5,7 +5,7 @@ import pandas as pd
 import sys
 import json
 import time
-from utils import constant
+from utils.constant import default_nb, MAX_SUM_OFFSET_AND_LIMIT
 from utils.utils import gen_collection_name, get_sorted_distance, patch_faker_text, en_vocabularies_distribution, \
     zh_vocabularies_distribution
 from utils.util_log import test_log as logger
@@ -796,7 +796,7 @@ class TestInsertVectorNegative(TestBase):
         rsp = self.collection_client.collection_describe(name)
         assert rsp['code'] == 0
         # insert data
-        nb = 100
+        nb = default_nb
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": "invalid_collection_name",
@@ -1270,7 +1270,7 @@ class TestUpsertVectorNegative(TestBase):
         rsp = self.collection_client.collection_describe(name)
         assert rsp['code'] == 0
         # insert data
-        nb = 100
+        nb = default_nb
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": "invalid_collection_name",
@@ -1958,7 +1958,7 @@ class TestSearchVector(TestBase):
         """
         Search a vector with a simple payload
         """
-        max_search_sum_limit_offset = constant.MAX_SUM_OFFSET_AND_LIMIT
+        max_search_sum_limit_offset = MAX_SUM_OFFSET_AND_LIMIT
         name = gen_collection_name()
         self.name = name
         nb = sum_limit_offset + 2000
@@ -2017,7 +2017,7 @@ class TestSearchVector(TestBase):
             "offset": offset,
         }
         rsp = self.vector_client.vector_search(payload)
-        if offset + limit > constant.MAX_SUM_OFFSET_AND_LIMIT:
+        if offset + limit > MAX_SUM_OFFSET_AND_LIMIT:
             assert rsp['code'] == 90126
             return
         assert rsp['code'] == 0
@@ -2036,7 +2036,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2068,7 +2068,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2115,7 +2115,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2164,7 +2164,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2200,7 +2200,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 3000
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb, metric_type=metric_type)
@@ -3044,7 +3044,7 @@ class TestHybridSearchVector(TestBase):
         rsp = self.vector_client.vector_hybrid_search(payload)
         
         # Check if offset + limit exceeds max allowed
-        if offset + limit > constant.MAX_SUM_OFFSET_AND_LIMIT:
+        if offset + limit > MAX_SUM_OFFSET_AND_LIMIT:
             assert rsp['code'] == 1
             assert "exceeds" in rsp['message'] or "invalid" in rsp['message'].lower()
         else:
@@ -3278,7 +3278,7 @@ class TestHybridSearchVector(TestBase):
         
         rsp = self.vector_client.vector_hybrid_search(payload)
         # When offset + limit exceeds max allowed
-        if large_offset + limit > constant.MAX_SUM_OFFSET_AND_LIMIT:
+        if large_offset + limit > MAX_SUM_OFFSET_AND_LIMIT:
             assert rsp['code'] == 65535
             assert "exceeds" in rsp['message'] or "invalid" in rsp['message'].lower()
         # When offset is larger than the available results
@@ -3590,7 +3590,7 @@ class TestQueryVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        self.init_collection(name, nb=3000)
+        self.init_collection(name, nb=default_nb)
         # query for "count(*)"
         payload = {
             "collectionName": name,
@@ -3609,7 +3609,7 @@ class TestQueryVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        _, _, insert_ids = self.init_collection(name, nb=3000, return_insert_id=True)
+        _, _, insert_ids = self.init_collection(name, nb=default_nb, return_insert_id=True)
         payload = {
             "collectionName": name,
             "id": insert_ids,
@@ -3625,7 +3625,7 @@ class TestQueryVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -3671,7 +3671,7 @@ class TestQueryVector(TestBase):
         name = gen_collection_name()
         filter_expr = "name > \"placeholder\""
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         limit = 100
         offset = sum_of_limit_offset - limit
@@ -4050,7 +4050,7 @@ class TestQueryVectorNegative(TestBase):
     def test_query_with_wrong_filter_expr(self):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
         output_fields = get_common_fields_by_data(data)
@@ -4113,7 +4113,7 @@ class TestGetVector(TestBase):
     def test_get_vector_complex(self, id_field_type, include_output_fields, include_invalid_id):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         output_fields = get_common_fields_by_data(data)
@@ -4182,7 +4182,7 @@ class TestDeleteVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        _, _, insert_ids = self.init_collection(name, nb=3000, return_insert_id=True)
+        _, _, insert_ids = self.init_collection(name, nb=default_nb, return_insert_id=True)
         payload = {
             "collectionName": name,
             "id": insert_ids,
@@ -4194,7 +4194,7 @@ class TestDeleteVector(TestBase):
     def test_delete_vector_by_pk_field_ids(self, id_field_type):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
         time.sleep(1)
@@ -4227,7 +4227,7 @@ class TestDeleteVector(TestBase):
     def test_delete_vector_by_filter_pk_field(self, id_field_type):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         time.sleep(1)
@@ -4286,7 +4286,7 @@ class TestDeleteVector(TestBase):
 
     def test_delete_vector_by_custom_pk_field(self):
         dim = 128
-        nb = 3000
+        nb = default_nb
         insert_round = 1
 
         name = gen_collection_name()
@@ -4349,7 +4349,7 @@ class TestDeleteVector(TestBase):
 
     def test_delete_vector_by_filter_custom_field(self):
         dim = 128
-        nb = 3000
+        nb = default_nb
         insert_round = 1
 
         name = gen_collection_name()
@@ -4413,7 +4413,7 @@ class TestDeleteVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        self.init_collection(name, dim=128, nb=300)
+        self.init_collection(name, dim=128, nb=default_nb)
         expr = "uid > 0"
         payload = {
             "collectionName": name,
@@ -4469,7 +4469,7 @@ class TestDeleteVectorNegative(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        self.init_collection(name, dim=128, nb=3000)
+        self.init_collection(name, dim=128, nb=default_nb)
 
         # query data
         # expr = f"id in {[i for i in range(10)]}".replace("[", "(").replace("]", ")")
@@ -4583,7 +4583,7 @@ class TestVectorWithAuth(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = default_nb
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         output_fields = get_common_fields_by_data(data)

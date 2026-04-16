@@ -12,7 +12,7 @@ success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"nlist": 128, "refine": 'true', "refine_type": "SQ8"}
 default_search_params = {"nprobe": 8, "rbq_bits_query": 6, "refine_k": 1.0}
 

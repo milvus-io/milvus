@@ -177,7 +177,7 @@ class TestSparseSearch(TestcaseBase):
         assert pro["mmap.enabled"] == 'True'
         collection_w.alter_index(index, {'mmap.enabled': True})
         assert collection_w.index()[0].params["mmap.enabled"] == 'True'
-        data2 = cf.gen_default_list_sparse_data(nb=2000, start=first_nb)  # id shall be continuous
+        data2 = cf.gen_default_list_sparse_data(nb=ct.default_nb, start=first_nb)  # id shall be continuous
         all_data = []  # combine 2 insert datas for next checking
         for i in range(len(data2)):
             all_data.append(data[i] + data2[i])

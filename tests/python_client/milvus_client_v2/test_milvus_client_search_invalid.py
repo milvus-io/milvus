@@ -292,7 +292,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         if index == "FLAT":
             pytest.skip("skip in FLAT index")
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 2000,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, ct.default_nb,
                                                                       is_index=False)[0:4]
         # 2. create index and load
         params = cf.get_index_params_params(index)
@@ -1231,7 +1231,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                 2. search with ef less than limit
         expected: raise exception and report the error
         """
-        collection_w = self.init_collection_general(prefix, True, 2000, 0, is_index=False)[0]
+        collection_w = self.init_collection_general(prefix, True, ct.default_nb, 0, is_index=False)[0]
         index_hnsw = {
             "index_type": "HNSW",
             "metric_type": "L2",

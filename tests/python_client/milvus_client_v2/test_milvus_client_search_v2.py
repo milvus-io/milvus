@@ -147,7 +147,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: searched successfully with correct limit(topK)
         """
         # 1. initialize with data
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         enable_dynamic_field = False
         collection_w, _vectors, _, insert_ids = \
@@ -525,7 +525,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         collection_w, _vectors, _, insert_ids = \
             self.init_collection_general(prefix, True, nb=nb, dim=dim, enable_dynamic_field=True)[0:4]
