@@ -55,3 +55,40 @@ func TestUnmarshalSegmentIndexModel(t *testing.T) {
 	assert.Equal(t, indexModel2.SegmentID, ret.SegmentID)
 	assert.Nil(t, UnmarshalSegmentIndexModel(nil))
 }
+
+func TestSegmentIndex_MarshalUnmarshal_IndexStorePathVersion(t *testing.T) {
+	original := &SegmentIndex{
+		SegmentID:             1,
+		CollectionID:          100,
+		PartitionID:           200,
+		BuildID:               1000,
+		IndexVersion:          1,
+		IndexStorePathVersion: 1,
+		IndexType:             "HNSW",
+	}
+	pb := MarshalSegmentIndexModel(original)
+	assert.Equal(t, int32(1), pb.IndexStorePathVersion)
+	restored := UnmarshalSegmentIndexModel(pb)
+	assert.Equal(t, int32(1), restored.IndexStorePathVersion)
+}
+
+func TestSegmentIndex_MarshalUnmarshal_LegacyDefaultZero(t *testing.T) {
+	pb := &indexpb.SegmentIndex{
+		CollectionID: 100,
+		BuildID:      1000,
+	}
+	restored := UnmarshalSegmentIndexModel(pb)
+	assert.Equal(t, int32(0), restored.IndexStorePathVersion)
+}
+
+func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
+	original := &SegmentIndex{
+		CollectionID:          100,
+		BuildID:               1000,
+		IndexStorePathVersion: 1,
+	}
+	cloned := CloneSegmentIndex(original)
+	assert.Equal(t, int32(1), cloned.IndexStorePathVersion)
+	cloned.IndexStorePathVersion = 0
+	assert.Equal(t, int32(1), original.IndexStorePathVersion)
+}
