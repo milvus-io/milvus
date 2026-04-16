@@ -16,7 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
@@ -125,9 +124,10 @@ add_executable(all_tests
         )
 
 target_link_libraries(all_tests
-        gtest
-        gmock
+        GTest::gtest
+        GTest::gmock
         milvus_core
+        milvus_conan_deps
         knowhere
         milvus-storage
         milvus-common
@@ -167,8 +167,7 @@ endif()
 
 target_link_libraries(bitset_test
         milvus_bitset
-        gtest
-        ${CONAN_LIBS}
+        GTest::gtest
 )
 if (LINUX)
     # folly shared library requires libaio; use --no-as-needed to ensure

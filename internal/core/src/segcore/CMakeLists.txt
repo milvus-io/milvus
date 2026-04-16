@@ -12,6 +12,7 @@
 
 add_source_at_current_directory_recursively()
 add_library(milvus_segcore OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_segcore PUBLIC milvus_conan_deps)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CHECK_SORTED ON)
