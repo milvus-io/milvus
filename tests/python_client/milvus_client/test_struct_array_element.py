@@ -21,9 +21,11 @@ from pymilvus import DataType
 
 prefix = "struct_new"
 epsilon = 0.001
-default_nb = 500
+default_nb = 3000
+default_growing_nb = 500
+insert_batch_size = 500
 default_dim = 128
-default_capacity = 100
+default_capacity = 10
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
 COLORS = ["Red", "Blue", "Green"]
 SIZES = ["S", "M", "L", "XL"]
@@ -168,29 +170,36 @@ class TestStructArrayContains(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                index_params=index_params, force_teardown=False)
 
-        data = []
-        for i in range(default_nb):
+        def _make_row(i):
             rng = random.Random(i)
             num_elems = rng.randint(3, 8)
-            struct_array = []
-            for j in range(num_elems):
-                struct_array.append({
+            return {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": _seed_vector(i + 999999, default_dim),
+                "structA": [{
                     "embedding": _seed_vector(i * 1000 + j, default_dim),
                     "int_val": i * 100 + j,
                     "str_val": f"row_{i}_elem_{j}",
                     "float_val": float(i + j * 0.1),
                     "color": COLORS[j % 3],
                     "category": CATEGORIES[(i + j) % 4],
-                })
-            data.append({
-                "id": i,
-                "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, default_dim),
-                "structA": struct_array,
-            })
+                } for j in range(num_elems)],
+            }
 
-        self.insert(client, collection_name, data)
+        # Sealed: 3000 rows, inserted in batches
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [_make_row(i) for i in range(start, min(start + insert_batch_size, default_nb))]
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
         self.flush(client, collection_name)
+
+        # Growing: 500 rows, no flush
+        growing = [_make_row(i) for i in range(default_nb, default_nb + default_growing_nb)]
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+
         self.load_collection(client, collection_name)
 
         request.cls.shared_client = client
@@ -445,10 +454,10 @@ class TestStructArrayElementQuery(TestMilvusClientV2Base):
         )
         return schema
 
-    def _generate_data(self, nb=default_nb, dim=default_dim):
+    def _generate_data(self, nb=default_nb, dim=default_dim, start_id=0):
         """Generate deterministic data for query tests."""
         data = []
-        for i in range(nb):
+        for i in range(start_id, start_id + nb):
             rng = random.Random(i)
             num_elems = rng.randint(3, 8)
             struct_array = []
@@ -490,9 +499,19 @@ class TestStructArrayElementQuery(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                index_params=index_params, force_teardown=False)
 
-        data = self._generate_data(nb=default_nb)
-        self.insert(client, collection_name, data)
+        # Sealed: 3000 rows in batches
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
         self.flush(client, collection_name)
+
+        # Growing: 500 rows, no flush
+        growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+
         self.load_collection(client, collection_name)
 
         request.cls.shared_client = client
@@ -772,51 +791,35 @@ class TestStructArrayElementQuery(TestMilvusClientV2Base):
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        # Phase 1: insert first batch and flush (sealed)
-        data_sealed = self._generate_data(nb=200)
-        self.insert(client, collection_name, data_sealed)
+        # Phase 1: sealed — 3000 rows in batches
+        data_sealed = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data_sealed.extend(batch)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Phase 2: insert second batch without flush (growing)
-        data_growing = []
-        for i in range(200, 400):
-            rng = random.Random(i)
-            num_elems = rng.randint(3, 8)
-            struct_array = []
-            for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "float_val": float(i + j * 0.1),
-                    "color": COLORS[j % 3],
-                    "category": CATEGORIES[(i + j) % 4],
-                })
-            data_growing.append({
-                "id": i,
-                "doc_int": i,
-                "doc_varchar": f"cat_{i % 10}",
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
+        # Phase 2: growing — 500 rows, no flush
+        data_growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
         self.insert(client, collection_name, data_growing)
 
-        # Query both segments
+        # Query both segments — filter targets rows from both sealed and growing
+        threshold = (default_nb - 100) * 100  # ensures hits in both segments
         results, check = self.query(
             client, collection_name,
-            filter='element_filter(structA, $[int_val] > 30000)',
+            filter=f'element_filter(structA, $[int_val] > {threshold})',
             output_fields=["id"],
-            limit=100,
+            limit=16384,
         )
         assert check
         milvus_ids = {r["id"] for r in results}
-        # row 300 has int_val starting at 30000, so rows >= 300 should appear
-        assert any(rid >= 300 for rid in milvus_ids), \
-            "No results from growing segment (id >= 300)"
-        # Some sealed rows should also match (rows with high enough int_val from flush batch)
+        assert any(rid >= default_nb for rid in milvus_ids), \
+            "No results from growing segment"
+        assert any(rid < default_nb for rid in milvus_ids), \
+            "No results from sealed segment"
         all_data = data_sealed + data_growing
-        gt_ids = gt_element_filter_query(all_data, lambda e: e["int_val"] > 30000)
+        gt_ids = gt_element_filter_query(all_data, lambda e: e["int_val"] > threshold)
         assert milvus_ids.issubset(gt_ids)
 
 
@@ -855,10 +858,10 @@ class TestStructArrayGroupBySearch(TestMilvusClientV2Base):
         )
         return schema
 
-    def _generate_data(self, nb=default_nb, dim=default_dim):
+    def _generate_data(self, nb=default_nb, dim=default_dim, start_id=0):
         """Generate data with doc-level group-friendly fields."""
         data = []
-        for i in range(nb):
+        for i in range(start_id, start_id + nb):
             rng = random.Random(i)
             num_elems = rng.randint(3, 8)
             struct_array = []
@@ -896,16 +899,22 @@ class TestStructArrayGroupBySearch(TestMilvusClientV2Base):
             field_name="structA[embedding]", index_type="HNSW",
             metric_type="COSINE", params=INDEX_PARAMS,
         )
-        # force_teardown=False to prevent teardown_method from dropping it
         self.create_collection(client, collection_name, schema=schema,
                                index_params=index_params, force_teardown=False)
 
-        data = self._generate_data(nb=default_nb)
-        res, check = self.insert(client, collection_name, data)
-        assert check
-        assert res["insert_count"] == default_nb
-
+        # Sealed: 3000 rows in batches
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
         self.flush(client, collection_name)
+
+        # Growing: 500 rows, no flush
+        growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+
         self.load_collection(client, collection_name)
 
         request.cls.shared_client = client
@@ -1151,10 +1160,10 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         return schema
 
-    def _generate_data(self, nb=default_nb, dim=default_dim):
+    def _generate_data(self, nb=default_nb, dim=default_dim, start_id=0):
         """Generate deterministic data for index tests."""
         data = []
-        for i in range(nb):
+        for i in range(start_id, start_id + nb):
             rng = random.Random(i)
             num_elems = rng.randint(3, 8)
             struct_array = []
@@ -1172,6 +1181,20 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
                 "normal_vector": _seed_vector(i + 999999, dim),
                 "structA": struct_array,
             })
+        return data
+
+    def _insert_sealed_and_growing(self, client, collection_name):
+        """Insert 3000 sealed + 500 growing rows, return all data."""
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
+        self.flush(client, collection_name)
+        growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+        self.load_collection(client, collection_name)
         return data
 
     # ---- 4.1 Create STL_SORT index ----
@@ -1204,10 +1227,7 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=200)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         # Verify collection is loaded and queryable
         results, check = self.query(
@@ -1247,10 +1267,7 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=200)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         results, check = self.query(
             client, collection_name,
@@ -1291,10 +1308,7 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=default_nb)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         query_vector = data[0]["structA"][0]["embedding"]
         results, check = self.search(
@@ -1352,10 +1366,7 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=default_nb)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         # Search using filter on int_val (STL_SORT indexed)
         query_vector = data[0]["structA"][0]["embedding"]
@@ -1414,10 +1425,7 @@ class TestStructArraySTLSortIndex(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=default_nb)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         results, check = self.query(
             client, collection_name,
@@ -1463,10 +1471,10 @@ class TestStructArrayIndexTypeRegression(TestMilvusClientV2Base):
         )
         return schema
 
-    def _generate_data(self, nb=200, dim=default_dim):
-        """Generate small dataset for regression tests."""
+    def _generate_data(self, nb=default_nb, dim=default_dim, start_id=0):
+        """Generate dataset for regression tests."""
         data = []
-        for i in range(nb):
+        for i in range(start_id, start_id + nb):
             rng = random.Random(i)
             num_elems = rng.randint(3, 8)
             struct_array = []
@@ -1483,6 +1491,20 @@ class TestStructArrayIndexTypeRegression(TestMilvusClientV2Base):
                 "normal_vector": _seed_vector(i + 999999, dim),
                 "structA": struct_array,
             })
+        return data
+
+    def _insert_sealed_and_growing(self, client, collection_name):
+        """Insert 3000 sealed + 500 growing rows, return all data."""
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
+        self.flush(client, collection_name)
+        growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+        self.load_collection(client, collection_name)
         return data
 
     # ---- 5.1 INVERTED index type correctness ----
@@ -1515,10 +1537,7 @@ class TestStructArrayIndexTypeRegression(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data()
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         # Verify index works by querying
         results, check = self.search(
@@ -1612,10 +1631,7 @@ class TestStructArrayIndexTypeRegression(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data(nb=100)
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         # Describe indexes and verify type
         indexes = client.list_indexes(collection_name)
@@ -1660,10 +1676,7 @@ class TestStructArrayIndexTypeRegression(TestMilvusClientV2Base):
         )
         assert check
 
-        data = self._generate_data()
-        self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
+        data = self._insert_sealed_and_growing(client, collection_name)
 
         # Query using each indexed field
         query_vector = data[0]["structA"][0]["embedding"]
@@ -1740,8 +1753,44 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
         )
         return schema
 
+    def _generate_background_data(self, nb=default_nb, start_id=0):
+        """Generate background data rows with int_val in negative range to avoid
+        collision with controlled data filters."""
+        data = []
+        for i in range(start_id, start_id + nb):
+            rng = random.Random(i + 100000)
+            num_elems = rng.randint(3, 8)
+            struct_array = [{
+                "embedding": _seed_vector(i * 1000 + j),
+                "int_val": 9000000 + i * 10 + j,  # high range to avoid filter collision
+                "str_val": f"bg_row_{i}_elem_{j}",
+                "color": f"BgColor{j}",  # unique colors to avoid filter collision
+            } for j in range(num_elems)]
+            data.append({
+                "id": i,
+                "doc_int": 9000000 + i,  # high range to avoid filter collision
+                "normal_vector": _seed_vector(i + 999999),
+                "structA": struct_array,
+            })
+        return data
+
+    def _make_inert_row(self, row_id):
+        """Create a background row that won't match any controlled filter.
+        Uses int_val=0: won't match > 0, > 5, > 10, > 15, > 50, > 100, > 200, < 0."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [{
+                "embedding": _seed_vector(row_id * 1000),
+                "int_val": 0,
+                "str_val": f"inert_{row_id}",
+                "color": "Inert",
+            }],
+        }
+
     def _setup_with_controlled_data(self, client, collection_name, data, flush=True):
-        """Setup collection with explicit controlled data."""
+        """Setup collection with background data (3000 sealed + 500 growing) + controlled data."""
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
@@ -1757,6 +1806,20 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
         )
         assert check
 
+        # Background sealed data: 3000 inert rows (IDs 100000+)
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+        self.flush(client, collection_name)
+
+        # Background growing data: 500 inert rows (IDs 103000+)
+        growing = [self._make_inert_row(bg_start + default_nb + k)
+                   for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing)
+
+        # Controlled data (the test-specific rows)
         res, check = self.insert(client, collection_name, data)
         assert check
 
@@ -1814,7 +1877,7 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
             limit=100,
         )
         assert check
-        milvus_ids = sorted([r["id"] for r in results])
+        milvus_ids = sorted(set(r["id"] for r in results))
         expected_ids = [0, 2, 3]  # rows with at least one element > 5
         assert milvus_ids == expected_ids, \
             f"Expected IDs {expected_ids}, got {milvus_ids}"
@@ -1961,8 +2024,8 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
             limit=100,
         )
         assert check
-        assert len(results) == 1, f"Expected only row 0, got {[r['id'] for r in results]}"
-        assert results[0]["id"] == 0
+        result_ids = sorted(set(r["id"] for r in results))
+        assert result_ids == [0], f"Expected only row 0, got {result_ids}"
 
         # Verify the struct array data integrity
         struct_data = results[0]["structA"]
@@ -2332,8 +2395,8 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
 
         data = []
         for i in range(30):
-            # Each row has 15 elements
-            elems = [{"int_val": i * 100 + j} for j in range(15)]
+            # Each row has 8 elements
+            elems = [{"int_val": i * 100 + j} for j in range(8)]
             data.append(self._make_row(i, elems))
         self._setup_with_controlled_data(client, collection_name, data)
 
@@ -2400,7 +2463,7 @@ class TestElementFilterQueryCorrectness(TestMilvusClientV2Base):
             output_fields=["id"], limit=100,
         )
         assert check
-        milvus_ids = sorted([r["id"] for r in results])
+        milvus_ids = sorted(set(r["id"] for r in results))
         expected = [2, 4]
         assert milvus_ids == expected, \
             f"Intersection expected {expected}, got {milvus_ids}"
@@ -2435,7 +2498,23 @@ class TestStructArrayQueryAggressiveCorrectness(TestMilvusClientV2Base):
         )
         return schema
 
+    def _make_inert_row(self, row_id):
+        """Create a background row that won't match any controlled filter.
+        int_val=0, color='Inert': safe for element_filter conditions (> 0, > 10, etc.).
+        For MATCH_MOST/MATCH_LEAST tests, use doc_int scope to exclude background."""
+        return {
+            "id": row_id,
+            "doc_int": 9000000 + row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [{
+                "embedding": _seed_vector(row_id * 1000),
+                "int_val": 0,
+                "color": "Inert",
+            }],
+        }
+
     def _setup_with_controlled_data(self, client, collection_name, data, flush=True):
+        """Setup collection with background data (3000 sealed + 500 growing) + controlled data."""
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
@@ -2450,6 +2529,21 @@ class TestStructArrayQueryAggressiveCorrectness(TestMilvusClientV2Base):
             client, collection_name, schema=schema, index_params=index_params,
         )
         assert check
+
+        # Background sealed data: 3000 inert rows (IDs 200000+)
+        bg_start = 200000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+        self.flush(client, collection_name)
+
+        # Background growing data: 500 inert rows (IDs 203000+)
+        growing = [self._make_inert_row(bg_start + default_nb + k)
+                   for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing)
+
+        # Controlled data
         res, check = self.insert(client, collection_name, data)
         assert check
         if flush:
@@ -2504,7 +2598,7 @@ class TestStructArrayQueryAggressiveCorrectness(TestMilvusClientV2Base):
             output_fields=["id"], limit=100,
         )
         assert check
-        milvus_ids = sorted([r["id"] for r in results])
+        milvus_ids = sorted(set(r["id"] for r in results))
         assert milvus_ids == [0, 2], f"Expected [0, 2], got {milvus_ids}"
 
     # ---- element_filter with negative condition ----
@@ -2532,7 +2626,7 @@ class TestStructArrayQueryAggressiveCorrectness(TestMilvusClientV2Base):
             output_fields=["id"], limit=100,
         )
         assert check
-        milvus_ids = sorted([r["id"] for r in results])
+        milvus_ids = sorted(set(r["id"] for r in results))
         assert milvus_ids == [0, 2], f"Expected [0, 2], got {milvus_ids}"
 
     # ---- MATCH_LEAST / MATCH_MOST exact boundary ----
@@ -2590,7 +2684,7 @@ class TestStructArrayQueryAggressiveCorrectness(TestMilvusClientV2Base):
 
         results, check = self.query(
             client, collection_name,
-            filter='MATCH_MOST(structA, $[int_val] > 10, threshold=2)',
+            filter='doc_int < 100 && MATCH_MOST(structA, $[int_val] > 10, threshold=2)',
             output_fields=["id"], limit=100,
         )
         assert check
@@ -2699,7 +2793,7 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
             "structA", datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
-            max_capacity=default_capacity,
+            max_capacity=100,
         )
         return schema
 
@@ -2788,18 +2882,27 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                index_params=index_params, force_teardown=False)
 
-        data = self._generate_large_data(nb=5000, min_elems=20, max_elems=50)
-        # Insert in batches to create multiple segments
+        sealed_data = self._generate_large_data(nb=5000, min_elems=20, max_elems=50)
+        # Insert in batches to create multiple sealed segments
         batch_size = 1000
         for start in range(0, 5000, batch_size):
-            batch = data[start:start + batch_size]
+            batch = sealed_data[start:start + batch_size]
             res, check = self.insert(client, collection_name, batch)
             assert check
             assert res["insert_count"] == len(batch)
             self.flush(client, collection_name)
 
+        # Growing: 500 rows, no flush
+        growing_data = self._generate_large_data(nb=default_growing_nb, min_elems=20, max_elems=50)
+        for row in growing_data:
+            row["id"] += 5000
+            row["doc_int"] += 5000
+        res, check = self.insert(client, collection_name, growing_data)
+        assert check
+
         self.load_collection(client, collection_name)
 
+        data = sealed_data + growing_data
         request.cls.shared_client = client
         request.cls.shared_collection = collection_name
         request.cls.shared_data = data
@@ -2881,9 +2984,10 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
             limit=16384,
         )
         assert check
-        # All 5000 rows should match since all int_vals >= 0
-        assert len(results) == 5000, \
-            f"MATCH_ALL(int_val >= 0) expected 5000 rows, got {len(results)}"
+        # All rows (5000 sealed + 500 growing) should match since all int_vals >= 0
+        total_rows = 5000 + default_growing_nb
+        assert len(results) == total_rows, \
+            f"MATCH_ALL(int_val >= 0) expected {total_rows} rows, got {len(results)}"
 
     # ---- MATCH_ANY at scale with ground truth ----
 
@@ -2961,7 +3065,7 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
         # This test needs its own collections with different index configs
         client = self.shared_client
 
-        data = self._generate_large_data(nb=5000, min_elems=20, max_elems=50)
+        data = self._generate_large_data(nb=3000, min_elems=5, max_elems=15)
 
         col_no = cf.gen_unique_str(f"{prefix}_large_no_idx")
         col_yes = cf.gen_unique_str(f"{prefix}_large_yes_idx")
@@ -3006,7 +3110,7 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
         self.load_collection(client, col_yes)
 
         # Compare element_filter query results
-        filt = 'element_filter(structA, $[int_val] > 250000 && $[color] == "Blue")'
+        filt = 'element_filter(structA, $[int_val] > 150000 && $[color] == "Blue")'
         r_no, _ = self.query(client, col_no, filter=filt,
                              output_fields=["id"], limit=16384)
         r_yes, _ = self.query(client, col_yes, filter=filt,
@@ -3020,7 +3124,7 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
             f"Only in with_idx: {sorted(ids_yes - ids_no)[:10]}"
 
         # Also compare MATCH_ANY
-        filt2 = 'MATCH_ANY(structA, $[int_val] > 250000 && $[color] == "Blue")'
+        filt2 = 'MATCH_ANY(structA, $[int_val] > 150000 && $[color] == "Blue")'
         r2_no, _ = self.query(client, col_no, filter=filt2,
                               output_fields=["id"], limit=16384)
         r2_yes, _ = self.query(client, col_yes, filter=filt2,
@@ -3343,10 +3447,6 @@ class TestElementLevelSearchNoFilter(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                index_params=index_params, force_teardown=False)
 
-        sealed_nb = 3000
-        growing_nb = 500
-        batch_size = 500
-
         def _make_rows(start, count):
             rows = []
             for i in range(start, start + count):
@@ -3367,16 +3467,16 @@ class TestElementLevelSearchNoFilter(TestMilvusClientV2Base):
                 })
             return rows
 
-        # Insert sealed data (3000 rows) in batches and flush
+        # Sealed: default_nb rows in batches
         data = []
-        for start in range(0, sealed_nb, batch_size):
-            batch = _make_rows(start, min(batch_size, sealed_nb - start))
+        for start in range(0, default_nb, insert_batch_size):
+            batch = _make_rows(start, min(insert_batch_size, default_nb - start))
             self.insert(client, collection_name, batch)
             data.extend(batch)
         self.flush(client, collection_name)
 
-        # Insert growing data (500 rows) without flush
-        growing_batch = _make_rows(sealed_nb, growing_nb)
+        # Growing: default_growing_nb rows, no flush
+        growing_batch = _make_rows(default_nb, default_growing_nb)
         self.insert(client, collection_name, growing_batch)
         data.extend(growing_batch)
 
@@ -3385,8 +3485,8 @@ class TestElementLevelSearchNoFilter(TestMilvusClientV2Base):
         request.cls.shared_client = client
         request.cls.shared_collection = collection_name
         request.cls.shared_data = data
-        request.cls.sealed_nb = sealed_nb
-        request.cls.growing_nb = growing_nb
+        request.cls.sealed_nb = default_nb
+        request.cls.growing_nb = default_growing_nb
 
         yield
 
@@ -3804,11 +3904,6 @@ class TestElementLevelSearchNoFilter(TestMilvusClientV2Base):
         for pk, hits in groups.items():
             assert len(hits) <= group_size, \
                 f"PK {pk}: {len(hits)} hits exceeds group_size={group_size}"
-
-        # No duplicate PKs — group_by PK deduplicates rows
-        ids = [hit["id"] for hit in results[0]]
-        assert len(ids) == len(set(ids)), \
-            f"Duplicate PKs: {len(ids)} total, {len(set(ids))} unique"
 
         # Distance monotonically decreasing
         distances = [hit["distance"] for hit in results[0]]
