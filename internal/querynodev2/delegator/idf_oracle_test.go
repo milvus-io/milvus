@@ -92,11 +92,15 @@ func (s *IDFOracleSuite) waitTargetVersion(targetVersion int64) {
 }
 
 func (suite *IDFOracleSuite) genStats(start uint32, end uint32) map[int64]*storage.BM25Stats {
+	return suite.genStatsForField(102, start, end)
+}
+
+func (suite *IDFOracleSuite) genStatsForField(fieldID int64, start uint32, end uint32) map[int64]*storage.BM25Stats {
 	result := make(map[int64]*storage.BM25Stats)
-	result[102] = storage.NewBM25Stats()
+	result[fieldID] = storage.NewBM25Stats()
 	for i := start; i < end; i++ {
 		row := map[uint32]float32{i: 1}
-		result[102].Append(row)
+		result[fieldID].Append(row)
 	}
 	return result
 }
@@ -241,6 +245,155 @@ func (suite *IDFOracleSuite) TestGrow() {
 
 	suite.idfOracle.UpdateGrowing(4, suite.genStats(5, 6))
 	suite.Equal(int64(2), suite.idfOracle.current.NumRow())
+}
+
+func (suite *IDFOracleSuite) currentFieldNumRow(fieldID int64) int64 {
+	stats, err := suite.idfOracle.current.GetStats(fieldID)
+	if err != nil {
+		return 0
+	}
+	return stats.NumRow()
+}
+
+func (suite *IDFOracleSuite) TestUpdateCurrent() {
+	// Initially only field 102 exists in current (from collectionSchema).
+	suite.Equal(int64(0), suite.currentFieldNumRow(102))
+	suite.Equal(int64(0), suite.currentFieldNumRow(103))
+
+	// Add a new BM25 function with output field 103.
+	newFunctions := []*schemapb.FunctionSchema{
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{201}, OutputFieldIds: []int64{103}},
+	}
+	suite.idfOracle.UpdateCurrent(newFunctions)
+
+	// Field 103 should now exist (empty stats) in current.
+	stats103, err := suite.idfOracle.current.GetStats(103)
+	suite.NoError(err)
+	suite.NotNil(stats103)
+	suite.Equal(int64(0), stats103.NumRow())
+
+	// Field 102 unchanged.
+	stats102, err := suite.idfOracle.current.GetStats(102)
+	suite.NoError(err)
+	suite.NotNil(stats102)
+
+	// Idempotency: calling again with same field does not overwrite.
+	suite.idfOracle.UpdateCurrent(newFunctions)
+	stats103After, err := suite.idfOracle.current.GetStats(103)
+	suite.NoError(err)
+	suite.Equal(stats103, stats103After) // same pointer
+
+	// Non-BM25 functions are ignored.
+	suite.idfOracle.UpdateCurrent([]*schemapb.FunctionSchema{
+		{Type: schemapb.FunctionType_MinHash, OutputFieldIds: []int64{104}},
+	})
+	_, err = suite.idfOracle.current.GetStats(104)
+	suite.Error(err) // field 104 should not exist
+}
+
+func (suite *IDFOracleSuite) TestLoadBackfillFields() {
+	ctx := context.Background()
+
+	// Case 1: Non-existent segment — no error, just returns nil.
+	err := suite.idfOracle.LoadBackfillFields(ctx, 999, &querypb.SegmentLoadInfo{}, nil)
+	suite.NoError(err)
+
+	// Register segment 1 with field 102.
+	suite.registerSealed(1, 0, 3)
+	suite.True(suite.idfOracle.sealed.Contain(1))
+
+	// Case 2: Empty Bm25Logs — no-op.
+	err = suite.idfOracle.LoadBackfillFields(ctx, 1, &querypb.SegmentLoadInfo{}, nil)
+	suite.NoError(err)
+
+	// Case 3: Backfill adds field 103 to an active segment.
+	// Activate segment 1 first.
+	suite.updateSnapshot([]int64{1}, nil, nil)
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(3), suite.currentFieldNumRow(102))
+
+	// Prepare mock for field 103 download.
+	stats103 := suite.genStatsForField(103, 10, 15)
+	data103, err := stats103[103].Serialize()
+	suite.Require().NoError(err)
+
+	remotePath103 := fmt.Sprintf("bm25stats/seg_1/field_103/0")
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath103).Return(
+		&bytesFileReader{bytes.NewReader(data103)}, nil,
+	).Once()
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		Bm25Logs: []*datapb.FieldBinlog{
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "bm25stats/seg_1/field_102/0"}}},
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: remotePath103}}},
+		},
+	}
+
+	err = suite.idfOracle.LoadBackfillFields(ctx, 1, loadInfo, cm)
+	suite.NoError(err)
+
+	// Field 103 stats merged into current (segment is active).
+	suite.Equal(int64(3), suite.currentFieldNumRow(102)) // unchanged
+	suite.Equal(int64(5), suite.currentFieldNumRow(103)) // 5 rows from backfill
+
+	// Verify fieldList updated.
+	seg1, _ := suite.idfOracle.sealed.Get(1)
+	seg1.RLock()
+	suite.Contains(seg1.fieldList, int64(103))
+	seg1.RUnlock()
+
+	// Case 4: Idempotency — calling again skips field 103 (already in fieldList).
+	err = suite.idfOracle.LoadBackfillFields(ctx, 1, loadInfo, cm)
+	suite.NoError(err)
+	suite.Equal(int64(5), suite.currentFieldNumRow(103)) // unchanged, no double-count
+
+	// Case 5: Backfill on inactive segment — stats not merged into current.
+	suite.registerSealed(2, 0, 2)
+	// Segment 2 is NOT in target snapshot, so not activated.
+
+	remotePath103_seg2 := fmt.Sprintf("bm25stats/seg_2/field_103/0")
+	cm2 := mocks.NewChunkManager(suite.T())
+	cm2.EXPECT().Reader(mock.Anything, remotePath103_seg2).Return(
+		&bytesFileReader{bytes.NewReader(data103)}, nil,
+	).Once()
+
+	loadInfo2 := &querypb.SegmentLoadInfo{
+		Bm25Logs: []*datapb.FieldBinlog{
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: remotePath103_seg2}}},
+		},
+	}
+
+	numBefore := suite.currentFieldNumRow(103)
+	err = suite.idfOracle.LoadBackfillFields(ctx, 2, loadInfo2, cm2)
+	suite.NoError(err)
+	suite.Equal(numBefore, suite.currentFieldNumRow(103)) // current unchanged
+
+	// Case 6: Download failure — cleanup partial files, return error.
+	suite.registerSealed(3, 0, 1)
+
+	cmFail := mocks.NewChunkManager(suite.T())
+	cmFail.EXPECT().Reader(mock.Anything, mock.Anything).Return(
+		nil, errors.New("remote read failed"),
+	).Once()
+
+	loadInfoFail := &querypb.SegmentLoadInfo{
+		Bm25Logs: []*datapb.FieldBinlog{
+			{FieldID: 104, Binlogs: []*datapb.Binlog{{LogPath: "bm25stats/seg_3/field_104/0"}}},
+		},
+	}
+
+	err = suite.idfOracle.LoadBackfillFields(ctx, 3, loadInfoFail, cmFail)
+	suite.Error(err)
+
+	// Verify cleanup: field 104 dir should not exist.
+	seg3, _ := suite.idfOracle.sealed.Get(3)
+	seg3.RLock()
+	fieldDir := path.Join(seg3.localDir, "104")
+	seg3.RUnlock()
+	_, statErr := os.Stat(fieldDir)
+	suite.True(os.IsNotExist(statErr))
 }
 
 func (suite *IDFOracleSuite) TestStats() {

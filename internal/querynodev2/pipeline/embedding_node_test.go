@@ -240,7 +240,7 @@ func (suite *EmbeddingNodeSuite) TestAddInsertData() {
 			BaseMsg:       msgstream.BaseMsg{},
 			InsertRequest: rowBaseReq,
 		}
-		err = node.addInsertData(insertDatas, rowBaseMsg, collection)
+		err = node.addInsertData(insertDatas, rowBaseMsg, collection.Schema())
 		suite.Error(err)
 	})
 
@@ -258,7 +258,7 @@ func (suite *EmbeddingNodeSuite) TestAddInsertData() {
 		defer node.Close()
 
 		insertDatas := make(map[int64]*delegator.InsertData)
-		err = node.addInsertData(insertDatas, suite.msgs[0], collection)
+		err = node.addInsertData(insertDatas, suite.msgs[0], collection.Schema())
 		suite.Error(err)
 	})
 }

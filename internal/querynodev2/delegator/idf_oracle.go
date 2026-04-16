@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -64,10 +65,17 @@ type IDFOracle interface {
 	// Internally handles: streaming download → local disk → optional parse → register.
 	// Idempotent: skips if segment already loaded.
 	LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
+	// LoadBackfillFields downloads BM25 stats for newly backfilled fields of an
+	// already-loaded sealed segment. Skips fields already in fieldList (idempotent).
+	LoadBackfillFields(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
 	DirPath() string
+
+	// UpdateCurrent adds empty BM25Stats entries for new BM25 function output fields.
+	// Called when schema changes add new BM25 functions.
+	UpdateCurrent(functions []*schemapb.FunctionSchema)
 
 	Start()
 	Close()
@@ -330,6 +338,89 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 		o.sealedDiskSize.Add(result.diskSize)
 
 		o.syncResource()
+		return nil, nil
+	})
+	return err
+}
+
+// LoadBackfillFields downloads BM25 stats for newly backfilled fields of an
+// already-loaded sealed segment. Fields already present in fieldList are skipped.
+// If the segment is active, newly loaded field stats are merged into current immediately.
+func (o *idfOracle) LoadBackfillFields(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
+	// Singleflight prevents concurrent backfill for the same segment (e.g., if
+	// multiple Reopen tasks arrive before the first completes).
+	_, err, _ := o.sf.Do(fmt.Sprintf("backfill_%d", segmentID), func() (any, error) {
+		existing, ok := o.sealed.Get(segmentID)
+		if !ok {
+			return nil, nil // segment not registered, nothing to backfill
+		}
+
+		allPaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+		if err != nil {
+			return nil, err
+		}
+		if len(allPaths) == 0 {
+			return nil, nil
+		}
+
+		// Filter to only fields not already in fieldList
+		existing.RLock()
+		existingFields := make(map[int64]struct{}, len(existing.fieldList))
+		for _, fid := range existing.fieldList {
+			existingFields[fid] = struct{}{}
+		}
+		existing.RUnlock()
+
+		missingPaths := make(map[int64][]string)
+		for fieldID, paths := range allPaths {
+			if _, ok := existingFields[fieldID]; !ok {
+				missingPaths[fieldID] = paths
+			}
+		}
+		if len(missingPaths) == 0 {
+			return nil, nil // all fields already loaded
+		}
+
+		log := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID),
+			zap.Int64s("missingFields", lo.Keys(missingPaths)))
+		log.Info("loading backfill BM25 stats for new fields")
+
+		// Only parse stats during download if the segment is already active,
+		// otherwise SyncDistribution will read from disk when activating.
+		needParse := existing.activate.Load()
+
+		result, err := o.streamLoad(ctx, segmentID, missingPaths, cm, needParse)
+		if err != nil {
+			// Clean up partially downloaded files for the missing fields.
+			// NOTE: cleanup uses existing.localDir which must equal the segDir used
+			// by streamLoad (path.Join(o.dirPath, segmentID)). Both are set from the
+			// same o.dirPath base in LoadSealed; keep them in sync if dirPath changes.
+			for fieldID := range missingPaths {
+				fieldDir := path.Join(existing.localDir, fmt.Sprintf("%d", fieldID))
+				os.RemoveAll(fieldDir)
+			}
+			log.Warn("failed to stream load backfill BM25 stats", zap.Error(err))
+			return nil, err
+		}
+
+		existing.Lock()
+		existing.fieldList = append(existing.fieldList, result.fieldList...)
+		existing.diskSize += result.diskSize
+		existing.Unlock()
+		o.sealedDiskSize.Add(result.diskSize)
+
+		// Check activate under o.Lock to serialize with SyncDistribution,
+		// preventing a deactivated segment's stats from leaking into current.
+		if result.stats != nil {
+			o.Lock()
+			if existing.activate.Load() {
+				o.current.Merge(result.stats)
+			}
+			o.Unlock()
+		}
+
+		o.syncResource()
+		log.Info("backfill BM25 stats loaded successfully")
 		return nil, nil
 	})
 	return err
@@ -747,6 +838,20 @@ func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][
 		idfBytes[i] = idf
 	}
 	return idfBytes, stats.GetAvgdl(), nil
+}
+
+func (o *idfOracle) UpdateCurrent(functions []*schemapb.FunctionSchema) {
+	o.Lock()
+	defer o.Unlock()
+	for _, f := range functions {
+		if f.GetType() == schemapb.FunctionType_BM25 {
+			if ids := f.GetOutputFieldIds(); len(ids) > 0 {
+				if _, exists := o.current[ids[0]]; !exists {
+					o.current[ids[0]] = storage.NewBM25Stats()
+				}
+			}
+		}
+	}
 }
 
 func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracle {
