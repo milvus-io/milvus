@@ -85,6 +85,10 @@ message SegmentIndex {
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;
     string index_type = 21;
+    // Path format version for index files on object storage.
+    // 0 (default/legacy): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
+    // 1 (collection-partitioned): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    int32 index_store_path_version = 22;
 }
 
 message RegisterNodeRequest {
