@@ -1232,11 +1232,13 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 
 // getAllIndexFilesOfIndex returns the all index files of index.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
+	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
+		segmentIndex.PartitionID, segmentIndex.SegmentID,
+		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
-		filepath := metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segmentIndex.BuildID, segmentIndex.IndexVersion,
-			segmentIndex.PartitionID, segmentIndex.SegmentID, fileID)
-		filesMap[filepath] = struct{}{}
+		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
 	}
 	return filesMap
 }
