@@ -524,6 +524,14 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
+		// Recover file resource refCnt for pending CreateCollection broadcast tasks
+		// before registering DDL callbacks, so ack callbacks won't race with recovery.
+		// See #48612.
+		pending := broadcast.GetPendingCreateCollectionResources()
+		if len(pending) > 0 {
+			c.meta.RecoverFileResourceRefCnt(pending)
+			log.Info("recovered file resource refCnt from pending broadcast tasks", zap.Int("count", len(pending)))
+		}
 		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
@@ -664,14 +672,6 @@ func (c *Core) restore(ctx context.Context) error {
 			}
 		}
 	}
-	// Recover file resource refCnt for pending CreateCollection broadcast tasks
-	// whose collections haven't been persisted yet. See #48612.
-	pending := broadcast.GetPendingCreateCollectionResources()
-	if len(pending) > 0 {
-		c.meta.RecoverFileResourceRefCnt(pending)
-		log.Ctx(ctx).Info("recovered file resource refCnt from pending broadcast tasks", zap.Int("count", len(pending)))
-	}
-
 	return nil
 }
 
