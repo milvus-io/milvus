@@ -317,7 +317,7 @@ require (
 )
 
 replace (
-	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.0
+	github.com/apache/arrow/go/v17 => github.com/milvus-io/arrow/go/v17 v17.0.1
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
