@@ -176,6 +176,20 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			wantPath:   "",
 			wantErr:    true,
 		},
+		{
+			name:       "vector scalar index path v1 format",
+			sourcePath: "files/index_files/111/222/333/1001/1/scalar_index",
+			indexType:  IndexTypeVectorScalar,
+			wantPath:   "files/index_files/444/555/666/1001/1/scalar_index",
+			wantErr:    false,
+		},
+		{
+			name:       "vector scalar index path v1 format with buildID mapping",
+			sourcePath: "files/index_files/111/222/333/1001/1/scalar_index",
+			indexType:  IndexTypeVectorScalar,
+			wantPath:   "files/index_files/444/555/666/1001/1/scalar_index",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {
