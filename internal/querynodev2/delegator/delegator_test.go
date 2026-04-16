@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -2186,7 +2187,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2210,7 +2211,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2234,7 +2235,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 

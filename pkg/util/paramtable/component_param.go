@@ -3444,6 +3444,7 @@ type queryNodeConfig struct {
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
 	DowngradeTsafe            ParamItem `refreshable:"true"`
+	WaitTsafeStallTimeout     ParamItem `refreshable:"true"`
 	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
@@ -4387,6 +4388,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       false,
 	}
 	p.DowngradeTsafe.Init(base.mgr)
+
+	p.WaitTsafeStallTimeout = ParamItem{
+		Key:          "queryNode.waitTsafeStallTimeout",
+		Version:      "2.6.15",
+		Doc:          "If tSafe does not advance within this duration during waitTSafe, the delegator returns an error to allow proxy failover to another replica",
+		DefaultValue: "3s",
+		Export:       false,
+	}
+	p.WaitTsafeStallTimeout.Init(base.mgr)
 
 	p.CatchUpStreamingDataTsLag = ParamItem{
 		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
