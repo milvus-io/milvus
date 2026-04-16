@@ -578,6 +578,7 @@ message CreateSnapshotMessageHeader {
     int64 collection_id = 1;
     string name         = 2;
     string description  = 3;
+    int64 compaction_protection_seconds = 4; // duration in seconds to protect referenced segments from compaction
 }
 
 // CreateSnapshotMessageBody is the body of create snapshot message.
