@@ -432,7 +432,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 65535,
-                "err_msg": "Call service faild",
+                "err_msg": "call service failed",
             },
         )
         assert collection_w.num_entities == 0
@@ -727,7 +727,7 @@ class TestSearchWithTextEmbeddingNegative(TestcaseBase):
             limit=3,
             output_fields=["document"],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "Call service faild"},
+            check_items={"err_code": 65535, "err_msg": "call service failed"},
         )
 
 

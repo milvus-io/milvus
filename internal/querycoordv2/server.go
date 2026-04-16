@@ -880,5 +880,5 @@ func (s *Server) watchLoadConfigChanges() {
 // GetInternalReplicasByCollection returns replicas for a collection from internal meta.
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
-	return s.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	return s.meta.GetByCollection(ctx, collectionID)
 }

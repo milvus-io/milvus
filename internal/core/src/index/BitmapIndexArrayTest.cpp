@@ -690,7 +690,7 @@ TEST_P(BitmapIndexArrayRegressionTest,
 
         auto loaded_index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        loaded_index->LoadV3(config);
+        loaded_index->LoadUnified(config);
         AssertNullSemantics(loaded_index.get(), param.element_type);
     } else {
         Config load_config;
