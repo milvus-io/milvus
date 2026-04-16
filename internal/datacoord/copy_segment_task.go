@@ -521,7 +521,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	ctx := context.Background()
 
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSnapshotName(), true)
+	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
 	if err != nil {
 		log.Error("failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), zap.Error(err))...)

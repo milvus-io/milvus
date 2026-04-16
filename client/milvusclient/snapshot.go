@@ -152,3 +152,36 @@ func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, opt ListRestoreSna
 
 	return jobs, err
 }
+
+// PinSnapshotData pins snapshot-referenced data files to prevent GC from deleting them.
+// Returns the pin ID for later Unpin.
+func (c *Client) PinSnapshotData(ctx context.Context, opt PinSnapshotDataOption, callOptions ...grpc.CallOption) (int64, error) {
+	if opt == nil {
+		return 0, merr.WrapErrParameterInvalid("PinSnapshotDataOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+
+	var pinID int64
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.PinSnapshotData(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		pinID = resp.GetPinId()
+		return nil
+	})
+	return pinID, err
+}
+
+// UnpinSnapshotData unpins previously pinned snapshot data, allowing GC to reclaim the files
+func (c *Client) UnpinSnapshotData(ctx context.Context, opt UnpinSnapshotDataOption, callOptions ...grpc.CallOption) error {
+	if opt == nil {
+		return merr.WrapErrParameterInvalid("UnpinSnapshotDataOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.UnpinSnapshotData(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}

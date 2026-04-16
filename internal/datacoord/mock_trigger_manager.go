@@ -223,8 +223,7 @@ func (_c *MockTriggerManager_Stop_Call) RunAndReturn(run func()) *MockTriggerMan
 func NewMockTriggerManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockTriggerManager {
+}) *MockTriggerManager {
 	mock := &MockTriggerManager{}
 	mock.Mock.Test(t)
 

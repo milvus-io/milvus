@@ -1020,6 +1020,14 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
 }
 
+func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	return s.mixCoord.PinSnapshotData(ctx, req)
+}
+
+func (s *Server) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.mixCoord.UnpinSnapshotData(ctx, req)
+}
+
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
 	return s.mixCoord.BatchUpdateManifest(ctx, req)
 }
