@@ -461,3 +461,4 @@ class CaseLabel:
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
     MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
     GPU = "GPU"
+    CDC = "CDC"
