@@ -11,7 +11,37 @@
 
 package retry
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// maxAttemptsKey is the context key for storing max retry attempts.
+type maxAttemptsKey struct{}
+
+// WithMaxAttemptsContext stores the max retry attempts in the context.
+func WithMaxAttemptsContext(ctx context.Context, attempts uint) context.Context {
+	return context.WithValue(ctx, maxAttemptsKey{}, attempts)
+}
+
+// MaxAttemptsFromContext reads the max retry attempts from the context.
+// Returns (0, false) if not set.
+func MaxAttemptsFromContext(ctx context.Context) (uint, bool) {
+	raw := ctx.Value(maxAttemptsKey{})
+	if raw == nil {
+		return 0, false
+	}
+	return raw.(uint), true
+}
+
+// MaxAttemptsFromContextOrDefault reads the max retry attempts from the context,
+// returning defaultVal if no value is set.
+func MaxAttemptsFromContextOrDefault(ctx context.Context, defaultVal uint) uint {
+	if v, ok := MaxAttemptsFromContext(ctx); ok {
+		return v
+	}
+	return defaultVal
+}
 
 type config struct {
 	attempts     uint
