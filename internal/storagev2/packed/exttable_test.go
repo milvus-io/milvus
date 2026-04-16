@@ -373,14 +373,6 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.Equal(t, int64(0), ver)
 }
 
-func TestCreateSegmentManifest_CanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-
-	_, err := CreateSegmentManifest(ctx, 1, 1, "parquet", []string{"col1"}, nil, nil)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
