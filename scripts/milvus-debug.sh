@@ -3,7 +3,7 @@
 # Debug a coredump produced by the stripped (production) Milvus image
 # using the matching unstripped debug image.
 #
-# Starting from v2.6.14, each Milvus release publishes two image variants:
+# Starting from v2.6.15, each Milvus release publishes two image variants:
 #   milvusdb/milvus:<tag>         - stripped, production (default, ~1/3 size)
 #   milvusdb/milvus:<tag>-debug   - unstripped, full debug symbols (for GDB)
 #
@@ -15,21 +15,21 @@
 #   ./milvus-debug.sh <coredump> <stripped-image> <debug-image>
 #
 # Examples:
-#   ./milvus-debug.sh ./core.12345 milvusdb/milvus:v2.6.14 milvusdb/milvus:v2.6.14-debug
-#   ./milvus-debug.sh ./core.12345 harbor.example.com/milvus:v2.6.14 harbor.example.com/milvus:v2.6.14-debug
+#   ./milvus-debug.sh ./core.12345 milvusdb/milvus:v2.6.15 milvusdb/milvus:v2.6.15-debug
+#   ./milvus-debug.sh ./core.12345 harbor.example.com/milvus:v2.6.15 harbor.example.com/milvus:v2.6.15-debug
 #
 # Typical workflow when a Milvus pod crashes in production:
 #   # 1. Copy the coredump out of the crashed pod
 #   kubectl cp <ns>/<pod>:/tmp/cores/core.<pid> ./core.<pid>
 #
 #   # 2. Run this script (GDB starts automatically with backtrace)
-#   ./milvus-debug.sh ./core.<pid> milvusdb/milvus:v2.6.14 milvusdb/milvus:v2.6.14-debug
+#   ./milvus-debug.sh ./core.<pid> milvusdb/milvus:v2.6.15 milvusdb/milvus:v2.6.15-debug
 #
 set -euo pipefail
 
 COREDUMP="${1:?Usage: $0 <coredump> <stripped-image> <debug-image>}"
-IMAGE="${2:?Missing stripped image, e.g. milvusdb/milvus:v2.6.14}"
-IMAGE_NON_STRIP="${3:?Missing debug image, e.g. milvusdb/milvus:v2.6.14-debug}"
+IMAGE="${2:?Missing stripped image, e.g. milvusdb/milvus:v2.6.15}"
+IMAGE_NON_STRIP="${3:?Missing debug image, e.g. milvusdb/milvus:v2.6.15-debug}"
 
 # Resolve to absolute path
 COREDUMP="$(cd "$(dirname "$COREDUMP")" && pwd)/$(basename "$COREDUMP")"
