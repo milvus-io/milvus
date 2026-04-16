@@ -2050,3 +2050,14 @@ func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 		return client.ListRestoreSnapshotJobs(ctx, req)
 	})
 }
+
+func (c *Client) UpdateSegmentColumnGroups(ctx context.Context, req *datapb.UpdateSegmentColumnGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.UpdateSegmentColumnGroups(ctx, req)
+	})
+}

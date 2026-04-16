@@ -170,6 +170,7 @@ message IndexFilePathInfo {
     int64 num_rows = 10;
     int32 current_index_version = 11;
     uint64 mem_size = 12;
+    int32 current_scalar_index_version = 13;
 }
 
 message SegmentInfo {

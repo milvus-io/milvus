@@ -994,3 +994,7 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
 }
+
+func (s *Server) UpdateSegmentColumnGroups(ctx context.Context, req *datapb.UpdateSegmentColumnGroupsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.UpdateSegmentColumnGroups(ctx, req)
+}
