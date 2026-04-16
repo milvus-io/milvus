@@ -167,6 +167,9 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 
 	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
 	// and they update completely separate data structures so memory updates can also run in parallel.
+	// collectionSegIdxes is hoisted to function scope so the gauge goroutine
+	// (launched after g.Wait) can access it when both indexes and segment indexes are loaded.
+	collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
 	g, _ := errgroup.WithContext(m.ctx)
 	g.Go(func() error {
 		fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
@@ -183,7 +186,6 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 		pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 		defer pool.Release()
 		futures := make([]*conc.Future[any], 0, len(collectionIDs))
-		collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
 		for i, collID := range collectionIDs {
 			i, collID := i, collID
 			futures = append(futures, pool.Submit(func() (any, error) {
@@ -214,26 +216,31 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 				m.segmentBuildInfo.AddForRecovery(segIdx)
 			}
 		}
-
-		// Update Prometheus metrics asynchronously to avoid blocking recovery.
-		go func() {
-			storedSizeByCollection := make(map[int64]float64)
-			for _, segIdxes := range collectionSegIdxes {
-				for _, segIdx := range segIdxes {
-					metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
-				}
-			}
-			for collID, size := range storedSizeByCollection {
-				metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-					fmt.Sprintf("%d", collID)).Add(size)
-			}
-		}()
 		return nil
 	})
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
+	// Update Prometheus metrics asynchronously. Launched after g.Wait() so that
+	// both m.indexes (from goroutine 1) and collectionSegIdxes (from goroutine 2)
+	// are fully populated. Only count active indexes (index definition alive).
+	go func() {
+		storedSizeByCollection := make(map[int64]float64)
+		for _, segIdxes := range collectionSegIdxes {
+			for _, segIdx := range segIdxes {
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+				if m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
+				}
+			}
+		}
+		for collID, size := range storedSizeByCollection {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+				fmt.Sprintf("%d", collID)).Add(size)
+		}
+	}()
+
 	log.Info("indexMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -746,8 +753,28 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		log.Ctx(ctx).Error("failed to alter index meta in meta store", zap.Int("indexes num", len(indexes)), zap.Error(err))
 		return err
 	}
+
+	deletedSet := make(map[UniqueID]struct{}, len(indexes))
 	for _, index := range indexes {
 		m.indexes[index.CollectionID][index.IndexID] = index
+		deletedSet[index.IndexID] = struct{}{}
+	}
+
+	// Subtract gauge: the metric tracks alive indexes only, so drop means
+	// immediate subtraction. segmentIndexes is keyed SegmentID → IndexID,
+	// inner Get is O(1) per segment.
+	var totalSize float64
+	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+		for indexID := range deletedSet {
+			if segIdx, ok := idxMap.Get(indexID); ok && segIdx.CollectionID == collID {
+				totalSize += float64(segIdx.IndexSerializedSize)
+			}
+		}
+		return true
+	})
+	if totalSize > 0 {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", collID)).Sub(totalSize)
 	}
 
 	log.Ctx(ctx).Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collectionID", collID), zap.Int64s("indexIDs", indexIDs))
@@ -968,6 +995,9 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		log.Ctx(m.ctx).Warn("there is no index with buildID", zap.Int64("buildID", taskInfo.GetBuildID()))
 		return nil
 	}
+
+	oldSize := segIdx.IndexSerializedSize
+
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = taskInfo.GetState()
 		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
@@ -989,8 +1019,11 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
 
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-		fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+	newSize := taskInfo.GetSerializedSize()
+	if delta := float64(newSize) - float64(oldSize); delta != 0 && m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", segIdx.CollectionID)).Add(delta)
+	}
 
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
@@ -1081,9 +1114,6 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	}
 
 	m.segmentBuildInfo.Remove(buildID)
-
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-		fmt.Sprintf("%d", segIdx.CollectionID)).Sub(float64(segIdx.IndexSerializedSize))
 
 	return nil
 }
