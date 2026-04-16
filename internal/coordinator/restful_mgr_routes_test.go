@@ -408,6 +408,28 @@ func TestHandleGetConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "keys")
 	})
 
+	t.Run("sensitive keys are redacted", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 3)
+		assert.Contains(t, configs[0].Error, "sensitive")
+		assert.Equal(t, "val1", configs[1].Value)
+		assert.Contains(t, configs[2].Error, "sensitive")
+	})
+
+	t.Run("all empty keys should fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=,,+,", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "no valid keys")
+	})
+
 	t.Run("wrong HTTP method should fail", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/management/config/get?keys=test.getconfig.key1", nil)
 		w := httptest.NewRecorder()

@@ -17,7 +17,6 @@
 package coordinator
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -70,14 +69,19 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	})
 	if err := merr.CheckRPCCall(showResp, err); err != nil {
 		logger.Warn("failed to show collections", zap.Error(err))
-		http.Error(w, fmt.Sprintf("failed to get collections: %s", err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	// Check each collection
+	percentages := showResp.GetInMemoryPercentages()
 	for idx, collectionID := range showResp.GetCollectionIDs() {
 		// Check if collection is fully loaded (LoadPercentage == 100)
-		loadPercentage := showResp.GetInMemoryPercentages()[idx]
+		if idx >= len(percentages) {
+			writeJSONError(w, fmt.Sprintf("inconsistent response: collection %d has no load percentage", collectionID), http.StatusInternalServerError)
+			return
+		}
+		loadPercentage := percentages[idx]
 		if loadPercentage < 100 {
 			reason := fmt.Sprintf("collection %d: not fully loaded (%d%%)", collectionID, loadPercentage)
 			logger.Info("collection not 100% loaded", zap.String("reason", reason))
@@ -126,9 +130,7 @@ func (s *mixCoordImpl) writeComplianceResponse(w http.ResponseWriter, state Load
 		resp.Reason = reason
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	writeJSONResponse(w, http.StatusOK, resp)
 }
 
 // validateRGDistribution validates that replicas are distributed according to cluster config
@@ -146,10 +148,14 @@ func (s *mixCoordImpl) validateRGDistribution(
 	for _, rg := range expectedRGs {
 		counts[rg]--
 	}
-	for _, cnt := range counts {
+	var diffs []string
+	for rg, cnt := range counts {
 		if cnt != 0 {
-			return fmt.Sprintf("collection %d: %s mismatch (expected [%s], actual [%s])", collectionID, rgType, strings.Join(expectedRGs, ","), strings.Join(actualRGs, ","))
+			diffs = append(diffs, fmt.Sprintf("%s:%+d", rg, cnt))
 		}
+	}
+	if len(diffs) > 0 {
+		return fmt.Sprintf("collection %d: %s mismatch (delta: %s)", collectionID, rgType, strings.Join(diffs, ", "))
 	}
 	return ""
 }
