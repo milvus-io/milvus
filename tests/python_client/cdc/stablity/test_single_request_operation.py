@@ -92,7 +92,7 @@ class TestOperations(TestBase):
         }
         self.health_checkers = checkers
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.CDC)
     def test_operations(self, request_duration, is_check):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")

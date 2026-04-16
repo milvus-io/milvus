@@ -9,7 +9,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 def pytest_addoption(parser):
     """Add command line options for pytest."""
     parser.addoption(
