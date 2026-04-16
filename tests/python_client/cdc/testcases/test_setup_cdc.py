@@ -4,9 +4,11 @@ CDC topology setup and configuration test cases.
 
 import time
 import pytest
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 @pytest.mark.skip(reason="Skip topology setup test")
 class TestCDCTopologySetup(TestCDCSyncBase):
     """Test CDC topology setup, switching, and configuration management."""

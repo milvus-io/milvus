@@ -4,10 +4,13 @@ CDC sync tests for data manipulation operations.
 
 import time
 import random
+import pytest
 from pymilvus import DataType
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncDML(TestCDCSyncBase):
     """Test CDC sync for data manipulation operations."""
 

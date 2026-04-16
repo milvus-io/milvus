@@ -3,9 +3,12 @@ CDC sync tests for partition operations.
 """
 
 import time
+import pytest
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncPartition(TestCDCSyncBase):
     """Test CDC sync for partition operations."""
 
