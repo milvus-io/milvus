@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -48,7 +49,7 @@ type minioConfig struct {
 
 func getMinIOConfig() minioConfig {
 	return minioConfig{
-		address:   envOrDefault("MINIO_ADDRESS", "localhost:9000"),
+		address:   envOrDefault("MINIO_ADDRESS", deriveMinIOAddress()),
 		accessKey: envOrDefault("MINIO_ACCESS_KEY", "minioadmin"),
 		secretKey: envOrDefault("MINIO_SECRET_KEY", "minioadmin"),
 		bucket:    envOrDefault("MINIO_BUCKET", "a-bucket"),
@@ -56,11 +57,43 @@ func getMinIOConfig() minioConfig {
 	}
 }
 
+// deriveMinIOAddress derives the MinIO service address from the Milvus
+// server address supplied via the -addr flag. The Milvus helm chart
+// deploys MinIO as a sibling k8s service named "<release>-minio" next to
+// "<release>-milvus", so we can reach it in CI by swapping the service
+// segment of the hostname (see tests/scripts/ci_e2e_4am.sh which derives
+// MINIO_SERVICE_NAME from MILVUS_HELM_RELEASE_NAME exactly this way).
+// Falls back to localhost:9000 when the addr is a plain localhost URL or
+// cannot be parsed.
+func deriveMinIOAddress() string {
+	milvusAddr := hp.GetAddr()
+	if milvusAddr == "" {
+		return "localhost:9000"
+	}
+	u, err := url.Parse(milvusAddr)
+	if err != nil || u.Hostname() == "" {
+		return "localhost:9000"
+	}
+	host := strings.Replace(u.Hostname(), "-milvus", "-minio", 1)
+	return host + ":9000"
+}
+
 func newMinIOClient(cfg minioConfig) (*miniogo.Client, error) {
 	return miniogo.New(cfg.address, &miniogo.Options{
 		Creds:  miniocreds.NewStaticV4(cfg.accessKey, cfg.secretKey, ""),
 		Secure: false,
 	})
+}
+
+// skipIfMinIOUnreachable skips the test when the MinIO server is not reachable.
+// Some CI pipelines (notably go-sdk) don't expose MinIO on the derived address,
+// so benchmark/perf tests that need direct MinIO access should bail out cleanly
+// rather than hard-fail.
+func skipIfMinIOUnreachable(ctx context.Context, t *testing.T, mc *miniogo.Client, bucket string) {
+	t.Helper()
+	if _, err := mc.BucketExists(ctx, bucket); err != nil {
+		t.Skipf("MinIO unreachable (bucket=%s): %v", bucket, err)
+	}
 }
 
 // cleanupMinIOPrefix removes all objects under a prefix in the given bucket.
@@ -420,9 +453,7 @@ func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
 	// Connect to MinIO (skip if unavailable)
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -618,7 +649,7 @@ emb = pa.array([[float(i)*0.1 + j for j in range(4)] for i in range(num)],
 table = pa.Table.from_arrays([ids, values, emb], names=['id','value','embedding'])
 pq.write_table(table, out, compression=codec)
 `
-	cmd := exec.Command("python3", "-c", script, codec, strconv.Itoa(numRows), tmp.Name())
+	cmd := exec.Command("python3", "-c", script, codec, strconv.Itoa(numRows), tmp.Name()) // #nosec G204
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		t.Skipf("python3 + pyarrow unavailable (codec=%s): %v", codec, err)
@@ -643,9 +674,7 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
@@ -738,9 +767,7 @@ func TestExternalCollectionLoadAndQuery(t *testing.T) {
 	// Connect to MinIO (skip if unavailable)
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -987,9 +1014,7 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -1147,9 +1172,7 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -1559,9 +1582,7 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// Connect to MinIO
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -1795,9 +1816,7 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -2011,9 +2030,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 	// Connect to MinIO
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
@@ -2182,9 +2199,9 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	// Connect to MinIO
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
+
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 	// Use a different bucket than Milvus's default (a-bucket)
 	externalBucket := "external-bucket"
@@ -2332,9 +2349,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	// Connect to MinIO
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client, skipping: %v", err)
-	}
+	require.NoError(t, err)
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
 		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
@@ -2443,9 +2458,7 @@ func TestExternalSourceFormats(t *testing.T) {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("MinIO not available: %v", err)
-	}
+	require.NoError(t, err)
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
 		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
@@ -2719,6 +2732,7 @@ func TestExternalCollectionLoadPerfProfile(t *testing.T) {
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
 	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 	collName := common.GenRandomString("ext_perf_profile", 6)
 	extPath := "external-e2e-test/" + collName

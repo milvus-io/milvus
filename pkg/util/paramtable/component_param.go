@@ -4711,7 +4711,7 @@ user-task-polling:
 
 	p.ExternalCollectionUseTakeForOutput = ParamItem{
 		Key:          "queryNode.externalCollection.useTakeForOutput",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "true",
 		Doc:          `When true, use take() API to fetch output fields from external storage instead of bulk_subscript`,
 		Export:       false,
@@ -4720,7 +4720,7 @@ user-task-polling:
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc:          "When true, sample each segment for size estimation; when false, sample once per collection",
 		Export:       false,
@@ -4729,7 +4729,7 @@ user-task-polling:
 
 	p.ExternalCollectionSampleRows = ParamItem{
 		Key:          "queryNode.externalCollection.sampleRows",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "100",
 		Doc:          "Number of rows to read via Take API for sampling external segment size",
 		Export:       false,
@@ -4738,7 +4738,7 @@ user-task-polling:
 
 	p.ExternalCollectionRawDataFactor = ParamItem{
 		Key:          "queryNode.externalCollection.rawDataFactor",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "2.0",
 		Doc:          "Peak memory amplification factor for external segment loading. External tables always download, decompress, and deserialize entire row groups into Arrow buffers regardless of mmap/eviction settings, so peak transient memory = rawDataSize * this factor.",
 		Export:       false,
@@ -6919,7 +6919,7 @@ if this parameter <= 0, will set it as 10`,
 
 	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
 		Key:          "dataNode.externalCollection.targetRowsPerSegment",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1000000",
 		Doc:          "Target number of rows per segment for external collections",
 		Export:       false,

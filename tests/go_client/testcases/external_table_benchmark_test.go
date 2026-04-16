@@ -600,9 +600,7 @@ func newBenchEnvWithConfig(t *testing.T, cfg benchConfig) *benchEnv {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -1812,9 +1810,8 @@ func TestBenchmarkExternalYYAccessMode(t *testing.T) {
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
 		minioCfg := getMinIOConfig()
 		minioClient, err := newMinIOClient(minioCfg)
-		if err != nil {
-			t.Skipf("Failed to create MinIO client: %v", err)
-		}
+		require.NoError(t, err)
+		skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
 
 		// Prepare data once
 		collName := common.GenRandomString("bench_mode", 6)

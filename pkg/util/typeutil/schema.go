@@ -2577,8 +2577,7 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 			}
 		}
 
-		// Compact format: data array only contains valid values.
-		// Build index mapping from position to valid-data offset.
+		// unpack valid data
 		idxs := make([]int, len(field.ValidData))
 		validCnt := 0
 		for i, valid := range field.ValidData {

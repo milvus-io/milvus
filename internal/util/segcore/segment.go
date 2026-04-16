@@ -416,7 +416,7 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		JsonKeyStatsLogs:     convertJSONKeyStats(jsonStats, jsonBasePaths),
 		Priority:             src.GetPriority(),
 		ManifestPath:         src.GetManifestPath(),
-		UseTakeForOutput:     src.GetUseTakeForOutput(),
+		UseTakeForOutput:     paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
 	}
 }

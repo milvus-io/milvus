@@ -86,12 +86,7 @@ func setup() {
 	log.Info("Parser Milvus address", zap.String("address", *addr))
 
 	// set default milvus client config
-	cfg := &client.ClientConfig{Address: *addr}
-	if *user != "" && *password != "Milvus" {
-		cfg.Username = *user
-		cfg.Password = *password
-	}
-	setDefaultClientConfig(cfg)
+	setDefaultClientConfig(&client.ClientConfig{Address: *addr})
 }
 
 // Teardown teardown

@@ -5,3 +5,4 @@ pyarrow==23.0.1
 lance==1.2.1
 vortex-data==0.56.0
 obstore==0.9.1
+pyiceberg[sql-sqlite]==0.8.1

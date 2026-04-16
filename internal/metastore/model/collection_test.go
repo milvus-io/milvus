@@ -20,14 +20,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var (
@@ -616,91 +613,4 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, clone1, collection)
 	clone2 := collection.ShallowClone()
 	assert.Equal(t, clone2, collection)
-}
-
-func TestApplyUpdates_ExternalSpec(t *testing.T) {
-	coll := &Collection{
-		Name:           "test_coll",
-		ExternalSource: "",
-		ExternalSpec:   "",
-		Fields: []*Field{
-			{FieldID: 1, Name: "pk"},
-		},
-		SchemaVersion: 5,
-	}
-
-	header := &messagespb.AlterCollectionMessageHeader{
-		CollectionId: 100,
-		UpdateMask: &fieldmaskpb.FieldMask{
-			Paths: []string{message.FieldMaskCollectionExternalSpec},
-		},
-	}
-	body := &messagespb.AlterCollectionMessageBody{
-		Updates: &messagespb.AlterCollectionMessageUpdates{
-			Schema: &schemapb.CollectionSchema{
-				ExternalSource: "s3://bucket/path",
-				ExternalSpec:   `{"format":"parquet"}`,
-			},
-		},
-	}
-
-	coll.ApplyUpdates(header, body)
-
-	// Only ExternalSource and ExternalSpec should be updated.
-	assert.Equal(t, "s3://bucket/path", coll.ExternalSource)
-	assert.Equal(t, `{"format":"parquet"}`, coll.ExternalSpec)
-	// Other fields should remain unchanged.
-	assert.Equal(t, "test_coll", coll.Name)
-	assert.Equal(t, int32(5), coll.SchemaVersion)
-	assert.Len(t, coll.Fields, 1)
-	assert.Equal(t, "pk", coll.Fields[0].Name)
-}
-
-func TestApplyUpdates_ExternalSpecDoesNotAffectOtherFields(t *testing.T) {
-	coll := &Collection{
-		Name:           "test_coll",
-		Description:    "original desc",
-		ExternalSource: "s3://old",
-		ExternalSpec:   `{"old":true}`,
-		Fields: []*Field{
-			{FieldID: 1, Name: "pk"},
-			{FieldID: 2, Name: "vec"},
-		},
-		SchemaVersion:      3,
-		EnableDynamicField: true,
-	}
-
-	header := &messagespb.AlterCollectionMessageHeader{
-		CollectionId: 100,
-		UpdateMask: &fieldmaskpb.FieldMask{
-			Paths: []string{message.FieldMaskCollectionExternalSpec},
-		},
-	}
-	body := &messagespb.AlterCollectionMessageBody{
-		Updates: &messagespb.AlterCollectionMessageUpdates{
-			Schema: &schemapb.CollectionSchema{
-				ExternalSource: "s3://new-bucket/new-path",
-				ExternalSpec:   `{"format":"lance"}`,
-				// These fields should be IGNORED by the external_spec mask.
-				AutoID: true,
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 99, Name: "should_be_ignored"},
-				},
-				Version: 99,
-			},
-		},
-	}
-
-	coll.ApplyUpdates(header, body)
-
-	// ExternalSource and ExternalSpec should be updated.
-	assert.Equal(t, "s3://new-bucket/new-path", coll.ExternalSource)
-	assert.Equal(t, `{"format":"lance"}`, coll.ExternalSpec)
-	// Other fields should NOT be changed.
-	assert.Equal(t, "original desc", coll.Description)
-	assert.Equal(t, int32(3), coll.SchemaVersion)
-	assert.False(t, coll.AutoID)
-	assert.Len(t, coll.Fields, 2)
-	assert.Equal(t, "pk", coll.Fields[0].Name)
-	assert.True(t, coll.EnableDynamicField)
 }

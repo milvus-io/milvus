@@ -91,10 +91,7 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		Timestamp:   tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0),
 	}
 
-	t.Run("manifest set preserves all legacy fields", func(t *testing.T) {
-		// Part 8 changed PackSegmentLoadInfo to always populate legacy stats
-		// fields regardless of ManifestPath. The reader decides which source
-		// to use at load time, not the packer.
+	t.Run("manifest set clears legacy stats fields", func(t *testing.T) {
 		seg := &datapb.SegmentInfo{
 			ID:           100,
 			ManifestPath: "base/path@5",
@@ -117,10 +114,11 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
 
 		assert.Equal(t, "base/path@5", loadInfo.GetManifestPath())
-		assert.NotEmpty(t, loadInfo.GetStatslogs())
-		assert.NotEmpty(t, loadInfo.GetBm25Logs())
-		assert.NotEmpty(t, loadInfo.GetTextStatsLogs())
-		assert.NotEmpty(t, loadInfo.GetJsonKeyStatsLogs())
+		assert.Empty(t, loadInfo.GetStatslogs())
+		assert.Empty(t, loadInfo.GetBm25Logs())
+		assert.Empty(t, loadInfo.GetTextStatsLogs())
+		assert.Empty(t, loadInfo.GetJsonKeyStatsLogs())
+		// Deltalogs should always be populated
 		assert.NotEmpty(t, loadInfo.GetDeltalogs())
 	})
 

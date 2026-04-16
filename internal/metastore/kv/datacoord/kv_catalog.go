@@ -294,15 +294,9 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
 		resetBinlogFields(cloned)
 
-		// For external table segments (identified by having a manifest path
-		// but no binlogs), skip the binlog-based row count recalculation.
-		// CalcRowCountFromBinLog returns 0 for these segments, which would
-		// incorrectly overwrite the NumOfRows set during Refresh.
-		if segment.GetManifestPath() == "" {
-			rowCount := segmentutil.CalcRowCountFromBinLog(segment)
-			if cloned.GetNumOfRows() != rowCount {
-				cloned.NumOfRows = rowCount
-			}
+		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
+		if cloned.GetNumOfRows() != rowCount {
+			cloned.NumOfRows = rowCount
 		}
 
 		if segment.GetState() == commonpb.SegmentState_Dropped {

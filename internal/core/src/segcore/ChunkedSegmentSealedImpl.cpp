@@ -465,10 +465,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
             info.num_rows,
             info.dim);
 
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.rlock()->at(field_id)->CancelWarmup();
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff +
+    // ApplyLoadDiff, not here. This avoids unsafe ManualEvictCache on column
+    // groups whose underlying buffer is shared across fields.
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
@@ -571,15 +570,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
-    // release field column if the index contains raw data
-    // only release non-primary field when in pk sorted mode
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
-        !is_pk) {
-        // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
-        // need the pk field again.
-        fields_.rlock()->at(field_id)->CancelWarmup();
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff +
+    // ApplyLoadDiff, not here. This avoids unsafe ManualEvictCache on column
+    // groups whose underlying buffer is shared across fields.
     LOG_INFO(
         "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
         info.field_id,
@@ -3685,7 +3678,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         }
     }
 
-    bool generated_interim_index = generate_interim_index(field_id, num_rows);
+    // now interim index does not touch column warmup
+    generate_interim_index(field_id, num_rows);
 
     std::string struct_name;
     const FieldMeta* field_meta_ptr = nullptr;
@@ -3699,13 +3693,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         }
         set_bit(field_data_ready_bitset_, field_id, true);
         update_row_count(num_rows);
-        if (generated_interim_index) {
-            auto column = get_column(field_id);
-            if (column) {
-                column->CancelWarmup();
-                column->ManualEvictCache();
-            }
-        }
         if (data_type == DataType::GEOMETRY &&
             segcore_config_.get_enable_geometry_cache()) {
             // Construct GeometryCache for the entire field

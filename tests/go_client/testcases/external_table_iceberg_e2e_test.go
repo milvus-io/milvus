@@ -209,7 +209,7 @@ func createIcebergTestTable(t *testing.T, endpoint, accessKey, secretKey, bucket
 	scriptPath := filepath.Join(filepath.Dir(thisFile), "testdata", "create_iceberg_table.py")
 	infoPath := filepath.Join(t.TempDir(), "iceberg_table_info.json")
 
-	cmd := exec.Command("python3", scriptPath,
+	cmd := exec.Command("python3", scriptPath, // #nosec G204
 		"--endpoint", endpoint,
 		"--access-key", accessKey,
 		"--secret-key", secretKey,
