@@ -3,9 +3,12 @@ CDC sync tests for alias operations.
 """
 
 import time
+import pytest
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncAlias(TestCDCSyncBase):
     """Test CDC sync for alias operations."""
 

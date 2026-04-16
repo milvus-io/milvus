@@ -5,9 +5,11 @@ CDC sync tests for collection DDL operations.
 import time
 import pytest
 from pymilvus import DataType, Collection
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncCollectionDDL(TestCDCSyncBase):
     """Test CDC sync for collection DDL operations."""
 
@@ -303,6 +305,7 @@ class TestCDCSyncCollectionDDL(TestCDCSyncBase):
             raise
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncCollectionManagement(TestCDCSyncBase):
     """Test CDC sync for collection management operations."""
 

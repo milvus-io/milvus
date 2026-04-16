@@ -4,9 +4,12 @@ CDC sync tests for index operations.
 
 import time
 import random
+import pytest
+from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
+@pytest.mark.tags(CaseLabel.CDC)
 class TestCDCSyncIndex(TestCDCSyncBase):
     """Test CDC sync for index operations."""
 
