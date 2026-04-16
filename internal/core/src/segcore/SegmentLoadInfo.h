@@ -512,6 +512,11 @@ class SegmentLoadInfo {
         return info_.priority();
     }
 
+    [[nodiscard]] bool
+    GetUseTakeForOutput() const {
+        return info_.use_take_for_output();
+    }
+
     // ==================== Compaction Info ====================
 
     [[nodiscard]] const google::protobuf::RepeatedField<int64_t>&

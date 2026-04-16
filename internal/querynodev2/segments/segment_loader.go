@@ -946,6 +946,22 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
+	// For external table segments (ManifestPath set, BinlogPaths empty), extract
+	// indexes directly from fieldID2IndexInfo without a corresponding FieldBinlog,
+	// because the segment data lives in the external store rather than Milvus binlogs.
+	if loadInfo.GetManifestPath() != "" {
+		for _, infos := range fieldID2IndexInfo {
+			for _, indexInfo := range infos {
+				if _, exists := indexedFieldInfos[indexInfo.IndexID]; !exists {
+					indexedFieldInfos[indexInfo.IndexID] = &IndexedFieldInfo{
+						FieldBinlog: &datapb.FieldBinlog{},
+						IndexInfo:   indexInfo,
+					}
+				}
+			}
+		}
+	}
+
 	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
 	textIndexedInfo := statsResult.TextIndexStats
 	jsonKeyIndexInfo := statsResult.JSONKeyStats

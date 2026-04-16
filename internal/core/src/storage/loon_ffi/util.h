@@ -92,3 +92,17 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);
+
+/**
+ * @brief Inject extfs.{collectionID}.* properties for external collections.
+ *
+ * Three-layer priority:
+ *   1. Copy fs.* baseline to extfs.{collID}.*
+ *   2. Override bucket/address from external_source URI (if cross-bucket)
+ *   3. Apply extfs overrides from external_spec JSON (highest priority)
+ */
+void
+InjectExtfsProperties(milvus_storage::api::Properties& properties,
+                      int64_t collection_id,
+                      const std::string& external_source,
+                      const std::string& external_spec);
