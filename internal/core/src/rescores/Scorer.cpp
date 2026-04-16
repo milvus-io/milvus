@@ -163,9 +163,9 @@ RandomScorer::random_score(milvus::OpContext* op_ctx,
                    "now only support int64 field as seed");
         // TODO: Support varchar and int32 field as random field.
 
-        auto datas = array->scalars().long_data();
-        for (int i = 0; i < datas.data_size(); i++) {
-            auto a = datas.data()[i];
+        const auto& data = array->scalars().long_data();
+        for (int i = 0; i < data.data_size(); i++) {
+            auto a = data.data()[i];
             auto random_score =
                 hash_to_double(MurmurHash3_x64_64_Special(a, seed_));
             if (idx == nullptr) {
@@ -176,9 +176,10 @@ RandomScorer::random_score(milvus::OpContext* op_ctx,
         }
     } else {
         // if not set field, use offset and seed to hash.
+        const auto segment_id = segment->get_segment_id();
         for (int i = 0; i < target_offsets.size(); i++) {
             double random_score = hash_to_double(MurmurHash3_x64_64_Special(
-                target_offsets[i] + segment->get_segment_id(), seed_));
+                target_offsets[i] + segment_id, seed_));
             if (idx == nullptr) {
                 set_score(random_score, boost_scores[i], mode);
             } else {

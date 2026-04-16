@@ -182,13 +182,18 @@ PhyIterativeFilterNode::GetOutput() {
 
         search_result.seg_offsets_.resize(nq * unity_topk, INVALID_SEG_OFFSET);
         search_result.distances_.resize(nq * unity_topk);
+
+        // Reuse memory allocation across batches and nqs
+        FixedVector<int32_t> offsets;
+        FixedVector<float> distances;
+
         for (auto& iterator : search_result.vector_iterators_.value()) {
             EvalCtx eval_ctx(operator_context_->get_exec_context(),
                              exprs_.get());
             int topk = 0;
             while (iterator->HasNext() && topk < unity_topk) {
-                FixedVector<int32_t> offsets;
-                FixedVector<float> distances;
+                offsets.clear();
+                distances.clear();
                 // remain unfilled size as iterator batch size
                 int64_t batch_size = unity_topk - topk;
                 offsets.reserve(batch_size);

@@ -49,7 +49,10 @@ StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
                 strs->RawValueAt(i, sizeof(std::string)));
             auto* prefix_ptr = reinterpret_cast<std::string*>(
                 prefixes->RawValueAt(i, sizeof(std::string)));
-            bitmap.set(i, str_ptr->find(*prefix_ptr) == 0);
+            bitmap.set(
+                i,
+                str_ptr->size() >= prefix_ptr->size() &&
+                    str_ptr->compare(0, prefix_ptr->size(), *prefix_ptr) == 0);
         } else {
             valid_bitmap[i] = false;
         }

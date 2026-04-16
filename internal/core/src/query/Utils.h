@@ -56,6 +56,37 @@ Match<std::string_view>(const std::string_view& str,
     }
 }
 
+// Overloads for string_view combinations used when CompareExpr operands
+// hold string_view in the data_access_type variant (chunk access), or a
+// mix of string (index access) and string_view (chunk access).
+inline bool
+Match(const std::string_view& str, const std::string_view& val, OpType op) {
+    switch (op) {
+        case OpType::PrefixMatch:
+            return PrefixMatch(str, val);
+        case OpType::PostfixMatch:
+            return PostfixMatch(str, val);
+        case OpType::InnerMatch:
+            return InnerMatch(str, val);
+        default:
+            ThrowInfo(OpTypeInvalid, "not supported");
+    }
+}
+
+inline bool
+Match(const std::string& str, const std::string_view& val, OpType op) {
+    switch (op) {
+        case OpType::PrefixMatch:
+            return PrefixMatch(str, val);
+        case OpType::PostfixMatch:
+            return PostfixMatch(str, val);
+        case OpType::InnerMatch:
+            return InnerMatch(str, val);
+        default:
+            ThrowInfo(OpTypeInvalid, "not supported");
+    }
+}
+
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
 inline bool
 gt_ub(int64_t t) {

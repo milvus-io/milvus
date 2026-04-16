@@ -141,9 +141,9 @@ IndexFactory::VecIndexLoadResource(
     int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
-    std::string index_type = index_params.at("index_type");
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    const std::string& index_type = index_type_it->second;
 
     bool mmaped = false;
     if (mmap_enable &&
@@ -297,17 +297,18 @@ IndexFactory::VecIndexLoadResource(
     }
 
     LoadResourceRequest request{};
+    const auto& res = resource.value();
 
     request.has_raw_data = has_raw_data;
-    request.final_disk_cost = resource.value().diskCost;
-    request.final_memory_cost = resource.value().memoryCost;
+    request.final_disk_cost = res.diskCost;
+    request.final_memory_cost = res.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
-        request.max_disk_cost = resource.value().diskCost;
-        request.max_memory_cost = std::max(resource.value().memoryCost,
-                                           download_buffer_size_in_bytes);
+        request.max_disk_cost = res.diskCost;
+        request.max_memory_cost =
+            std::max(res.memoryCost, download_buffer_size_in_bytes);
     } else {
         request.max_disk_cost = 0;
-        request.max_memory_cost = 2 * resource.value().memoryCost;
+        request.max_memory_cost = 2 * res.memoryCost;
     }
     return request;
 }
@@ -321,9 +322,9 @@ IndexFactory::ScalarIndexLoadResource(
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
-    std::string index_type = index_params.at("index_type");
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    const std::string& index_type = index_type_it->second;
 
     knowhere::expected<knowhere::Resource> resource;
 

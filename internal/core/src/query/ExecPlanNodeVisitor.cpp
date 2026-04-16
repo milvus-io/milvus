@@ -59,7 +59,7 @@ ExecPlanNodeVisitor::ExecuteTask(
             Assert(processed_num == query_context->get_active_count());
             break;
         }
-        auto childrens = result->childrens();
+        const auto& childrens = result->childrens();
         AssertInfo(childrens.size() == 1,
                    "plannode result vector's children size not equal one");
         LOG_DEBUG("output result length:{}", childrens[0]->size());

@@ -31,10 +31,53 @@ using data_access_type = std::optional<boost::variant<bool,
                                                       int64_t,
                                                       float,
                                                       double,
-                                                      std::string>>;
+                                                      std::string,
+                                                      std::string_view>>;
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
+
+// Helper to extract a value of type T from data_access_type.
+// For std::string, handles both std::string and std::string_view in the variant.
+// Uses boost::apply_visitor to avoid ADL conflicts between boost::variant::get
+// and boost::array::get.
+namespace detail {
+template <typename T>
+struct ValueExtractor : public boost::static_visitor<T> {
+    T
+    operator()(const T& val) const {
+        return val;
+    }
+    template <typename U>
+    T
+    operator()(const U&) const {
+        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+    }
+};
+
+template <>
+struct ValueExtractor<std::string> : public boost::static_visitor<std::string> {
+    std::string
+    operator()(const std::string& s) const {
+        return s;
+    }
+    std::string
+    operator()(std::string_view sv) const {
+        return std::string(sv);
+    }
+    template <typename U>
+    std::string
+    operator()(const U&) const {
+        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+    }
+};
+}  // namespace detail
+
+template <typename T>
+T
+get_from_variant(const data_access_type& opt) {
+    return boost::apply_visitor(detail::ValueExtractor<T>{}, opt.value());
+}
 
 class SegmentChunkReader {
  public:

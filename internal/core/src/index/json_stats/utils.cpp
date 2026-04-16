@@ -160,7 +160,7 @@ CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
         }
     }
     builders.push_back(shared_builder);
-    return std::make_pair(builders, builders_map);
+    return {std::move(builders), std::move(builders_map)};
 }
 
 std::shared_ptr<arrow::Schema>
@@ -262,7 +262,7 @@ JsonStatsMeta::Deserialize(const std::string& json_str) {
                         JsonKeyLayoutTypeFromString(layout_type_str);
                     layout_map[json_key] = layout_type;
                 }
-                meta.SetLayoutTypeMap(layout_map);
+                meta.SetLayoutTypeMap(std::move(layout_map));
             } else if (it.value().is_string()) {
                 meta.SetString(key, it.value().get<std::string>());
             } else if (it.value().is_number_integer()) {

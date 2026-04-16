@@ -2163,8 +2163,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     column->BulkRawJsonAt(
         op_ctx,
         [&](Json json, size_t offset, bool is_valid) {
-            dst->at(offset) =
-                ExtractSubJson(std::string(json.data()), dynamic_field_names);
+            dst->at(offset) = ExtractSubJson(json.data(), dynamic_field_names);
         },
         seg_offsets,
         count);
@@ -2871,9 +2870,9 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 
 void
 ChunkedSegmentSealedImpl::SetLoadInfo(
-    const proto::segcore::SegmentLoadInfo& load_info) {
+    proto::segcore::SegmentLoadInfo load_info) {
     std::unique_lock lck(mutex_);
-    segment_load_info_ = SegmentLoadInfo(load_info, schema_);
+    segment_load_info_ = SegmentLoadInfo(std::move(load_info), schema_);
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
         "storage_version: {}",

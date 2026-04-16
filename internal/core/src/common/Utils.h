@@ -221,13 +221,17 @@ IsInteger(const std::string& str) {
     if (str.empty())
         return false;
 
-    try {
-        size_t pos;
-        std::stoi(str, &pos);
-        return pos == str.length();
-    } catch (...) {
-        return false;
+    size_t start = 0;
+    if (str[0] == '+' || str[0] == '-') {
+        start = 1;
+        if (str.size() == 1)
+            return false;
     }
+    for (size_t i = start; i < str.size(); ++i) {
+        if (str[i] < '0' || str[i] > '9')
+            return false;
+    }
+    return true;
 }
 
 inline std::string

@@ -133,7 +133,7 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto files_value = index_files.value();
+    auto files_value = std::move(*index_files);
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             constexpr std::string_view suffix{"/index_null_offset"};
@@ -362,7 +362,7 @@ split_by_wildcard(const std::string& literal) {
                 escape_mode = true;
             } else if (c == '%' || c == '_') {
                 if (r.length() > 0) {
-                    result.push_back(r);
+                    result.push_back(std::move(r));
                     r.clear();
                 }
             } else {
@@ -371,7 +371,7 @@ split_by_wildcard(const std::string& literal) {
         }
     }
     if (r.length() > 0) {
-        result.push_back(r);
+        result.push_back(std::move(r));
     }
     return result;
 }

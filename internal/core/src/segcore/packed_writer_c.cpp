@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "common/common_type_c.h"
+#include "fmt/core.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
 #include "parquet/types.h"
@@ -237,8 +238,9 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             if (!array.ok()) {
                 return milvus::FailureCStatus(
                     milvus::ErrorCode::FileWriteFailed,
-                    "Failed to import array " + std::to_string(i) + ": " +
-                        array.status().ToString());
+                    fmt::format("Failed to import array {}: {}",
+                                i,
+                                array.status().ToString()));
             }
             all_arrays.push_back(array.ValueOrDie());
         }

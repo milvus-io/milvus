@@ -324,15 +324,16 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        const auto target = IndexStructure<T>(*(values + i));
+        auto lb = std::lower_bound(begin(), end(), target);
+        auto ub = std::upper_bound(lb, end(), target);
         for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::In, "
-                             "experted value is: "
-                          << *(values + i) << ", but real value is: " << lb->a_;
+            if (lb->a_ != target.a_) {
+                LOG_ERROR(
+                    "error happens in ScalarIndexSort<T>::In, "
+                    "expected value is: {}, but real value is: {}",
+                    target.a_,
+                    lb->a_);
             }
             bitset[lb->idx_] = true;
         }
@@ -346,15 +347,16 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        const auto target = IndexStructure<T>(*(values + i));
+        auto lb = std::lower_bound(begin(), end(), target);
+        auto ub = std::upper_bound(lb, end(), target);
         for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::NotIn, "
-                             "experted value is: "
-                          << *(values + i) << ", but real value is: " << lb->a_;
+            if (lb->a_ != target.a_) {
+                LOG_ERROR(
+                    "error happens in ScalarIndexSort<T>::NotIn, "
+                    "expected value is: {}, but real value is: {}",
+                    target.a_,
+                    lb->a_);
             }
             bitset[lb->idx_] = false;
         }

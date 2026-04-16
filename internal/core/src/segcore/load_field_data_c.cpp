@@ -82,9 +82,8 @@ SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
             ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
                       "please append field info first");
         }
-        load_field_data_info->field_infos[field_id].child_field_ids =
-            std::vector<int64_t>(child_field_ids,
-                                 child_field_ids + child_field_num);
+        iter->second.child_field_ids = std::vector<int64_t>(
+            child_field_ids, child_field_ids + child_field_num);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -107,13 +106,10 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
                       "please append field info first");
         }
-        std::string file_path(c_file_path);
-        load_field_data_info->field_infos[field_id].insert_files.emplace_back(
-            file_path);
-        load_field_data_info->field_infos[field_id].entries_nums.emplace_back(
-            entries_num);
-        load_field_data_info->field_infos[field_id].memory_sizes.emplace_back(
-            memory_size);
+        auto& field_info = iter->second;
+        field_info.insert_files.emplace_back(c_file_path);
+        field_info.entries_nums.emplace_back(entries_num);
+        field_info.memory_sizes.emplace_back(memory_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

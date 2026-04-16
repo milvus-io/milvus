@@ -139,7 +139,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 current_chunk_pos++;
                 return std::nullopt;
             }
-            return chunk_data[current_chunk_pos++];
+            return data_access_type(
+                std::string_view(chunk_data[current_chunk_pos++]));
         };
     } else {
         auto pw = segment_->chunk_view<std::string_view>(
@@ -165,7 +166,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 current_chunk_pos++;
                 return std::nullopt;
             }
-            return std::string(chunk_data[current_chunk_pos++]);
+            return data_access_type(chunk_data[current_chunk_pos++]);
         };
     }
 }
@@ -279,18 +280,18 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
-            return chunk_data[i];
+            return data_access_type(std::string_view(chunk_data[i]));
         };
     } else {
         auto pw =
             segment_->chunk_view<std::string_view>(op_ctx_, field_id, chunk_id);
         return [pw = std::move(pw)](int i) mutable -> const data_access_type {
-            auto chunk_data = pw.get().first;
-            auto chunk_valid_data = pw.get().second;
+            auto& chunk_data = pw.get().first;
+            auto& chunk_valid_data = pw.get().second;
             if (i < chunk_valid_data.size() && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
-            return std::string(chunk_data[i]);
+            return data_access_type(chunk_data[i]);
         };
     }
 }

@@ -392,8 +392,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
         case OpType::GreaterThan: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         ids.push_back(agent.key().id());
                         break;
@@ -406,8 +406,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         ids.push_back(agent.key().id());
                     }
@@ -418,8 +418,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
         case OpType::GreaterEqual: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         ids.push_back(agent.key().id());
                         break;
@@ -432,8 +432,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         ids.push_back(agent.key().id());
                     }
@@ -444,8 +444,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
         case OpType::LessThan: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         break;
                     }
@@ -454,8 +454,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key < value) {
                         ids.push_back(agent.key().id());
                     }
@@ -466,8 +466,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
         case OpType::LessEqual: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         break;
                     }
@@ -476,8 +476,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key <= value) {
                         ids.push_back(agent.key().id());
                     }
@@ -646,9 +646,6 @@ void
 StringIndexMarisa::fill_offsets() {
     for (size_t offset = 0; offset < str_ids_.size(); offset++) {
         auto str_id = str_ids_[offset];
-        if (str_ids_to_offsets_.find(str_id) == str_ids_to_offsets_.end()) {
-            str_ids_to_offsets_[str_id] = std::vector<size_t>{};
-        }
         str_ids_to_offsets_[str_id].push_back(offset);
     }
 }

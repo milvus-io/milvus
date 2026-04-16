@@ -436,8 +436,7 @@ ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
 
     auto function = factory.GetFilterFunction(func_sig);
     if (function == nullptr) {
-        ThrowInfo(ExprInvalid,
-                  "function " + func_sig.ToString() + " not found. ");
+        ThrowInfo(ExprInvalid, "function {} not found.", func_sig.ToString());
     }
     return std::make_shared<expr::CallExpr>(
         expr_pb.function_name(), parameters, function);
@@ -643,8 +642,7 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            ThrowInfo(ExprInvalid,
-                      std::string("unsupported expr proto node: ") + s);
+            ThrowInfo(ExprInvalid, "unsupported expr proto node: {}", s);
         }
     }
     if (type_check(result->type())) {

@@ -114,8 +114,8 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     int64_t absolute_offset = 0;
     for (const auto& fd : field_datas) {
         const auto n = fd->get_num_rows();
+        const bool is_nullable_effective = nullable || fd->IsNullable();
         for (int64_t i = 0; i < n; ++i, ++absolute_offset) {
-            const bool is_nullable_effective = nullable || fd->IsNullable();
             if (is_nullable_effective && !fd->is_valid(i)) {
                 continue;
             }

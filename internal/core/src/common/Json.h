@@ -55,9 +55,9 @@ isDocEmpty(simdjson::ondemand::document document);
 // rapidjson is suitable for extract and reconstruct serialization
 // instead of simdjson which not suitable for serialization
 inline std::string
-ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
+ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
     rapidjson::Document doc;
-    doc.Parse(json.c_str());
+    doc.Parse(json.data(), json.size());
     if (doc.HasParseError()) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "json parse failed, error:{}",
