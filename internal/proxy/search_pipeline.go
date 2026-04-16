@@ -273,7 +273,7 @@ type rerankOperator struct {
 }
 
 func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		return &rerankOperator{
 			nq:              t.GetNq(),
 			topK:            t.rankParams.limit,
@@ -287,8 +287,8 @@ func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 		}, nil
 	}
 	return &rerankOperator{
-		nq:              t.SearchRequest.GetNq(),
-		topK:            t.SearchRequest.GetTopk(),
+		nq:              t.GetNq(),
+		topK:            t.GetTopk(),
 		offset:          0, // Search performs Offset in the reduce phase
 		roundDecimal:    t.queryInfos[0].RoundDecimal,
 		groupByFieldId:  t.queryInfos[0].GroupByFieldId,
@@ -344,7 +344,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		return nil, err
 	}
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		outputFieldNames.Insert(t.functionScore.GetAllInputFieldNames()...)
 	}
 	// Add highlight dynamic fields to requery output
@@ -362,11 +362,11 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		collectionName:     t.request.GetCollectionName(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
-		consistencyLevel:   t.SearchRequest.GetConsistencyLevel(),
-		guaranteeTimestamp: t.SearchRequest.GetGuaranteeTimestamp(),
+		consistencyLevel:   t.GetConsistencyLevel(),
+		guaranteeTimestamp: t.GetGuaranteeTimestamp(),
 		notReturnAllMeta:   t.request.GetNotReturnAllMeta(),
 		partitionNames:     t.request.GetPartitionNames(),
-		partitionIDs:       t.SearchRequest.GetPartitionIDs(),
+		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 	}, nil
 }
@@ -455,7 +455,7 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &organizeOperator{
 		traceCtx:           t.TraceCtx(),
 		primaryFieldSchema: pkField,
-		collectionID:       t.SearchRequest.GetCollectionID(),
+		collectionID:       t.GetCollectionID(),
 	}, nil
 }
 
@@ -698,7 +698,7 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 func (p *pipeline) String() string {
 	buf := bytes.NewBufferString(fmt.Sprintf("SearchPipeline: %s", p.name))
 	for _, node := range p.nodes {
-		buf.WriteString(fmt.Sprintf("  %s -> %s", node.name, node.outputs))
+		fmt.Fprintf(buf, "  %s -> %s", node.name, node.outputs)
 	}
 	return buf.String()
 }
@@ -1101,22 +1101,22 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 }
 
 func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
-	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
+	if !t.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
 		return newPipeline(searchPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && t.needRequery && t.functionScore == nil {
+	if !t.GetIsAdvanced() && t.needRequery && t.functionScore == nil {
 		return newPipeline(searchWithRequeryPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore != nil {
+	if !t.GetIsAdvanced() && !t.needRequery && t.functionScore != nil {
 		return newPipeline(searchWithRerankPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && t.needRequery && t.functionScore != nil {
+	if !t.GetIsAdvanced() && t.needRequery && t.functionScore != nil {
 		return newPipeline(searchWithRerankRequeryPipe, t)
 	}
-	if t.SearchRequest.GetIsAdvanced() && !t.needRequery {
+	if t.GetIsAdvanced() && !t.needRequery {
 		return newPipeline(hybridSearchPipe, t)
 	}
-	if t.SearchRequest.GetIsAdvanced() && t.needRequery {
+	if t.GetIsAdvanced() && t.needRequery {
 		if len(t.functionScore.GetAllInputFieldIDs()) > 0 {
 			// When the function score need field data, we need to requery to fetch the field data before rerank.
 			// The requery will fetch the field data of all search results,
@@ -1128,7 +1128,7 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}
-	return nil, fmt.Errorf("Unsupported pipeline")
+	return nil, fmt.Errorf("unsupported pipeline")
 }
 
 func aggregatedAllSearchCount(searchResults []*milvuspb.SearchResults) int64 {

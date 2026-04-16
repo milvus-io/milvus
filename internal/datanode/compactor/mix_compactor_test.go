@@ -421,7 +421,6 @@ func (s *MixCompactionTaskStorageV1Suite) prepareCompactSortedSegmentLackBinlog(
 				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
 			},
 		})
-
 	}
 }
 
@@ -1272,7 +1271,6 @@ func BenchmarkMixCompactor(b *testing.B) {
 		s.NotEmpty(segment.InsertLogs)
 		s.NotEmpty(segment.Field2StatslogPaths)
 		s.Empty(segment.Deltalogs)
-
 	}
 
 	s.TearDownTest()

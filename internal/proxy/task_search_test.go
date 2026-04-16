@@ -735,19 +735,19 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		createColl(t, collName, qc)
 
 		task := getSearchTask(t, collName)
-		task.SearchRequest.Nq = 1000
-		task.SearchRequest.Topk = 1001
+		task.Nq = 1000
+		task.Topk = 1001
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		task.SearchRequest.Nq = 100
-		task.SearchRequest.Topk = 100
-		task.SearchRequest.GroupSize = 200
+		task.Nq = 100
+		task.Topk = 100
+		task.GroupSize = 200
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		task.SearchRequest.IsAdvanced = true
-		task.SearchRequest.SubReqs = []*internalpb.SubSearchRequest{
+		task.IsAdvanced = true
+		task.SubReqs = []*internalpb.SubSearchRequest{
 			{
 				Topk:      100,
 				Nq:        100,
@@ -896,7 +896,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.Equal(t, collInfo.updateTimestamp, st.SearchRequest.GuaranteeTimestamp)
+		assert.Equal(t, collInfo.updateTimestamp, st.GuaranteeTimestamp)
 	})
 	t.Run("search with rerank", func(t *testing.T) {
 		collName := "search_with_rerank" + funcutil.GenRandomStr()
@@ -912,7 +912,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
-		assert.Equal(t, false, st.SearchRequest.GetIsAdvanced())
+		assert.Equal(t, false, st.GetIsAdvanced())
 	})
 
 	t.Run("advance search with rerank", func(t *testing.T) {
@@ -934,7 +934,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
-		assert.Equal(t, true, st.SearchRequest.GetIsAdvanced())
+		assert.Equal(t, true, st.GetIsAdvanced())
 	})
 
 	t.Run("search with rerank grouping", func(t *testing.T) {
@@ -1114,7 +1114,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 		pb := &commonpb.PlaceholderGroup{}
-		proto.Unmarshal(task.SearchRequest.PlaceholderGroup, pb)
+		proto.Unmarshal(task.PlaceholderGroup, pb)
 		assert.Equal(t, len(pb.Placeholders), 1)
 		assert.Equal(t, len(pb.Placeholders[0].Values), 1)
 		assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
@@ -1125,7 +1125,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 		pb := &commonpb.PlaceholderGroup{}
-		proto.Unmarshal(task.SearchRequest.PlaceholderGroup, pb)
+		proto.Unmarshal(task.PlaceholderGroup, pb)
 		assert.Equal(t, len(pb.Placeholders), 1)
 		assert.Equal(t, len(pb.Placeholders[0].Values), 2)
 		assert.Equal(t, pb.Placeholders[0].Type, commonpb.PlaceholderType_FloatVector)
@@ -1191,8 +1191,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		})
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
-		assert.Equal(t, len(task.SearchRequest.SubReqs), 2)
-		for _, sub := range task.SearchRequest.SubReqs {
+		assert.Equal(t, len(task.SubReqs), 2)
+		for _, sub := range task.SubReqs {
 			pb := &commonpb.PlaceholderGroup{}
 			proto.Unmarshal(sub.PlaceholderGroup, pb)
 			assert.Equal(t, len(pb.Placeholders), 1)
@@ -1209,8 +1209,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		})
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
-		assert.Equal(t, len(task.SearchRequest.SubReqs), 3)
-		for _, sub := range task.SearchRequest.SubReqs {
+		assert.Equal(t, len(task.SubReqs), 3)
+		for _, sub := range task.SubReqs {
 			pb := &commonpb.PlaceholderGroup{}
 			proto.Unmarshal(sub.PlaceholderGroup, pb)
 			assert.Equal(t, len(pb.Placeholders), 1)
@@ -3036,7 +3036,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		shardClientMgr: mgr,
 	}
 	for i := 0; i < len(fieldName2Types); i++ {
-		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
+		task.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
 	}
 
 	assert.NoError(t, task.OnEnqueue())
@@ -4941,7 +4941,7 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 					}
 				}
 			}
-			task.SearchRequest.OutputFieldsId = outputFieldIDs
+			task.OutputFieldsId = outputFieldIDs
 
 			err := task.initSearchRequest(ctx)
 			assert.NoError(t, err)
@@ -5236,9 +5236,9 @@ func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify that highlighter's RequiredFieldIDs are added to OutputFieldsId
-		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(101)) // title
-		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(102)) // content
-		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(103)) // $meta
+		assert.Contains(t, task.OutputFieldsId, int64(101)) // title
+		assert.Contains(t, task.OutputFieldsId, int64(102)) // content
+		assert.Contains(t, task.OutputFieldsId, int64(103)) // $meta
 	})
 
 	t.Run("highlighter merges DynamicFieldNames into plan.DynamicFields", func(t *testing.T) {
@@ -5289,7 +5289,7 @@ func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
 
 		// Deserialize the plan to check DynamicFields
 		plan := &planpb.PlanNode{}
-		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		err = proto.Unmarshal(task.SerializedExprPlan, plan)
 		assert.NoError(t, err)
 
 		// Verify that highlighter's DynamicFieldNames are merged into plan.DynamicFields
@@ -5343,7 +5343,7 @@ func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
 
 		// Deserialize the plan
 		plan := &planpb.PlanNode{}
-		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		err = proto.Unmarshal(task.SerializedExprPlan, plan)
 		assert.NoError(t, err)
 
 		// Only original user dynamic fields should be present
@@ -5398,7 +5398,7 @@ func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
 
 		// Deserialize the plan
 		plan := &planpb.PlanNode{}
-		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		err = proto.Unmarshal(task.SerializedExprPlan, plan)
 		assert.NoError(t, err)
 
 		// When needRequery is true, DynamicFields should NOT be set (the branch is skipped)

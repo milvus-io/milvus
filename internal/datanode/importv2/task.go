@@ -70,11 +70,11 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.State = state
+			t.(*PreImportTask).State = state
 		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.State = state
+			t.(*ImportTask).State = state
 		case L0PreImportTaskType:
-			t.(*L0PreImportTask).PreImportTask.State = state
+			t.(*L0PreImportTask).State = state
 		case L0ImportTaskType:
 			t.(*L0ImportTask).ImportTaskV2.State = state
 		}
@@ -85,11 +85,11 @@ func UpdateReason(reason string) UpdateAction {
 	return func(t Task) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*PreImportTask).PreImportTask.Reason = reason
+			t.(*PreImportTask).Reason = reason
 		case ImportTaskType:
-			t.(*ImportTask).ImportTaskV2.Reason = reason
+			t.(*ImportTask).Reason = reason
 		case L0PreImportTaskType:
-			t.(*L0PreImportTask).PreImportTask.Reason = reason
+			t.(*L0PreImportTask).Reason = reason
 		case L0ImportTaskType:
 			t.(*L0ImportTask).ImportTaskV2.Reason = reason
 		}

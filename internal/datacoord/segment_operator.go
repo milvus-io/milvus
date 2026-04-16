@@ -43,7 +43,7 @@ func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOpe
 	}
 }
 
-func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
+func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		if segment.JsonKeyStats == nil {
 			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)

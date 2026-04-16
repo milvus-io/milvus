@@ -290,7 +290,7 @@ func Test_CheckRowsEqual(t *testing.T) {
 		DataType: schemapb.DataType_Bool,
 	}
 	schema.Fields = append(schema.Fields, newField)
-	insertData.Data[newField.GetFieldID()], err = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldData(newField.GetDataType(), newField, 1)
 	err = CheckRowsEqual(schema, insertData)
 	assert.Error(t, err)
 
@@ -670,7 +670,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 
-	// the dynamic field is allready filled, do nothing
+	// the dynamic field is already filled, do nothing
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())

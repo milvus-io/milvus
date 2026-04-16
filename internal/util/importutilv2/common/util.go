@@ -72,7 +72,7 @@ func SafeStringForError(s string) string {
 	for i, r := range s {
 		if r == utf8.RuneError {
 			// Invalid UTF-8 sequence, encode as hex
-			result.WriteString(fmt.Sprintf("\\x%02x", s[i]))
+			fmt.Fprintf(&result, "\\x%02x", s[i])
 		} else {
 			result.WriteRune(r)
 		}

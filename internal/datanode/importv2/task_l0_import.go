@@ -151,7 +151,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	fn := func(file *internalpb.ImportFile) (err error) {
 		defer func() {
 			if err != nil {
-				var reason string = err.Error()
+				reason := err.Error()
 				if len(t.req.GetFiles()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.req.GetFiles()[0].String())
 				}

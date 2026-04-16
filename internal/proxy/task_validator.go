@@ -53,8 +53,8 @@ func (v *searchTaskValidator) validateSearch(search *searchTask) error {
 
 func (v *searchTaskValidator) validate(search *searchTask) error {
 	// if it is a hybrid search, check all sub-searches
-	if search.SearchRequest.GetIsAdvanced() {
-		for _, subReq := range search.SearchRequest.GetSubReqs() {
+	if search.GetIsAdvanced() {
+		for _, subReq := range search.GetSubReqs() {
 			if err := v.validateSubSearch(subReq); err != nil {
 				return err
 			}

@@ -138,7 +138,7 @@ func (s *PartitionStatsMetaSuite) TestDropPartitionStats() {
 	version2 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	s.Equal(int64(101), version2)
 
-	err = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[1])
+	_ = partitionStatsMeta.DropPartitionStatsInfo(context.Background(), partitionStats[1])
 	s.Equal(1, len(partitionStatsMeta.partitionStatsInfos[channel][partitionID].infos))
 	version3 := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	s.Equal(int64(100), version3)

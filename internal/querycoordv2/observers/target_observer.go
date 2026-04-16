@@ -268,7 +268,7 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	defer ob.keylocks.Unlock(collectionID)
 
 	// if collection release, skip check
-	if ob.meta.CollectionManager.GetCollection(ctx, collectionID) == nil {
+	if ob.meta.GetCollection(ctx, collectionID) == nil {
 		return
 	}
 
@@ -396,7 +396,7 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
-	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(ctx, collectionID)
+	replicaNum := ob.meta.GetReplicaNumber(ctx, collectionID)
 	log := log.Ctx(ctx).WithRateGroup(
 		fmt.Sprintf("qcv2.TargetObserver-shouldUpdateCurrentTarget-%d", collectionID),
 		10,
@@ -444,7 +444,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	// This prevents the issue where some replicas may lack nodes during dynamic replica scaling,
 	// while the total count still meets the threshold.
 	readyDelegatorsInCollection := make([]*meta.DmChannel, 0)
-	replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := ob.meta.GetByCollection(ctx, collectionID)
 	for _, replica := range replicas {
 		readyDelegatorsInReplica := make([]*meta.DmChannel, 0)
 		for channel := range channelNames {
@@ -480,7 +480,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 	var err error
 	for _, d := range collReadyDelegatorList {
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
-		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, d.Node)
+		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
 			log.Warn("replica not found", zap.Int64("nodeID", d.Node), zap.Int64("collectionID", collectionID))
 			// should not happen, don't update current target if replica not found

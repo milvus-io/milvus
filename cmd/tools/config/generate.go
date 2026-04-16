@@ -65,7 +65,8 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 		subVal := val.Field(j)
 		tag := val.Type().Field(j).Tag
 		t := val.Type().Field(j).Type.String()
-		if t == "paramtable.ParamItem" {
+		switch t {
+		case "paramtable.ParamItem":
 			item := subVal.Interface().(paramtable.ParamItem) //nolint:govet
 			refreshable := tag.Get("refreshable")
 			defaultValue := params.GetWithDefault(item.Key, item.DefaultValue)
@@ -74,7 +75,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			}
 			log.Ctx(context.TODO()).Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
-		} else if t == "paramtable.ParamGroup" {
+		case "paramtable.ParamGroup":
 			item := subVal.Interface().(paramtable.ParamGroup)
 			log.Ctx(context.TODO()).Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
@@ -91,7 +92,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 				log.Ctx(context.TODO()).Debug("got group entry", zap.String("key", key), zap.String("value", value))
 				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, item.GetDoc(key)})
 			}
-		} else {
+		default:
 			collectRecursive(params, data, &subVal)
 		}
 	}

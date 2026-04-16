@@ -62,19 +62,19 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "unknown"},
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unknow rerank model provider")
+		s.ErrorContains(err, "unknown rerank model provider")
 	}
 
 	{
 		_, err := newProvider([]*commonpb.KeyValuePair{}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Lost rerank params")
+		s.ErrorContains(err, "lost rerank params")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank function lost params endpoint")
+		s.ErrorContains(err, "rerank function lost params endpoint")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -123,7 +123,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank provider: [vllm] is disabled")
+		s.ErrorContains(err, "rerank provider: [vllm] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
@@ -178,7 +178,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank provider: [tei] is disabled")
+		s.ErrorContains(err, "rerank provider: [tei] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
@@ -285,7 +285,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +301,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +354,7 @@ func (s *RerankModelSuite) TestCallTEI() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 }
 

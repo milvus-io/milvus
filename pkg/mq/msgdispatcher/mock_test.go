@@ -48,7 +48,7 @@ var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+	Params.Save(Params.MQCfg.EnablePursuitMode.Key, "false")
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

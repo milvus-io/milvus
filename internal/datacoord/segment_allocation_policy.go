@@ -297,7 +297,7 @@ func sealByBlockingL0(meta *meta) channelSealPolicy {
 			result = append(result, candidates[0])
 			candidates = candidates[1:]
 		}
-		return result, fmt.Sprintf("seal segments due to blocking l0 size/num")
+		return result, "seal segments due to blocking l0 size/num"
 	}
 }
 

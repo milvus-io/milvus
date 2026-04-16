@@ -86,7 +86,7 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Floc
 	defer fd.Close()
 
 	fd.Truncate(0)
-	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	_, err = fmt.Fprintf(fd, "%d", os.Getpid())
 	if err != nil {
 		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
 	}

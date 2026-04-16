@@ -1021,7 +1021,7 @@ func (s *TextEmbeddingFunctionSuite) TestDisable() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
+	s.ErrorContains(err, "text embedding model provider [openai] is disabled")
 }
 
 func (s *TextEmbeddingFunctionSuite) TestCheck() {
@@ -1062,5 +1062,5 @@ func (s *TextEmbeddingFunctionSuite) TestCheck() {
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 	err = runner.Check(context.Background())
-	s.ErrorContains(err, "Embedding model output and field type mismatch, model output is FloatVector, field type is Int8Vector")
+	s.ErrorContains(err, "embedding model output and field type mismatch, model output is FloatVector, field type is Int8Vector")
 }

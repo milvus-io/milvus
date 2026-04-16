@@ -104,7 +104,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		return nil
 	}
 
-	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
+	collectionIDs := c.meta.GetAll(ctx)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
 			// Fast path: skip if target and dist versions unchanged
@@ -115,7 +115,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 				continue
 			}
 
-			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
+			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
 			for _, r := range replicas {
 				tasks := c.checkReplica(ctx, r)
@@ -159,7 +159,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		segmentsOnQN := c.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
 		collectionSegments := lo.GroupBy(segmentsOnQN, func(segment *meta.Segment) int64 { return segment.GetCollectionID() })
 		for collectionID, segments := range collectionSegments {
-			replica := c.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, nodeID)
+			replica := c.meta.GetByCollectionAndNode(ctx, collectionID, nodeID)
 			if replica == nil {
 				reduceTasks := c.createSegmentReduceTasks(ctx, segments, meta.NilReplica, querypb.DataScope_Historical)
 				task.SetReason("dirty segment exists", reduceTasks...)
@@ -349,7 +349,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 					loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
 				} else {
 					// Segment not in current target -> check if refresh in progress
-					collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
+					collection := c.meta.GetCollection(ctx, collectionID)
 					if collection != nil && !collection.IsRefreshed() {
 						// Refresh scenario (import) -> Use user's configured priority
 						loadPriorities = append(loadPriorities, replica.LoadPriority())
@@ -433,7 +433,7 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 	notUsed := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
-		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
+		partition := c.meta.GetPartition(ctx, s.PartitionID)
 
 		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
 		if len(delegatorList) == 0 {
