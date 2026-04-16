@@ -1411,10 +1411,10 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	}
 
 	// Read deltalogs from manifest for StorageV3 segments
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
+	if loadInfo.GetStorageVersion() == storage.StorageV3 {
 		reader, err := storage.NewDeltalogReaderFromManifest(
 			pkField.DataType,
-			manifestPath,
+			loadInfo.GetManifestPath(),
 			storage.WithStorageConfig(createStorageConfig()),
 			storage.WithVersion(storage.StorageV2),
 		)

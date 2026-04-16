@@ -170,8 +170,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && s.GetManifestPath() == "" {
-			// External collection segments may not have start/DML positions but have ManifestPath
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && s.GetStorageVersion() < storage.StorageV3 {
+			// External collection segments may not have start/DML positions for v3 segment
 			continue
 		}
 		if s.GetIsImporting() {

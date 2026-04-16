@@ -6,6 +6,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -196,20 +197,22 @@ func TestIsStatsLogExists(t *testing.T) {
 }
 
 func TestValidateManifestSegment(t *testing.T) {
-	t.Run("no manifest is always valid", func(t *testing.T) {
+	t.Run("non-v3 segment", func(t *testing.T) {
 		info := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1,
 			Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 100},
 			},
+			StorageVersion: storage.StorageV2,
 		})
 		assert.Empty(t, ValidateManifestSegment(info))
 	})
 
 	t.Run("manifest with empty legacy fields is valid", func(t *testing.T) {
 		info := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           2,
-			ManifestPath: "base/path@1",
+			ID:             2,
+			ManifestPath:   "base/path@1",
+			StorageVersion: storage.StorageV3,
 		})
 		assert.Empty(t, ValidateManifestSegment(info))
 	})
@@ -221,6 +224,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 100},
 			},
+			StorageVersion: storage.StorageV3,
 		})
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "statslogs")
@@ -234,6 +238,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			Bm25Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 200},
 			},
+			StorageVersion: storage.StorageV3,
 		})
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "bm25statslogs")
@@ -246,6 +251,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				10: {FieldID: 10},
 			},
+			StorageVersion: storage.StorageV3,
 		})
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "textStatsLogs")
@@ -258,6 +264,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
 				20: {FieldID: 20},
 			},
+			StorageVersion: storage.StorageV3,
 		})
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "jsonKeyStats")
@@ -271,6 +278,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				10: {FieldID: 10},
 			},
+			StorageVersion: storage.StorageV3,
 		})
 		msg := ValidateManifestSegment(info)
 		assert.Contains(t, msg, "statslogs")

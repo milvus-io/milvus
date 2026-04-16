@@ -35,10 +35,14 @@ namespace milvus::segcore {
 
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 SegmentLoadInfo::GetColumnGroups() {
-    auto manifest_path = GetManifestPath();
-    if (manifest_path.empty()) {
+    if (GetStorageVersion() < STORAGE_V3) {
         return nullptr;
     }
+    auto manifest_path = GetManifestPath();
+    AssertInfo(manifest_path != "",
+               "manifest path shall not be empty for storage v3 segment, "
+               "segment id: {}",
+               GetSegmentID());
     // return cached result if exists
     if (column_groups_ != nullptr) {
         return column_groups_;

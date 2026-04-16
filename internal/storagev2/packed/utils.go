@@ -192,7 +192,9 @@ func BuildCurrentSegmentFragments(
 	result := make(SegmentFragments)
 	for _, seg := range segments {
 		// Try to read from manifest if available
-		if seg.GetManifestPath() != "" && storageConfig != nil {
+		// storageVersion >= StorageV3(3) means loon manifest format.
+		// Cannot reference storage.StorageV3 due to import cycle (storage <-> packed).
+		if seg.GetStorageVersion() == 3 && storageConfig != nil {
 			fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read manifest for segment %d at %s: %w",

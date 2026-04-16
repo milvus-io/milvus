@@ -1383,8 +1383,9 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{},
-			Statslogs: []*datapb.FieldBinlog{},
+			Binlogs:        []*datapb.FieldBinlog{},
+			Statslogs:      []*datapb.FieldBinlog{},
+			StorageVersion: storage.StorageV3,
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -1673,15 +1674,15 @@ func TestUpdateManifestVersion(t *testing.T) {
 		assert.False(t, operator(pack))
 	})
 
-	t.Run("empty manifest path", func(t *testing.T) {
+	t.Run("non-v3 segment", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
 		meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: "",
+				ID:             1,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
 			},
 		})
 
@@ -1720,9 +1721,10 @@ func TestUpdateManifestVersion(t *testing.T) {
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
 		meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: manifestPath,
+				ID:             1,
+				State:          commonpb.SegmentState_Flushed,
+				ManifestPath:   manifestPath,
+				StorageVersion: storage.StorageV3,
 			},
 		})
 
@@ -1741,9 +1743,10 @@ func TestUpdateManifestVersion(t *testing.T) {
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 5)
 		meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: manifestPath,
+				ID:             1,
+				State:          commonpb.SegmentState_Flushed,
+				ManifestPath:   manifestPath,
+				StorageVersion: storage.StorageV3,
 			},
 		})
 
@@ -1770,9 +1773,10 @@ func TestUpdateManifestVersion(t *testing.T) {
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 1)
 		meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: manifestPath,
+				ID:             1,
+				State:          commonpb.SegmentState_Flushed,
+				ManifestPath:   manifestPath,
+				StorageVersion: storage.StorageV3,
 			},
 		})
 

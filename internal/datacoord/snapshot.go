@@ -503,7 +503,7 @@ func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (stri
 	// StorageV2 segments have an additional manifest file for Lance/Arrow format
 	storagev2Manifests := make([]*datapb.StorageV2SegmentManifest, 0)
 	for _, segment := range snapshot.Segments {
-		if segment.GetManifestPath() != "" {
+		if segment.GetStorageVersion() == storage.StorageV3 {
 			storagev2Manifests = append(storagev2Manifests, &datapb.StorageV2SegmentManifest{
 				SegmentId: segment.GetSegmentId(),
 				Manifest:  segment.GetManifestPath(),

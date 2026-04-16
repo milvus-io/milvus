@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -577,7 +578,7 @@ type SegmentInfoSelector func(*SegmentInfo) bool
 // legacy stats fields. Returns a descriptive message if validation fails,
 // or empty string if the segment is valid.
 func ValidateManifestSegment(info *SegmentInfo) string {
-	if info.GetManifestPath() == "" {
+	if info.GetStorageVersion() < storage.StorageV3 {
 		return ""
 	}
 
