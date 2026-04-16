@@ -614,15 +614,11 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := etcdSource.etcdCli.Txn(ctx).
+	_, err := etcdSource.etcdCli.Txn(ctx).
 		Then(ops...).
 		Commit()
 	if err != nil {
 		return fmt.Errorf("failed to atomically alter configs in etcd: %w", err)
-	}
-
-	if !resp.Succeeded {
-		return errors.New("transaction failed to alter configs in etcd")
 	}
 
 	log.Info("configs atomically altered in etcd",
