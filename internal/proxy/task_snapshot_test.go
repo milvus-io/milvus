@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -280,13 +281,53 @@ func TestDropSnapshotTask_OnEnqueue_Success(t *testing.T) {
 func TestDropSnapshotTask_PreExecute(t *testing.T) {
 	task := &dropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "test_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), task.collectionID)
+}
+
+func TestDropSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
+	task := &dropSnapshotTask{
+		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
 	}
 
 	err := task.PreExecute(context.Background())
 
-	assert.NoError(t, err) // PreExecute should always succeed for drop
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
+	task := &dropSnapshotTask{
+		req: &milvuspb.DropSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "nonexistent_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	expectedError := errors.New("collection not found")
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection not found")
 }
 
 func TestDropSnapshotTask_Execute_Success(t *testing.T) {
@@ -518,7 +559,8 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 
 	// Initialize globalMetaCache
 	globalMetaCache = &MetaCache{}
-	// Mock globalMetaCache calls
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -831,8 +873,9 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &restoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
-						Name:           "valid_snapshot",
-						CollectionName: tc.collectionName,
+						Name:                 "valid_snapshot",
+						CollectionName:       "source_collection",
+						TargetCollectionName: tc.collectionName,
 					},
 				}
 
@@ -889,9 +932,15 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &dropSnapshotTask{
 					req: &milvuspb.DropSnapshotRequest{
-						Name: tc.snapshotName,
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -906,9 +955,15 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &describeSnapshotTask{
 					req: &milvuspb.DescribeSnapshotRequest{
-						Name: tc.snapshotName,
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -920,24 +975,29 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 	// Test RestoreSnapshotTask
 	t.Run("RestoreSnapshotTask", func(t *testing.T) {
 		testCases := []struct {
-			name           string
-			snapshotName   string
-			collectionName string
+			name                 string
+			snapshotName         string
+			collectionName       string
+			targetCollectionName string
 		}{
-			{"both valid", "snapshot_1", "collection_1"},
-			{"empty collection name", "snapshot_1", ""}, // Empty collection name is allowed
-			{"with underscores", "_snapshot", "_collection"},
-			{"mixed", "Snap_123", "Coll_456"},
+			{"both valid", "snapshot_1", "collection_1", "target_coll"},
+			{"with underscores", "_snapshot", "_collection", "_target"},
+			{"mixed", "Snap_123", "Coll_456", "Target_789"},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &restoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
-						Name:           tc.snapshotName,
-						CollectionName: tc.collectionName,
+						Name:                 tc.snapshotName,
+						CollectionName:       tc.collectionName,
+						TargetCollectionName: tc.targetCollectionName,
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -953,12 +1013,845 @@ func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 	task := &listSnapshotsTask{
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
-			CollectionName: "", // Empty collection name should list all snapshots
+			CollectionName: "", // Empty collection name should be rejected
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+// =========================== resolveCollectionNames Tests ===========================
+
+func TestResolveCollectionNames_ZeroCollectionID(t *testing.T) {
+	dbName, collName := resolveCollectionNames(context.Background(), 0)
+	assert.Equal(t, "", dbName)
+	assert.Equal(t, "", collName)
+}
+
+func TestResolveCollectionNames_GetCollectionInfoError(t *testing.T) {
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
+		Return(nil, errors.New("collection not found")).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	dbName, collName := resolveCollectionNames(context.Background(), 100)
+	assert.Equal(t, "", dbName)
+	assert.Equal(t, "", collName)
+}
+
+func TestResolveCollectionNames_Success(t *testing.T) {
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
+		Return(&collectionInfo{
+			dbName: "test_db",
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+				},
+			},
+		}, nil).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	dbName, collName := resolveCollectionNames(context.Background(), 100)
+	assert.Equal(t, "test_db", dbName)
+	assert.Equal(t, "test_collection", collName)
+}
+
+// =========================== restoreSnapshotTask.PreExecute Additional Tests ===========================
+
+func TestRestoreSnapshotTask_PreExecute_MissingSourceCollectionName(t *testing.T) {
+	task := &restoreSnapshotTask{
+		req: &milvuspb.RestoreSnapshotRequest{
+			Name:                 "valid_snapshot",
+			CollectionName:       "", // empty source collection name
+			TargetCollectionName: "target_collection",
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+func TestRestoreSnapshotTask_PreExecute_MissingTargetCollectionName(t *testing.T) {
+	task := &restoreSnapshotTask{
+		req: &milvuspb.RestoreSnapshotRequest{
+			Name:                 "valid_snapshot",
+			CollectionName:       "source_collection",
+			TargetCollectionName: "", // empty target collection name
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "target_collection_name is required")
+}
+
+func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	task := &restoreSnapshotTask{
+		req: &milvuspb.RestoreSnapshotRequest{
+			Name:                 "valid_snapshot",
+			CollectionName:       "source_collection",
+			TargetCollectionName: "target_collection",
+			DbName:               "default",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
+		Return(int64(0), errors.New("source collection not found")).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "source collection not found")
+}
+
+// =========================== describeSnapshotTask.PreExecute Additional Tests ===========================
+
+func TestDescribeSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
+	task := &describeSnapshotTask{
+		req: &milvuspb.DescribeSnapshotRequest{
+			Name:           "valid_snapshot",
+			CollectionName: "", // empty collection name
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	task := &describeSnapshotTask{
+		req: &milvuspb.DescribeSnapshotRequest{
+			Name:           "valid_snapshot",
+			DbName:         "default",
+			CollectionName: "nonexistent_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
+		Return(int64(0), errors.New("collection not found")).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection not found")
+}
+
+// =========================== listSnapshotsTask.PreExecute Additional Tests ===========================
+
+func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
+	task := &listSnapshotsTask{
+		req: &milvuspb.ListSnapshotsRequest{
+			DbName: "nonexistent_db",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(nil, errors.New("database not found")).Build()
+	defer mockGetDBInfo.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database not found")
+}
+
+func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
+	task := &listSnapshotsTask{
+		req: &milvuspb.ListSnapshotsRequest{
+			DbName:         "default",
+			CollectionName: "nonexistent_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
+		Return(int64(0), errors.New("collection not found")).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection not found")
+}
+
+// =========================== getRestoreSnapshotStateTask Tests ===========================
+
+func TestGetRestoreSnapshotStateTask_OnEnqueue(t *testing.T) {
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			JobId: 1,
+		},
+	}
+
+	err := task.OnEnqueue()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.req.Base)
+	assert.Equal(t, commonpb.MsgType_GetRestoreSnapshotState, task.req.Base.MsgType)
+	assert.Equal(t, paramtable.GetNodeID(), task.req.Base.SourceID)
+}
+
+func TestGetRestoreSnapshotStateTask_PreExecute(t *testing.T) {
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			JobId: 1,
 		},
 	}
 
 	err := task.PreExecute(context.Background())
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), task.collectionID) // collectionID should be 0 for listing all
+}
+
+func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			JobId: 1,
+		},
+		mixCoord: mockMixCoord,
+	}
+
+	// Mock GetRestoreSnapshotState with info containing a collectionId
+	mockResponse := &datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &datapb.RestoreSnapshotInfo{
+			JobId:        1,
+			SnapshotName: "snap1",
+			CollectionId: 200,
+			State:        datapb.RestoreSnapshotState_RestoreSnapshotCompleted,
+			Progress:     100,
+			StartTime:    12345,
+			TimeCost:     5000,
+		},
+	}
+	mockGetState := mockey.Mock((*MixCoordMock).GetRestoreSnapshotState).
+		Return(mockResponse, nil).Build()
+	defer mockGetState.UnPatch()
+
+	// Mock resolveCollectionNames via globalMetaCache.GetCollectionInfo
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
+		Return(&collectionInfo{
+			dbName: "test_db",
+			schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+				},
+			},
+		}, nil).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.NotNil(t, task.result.GetInfo())
+	assert.Equal(t, int64(1), task.result.GetInfo().GetJobId())
+	assert.Equal(t, "snap1", task.result.GetInfo().GetSnapshotName())
+	assert.Equal(t, "test_db", task.result.GetInfo().GetDbName())
+	assert.Equal(t, "test_collection", task.result.GetInfo().GetCollectionName())
+	assert.Equal(t, int32(100), task.result.GetInfo().GetProgress())
+}
+
+func TestGetRestoreSnapshotStateTask_Execute_NilInfo(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			JobId: 1,
+		},
+		mixCoord: mockMixCoord,
+	}
+
+	// Mock GetRestoreSnapshotState with nil info
+	mockResponse := &datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info:   nil,
+	}
+	mockGetState := mockey.Mock((*MixCoordMock).GetRestoreSnapshotState).
+		Return(mockResponse, nil).Build()
+	defer mockGetState.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.Nil(t, task.result.GetInfo())
+}
+
+func TestGetRestoreSnapshotStateTask_Execute_MixCoordError(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			JobId: 1,
+		},
+		mixCoord: mockMixCoord,
+	}
+
+	expectedError := errors.New("mixcoord get restore snapshot state failed")
+	mockGetState := mockey.Mock((*MixCoordMock).GetRestoreSnapshotState).
+		Return(nil, expectedError).Build()
+	defer mockGetState.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mixcoord get restore snapshot state failed")
+	assert.NotNil(t, task.result)
+	assert.False(t, merr.Ok(task.result.GetStatus()))
+}
+
+func TestGetRestoreSnapshotStateTask_TaskInterface(t *testing.T) {
+	task := &getRestoreSnapshotStateTask{
+		req: &milvuspb.GetRestoreSnapshotStateRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:     123,
+				Timestamp: 456,
+				MsgType:   commonpb.MsgType_GetRestoreSnapshotState,
+			},
+			JobId: 1,
+		},
+		ctx: context.Background(),
+	}
+
+	assert.Equal(t, GetRestoreSnapshotStateTaskName, task.Name())
+	assert.Equal(t, context.Background(), task.TraceCtx())
+	assert.Equal(t, UniqueID(123), task.ID())
+	assert.Equal(t, commonpb.MsgType_GetRestoreSnapshotState, task.Type())
+	assert.Equal(t, Timestamp(456), task.BeginTs())
+	assert.Equal(t, Timestamp(456), task.EndTs())
+
+	task.SetID(789)
+	assert.Equal(t, UniqueID(789), task.ID())
+
+	task.SetTs(999)
+	assert.Equal(t, Timestamp(999), task.BeginTs())
+
+	err := task.PostExecute(context.Background())
+	assert.NoError(t, err)
+}
+
+// =========================== listRestoreSnapshotJobsTask Tests ===========================
+
+func TestListRestoreSnapshotJobsTask_OnEnqueue(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{},
+	}
+
+	err := task.OnEnqueue()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.req.Base)
+	assert.Equal(t, commonpb.MsgType_ListRestoreSnapshotJobs, task.req.Base.MsgType)
+	assert.Equal(t, paramtable.GetNodeID(), task.req.Base.SourceID)
+}
+
+func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{
+			DbName: "nonexistent_db",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(nil, errors.New("database not found")).Build()
+	defer mockGetDBInfo.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database not found")
+}
+
+func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{
+			DbName:         "default",
+			CollectionName: "nonexistent_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
+		Return(int64(0), errors.New("collection not found")).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection not found")
+}
+
+func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(&databaseInfo{dbID: 5}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
+		Return(int64(200), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), task.dbID)
+	assert.Equal(t, int64(200), task.collectionID)
+}
+
+func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{
+			DbName: "default",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
+		Return(&databaseInfo{dbID: 5}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), task.dbID)
+	assert.Equal(t, int64(0), task.collectionID) // no collection filter
+}
+
+func TestListRestoreSnapshotJobsTask_PreExecute_Empty(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), task.dbID)
+	assert.Equal(t, int64(0), task.collectionID)
+}
+
+func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &listRestoreSnapshotJobsTask{
+		req:          &milvuspb.ListRestoreSnapshotJobsRequest{},
+		mixCoord:     mockMixCoord,
+		collectionID: 0,
+		dbID:         0,
+	}
+
+	// Mock ListRestoreSnapshotJobs with multiple jobs
+	mockResponse := &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.RestoreSnapshotInfo{
+			{
+				JobId:        1,
+				SnapshotName: "snap1",
+				CollectionId: 100,
+				State:        datapb.RestoreSnapshotState_RestoreSnapshotCompleted,
+				Progress:     100,
+			},
+			{
+				JobId:        2,
+				SnapshotName: "snap2",
+				CollectionId: 200,
+				State:        datapb.RestoreSnapshotState_RestoreSnapshotExecuting,
+				Progress:     50,
+			},
+		},
+	}
+	mockListJobs := mockey.Mock((*MixCoordMock).ListRestoreSnapshotJobs).
+		Return(mockResponse, nil).Build()
+	defer mockListJobs.UnPatch()
+
+	// Mock resolveCollectionNames for both collections
+	globalMetaCache = &MetaCache{}
+	callCount := 0
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
+		To(func(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
+			callCount++
+			switch collectionID {
+			case 100:
+				return &collectionInfo{
+					dbName: "db1",
+					schema: &schemaInfo{
+						CollectionSchema: &schemapb.CollectionSchema{Name: "coll1"},
+					},
+				}, nil
+			case 200:
+				return &collectionInfo{
+					dbName: "db2",
+					schema: &schemaInfo{
+						CollectionSchema: &schemapb.CollectionSchema{Name: "coll2"},
+					},
+				}, nil
+			default:
+				return nil, errors.New("unknown collection")
+			}
+		}).Build()
+	defer mockGetCollectionInfo.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.Len(t, task.result.GetJobs(), 2)
+
+	job1 := task.result.GetJobs()[0]
+	assert.Equal(t, int64(1), job1.GetJobId())
+	assert.Equal(t, "snap1", job1.GetSnapshotName())
+	assert.Equal(t, "db1", job1.GetDbName())
+	assert.Equal(t, "coll1", job1.GetCollectionName())
+	assert.Equal(t, int32(100), job1.GetProgress())
+
+	job2 := task.result.GetJobs()[1]
+	assert.Equal(t, int64(2), job2.GetJobId())
+	assert.Equal(t, "snap2", job2.GetSnapshotName())
+	assert.Equal(t, "db2", job2.GetDbName())
+	assert.Equal(t, "coll2", job2.GetCollectionName())
+	assert.Equal(t, int32(50), job2.GetProgress())
+}
+
+func TestListRestoreSnapshotJobsTask_Execute_EmptyJobs(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &listRestoreSnapshotJobsTask{
+		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
+		mixCoord: mockMixCoord,
+	}
+
+	mockResponse := &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs:   []*datapb.RestoreSnapshotInfo{},
+	}
+	mockListJobs := mockey.Mock((*MixCoordMock).ListRestoreSnapshotJobs).
+		Return(mockResponse, nil).Build()
+	defer mockListJobs.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.Empty(t, task.result.GetJobs())
+}
+
+func TestListRestoreSnapshotJobsTask_Execute_MixCoordError(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &listRestoreSnapshotJobsTask{
+		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
+		mixCoord: mockMixCoord,
+	}
+
+	expectedError := errors.New("mixcoord list restore jobs failed")
+	mockListJobs := mockey.Mock((*MixCoordMock).ListRestoreSnapshotJobs).
+		Return(nil, expectedError).Build()
+	defer mockListJobs.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mixcoord list restore jobs failed")
+	assert.NotNil(t, task.result)
+	assert.False(t, merr.Ok(task.result.GetStatus()))
+}
+
+func TestListRestoreSnapshotJobsTask_Execute_ResolveCollectionNamesFallback(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &listRestoreSnapshotJobsTask{
+		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
+		mixCoord: mockMixCoord,
+	}
+
+	// Job with collectionId=0 should get empty names from resolveCollectionNames
+	mockResponse := &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.RestoreSnapshotInfo{
+			{
+				JobId:        1,
+				SnapshotName: "snap1",
+				CollectionId: 0, // zero means resolveCollectionNames returns empty
+			},
+		},
+	}
+	mockListJobs := mockey.Mock((*MixCoordMock).ListRestoreSnapshotJobs).
+		Return(mockResponse, nil).Build()
+	defer mockListJobs.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.Len(t, task.result.GetJobs(), 1)
+	assert.Equal(t, "", task.result.GetJobs()[0].GetDbName())
+	assert.Equal(t, "", task.result.GetJobs()[0].GetCollectionName())
+}
+
+func TestListRestoreSnapshotJobsTask_TaskInterface(t *testing.T) {
+	task := &listRestoreSnapshotJobsTask{
+		req: &milvuspb.ListRestoreSnapshotJobsRequest{
+			Base: &commonpb.MsgBase{
+				MsgID:     123,
+				Timestamp: 456,
+				MsgType:   commonpb.MsgType_ListRestoreSnapshotJobs,
+			},
+		},
+		ctx: context.Background(),
+	}
+
+	assert.Equal(t, ListRestoreSnapshotJobsTaskName, task.Name())
+	assert.Equal(t, context.Background(), task.TraceCtx())
+	assert.Equal(t, UniqueID(123), task.ID())
+	assert.Equal(t, commonpb.MsgType_ListRestoreSnapshotJobs, task.Type())
+	assert.Equal(t, Timestamp(456), task.BeginTs())
+	assert.Equal(t, Timestamp(456), task.EndTs())
+
+	task.SetID(789)
+	assert.Equal(t, UniqueID(789), task.ID())
+
+	task.SetTs(999)
+	assert.Equal(t, Timestamp(999), task.BeginTs())
+
+	err := task.PostExecute(context.Background())
+	assert.NoError(t, err)
+}
+
+// =========================== PinSnapshotDataTask Tests ===========================
+
+func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "test_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), task.collectionID)
+}
+
+func TestPinSnapshotDataTask_PreExecute_EmptyCollectionName(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			CollectionName: "",
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+func TestPinSnapshotDataTask_PreExecute_EmptyName(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "",
+			CollectionName: "test_collection",
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+}
+
+func TestPinSnapshotDataTask_PreExecute_NegativeTTL(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			CollectionName: "test_collection",
+			TtlSeconds:     -1,
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ttl_seconds must be non-negative")
+}
+
+func TestPinSnapshotDataTask_PreExecute_TTLExceedsMax(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			CollectionName: "test_collection",
+			TtlSeconds:     maxPinTTLSeconds + 1,
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ttl_seconds exceeds maximum")
+}
+
+func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "test_collection",
+			TtlSeconds:     maxPinTTLSeconds,
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), task.collectionID)
+}
+
+func TestPinSnapshotDataTask_Execute_Success(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			CollectionName: "test_collection",
+			TtlSeconds:     3600,
+		},
+		mixCoord:     mockMixCoord,
+		collectionID: 100,
+	}
+
+	mockPin := mockey.Mock((*MixCoordMock).PinSnapshotData).Return(&datapb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+		PinId:  12345,
+	}, nil).Build()
+	defer mockPin.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.Equal(t, int64(12345), task.result.GetPinId())
+}
+
+func TestPinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &pinSnapshotDataTask{
+		req: &milvuspb.PinSnapshotDataRequest{
+			Name:           "test_snapshot",
+			CollectionName: "test_collection",
+		},
+		mixCoord:     mockMixCoord,
+		collectionID: 100,
+	}
+
+	expectedError := errors.New("mixcoord pin snapshot failed")
+	mockPin := mockey.Mock((*MixCoordMock).PinSnapshotData).Return(nil, expectedError).Build()
+	defer mockPin.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mixcoord pin snapshot failed")
+}
+
+// =========================== UnpinSnapshotDataTask Tests ===========================
+
+func TestUnpinSnapshotDataTask_PreExecute_Success(t *testing.T) {
+	task := &unpinSnapshotDataTask{
+		req: &milvuspb.UnpinSnapshotDataRequest{
+			PinId: 5001,
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestUnpinSnapshotDataTask_PreExecute_ZeroPinID(t *testing.T) {
+	task := &unpinSnapshotDataTask{
+		req: &milvuspb.UnpinSnapshotDataRequest{
+			PinId: 0,
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "pin_id is required")
+}
+
+func TestUnpinSnapshotDataTask_Execute_Success(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &unpinSnapshotDataTask{
+		req: &milvuspb.UnpinSnapshotDataRequest{
+			PinId: 5001,
+		},
+		mixCoord: mockMixCoord,
+	}
+
+	mockUnpin := mockey.Mock((*MixCoordMock).UnpinSnapshotData).Return(merr.Success(), nil).Build()
+	defer mockUnpin.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.NoError(t, err)
+	assert.NotNil(t, task.result)
+	assert.True(t, merr.Ok(task.result))
+}
+
+func TestUnpinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
+	mockMixCoord := NewMixCoordMock()
+	task := &unpinSnapshotDataTask{
+		req: &milvuspb.UnpinSnapshotDataRequest{
+			PinId: 5001,
+		},
+		mixCoord: mockMixCoord,
+	}
+
+	expectedError := errors.New("mixcoord unpin failed")
+	mockUnpin := mockey.Mock((*MixCoordMock).UnpinSnapshotData).Return(nil, expectedError).Build()
+	defer mockUnpin.UnPatch()
+
+	err := task.Execute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mixcoord unpin failed")
 }

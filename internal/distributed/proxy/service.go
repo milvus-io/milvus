@@ -1230,6 +1230,14 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.List
 	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
 }
 
+func (s *Server) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	return s.proxy.PinSnapshotData(ctx, req)
+}
+
+func (s *Server) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.proxy.UnpinSnapshotData(ctx, req)
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	return s.proxy.ClientHeartbeat(ctx, req)

@@ -246,6 +246,10 @@ var (
 	// Cipher/Encryption related
 	ErrKMSKeyRevoked = newMilvusError("KMS key has been revoked, access denied", 2500, false)
 
+	// Snapshot related
+	ErrSnapshotNotFound = newMilvusError("snapshot not found", 2600, false)
+	ErrSnapshotPinned   = newMilvusError("snapshot is pinned", 2601, false)
+
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 

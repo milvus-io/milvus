@@ -1060,6 +1060,14 @@ func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.Push
 	panic("implement me")
 }
 
+func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }

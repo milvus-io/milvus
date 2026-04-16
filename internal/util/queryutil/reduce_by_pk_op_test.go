@@ -29,12 +29,12 @@ import (
 )
 
 func TestReduceByPKOperator_Name(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	assert.Equal(t, OpReduceByPK, op.Name())
 }
 
 func TestReduceByPKOperator_EmptyInput(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	// Test with nil input
@@ -45,7 +45,7 @@ func TestReduceByPKOperator_EmptyInput(t *testing.T) {
 }
 
 func TestReduceByPKOperator_SingleResult(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result := &internalpb.RetrieveResults{
@@ -82,7 +82,7 @@ func TestReduceByPKOperator_SingleResult(t *testing.T) {
 }
 
 func TestReduceByPKOperator_MultipleResults(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -147,7 +147,7 @@ func TestReduceByPKOperator_MultipleResults(t *testing.T) {
 }
 
 func TestReduceByPKOperator_StringPK(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -209,7 +209,7 @@ func TestReduceByPKOperator_StringPK(t *testing.T) {
 }
 
 func TestReduceByPKOperator_DuplicatePK(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	// Two results with overlapping PKs (2, 3 are duplicated)
@@ -265,7 +265,7 @@ func TestReduceByPKOperator_DuplicatePK(t *testing.T) {
 }
 
 func TestReduceByPKOperator_HasMoreResult(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -322,7 +322,7 @@ func TestReduceByPKOperator_HasMoreResult(t *testing.T) {
 }
 
 func TestSortAndCheckPKOperator_NoDuplicate(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -377,7 +377,7 @@ func TestSortAndCheckPKOperator_NoDuplicate(t *testing.T) {
 }
 
 func TestSortAndCheckPKOperator_FailOnDuplicate(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -431,7 +431,7 @@ func TestSortAndCheckPKOperator_FailOnDuplicate(t *testing.T) {
 
 func TestReduceByPKOperator_DrainResultWithInOrder(t *testing.T) {
 	// IReduceInOrder should stop when one result is drained but has HasMoreResult=true
-	op := NewSortAndCheckPKOperator(reduce.IReduceInOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceInOrder, nil)
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -491,7 +491,7 @@ func TestReduceByPKOperator_DrainResultWithInOrder(t *testing.T) {
 
 func TestReduceByPKOperator_DrainResultWithNoOrder(t *testing.T) {
 	// Use IReduceNoOrder which should NOT stop when one result is drained
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder) // Default is IReduceNoOrder
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil) // Default is IReduceNoOrder
 	ctx := context.Background()
 
 	result1 := &internalpb.RetrieveResults{
@@ -549,12 +549,12 @@ func TestReduceByPKOperator_DrainResultWithNoOrder(t *testing.T) {
 }
 
 func TestReduceByPKWithTimestampOperator_Name(t *testing.T) {
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0, nil)
 	assert.Equal(t, OpReduceByPKTS, op.Name())
 }
 
 func TestReduceByPKWithTimestampOperator_DuplicatePKWithHigherTimestamp(t *testing.T) {
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0, nil)
 	ctx := context.Background()
 
 	const timestampFieldID int64 = 1 // common.TimeStampField
@@ -646,7 +646,7 @@ func TestReduceByPKWithTimestampOperator_DuplicatePKWithHigherTimestamp(t *testi
 }
 
 func TestReduceByPKWithTimestampOperator_NoTimestampField(t *testing.T) {
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0, nil)
 	ctx := context.Background()
 
 	// Results without timestamp field - should still work (fallback to first seen)
@@ -743,7 +743,7 @@ func makeElementLevelResult(pks []int64, timestamps []int64, elemIndices [][]int
 }
 
 func TestReduceByPKWithTimestamp_ElementLevel_MergeAndDedup(t *testing.T) {
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, 0, 0, nil)
 	ctx := context.Background()
 
 	// r1: pk=1 (ts=100, elements [0,1]), pk=3 (ts=100, elements [2])
@@ -777,7 +777,7 @@ func TestReduceByPKWithTimestamp_ElementLevel_MergeAndDedup(t *testing.T) {
 }
 
 func TestReduceByPKOperator_ElementLevel_Propagation(t *testing.T) {
-	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder)
+	op := NewSortAndCheckPKOperator(reduce.IReduceNoOrder, nil)
 	ctx := context.Background()
 
 	// Two element-level results with no overlapping PKs
@@ -859,7 +859,7 @@ func TestReduceByPKWithTimestampOperator_MaxOutputSize_ExactlyAtLimit(t *testing
 	const rowCount = 3
 	const exactLimit int64 = rowSize * rowCount // 24 bytes
 
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, exactLimit, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, exactLimit, 0, nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{
@@ -891,7 +891,7 @@ func TestReduceByPKWithTimestampOperator_MaxOutputSize_Exceeded(t *testing.T) {
 	const rowCount = 3
 	const limitOneByte int64 = rowSize*rowCount - 1 // 23 bytes
 
-	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, limitOneByte, 0)
+	op := NewReduceByPKWithTimestampOperator(reduce.IReduceNoOrder, limitOneByte, 0, nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{

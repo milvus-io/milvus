@@ -292,64 +292,6 @@ func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) RunAndReturn(run func(c
 	return _c
 }
 
-// GetWALMetricsIfLocal provides a mock function with given fields: ctx
-func (_m *MockHandlerClient) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetWALMetricsIfLocal")
-	}
-
-	var r0 *types.StreamingNodeMetrics
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*types.StreamingNodeMetrics, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) *types.StreamingNodeMetrics); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*types.StreamingNodeMetrics)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockHandlerClient_GetWALMetricsIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWALMetricsIfLocal'
-type MockHandlerClient_GetWALMetricsIfLocal_Call struct {
-	*mock.Call
-}
-
-// GetWALMetricsIfLocal is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockHandlerClient_Expecter) GetWALMetricsIfLocal(ctx interface{}) *MockHandlerClient_GetWALMetricsIfLocal_Call {
-	return &MockHandlerClient_GetWALMetricsIfLocal_Call{Call: _e.mock.On("GetWALMetricsIfLocal", ctx)}
-}
-
-func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) Run(run func(ctx context.Context)) *MockHandlerClient_GetWALMetricsIfLocal_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) Return(_a0 *types.StreamingNodeMetrics, _a1 error) *MockHandlerClient_GetWALMetricsIfLocal_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) RunAndReturn(run func(context.Context) (*types.StreamingNodeMetrics, error)) *MockHandlerClient_GetWALMetricsIfLocal_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, channelName
 func (_m *MockHandlerClient) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, channelName)
@@ -405,6 +347,64 @@ func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Return(_a0 []*wal.Replica
 }
 
 func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)) *MockHandlerClient_GetSalvageCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetWALMetricsIfLocal provides a mock function with given fields: ctx
+func (_m *MockHandlerClient) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetWALMetricsIfLocal")
+	}
+
+	var r0 *types.StreamingNodeMetrics
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*types.StreamingNodeMetrics, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *types.StreamingNodeMetrics); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.StreamingNodeMetrics)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_GetWALMetricsIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWALMetricsIfLocal'
+type MockHandlerClient_GetWALMetricsIfLocal_Call struct {
+	*mock.Call
+}
+
+// GetWALMetricsIfLocal is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockHandlerClient_Expecter) GetWALMetricsIfLocal(ctx interface{}) *MockHandlerClient_GetWALMetricsIfLocal_Call {
+	return &MockHandlerClient_GetWALMetricsIfLocal_Call{Call: _e.mock.On("GetWALMetricsIfLocal", ctx)}
+}
+
+func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) Run(run func(ctx context.Context)) *MockHandlerClient_GetWALMetricsIfLocal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) Return(_a0 *types.StreamingNodeMetrics, _a1 error) *MockHandlerClient_GetWALMetricsIfLocal_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) RunAndReturn(run func(context.Context) (*types.StreamingNodeMetrics, error)) *MockHandlerClient_GetWALMetricsIfLocal_Call {
 	_c.Call.Return(run)
 	return _c
 }

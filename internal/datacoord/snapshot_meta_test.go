@@ -117,7 +117,7 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 		catalog:                      catalog,
 		snapshotID2Info:              typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:          typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:              typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
+		snapshotName2ID:              typeutil.NewConcurrentMap[typeutil.UniqueID, *typeutil.ConcurrentMap[string, typeutil.UniqueID]](),
 		collectionID2Snapshots:       typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
 		segmentProtectionUntil:       make(map[int64]uint64),
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
@@ -278,7 +278,7 @@ func TestSnapshotMeta_GetSnapshot_Success(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.GetSnapshot(ctx, snapshotName)
+	result, err := sm.GetSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -293,7 +293,7 @@ func TestSnapshotMeta_GetSnapshot_NotFound(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	result, err := sm.GetSnapshot(ctx, snapshotName)
+	result, err := sm.GetSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -314,7 +314,7 @@ func TestSnapshotMeta_GetSnapshotByName_Success(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, snapshotName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -329,7 +329,7 @@ func TestSnapshotMeta_GetSnapshotByName_NotFound(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, snapshotName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -359,7 +359,7 @@ func TestSnapshotMeta_GetSnapshotByName_MultipleSnapshots(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, targetName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), targetName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -931,7 +931,7 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	defer mock2.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -940,8 +940,11 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	assert.False(t, exists)
 	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
 	assert.False(t, exists)
-	_, exists = sm.snapshotName2ID.Get(snapshotName)
-	assert.False(t, exists)
+	nameMap, nameMapExists := sm.snapshotName2ID.Get(int64(100))
+	if nameMapExists {
+		_, exists = nameMap.Get(snapshotName)
+		assert.False(t, exists)
+	}
 }
 
 func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
@@ -951,7 +954,7 @@ func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
 	snapshotName := "nonexistent_snapshot"
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -988,7 +991,7 @@ func TestSnapshotMeta_DropSnapshot_CatalogDropError_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - Two-phase delete: if S3 deletion succeeds, operation returns success
 	// even if catalog cleanup fails. GC will clean up the catalog record later.
@@ -1027,7 +1030,7 @@ func TestSnapshotMeta_DropSnapshot_WriterError_WithMockey(t *testing.T) {
 	defer mock2.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - Two-phase delete: S3 failure returns success, GC will clean up
 	assert.NoError(t, err)
@@ -1057,7 +1060,7 @@ func TestSnapshotMeta_DropSnapshot_MarkDeletingError_WithMockey(t *testing.T) {
 	defer mock0.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - If marking as Deleting fails, operation should fail
 	assert.Error(t, err)
@@ -1144,7 +1147,7 @@ func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
 	blocked := sm.IsSegmentGCBlocked(100, 1001)
-	snapshot, getErr := sm.GetSnapshot(ctx, "nonexistent")
+	snapshot, getErr := sm.GetSnapshot(ctx, int64(100), "nonexistent")
 
 	// Assert
 	assert.NoError(t, err)
@@ -2463,7 +2466,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsProtection(t *testing.T) {
 	defer mock2.UnPatch()
 
 	// Drop the snapshot
-	err := sm.DropSnapshot(ctx, "protected_drop")
+	err := sm.DropSnapshot(ctx, 100, "protected_drop")
 	assert.NoError(t, err)
 
 	// Protection should be cleared since no remaining snapshots reference this segment
@@ -2503,7 +2506,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsGCProtectionForTTL0(t *testing.T) {
 	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
-	err := sm.DropSnapshot(ctx, "ttl0_drop")
+	err := sm.DropSnapshot(ctx, 100, "ttl0_drop")
 	assert.NoError(t, err)
 
 	// GC protection must be cleared since no other snapshot references this segment.
@@ -2545,7 +2548,7 @@ func TestSnapshotMeta_DropSnapshot_RetainsProtectionFromOtherSnapshot(t *testing
 	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
-	err := sm.DropSnapshot(ctx, "snap1")
+	err := sm.DropSnapshot(ctx, 100, "snap1")
 	assert.NoError(t, err)
 
 	// Protection should be retained from snap2 (with higher expiry)
@@ -2594,7 +2597,7 @@ func TestSnapshotMeta_DropSnapshot_ClearsBlockWhenRefIndexFailed(t *testing.T) {
 	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
 	defer mock2.UnPatch()
 
-	err := sm.DropSnapshot(ctx, "stuck_snapshot")
+	err := sm.DropSnapshot(ctx, collectionID, "stuck_snapshot")
 	assert.NoError(t, err)
 
 	assert.False(t, sm.IsCollectionCompactionBlocked(collectionID),
@@ -2840,4 +2843,1589 @@ func TestSnapshotMeta_RebuildAllSegmentProtection_UnifiedTwoDimensions(t *testin
 	assert.False(t, sm.gcBlockedCollections.Contain(100),
 		"coll 100 must NOT be GC-blocked (all loaded)")
 	assert.False(t, sm.gcBlockedCollections.Contain(300))
+}
+
+// --- DropSnapshotsByCollection Tests ---
+
+func TestSnapshotMeta_DropSnapshotsByCollection_DeletesAllForCollection(t *testing.T) {
+	// Should delete all snapshots for a collection while leaving other collections untouched.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Create snapshots for collection 100
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "snap_a"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "snap_b"
+	snap2.SnapshotInfo.CollectionId = 100
+
+	// Create snapshot for collection 200
+	snap3 := createTestSnapshotDataForMeta()
+	snap3.SnapshotInfo.Id = 3
+	snap3.SnapshotInfo.Name = "snap_c"
+	snap3.SnapshotInfo.CollectionId = 200
+
+	// Save all snapshots
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2, snap3)
+	// Must cleanup before re-mocking SaveSnapshot below
+	cleanup()
+
+	// Mock catalog.SaveSnapshot (for marking as Deleting)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+
+	// Mock catalog.DropSnapshot
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+
+	// Mock SnapshotWriter.Drop
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	// Act
+	_, err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert
+	assert.NoError(t, err)
+
+	// Verify collection 100 snapshots are gone
+	_, exists := sm.snapshotID2Info.Get(int64(1))
+	assert.False(t, exists, "snapshot 1 should be deleted")
+	_, exists = sm.snapshotID2Info.Get(int64(2))
+	assert.False(t, exists, "snapshot 2 should be deleted")
+
+	// Verify collection 100 is gone from secondary indexes
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names100, 0, "collection 100 should have no snapshots")
+
+	// Verify collection 200 snapshot remains
+	info3, exists := sm.snapshotID2Info.Get(int64(3))
+	assert.True(t, exists, "snapshot 3 should remain")
+	assert.Equal(t, "snap_c", info3.GetName())
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_c")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_NoopForNonexistentCollection(t *testing.T) {
+	// Should be no-op for collection with no snapshots.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Act - drop snapshots for collection that has no snapshots
+	_, err := sm.DropSnapshotsByCollection(ctx, int64(999))
+
+	// Assert
+	assert.NoError(t, err)
+}
+
+// --- Per-Collection Name Uniqueness Tests ---
+
+func TestSnapshotMeta_SameNameDifferentCollections_BothSucceed(t *testing.T) {
+	// Same snapshot name in different collections should both succeed.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "my_snapshot"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "my_snapshot"
+	snap2.SnapshotInfo.CollectionId = 200
+
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2)
+	defer cleanup()
+
+	// Assert - both snapshots exist
+	info1, err := sm.GetSnapshot(ctx, int64(100), "my_snapshot")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info1.GetId())
+	assert.Equal(t, int64(100), info1.GetCollectionId())
+
+	info2, err := sm.GetSnapshot(ctx, int64(200), "my_snapshot")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), info2.GetId())
+	assert.Equal(t, int64(200), info2.GetCollectionId())
+
+	// Both collections should list the snapshot
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names100, 1)
+	assert.Contains(t, names100, "my_snapshot")
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "my_snapshot")
+}
+
+func TestSnapshotMeta_SameNameSameCollection_SecondFails(t *testing.T) {
+	// Same snapshot name in same collection should fail on the second one.
+	// The uniqueness check happens in GetSnapshot - if it returns non-nil, the name already exists.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "duplicate_name"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	cleanup := saveTestSnapshots(t, sm, snap1)
+	defer cleanup()
+
+	// Act - check name uniqueness using GetSnapshot (as the manager does)
+	existingInfo, err := sm.GetSnapshot(ctx, int64(100), "duplicate_name")
+
+	// Assert - name already exists in collection 100
+	assert.NoError(t, err)
+	assert.NotNil(t, existingInfo)
+	assert.Equal(t, int64(1), existingInfo.GetId())
+
+	// Verify the name does NOT exist in a different collection
+	_, err = sm.GetSnapshot(ctx, int64(200), "duplicate_name")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_PartialFailureReturnsError(t *testing.T) {
+	// DropSnapshotsByCollection tries to delete all snapshots for a collection.
+	// This test verifies that:
+	// 1. Successfully deleted snapshots are cleaned up
+	// 2. Failed snapshots remain in the index
+	// 3. Return value is an aggregated error for partial failures
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "snap_ok"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "snap_fail"
+	snap2.SnapshotInfo.CollectionId = 100
+
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2)
+	cleanup()
+
+	// Mock catalog.SaveSnapshot to succeed (for marking as Deleting)
+	callCount := 0
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(_ *kv_datacoord.Catalog, _ context.Context, info *datapb.SnapshotInfo) error {
+		callCount++
+		if info.GetName() == "snap_fail" {
+			return fmt.Errorf("catalog save error")
+		}
+		return nil
+	}).Build()
+	defer mockSave.UnPatch()
+
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act
+	_, err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: returns aggregated error for partial failure
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to drop 1/2 snapshots for collection 100")
+
+	// snap_ok should be deleted
+	_, exists := sm.snapshotID2Info.Get(int64(1))
+	assert.False(t, exists, "snap_ok should be deleted")
+
+	// snap_fail should remain (catalog save failed, DropSnapshot returned error)
+	_, exists = sm.snapshotID2Info.Get(int64(2))
+	assert.True(t, exists, "snap_fail should remain after partial failure")
+}
+
+// --- Per-Collection Snapshot Isolation Tests ---
+
+func TestSnapshotMeta_SameNameDifferentCollections(t *testing.T) {
+	// Arrange: two collections (100, 200) each have a snapshot named "backup"
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "backup",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/100/1",
+		PartitionIds: []int64{10},
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 200,
+		Name:         "backup",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/200/2",
+		PartitionIds: []int64{20},
+	}
+	// Also add a second snapshot for collection 100
+	snap3 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 100,
+		Name:         "daily",
+		CreateTs:     3000,
+		S3Location:   "s3://bucket/100/3",
+		PartitionIds: []int64{10},
+	}
+
+	insertTestSnapshot(sm, snap1, []int64{1001}, nil)
+	insertTestSnapshot(sm, snap2, []int64{1002}, nil)
+	insertTestSnapshot(sm, snap3, []int64{1003}, nil)
+
+	// Verify GetSnapshot for collection 100 returns collection 100's snapshot
+	info1, err := sm.GetSnapshot(ctx, 100, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), info1.GetId())
+	assert.Equal(t, int64(100), info1.GetCollectionId())
+
+	// Verify GetSnapshot for collection 200 returns collection 200's snapshot
+	info2, err := sm.GetSnapshot(ctx, 200, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), info2.GetId())
+	assert.Equal(t, int64(200), info2.GetCollectionId())
+
+	// Drop snapshot "backup" from collection 100
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	err = sm.DropSnapshot(ctx, 100, "backup")
+	require.NoError(t, err)
+
+	// Verify collection 100's "backup" is gone
+	_, err = sm.GetSnapshot(ctx, 100, "backup")
+	assert.Error(t, err)
+
+	// Verify collection 200's "backup" is NOT affected
+	info2After, err := sm.GetSnapshot(ctx, 200, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), info2After.GetId())
+
+	// Verify ListSnapshots for collection 100 only returns collection 100's remaining snapshot
+	names, err := sm.ListSnapshots(ctx, 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, names, 1)
+	assert.Contains(t, names, "daily")
+	assert.NotContains(t, names, "backup")
+
+	// Verify ListSnapshots for collection 200 still has "backup"
+	names2, err := sm.ListSnapshots(ctx, 200, 0)
+	require.NoError(t, err)
+	assert.Len(t, names2, 1)
+	assert.Contains(t, names2, "backup")
+}
+
+func TestSnapshotMeta_DropSnapshot_CollectionScoped(t *testing.T) {
+	// Arrange: two collections with same-named snapshot
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 300,
+		Name:         "weekly",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/300/10",
+		PartitionIds: []int64{30},
+	}
+	snapB := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: 400,
+		Name:         "weekly",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/400/20",
+		PartitionIds: []int64{40},
+	}
+
+	insertTestSnapshot(sm, snapA, []int64{3001}, nil)
+	insertTestSnapshot(sm, snapB, []int64{3002}, nil)
+
+	// Mock catalog and writer for drop
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: Drop "weekly" from collection 300
+	err := sm.DropSnapshot(ctx, 300, "weekly")
+	require.NoError(t, err)
+
+	// Assert: collection 300's snapshot is gone
+	_, err = sm.GetSnapshot(ctx, 300, "weekly")
+	assert.Error(t, err)
+
+	// Assert: collection 300 has no snapshots in memory
+	_, exists := sm.snapshotID2Info.Get(int64(10))
+	assert.False(t, exists, "snapshot 10 should be removed from snapshotID2Info")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(10))
+	assert.False(t, exists, "snapshot 10 should be removed from snapshotID2RefIndex")
+
+	// Assert: collection 400's "weekly" is completely unaffected
+	infoB, err := sm.GetSnapshot(ctx, 400, "weekly")
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), infoB.GetId())
+	assert.Equal(t, int64(400), infoB.GetCollectionId())
+
+	// Assert: collection 400's snapshot data is intact in memory
+	_, exists = sm.snapshotID2Info.Get(int64(20))
+	assert.True(t, exists, "snapshot 20 should still exist in snapshotID2Info")
+	refIndex, exists := sm.snapshotID2RefIndex.Get(int64(20))
+	assert.True(t, exists, "snapshot 20 should still exist in snapshotID2RefIndex")
+	assert.True(t, refIndex.ContainsSegment(3002), "snapshot 20 should still reference segment 3002")
+}
+
+func TestSnapshotMeta_ListSnapshots_AllCollections_MultipleCollections(t *testing.T) {
+	// Arrange: snapshots across multiple collections
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "snap_c100_1",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/100/1",
+		PartitionIds: []int64{10},
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 100,
+		Name:         "snap_c100_2",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/100/2",
+		PartitionIds: []int64{10},
+	}
+	snap3 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 200,
+		Name:         "snap_c200_1",
+		CreateTs:     3000,
+		S3Location:   "s3://bucket/200/3",
+		PartitionIds: []int64{20},
+	}
+	snap4 := &datapb.SnapshotInfo{
+		Id:           4,
+		CollectionId: 300,
+		Name:         "snap_c300_1",
+		CreateTs:     4000,
+		S3Location:   "s3://bucket/300/4",
+		PartitionIds: []int64{30},
+	}
+
+	insertTestSnapshot(sm, snap1, nil, nil)
+	insertTestSnapshot(sm, snap2, nil, nil)
+	insertTestSnapshot(sm, snap3, nil, nil)
+	insertTestSnapshot(sm, snap4, nil, nil)
+
+	// Act: ListSnapshots with collectionID=0 (all collections)
+	names, err := sm.ListSnapshots(ctx, 0, 0)
+	require.NoError(t, err)
+
+	// Assert: all 4 snapshots from all 3 collections are returned
+	assert.Len(t, names, 4)
+	assert.Contains(t, names, "snap_c100_1")
+	assert.Contains(t, names, "snap_c100_2")
+	assert.Contains(t, names, "snap_c200_1")
+	assert.Contains(t, names, "snap_c300_1")
+
+	// Act: ListSnapshots with specific collectionID only returns that collection
+	names100, err := sm.ListSnapshots(ctx, 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, names100, 2)
+	assert.Contains(t, names100, "snap_c100_1")
+	assert.Contains(t, names100, "snap_c100_2")
+
+	names200, err := sm.ListSnapshots(ctx, 200, 0)
+	require.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_c200_1")
+
+	names300, err := sm.ListSnapshots(ctx, 300, 0)
+	require.NoError(t, err)
+	assert.Len(t, names300, 1)
+	assert.Contains(t, names300, "snap_c300_1")
+
+	// Act: ListSnapshots with partition filter across all collections
+	namesP10, err := sm.ListSnapshots(ctx, 0, 10)
+	require.NoError(t, err)
+	assert.Len(t, namesP10, 2)
+	assert.Contains(t, namesP10, "snap_c100_1")
+	assert.Contains(t, namesP10, "snap_c100_2")
+}
+
+// --- Orphan Snapshot Detection Tests ---
+
+func TestSnapshotMeta_OrphanDetection_SkipsDeletingState(t *testing.T) {
+	// The orphan GC logic in gcSnapshotCleanup ranges over snapshotID2Info and
+	// collects collectionIDs only for snapshots NOT in SnapshotStateDeleting.
+	// This test verifies that ranging+filtering logic produces the correct set
+	// of collection IDs, ensuring DELETING snapshots are excluded.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Collection 100: one COMMITTED snapshot (should appear in orphan set)
+	snapCommitted := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "snap_committed",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/1",
+	}
+	insertTestSnapshot(sm, snapCommitted, nil, nil)
+
+	// Collection 200: one DELETING snapshot (should NOT appear in orphan set)
+	snapDeleting := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 200,
+		Name:         "snap_deleting",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/200/2",
+	}
+	insertTestSnapshot(sm, snapDeleting, nil, nil)
+
+	// Collection 300: two snapshots - one COMMITTED, one DELETING
+	// Collection 300 should still appear because it has a non-DELETING snapshot
+	snapCommitted2 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 300,
+		Name:         "snap_committed2",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/300/3",
+	}
+	insertTestSnapshot(sm, snapCommitted2, nil, nil)
+
+	snapDeleting2 := &datapb.SnapshotInfo{
+		Id:           4,
+		CollectionId: 300,
+		Name:         "snap_deleting2",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/300/4",
+	}
+	insertTestSnapshot(sm, snapDeleting2, nil, nil)
+
+	// Collection 400: only DELETING snapshot (should NOT appear)
+	snapDeleting3 := &datapb.SnapshotInfo{
+		Id:           5,
+		CollectionId: 400,
+		Name:         "snap_deleting3",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/400/5",
+	}
+	insertTestSnapshot(sm, snapDeleting3, nil, nil)
+
+	// Replicate the orphan detection logic from gcSnapshotCleanup (lines 1757-1765)
+	orphanCollections := typeutil.NewSet[int64]()
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			orphanCollections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+
+	// Assert: only collections with non-DELETING snapshots are detected
+	assert.Equal(t, 2, orphanCollections.Len(), "should detect 2 collections with non-DELETING snapshots")
+	assert.True(t, orphanCollections.Contain(int64(100)), "collection 100 (COMMITTED) should be in orphan set")
+	assert.False(t, orphanCollections.Contain(int64(200)), "collection 200 (only DELETING) should NOT be in orphan set")
+	assert.True(t, orphanCollections.Contain(int64(300)), "collection 300 (has COMMITTED) should be in orphan set")
+	assert.False(t, orphanCollections.Contain(int64(400)), "collection 400 (only DELETING) should NOT be in orphan set")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
+	// When DropSnapshotsByCollection is called, it should clean up all snapshots
+	// tracked in the collectionID2Snapshots index. Snapshots in DELETING state
+	// that are already tracked in the index (e.g., inserted via insertTestSnapshot
+	// which simulates reload) should also be cleaned up.
+	//
+	// In production, DELETING snapshots are NOT reloaded into snapshotID2Info
+	// (see reload(), line 268). But COMMITTED snapshots that are then dropped
+	// individually transition to DELETING during DropSnapshot flow. This test
+	// verifies that DropSnapshotsByCollection handles collections where some
+	// snapshots have already been individually dropped (and are no longer in
+	// the in-memory index).
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Insert 3 COMMITTED snapshots for collection 100
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 100,
+		Name:         "snap_a",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/10",
+	}
+	insertTestSnapshot(sm, snapA, []int64{1001}, nil)
+
+	snapB := &datapb.SnapshotInfo{
+		Id:           11,
+		CollectionId: 100,
+		Name:         "snap_b",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/11",
+	}
+	insertTestSnapshot(sm, snapB, []int64{1002}, nil)
+
+	snapC := &datapb.SnapshotInfo{
+		Id:           12,
+		CollectionId: 100,
+		Name:         "snap_c",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/12",
+	}
+	insertTestSnapshot(sm, snapC, []int64{1003}, nil)
+
+	// Also insert a snapshot for collection 200 to verify isolation
+	snapOther := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: 200,
+		Name:         "snap_other",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/200/20",
+	}
+	insertTestSnapshot(sm, snapOther, []int64{2001}, nil)
+
+	// Verify initial state: collection 100 has 3 snapshots
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names100, 3)
+
+	// Mock all dependencies for DropSnapshot
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: drop all snapshots for collection 100
+	_, err = sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: no error
+	require.NoError(t, err)
+
+	// All 3 snapshots for collection 100 should be removed from memory
+	_, exists := sm.snapshotID2Info.Get(int64(10))
+	assert.False(t, exists, "snap_a should be removed")
+	_, exists = sm.snapshotID2Info.Get(int64(11))
+	assert.False(t, exists, "snap_b should be removed")
+	_, exists = sm.snapshotID2Info.Get(int64(12))
+	assert.False(t, exists, "snap_c should be removed")
+
+	// RefIndex entries should also be removed
+	_, exists = sm.snapshotID2RefIndex.Get(int64(10))
+	assert.False(t, exists, "snap_a RefIndex should be removed")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(11))
+	assert.False(t, exists, "snap_b RefIndex should be removed")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(12))
+	assert.False(t, exists, "snap_c RefIndex should be removed")
+
+	// Collection 100 should have no snapshots listed
+	names100After, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names100After, 0, "collection 100 should have no snapshots")
+
+	// Collection 200 should be unaffected
+	info200, exists := sm.snapshotID2Info.Get(int64(20))
+	assert.True(t, exists, "collection 200 snapshot should remain")
+	assert.Equal(t, "snap_other", info200.GetName())
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_other")
+}
+
+func TestSnapshotMeta_OrphanDetection_MultipleCollections(t *testing.T) {
+	// Test orphan detection with multiple collections having various snapshot states.
+	// This tests the scenario where the GC needs to identify which collections
+	// are candidates for orphan cleanup across many collections.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Setup: 5 collections with different snapshot state combinations
+	testCases := []struct {
+		collectionID int64
+		snapshots    []*datapb.SnapshotInfo
+		expectOrphan bool
+		description  string
+	}{
+		{
+			collectionID: 100,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 1, CollectionId: 100, Name: "s1", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/1"},
+				{Id: 2, CollectionId: 100, Name: "s2", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/2"},
+			},
+			expectOrphan: true,
+			description:  "all COMMITTED",
+		},
+		{
+			collectionID: 200,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 3, CollectionId: 200, Name: "s3", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/3"},
+			},
+			expectOrphan: false,
+			description:  "all DELETING",
+		},
+		{
+			collectionID: 300,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 4, CollectionId: 300, Name: "s4", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/4"},
+				{Id: 5, CollectionId: 300, Name: "s5", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/5"},
+				{Id: 6, CollectionId: 300, Name: "s6", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/6"},
+			},
+			expectOrphan: true,
+			description:  "mixed: 1 COMMITTED + 2 DELETING",
+		},
+		{
+			collectionID: 400,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 7, CollectionId: 400, Name: "s7", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/7"},
+				{Id: 8, CollectionId: 400, Name: "s8", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/8"},
+			},
+			expectOrphan: false,
+			description:  "multiple DELETING",
+		},
+		{
+			collectionID: 500,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 9, CollectionId: 500, Name: "s9", State: datapb.SnapshotState_SnapshotStatePending, S3Location: "s3://b/9"},
+			},
+			expectOrphan: true,
+			description:  "PENDING (not DELETING, so included)",
+		},
+	}
+
+	// Insert all snapshots
+	for _, tc := range testCases {
+		for _, snap := range tc.snapshots {
+			insertTestSnapshot(sm, snap, nil, nil)
+		}
+	}
+
+	// Replicate orphan detection logic
+	orphanCollections := typeutil.NewSet[int64]()
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			orphanCollections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+
+	// Verify each collection
+	for _, tc := range testCases {
+		assert.Equal(t, tc.expectOrphan, orphanCollections.Contain(tc.collectionID),
+			"collection %d (%s): expected orphan=%v", tc.collectionID, tc.description, tc.expectOrphan)
+	}
+
+	// Total orphan candidates: 100 (COMMITTED), 300 (mixed), 500 (PENDING)
+	assert.Equal(t, 3, orphanCollections.Len(), "should have 3 orphan candidate collections")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_SnapshotAlreadyRemovedFromMemory(t *testing.T) {
+	// Edge case: collection has snapshot IDs in the collectionID2Snapshots index
+	// but the snapshot was already removed from snapshotID2Info (e.g., by concurrent
+	// DropSnapshot). DropSnapshotsByCollection should handle this gracefully by
+	// skipping snapshots that no longer exist in memory.
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Insert two snapshots for collection 100
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 100,
+		Name:         "snap_a",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/10",
+	}
+	insertTestSnapshot(sm, snapA, nil, nil)
+
+	snapB := &datapb.SnapshotInfo{
+		Id:           11,
+		CollectionId: 100,
+		Name:         "snap_b",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/11",
+	}
+	insertTestSnapshot(sm, snapB, nil, nil)
+
+	// Simulate snap_a already removed from snapshotID2Info (concurrent DropSnapshot)
+	// but still in the collectionID2Snapshots index
+	sm.snapshotID2Info.Remove(int64(10))
+	sm.snapshotID2RefIndex.Remove(int64(10))
+	// Name index is also cleaned up
+	if nameMap, ok := sm.snapshotName2ID.Get(int64(100)); ok {
+		nameMap.Remove("snap_a")
+	}
+
+	// Mock dependencies
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: DropSnapshotsByCollection should handle the missing snapshot gracefully
+	_, err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: no error - snap_a is already gone, snap_b is successfully deleted
+	require.NoError(t, err)
+
+	// snap_b should be removed
+	_, exists := sm.snapshotID2Info.Get(int64(11))
+	assert.False(t, exists, "snap_b should be removed")
+
+	// Collection 100 should have no snapshots
+	names, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names, 0)
+}
+
+// --- getSnapshotByName index inconsistency test ---
+
+func TestSnapshotMeta_GetSnapshotByName_IndexInconsistency(t *testing.T) {
+	// Test: when snapshotName2ID has an entry but snapshotID2Info doesn't,
+	// getSnapshotByName should return an error AND clean up the orphan name index entry.
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+	snapshotName := "orphan_snapshot"
+	snapshotID := int64(999)
+
+	// Set up inconsistent state: name2ID has an entry, but snapshotID2Info does NOT
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert(snapshotName, snapshotID)
+	sm.snapshotName2ID.Insert(collectionID, nameMap)
+
+	// Verify the orphan entry exists before the call
+	_, exists := nameMap.Get(snapshotName)
+	require.True(t, exists, "orphan name entry should exist before getSnapshotByName")
+
+	// Act
+	ctx := context.Background()
+	info, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
+
+	// Assert: error returned
+	assert.Nil(t, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Assert: orphan entry was cleaned up from nameMap
+	_, exists = nameMap.Get(snapshotName)
+	assert.False(t, exists, "orphan name entry should be removed after getSnapshotByName detects inconsistency")
+}
+
+// --- addToSecondaryIndexes tests ---
+
+func TestSnapshotMeta_AddToSecondaryIndexes_MultipleSnapshots(t *testing.T) {
+	// Test: adding two snapshots to the same collection puts both in collectionID2Snapshots
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "snapshot_a",
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: collectionID,
+		Name:         "snapshot_b",
+	}
+
+	// Act
+	sm.addToSecondaryIndexes(snap1)
+	sm.addToSecondaryIndexes(snap2)
+
+	// Assert: collectionID2Snapshots has both snapshot IDs
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collectionID2Snapshots should have an entry for collectionID")
+	assert.True(t, snapshotIDs.Contain(int64(1)), "should contain snapshot 1")
+	assert.True(t, snapshotIDs.Contain(int64(2)), "should contain snapshot 2")
+	assert.Equal(t, 2, snapshotIDs.Len(), "should have exactly 2 snapshots")
+
+	// Assert: snapshotName2ID has both entries under the same collection
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	require.True(t, ok, "snapshotName2ID should have an entry for collectionID")
+	id1, ok := nameMap.Get("snapshot_a")
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), id1)
+	id2, ok := nameMap.Get("snapshot_b")
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), id2)
+}
+
+// --- removeFromSecondaryIndexes tests ---
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_LastSnapshot(t *testing.T) {
+	// Test: removing the last snapshot from a collection removes the collection entry entirely
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+	snap := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "only_snapshot",
+	}
+
+	// Setup: add one snapshot
+	sm.addToSecondaryIndexes(snap)
+
+	// Verify setup
+	_, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collection entry should exist after add")
+
+	// Act: remove the only snapshot
+	sm.removeFromSecondaryIndexes(snap)
+
+	// Assert: collection entry is removed from collectionID2Snapshots
+	_, ok = sm.collectionID2Snapshots.Get(collectionID)
+	assert.False(t, ok, "collection entry should be removed when last snapshot is deleted")
+
+	// Assert: name entry is removed from snapshotName2ID
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	if ok {
+		_, nameExists := nameMap.Get("only_snapshot")
+		assert.False(t, nameExists, "snapshot name should be removed from name index")
+	}
+}
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_OneOfTwo(t *testing.T) {
+	// Test: removing one of two snapshots leaves the remaining one intact
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(200)
+	snap1 := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: collectionID,
+		Name:         "snap_keep",
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: collectionID,
+		Name:         "snap_remove",
+	}
+
+	// Setup: add two snapshots
+	sm.addToSecondaryIndexes(snap1)
+	sm.addToSecondaryIndexes(snap2)
+
+	// Verify setup
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok)
+	require.Equal(t, 2, snapshotIDs.Len())
+
+	// Act: remove snap2
+	sm.removeFromSecondaryIndexes(snap2)
+
+	// Assert: collection entry still exists with snap1
+	snapshotIDs, ok = sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collection entry should still exist")
+	assert.Equal(t, 1, snapshotIDs.Len(), "should have 1 snapshot remaining")
+	assert.True(t, snapshotIDs.Contain(int64(10)), "snap1 should remain")
+	assert.False(t, snapshotIDs.Contain(int64(20)), "snap2 should be removed")
+
+	// Assert: name index reflects the removal
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	require.True(t, ok)
+	_, ok = nameMap.Get("snap_keep")
+	assert.True(t, ok, "snap_keep should still be in name index")
+	_, ok = nameMap.Get("snap_remove")
+	assert.False(t, ok, "snap_remove should be removed from name index")
+}
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_NonExistent(t *testing.T) {
+	// Test: removing a snapshot from a non-existent collection should not panic
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	snap := &datapb.SnapshotInfo{
+		Id:           42,
+		CollectionId: 999, // Non-existent collection
+		Name:         "ghost_snapshot",
+	}
+
+	// Act: should not panic
+	assert.NotPanics(t, func() {
+		sm.removeFromSecondaryIndexes(snap)
+	}, "removeFromSecondaryIndexes should not panic for non-existent collection")
+
+	// Assert: maps are still empty / unchanged
+	_, ok := sm.collectionID2Snapshots.Get(int64(999))
+	assert.False(t, ok, "no collection entry should be created")
+}
+
+// --- Snapshot-Level Pin/Unpin Tests ---
+
+func TestSnapshotMeta_PinSnapshot_Success(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	// Setup: add a snapshot with no pins
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	pinID1, _, err := sm.PinSnapshot(ctx, 100, "snap1", 0)
+	assert.NoError(t, err)
+	assert.NotZero(t, pinID1)
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 1)
+
+	// Pin again — different pin ID
+	pinID2, _, err := sm.PinSnapshot(ctx, 100, "snap1", 0)
+	assert.NoError(t, err)
+	assert.NotZero(t, pinID2)
+	assert.NotEqual(t, pinID1, pinID2)
+	current, _ = sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 2)
+}
+
+func TestSnapshotMeta_PinSnapshot_NotFound(t *testing.T) {
+	ctx := context.Background()
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	_, _, err := sm.PinSnapshot(ctx, 100, "nonexistent", 0)
+	assert.Error(t, err)
+}
+
+func TestSnapshotMeta_PinSnapshot_WithTTL(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	now := time.Now().UnixMilli()
+	pinID, _, err := sm.PinSnapshot(ctx, 100, "snap1", 3600) // 1 hour TTL
+	assert.NoError(t, err)
+	assert.NotZero(t, pinID)
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 1)
+
+	// Verify expiry was stored
+	expireAt, exists := current.GetPinExpireAtMs()[pinID]
+	assert.True(t, exists, "pin should have expiry entry")
+	assert.InDelta(t, now+3600*1000, expireAt, 2000, "expiry should be ~1 hour from now")
+
+	// Pin with no TTL — should NOT have expiry entry
+	pinID2, _, err := sm.PinSnapshot(ctx, 100, "snap1", 0)
+	assert.NoError(t, err)
+	current, _ = sm.snapshotID2Info.Get(1)
+	_, exists = current.GetPinExpireAtMs()[pinID2]
+	assert.False(t, exists, "permanent pin should NOT have expiry entry")
+}
+
+func TestSnapshotMeta_CleanExpiredPins_CatalogError_Rollback(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(errors.New("etcd error")).Build()
+	defer mockSave.UnPatch()
+
+	now := time.Now().UnixMilli()
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{
+		Id: 1, Name: "snap1", CollectionId: 100,
+		PinIds:        []int64{5001, 5002},
+		PinExpireAtMs: map[int64]int64{5001: now - 1000}, // 5001 expired, 5002 permanent
+	}
+	sm.snapshotID2Info.Insert(1, info)
+
+	sm.cleanExpiredPinsForCollection(ctx, 100)
+
+	// Catalog failure means the swap never happens — live pointer remains
+	// untouched. PinIds AND PinExpireAtMs should both be intact.
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 2, "PinIds should be untouched on catalog failure")
+	assert.Contains(t, current.GetPinIds(), int64(5001))
+	expireAt, exists := current.GetPinExpireAtMs()[5001]
+	assert.True(t, exists, "PinExpireAtMs should be untouched on catalog failure")
+	assert.Equal(t, now-1000, expireAt)
+}
+
+func TestSnapshotMeta_UnpinSnapshot_Success(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100, PinIds: []int64{5001, 5002}}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+	// Pre-seed reverse index since we bypass PinSnapshot.
+	sm.ensurePinMaps()
+	sm.pinID2SnapshotID.Insert(5001, 1)
+	sm.pinID2SnapshotID.Insert(5002, 1)
+
+	_, _, _, err := sm.UnpinSnapshot(ctx, 5001)
+	assert.NoError(t, err)
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 1)
+	assert.Equal(t, int64(5002), current.GetPinIds()[0])
+}
+
+func TestSnapshotMeta_UnpinSnapshot_NotPinned(t *testing.T) {
+	ctx := context.Background()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100}
+	sm.snapshotID2Info.Insert(1, info)
+
+	// Unpin a non-existent pin ID — should succeed (idempotent)
+	_, _, _, err := sm.UnpinSnapshot(ctx, 99999)
+	assert.NoError(t, err)
+}
+
+func TestSnapshotMeta_DropSnapshot_RejectPinned(t *testing.T) {
+	ctx := context.Background()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100, PinIds: []int64{5001}}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	err := sm.DropSnapshot(ctx, 100, "snap1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "pinned")
+}
+
+func TestSnapshotMeta_DropSnapshot_ExpiredPinAllowsDrop(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock all catalog operations used by DropSnapshot
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriterDrop := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriterDrop.UnPatch()
+
+	now := time.Now().UnixMilli()
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		writer:                 &SnapshotWriter{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	// Snapshot with one expired pin — should NOT block drop
+	info := &datapb.SnapshotInfo{
+		Id: 1, Name: "snap1", CollectionId: 100,
+		State:         datapb.SnapshotState_SnapshotStateCommitted,
+		PinIds:        []int64{5001},
+		PinExpireAtMs: map[int64]int64{5001: now - 1000}, // expired
+	}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+	snapSet := typeutil.NewUniqueSet()
+	snapSet.Insert(1)
+	sm.collectionID2Snapshots.Insert(100, snapSet)
+
+	err := sm.DropSnapshot(ctx, 100, "snap1")
+	assert.NoError(t, err, "expired pin should not block DropSnapshot")
+
+	// Snapshot should be removed from memory
+	_, exists := sm.snapshotID2Info.Get(1)
+	assert.False(t, exists, "snapshot should be dropped")
+}
+
+func TestSnapshotMeta_DropSnapshot_CatalogFailure_RollbackPins(t *testing.T) {
+	ctx := context.Background()
+
+	now := time.Now().UnixMilli()
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		writer:                 &SnapshotWriter{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	// Snapshot with 2 pins: one expired (5001), one active (5002)
+	info := &datapb.SnapshotInfo{
+		Id: 1, Name: "snap1", CollectionId: 100,
+		State:  datapb.SnapshotState_SnapshotStateCommitted,
+		PinIds: []int64{5001, 5002},
+		PinExpireAtMs: map[int64]int64{
+			5001: now - 1000, // expired
+			5002: now + 999999999,
+		},
+	}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	// Mock catalog to fail — triggers rollback
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(errors.New("catalog fail")).Build()
+	defer mockSave.UnPatch()
+
+	// DropSnapshot will clean expired pin 5001, then reject because 5002 is still active.
+	// Because 5002 is still active, DropSnapshot returns "pinned" error BEFORE catalog save.
+	// The expired pin cleaning happens in-memory only but since we don't reach catalog save,
+	// there's no rollback path to test here.
+	//
+	// To test the rollback path, we need ALL pins to be expired so DropSnapshot proceeds
+	// to the catalog save step (which fails), then rolls back.
+	info.PinIds = []int64{5001, 5002}
+	info.PinExpireAtMs = map[int64]int64{
+		5001: now - 1000, // expired
+		5002: now - 500,  // also expired
+	}
+	info.State = datapb.SnapshotState_SnapshotStateCommitted
+
+	err := sm.DropSnapshot(ctx, 100, "snap1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "catalog fail")
+
+	// Verify rollback: both PinIds and PinExpireAtMs should be fully restored
+	restored, exists := sm.snapshotID2Info.Get(1)
+	require.True(t, exists, "snapshot should still be in memory after rollback")
+	assert.Equal(t, datapb.SnapshotState_SnapshotStateCommitted, restored.State, "state should be rolled back")
+	assert.Len(t, restored.PinIds, 2, "both pin IDs should be restored")
+	assert.Contains(t, restored.PinIds, int64(5001))
+	assert.Contains(t, restored.PinIds, int64(5002))
+	assert.Len(t, restored.PinExpireAtMs, 2, "both pin expiry entries should be restored")
+	assert.Equal(t, now-1000, restored.PinExpireAtMs[5001])
+	assert.Equal(t, now-500, restored.PinExpireAtMs[5002])
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_SkipPinned(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock catalog operations used by DropSnapshot flow
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriterDrop := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriterDrop.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		writer:                 &SnapshotWriter{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	// Setup: 2 snapshots, one pinned, one not
+	pinnedInfo := &datapb.SnapshotInfo{Id: 1, Name: "pinned_snap", CollectionId: 100, PinIds: []int64{5001}, State: datapb.SnapshotState_SnapshotStateCommitted}
+	unpinnedInfo := &datapb.SnapshotInfo{Id: 2, Name: "unpinned_snap", CollectionId: 100, State: datapb.SnapshotState_SnapshotStateCommitted}
+	sm.snapshotID2Info.Insert(1, pinnedInfo)
+	sm.snapshotID2Info.Insert(2, unpinnedInfo)
+
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("pinned_snap", 1)
+	nameMap.Insert("unpinned_snap", 2)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	snapSet := typeutil.NewUniqueSet()
+	snapSet.Insert(1, 2)
+	sm.collectionID2Snapshots.Insert(100, snapSet)
+
+	_, err := sm.DropSnapshotsByCollection(ctx, 100)
+	assert.NoError(t, err)
+
+	// Pinned snapshot should still exist
+	_, exists := sm.snapshotID2Info.Get(1)
+	assert.True(t, exists, "pinned snapshot should survive collection drop")
+
+	// Unpinned snapshot should be removed
+	_, exists = sm.snapshotID2Info.Get(2)
+	assert.False(t, exists, "unpinned snapshot should be dropped")
+}
+
+func TestSnapshotMeta_PinSnapshot_RejectDeleting(t *testing.T) {
+	ctx := context.Background()
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100, State: datapb.SnapshotState_SnapshotStateDeleting}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	_, _, err := sm.PinSnapshot(ctx, 100, "snap1", 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "being deleted")
+}
+
+func TestSnapshotMeta_PinSnapshot_CatalogError_Rollback(t *testing.T) {
+	ctx := context.Background()
+
+	callCount := 0
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(
+		func(_ *kv_datacoord.Catalog, _ context.Context, _ *datapb.SnapshotInfo) error {
+			callCount++
+			return errors.New("etcd write failed")
+		}).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100}
+	sm.snapshotID2Info.Insert(1, info)
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert("snap1", 1)
+	sm.snapshotName2ID.Insert(100, nameMap)
+
+	_, _, err := sm.PinSnapshot(ctx, 100, "snap1", 0)
+	assert.Error(t, err)
+	// Clone-and-swap: on catalog failure the swap is skipped, so the live
+	// pointer still has the original (empty) pin list.
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Empty(t, current.GetPinIds(), "pin_ids should stay empty when catalog write fails")
+}
+
+func TestSnapshotMeta_UnpinSnapshot_CatalogError_Rollback(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(errors.New("etcd write failed")).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	info := &datapb.SnapshotInfo{Id: 1, Name: "snap1", CollectionId: 100, PinIds: []int64{5001, 5002}}
+	sm.snapshotID2Info.Insert(1, info)
+	sm.ensurePinMaps()
+	sm.pinID2SnapshotID.Insert(5001, 1)
+	sm.pinID2SnapshotID.Insert(5002, 1)
+
+	_, _, _, err := sm.UnpinSnapshot(ctx, 5001)
+	assert.Error(t, err)
+	// Clone-and-swap: on catalog failure the swap is skipped, so the live
+	// pointer still carries both pin IDs.
+	current, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, current.GetPinIds(), 2, "pin_ids should be untouched on catalog failure")
+	assert.Contains(t, current.GetPinIds(), int64(5001))
+}
+
+func TestSnapshotMeta_CleanExpiredPinsForCollection(t *testing.T) {
+	ctx := context.Background()
+
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+
+	sm := &snapshotMeta{
+		catalog:                &kv_datacoord.Catalog{},
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	now := time.Now().UnixMilli()
+
+	// Snapshot with 2 pins: one expired, one active
+	mixed := &datapb.SnapshotInfo{
+		Id: 1, Name: "mixed", CollectionId: 100,
+		PinIds:        []int64{5001, 5002},
+		PinExpireAtMs: map[int64]int64{5001: now - 1000, 5002: now + 3600000}, // 5001 expired, 5002 active
+	}
+	// Snapshot with permanent pin (no TTL)
+	permanent := &datapb.SnapshotInfo{
+		Id: 2, Name: "permanent", CollectionId: 100,
+		PinIds: []int64{6001},
+		// no entry in PinExpireAtMs = permanent
+	}
+	// Different collection
+	other := &datapb.SnapshotInfo{
+		Id: 3, Name: "other", CollectionId: 200,
+		PinIds:        []int64{7001},
+		PinExpireAtMs: map[int64]int64{7001: now - 1000}, // expired but different collection
+	}
+	sm.snapshotID2Info.Insert(1, mixed)
+	sm.snapshotID2Info.Insert(2, permanent)
+	sm.snapshotID2Info.Insert(3, other)
+
+	// Setup collection index
+	snapSet100 := typeutil.NewUniqueSet()
+	snapSet100.Insert(1, 2)
+	sm.collectionID2Snapshots.Insert(100, snapSet100)
+	snapSet200 := typeutil.NewUniqueSet()
+	snapSet200.Insert(3)
+	sm.collectionID2Snapshots.Insert(200, snapSet200)
+
+	sm.cleanExpiredPinsForCollection(ctx, 100)
+
+	// 5001 expired → removed; 5002 active → kept
+	updatedMixed, _ := sm.snapshotID2Info.Get(1)
+	assert.Len(t, updatedMixed.GetPinIds(), 1)
+	assert.Equal(t, int64(5002), updatedMixed.GetPinIds()[0])
+	// Permanent pin untouched
+	updatedPermanent, _ := sm.snapshotID2Info.Get(2)
+	assert.Len(t, updatedPermanent.GetPinIds(), 1)
+	// Other collection untouched
+	updatedOther, _ := sm.snapshotID2Info.Get(3)
+	assert.Len(t, updatedOther.GetPinIds(), 1)
+}
+
+// TestSnapshotMeta_HasActivePins exercises the three branches of
+// snapshotMeta.HasActivePins directly against a real snapshotMeta instance.
+// This method is the lynchpin of the service-layer DropSnapshot pre-flight
+// check and the only place where the pinMu read lock and expired-pin
+// filtering actually execute end-to-end, so it needs coverage that doesn't
+// mock out the implementation.
+func TestSnapshotMeta_HasActivePins(t *testing.T) {
+	newMeta := func() *snapshotMeta {
+		return &snapshotMeta{
+			snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+			snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+			collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+		}
+	}
+	addSnapshot := func(sm *snapshotMeta, info *datapb.SnapshotInfo) {
+		sm.snapshotID2Info.Insert(info.GetId(), info)
+		nameMap, _ := sm.snapshotName2ID.GetOrInsert(
+			info.GetCollectionId(),
+			typeutil.NewConcurrentMap[string, UniqueID](),
+		)
+		nameMap.Insert(info.GetName(), info.GetId())
+	}
+
+	t.Run("snapshot_not_found_returns_error", func(t *testing.T) {
+		ctx := context.Background()
+		sm := newMeta()
+
+		has, err := sm.HasActivePins(ctx, 100, "nonexistent")
+		assert.Error(t, err)
+		assert.False(t, has, "missing snapshot must report no pins")
+	})
+
+	t.Run("no_pins_returns_false", func(t *testing.T) {
+		ctx := context.Background()
+		sm := newMeta()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 1, Name: "snap_empty", CollectionId: 100,
+		})
+
+		has, err := sm.HasActivePins(ctx, 100, "snap_empty")
+		assert.NoError(t, err)
+		assert.False(t, has, "snapshot with no pins must report no active pins")
+	})
+
+	t.Run("active_pin_returns_true", func(t *testing.T) {
+		ctx := context.Background()
+		sm := newMeta()
+		now := time.Now().UnixMilli()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 2, Name: "snap_active", CollectionId: 100,
+			PinIds:        []int64{5001},
+			PinExpireAtMs: map[int64]int64{5001: now + 3600*1000}, // 1h from now
+		})
+
+		has, err := sm.HasActivePins(ctx, 100, "snap_active")
+		assert.NoError(t, err)
+		assert.True(t, has, "non-expired pin must count as active")
+	})
+
+	t.Run("permanent_pin_returns_true", func(t *testing.T) {
+		// Permanent pins have no entry in PinExpireAtMs and must count as
+		// active forever. Regression guard for any "if expireAt == 0" bug.
+		ctx := context.Background()
+		sm := newMeta()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 3, Name: "snap_permanent", CollectionId: 100,
+			PinIds: []int64{6001},
+			// PinExpireAtMs intentionally nil
+		})
+
+		has, err := sm.HasActivePins(ctx, 100, "snap_permanent")
+		assert.NoError(t, err)
+		assert.True(t, has, "permanent pin must count as active")
+	})
+
+	t.Run("only_expired_pins_returns_false", func(t *testing.T) {
+		// Expired-pin filtering must not report a snapshot as pinned if every
+		// pin is already past its TTL. This is the happy path for the service-
+		// layer pre-flight check to allow drop to proceed.
+		ctx := context.Background()
+		sm := newMeta()
+		now := time.Now().UnixMilli()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 4, Name: "snap_expired", CollectionId: 100,
+			PinIds:        []int64{7001, 7002},
+			PinExpireAtMs: map[int64]int64{7001: now - 1000, 7002: now - 500},
+		})
+
+		has, err := sm.HasActivePins(ctx, 100, "snap_expired")
+		assert.NoError(t, err)
+		assert.False(t, has, "all-expired pins must not report active")
+	})
+
+	t.Run("mixed_expired_and_active_returns_true", func(t *testing.T) {
+		ctx := context.Background()
+		sm := newMeta()
+		now := time.Now().UnixMilli()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 5, Name: "snap_mixed", CollectionId: 100,
+			PinIds:        []int64{8001, 8002},
+			PinExpireAtMs: map[int64]int64{8001: now - 1000, 8002: now + 3600*1000},
+		})
+
+		has, err := sm.HasActivePins(ctx, 100, "snap_mixed")
+		assert.NoError(t, err)
+		assert.True(t, has, "at least one non-expired pin must report active")
+	})
+
+	t.Run("cross_collection_isolation", func(t *testing.T) {
+		// Two snapshots in different collections reusing the same name: the
+		// query must hit the (collectionID, name) tuple, not a global name
+		// index. Regression guard for the pre-composite-key behavior where
+		// HasActivePins on collection=100 could observe pins on collection=200.
+		ctx := context.Background()
+		sm := newMeta()
+		now := time.Now().UnixMilli()
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 6, Name: "shared_name", CollectionId: 100,
+		})
+		addSnapshot(sm, &datapb.SnapshotInfo{
+			Id: 7, Name: "shared_name", CollectionId: 200,
+			PinIds:        []int64{9001},
+			PinExpireAtMs: map[int64]int64{9001: now + 3600*1000},
+		})
+
+		has100, err := sm.HasActivePins(ctx, 100, "shared_name")
+		assert.NoError(t, err)
+		assert.False(t, has100, "collection 100 has no pins on this name")
+
+		has200, err := sm.HasActivePins(ctx, 200, "shared_name")
+		assert.NoError(t, err)
+		assert.True(t, has200, "collection 200 has an active pin")
+	})
 }
