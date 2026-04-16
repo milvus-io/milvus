@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <fmt/core.h>
 #include <gtest/gtest.h>
 #include <functional>
 #include <boost/filesystem.hpp>
@@ -488,3 +489,210 @@ INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
 INSTANTIATE_TYPED_TEST_SUITE_P(ArrayBitmapE2ECheckV1,
                                ArrayBitmapIndexTestV2,
                                BitmapTypeV1);
+
+struct BitmapIndexArrayRegressionParam {
+    proto::schema::DataType element_type;
+    bool use_mmap;
+};
+
+class BitmapIndexArrayRegressionTest
+    : public testing::TestWithParam<BitmapIndexArrayRegressionParam> {
+ protected:
+    static constexpr int64_t collection_id_ = 1;
+    static constexpr int64_t partition_id_ = 2;
+    static constexpr int64_t segment_id_ = 3;
+    static constexpr int64_t field_id_ = 101;
+    static constexpr int64_t index_build_id_ = 3001;
+    static constexpr int64_t index_version_ = 3001;
+    static constexpr int64_t num_rows_ = 4;
+
+    std::string
+    ElementTypeName(proto::schema::DataType element_type) const {
+        switch (element_type) {
+            case proto::schema::DataType::Int32:
+                return "int32";
+            case proto::schema::DataType::String:
+                return "string";
+            default:
+                return "unknown";
+        }
+    }
+
+    std::vector<milvus::Array>
+    BuildArrayData(proto::schema::DataType element_type, bool use_mmap) const {
+        auto posting_count =
+            use_mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 50 : 2;
+
+        std::vector<ScalarFieldProto> scalar_arrays(num_rows_);
+        switch (element_type) {
+            case proto::schema::DataType::Int32: {
+                for (int i = 0; i < posting_count; ++i) {
+                    scalar_arrays[1].mutable_int_data()->add_data(i);
+                }
+                scalar_arrays[2].mutable_int_data()->add_data(-1);
+                break;
+            }
+            case proto::schema::DataType::String: {
+                for (int i = 0; i < posting_count; ++i) {
+                    scalar_arrays[1].mutable_string_data()->add_data(
+                        fmt::format("s{}", i));
+                }
+                scalar_arrays[2].mutable_string_data()->add_data("ignored");
+                break;
+            }
+            default:
+                ThrowInfo(ErrorCode::DataTypeInvalid,
+                          "unsupported element type {} in regression test",
+                          proto::schema::DataType_Name(element_type));
+        }
+
+        std::vector<milvus::Array> array_data;
+        array_data.reserve(num_rows_);
+        for (const auto& scalar_array : scalar_arrays) {
+            array_data.emplace_back(scalar_array);
+        }
+        return array_data;
+    }
+
+    FieldDataPtr
+    BuildFieldData(proto::schema::DataType element_type, bool use_mmap) const {
+        auto array_data = BuildArrayData(element_type, use_mmap);
+        auto field_data =
+            storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+        uint8_t valid_data = 0x0B;  // rows 0,1,3 valid; row 2 null.
+        field_data->FillFieldData(
+            array_data.data(), &valid_data, array_data.size(), 0);
+        return field_data;
+    }
+
+    void
+    AssertNullSemantics(index::IndexBase* loaded_index,
+                        proto::schema::DataType element_type) const {
+        switch (element_type) {
+            case proto::schema::DataType::Int32: {
+                auto index_ptr =
+                    dynamic_cast<index::ScalarIndex<int32_t>*>(loaded_index);
+                ASSERT_NE(index_ptr, nullptr);
+                AssertNullSemanticsImpl(index_ptr);
+                break;
+            }
+            case proto::schema::DataType::String: {
+                auto index_ptr = dynamic_cast<index::ScalarIndex<std::string>*>(
+                    loaded_index);
+                ASSERT_NE(index_ptr, nullptr);
+                AssertNullSemanticsImpl(index_ptr);
+                break;
+            }
+            default:
+                FAIL() << "unsupported element type "
+                       << proto::schema::DataType_Name(element_type);
+        }
+    }
+
+    template <typename T>
+    void
+    AssertNullSemanticsImpl(index::ScalarIndex<T>* index_ptr) const {
+        auto is_null = index_ptr->IsNull();
+        auto is_not_null = index_ptr->IsNotNull();
+
+        ASSERT_EQ(is_null.size(), num_rows_);
+        ASSERT_EQ(is_not_null.size(), num_rows_);
+
+        EXPECT_FALSE(is_null[0]) << "empty array row should stay non-null";
+        EXPECT_TRUE(is_not_null[0]) << "empty array row should stay non-null";
+
+        EXPECT_FALSE(is_null[1]) << "non-empty array row should stay non-null";
+        EXPECT_TRUE(is_not_null[1])
+            << "non-empty array row should stay non-null";
+
+        EXPECT_TRUE(is_null[2]) << "null array row should stay null";
+        EXPECT_FALSE(is_not_null[2]) << "null array row should stay null";
+
+        EXPECT_FALSE(is_null[3]) << "empty array row should stay non-null";
+        EXPECT_TRUE(is_not_null[3]) << "empty array row should stay non-null";
+    }
+};
+
+TEST_P(BitmapIndexArrayRegressionTest,
+       NullableEmptyArrayPreservesValidityAfterReload) {
+    auto param = GetParam();
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(param.element_type);
+    field_schema.set_nullable(true);
+
+    auto field_meta = storage::FieldDataMeta{
+        collection_id_, partition_id_, segment_id_, field_id_, field_schema};
+    auto index_meta = storage::IndexMeta{
+        segment_id_, field_id_, index_build_id_, index_version_};
+
+    auto field_data = BuildFieldData(param.element_type, param.use_mmap);
+
+    std::string root_path =
+        fmt::format("{}/bitmap_empty_array_regression_{}_{}",
+                    TestLocalPath,
+                    ElementTypeName(param.element_type),
+                    param.use_mmap ? "mmap" : "memory");
+    boost::filesystem::remove_all(root_path);
+
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    Config load_config;
+    if (param.use_mmap) {
+        load_config[milvus::index::MMAP_FILE_PATH] =
+            fmt::format("{}/bitmap_index.mmap", root_path);
+    }
+
+    switch (param.element_type) {
+        case proto::schema::DataType::Int32: {
+            auto index = std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+            index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+            auto binary_set = index->Serialize({});
+
+            auto loaded_index =
+                std::make_unique<index::BitmapIndex<int32_t>>(ctx);
+            loaded_index->Load(binary_set, load_config);
+            AssertNullSemantics(loaded_index.get(), param.element_type);
+            break;
+        }
+        case proto::schema::DataType::String: {
+            auto index = std::make_unique<index::BitmapIndex<std::string>>(ctx);
+            index->BuildWithFieldData(std::vector<FieldDataPtr>{field_data});
+            auto binary_set = index->Serialize({});
+
+            auto loaded_index =
+                std::make_unique<index::BitmapIndex<std::string>>(ctx);
+            loaded_index->Load(binary_set, load_config);
+            AssertNullSemantics(loaded_index.get(), param.element_type);
+            break;
+        }
+        default:
+            FAIL() << "unsupported element type "
+                   << proto::schema::DataType_Name(param.element_type);
+    }
+
+    boost::filesystem::remove_all(root_path);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BitmapIndexArrayRegression,
+    BitmapIndexArrayRegressionTest,
+    testing::Values(
+        BitmapIndexArrayRegressionParam{proto::schema::DataType::Int32, false},
+        BitmapIndexArrayRegressionParam{proto::schema::DataType::Int32, true},
+        BitmapIndexArrayRegressionParam{proto::schema::DataType::String, false},
+        BitmapIndexArrayRegressionParam{proto::schema::DataType::String, true}),
+    [](const testing::TestParamInfo<BitmapIndexArrayRegressionParam>& info) {
+        auto element_type =
+            info.param.element_type == proto::schema::DataType::Int32
+                ? "Int32"
+                : "String";
+        return fmt::format(
+            "{}_{}", element_type, info.param.use_mmap ? "MMap" : "Memory");
+    });
