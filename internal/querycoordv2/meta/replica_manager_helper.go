@@ -311,22 +311,23 @@ func (s replicaAssignmentInfoSortByAvailableAndRecoverable) Less(i, j int) bool 
 }
 
 // newReplicaSQNAssignmentHelper creates a new replicaSQNAssignmentHelper.
+// rgName can be empty for flat allocation mode across all resource groups.
 func newReplicaSQNAssignmentHelper(
+	rgName string,
 	replicas []*Replica,
 	nodes typeutil.UniqueSet,
 ) *replicasInSameRGAssignmentHelper {
-	// We use a fake resource group name to create a helper.
 	assignmentInfos := make([]*replicaAssignmentInfo, 0, len(replicas))
 	for _, replica := range replicas {
 		assignmentInfos = append(assignmentInfos, newReplicaSQNAssignmentInfo(replica, nodes))
 	}
 	h := &replicasInSameRGAssignmentHelper{
-		rgName:        "",
+		rgName:        rgName,
 		nodesInRG:     nodes,
 		incomingNodes: nodes.Clone(),
 		replicas:      assignmentInfos,
 	}
-	// generate incoming nodes for collection.
+	// generate incoming nodes for resource group.
 	h.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 		assignment.RangeOverAllNodes(func(nodeID int64) {
 			if nodes.Contain(nodeID) {
@@ -335,6 +336,6 @@ func newReplicaSQNAssignmentHelper(
 		})
 	})
 	// update expected node count for all replicas in same resource group.
-	h.updateExpectedNodeCountForReplicas(len(nodes))
+	h.updateExpectedNodeCountForReplicas(nodes.Len())
 	return h
 }
