@@ -10,6 +10,7 @@ expr:
 	| (Identifier|Meta)           			      							                                # Identifier
 	| JSONIdentifier                                                                                        # JSONIdentifier
 	| StructFieldIdentifier                                                                                 # StructField
+	| StructIndexFieldIdentifier                                                                            # StructIndexField
 	| StructSubFieldIdentifier                                                                              # StructSubField
 	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
 	| '(' expr ')'											                                                # Parens
@@ -38,8 +39,8 @@ expr:
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
-	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (LT | LE) expr	# Range
-	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
+	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
+	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                                                # Relational
 	| expr op = (EQ | NE) expr								                                                # Equality
 	| expr BAND expr										                                                # BitAnd
@@ -140,6 +141,7 @@ Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
+StructIndexFieldIdentifier: Identifier '[' DecimalConstant ']' '[' Identifier ']';
 StructFieldIdentifier: Identifier '[' Identifier ']';
 StructSubFieldIdentifier: '$[' Identifier ']';
 
