@@ -600,6 +600,9 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	for _, fileResourceID := range coll.FileResourceIds {
 		if mt.fileResourceRefCnt[fileResourceID] > 0 {
 			mt.fileResourceRefCnt[fileResourceID]--
+		} else {
+			log.Warn("DropCollection: file resource refCnt underflow",
+				zap.Int64("collectionID", collectionID), zap.Int64("fileResourceID", fileResourceID))
 		}
 	}
 
@@ -2354,6 +2357,8 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 	for _, id := range ids {
 		if mt.fileResourceRefCnt[id] > 0 {
 			mt.fileResourceRefCnt[id]--
+		} else {
+			log.Warn("DecFileResourceRefCnt underflow", zap.Int64("id", id))
 		}
 	}
 }
