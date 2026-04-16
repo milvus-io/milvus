@@ -44,6 +44,11 @@ type hookContainer struct {
 	hook hook.Hook
 }
 
+type hookSetter interface {
+	SetZapLogger(*zap.Logger)
+	SetClientInfoProvider(any)
+}
+
 // extensionContainer is Container to wrap hook.Extension interface
 // this struct is used to be stored in atomic.Value
 // since different type stored in it will cause panicking.
@@ -74,6 +79,7 @@ func initHook() error {
 	if err != nil {
 		return err
 	}
+
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
@@ -98,6 +104,15 @@ func initHook() error {
 	storeExtension(extVal)
 
 	return nil
+}
+
+func SetHook(connectionManager any) {
+	hookVal := GetHook()
+	if setter, ok := hookVal.(hookSetter); ok {
+		setter.SetZapLogger(log.L())
+		setter.SetClientInfoProvider(connectionManager)
+		log.Info("hook setter injected")
+	}
 }
 
 func InitOnceHook() {
