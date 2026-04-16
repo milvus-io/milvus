@@ -71,7 +71,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     milvus::proto::common::LoadPriority load_priority,
     bool eager_load,
     const std::string& warmup_policy,
-    const std::string& cache_key_suffix)
+    const std::string& cache_key_suffix,
+    int64_t fallback_bytes_per_row)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -152,15 +153,43 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     meta_.chunk_memory_size_.reserve(num_cells);
 
     int64_t cumulative_rows = 0;
+    int64_t last_resort_cells = 0;
     for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
         auto [start, end] = meta_.get_row_group_range(cell_id);
         int64_t cell_size = 0;
+        int64_t cell_rows = 0;
         for (size_t i = start; i < end; ++i) {
+            cell_rows += static_cast<int64_t>(row_group_rows[i]);
             cumulative_rows += static_cast<int64_t>(row_group_rows[i]);
             cell_size += static_cast<int64_t>(row_group_sizes[i]);
         }
+        // External segments (fallback_bytes_per_row > 0): always prefer the
+        // DataNode-sampled Arrow bytes/row over format metadata. The
+        // metadata reports disk/encoded size which varies by format
+        // (parquet=uncompressed column chunk size, iceberg/vortex=often 0)
+        // and is not a reliable proxy for in-memory Arrow buffer size.
+        //
+        // Non-external: use format metadata; only if it reports zero
+        // (e.g. Vortex without size stats) fall back to a 4KB/row
+        // last-resort estimate.
+        if (fallback_bytes_per_row > 0 && cell_rows > 0) {
+            cell_size = cell_rows * fallback_bytes_per_row;
+        } else if (cell_size == 0 && cell_rows > 0) {
+            constexpr int64_t kLastResortBytesPerRow = 4096;
+            cell_size = cell_rows * kLastResortBytesPerRow;
+            ++last_resort_cells;
+        }
         meta_.num_rows_until_chunk_.push_back(cumulative_rows);
         meta_.chunk_memory_size_.push_back(cell_size);
+    }
+    if (last_resort_cells > 0) {
+        LOG_WARN(
+            "[StorageV2] translator {}: {}/{} cells had zero memory_size "
+            "from format metadata and no sampled bytes_per_row; using "
+            "4KB/row last-resort estimate",
+            key_,
+            last_resort_cells,
+            num_cells);
     }
 
     LOG_INFO(
