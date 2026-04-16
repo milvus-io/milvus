@@ -598,7 +598,9 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	}
 	mt.collID2Meta[collectionID] = clone
 	for _, fileResourceID := range coll.FileResourceIds {
-		mt.fileResourceRefCnt[fileResourceID]--
+		if mt.fileResourceRefCnt[fileResourceID] > 0 {
+			mt.fileResourceRefCnt[fileResourceID]--
+		}
 	}
 
 	log.Ctx(ctx).Info("update coll state to dropping",
@@ -2350,7 +2352,9 @@ func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	for _, id := range ids {
-		mt.fileResourceRefCnt[id]--
+		if mt.fileResourceRefCnt[id] > 0 {
+			mt.fileResourceRefCnt[id]--
+		}
 	}
 }
 
@@ -2367,6 +2371,9 @@ func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]in
 		for _, id := range resourceIds {
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
+			} else {
+				log.Warn("RecoverFileResourceRefCnt: pending task references missing file resource",
+					zap.Int64("collectionID", collID), zap.Int64("resourceID", id))
 			}
 		}
 	}

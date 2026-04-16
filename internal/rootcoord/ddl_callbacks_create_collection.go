@@ -96,11 +96,11 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
-		createCollectionTask.releaseFileResources()
+		// Do NOT release file resources here: the broadcast task is already in the
+		// scheduler and will retry until success. refCnt will be decremented when
+		// the collection is eventually dropped.
 		return err
 	}
-	// Broadcast succeeded → task persisted in etcd → retries until AddCollection.
-	// refCnt stays until collection is dropped. No release here.
 	return nil
 }
 
