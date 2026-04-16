@@ -1021,7 +1021,7 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		})
 
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().RootPath().Return("root").Maybe()
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedIndexFilesV1(context.TODO())
