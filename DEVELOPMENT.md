@@ -88,7 +88,7 @@ The following specification (either physical or virtual machine resources) is re
 |------|----------------|-------|
 | Go | 1.21 | Required. Install from https://go.dev/dl/ |
 | CMake | 3.26 | Auto-installed by install_deps.sh |
-| Conan | 1.64.1 | Auto-installed. Conan 2.x not supported |
+| Conan | 2.25.1 | Auto-installed by install_deps.sh |
 | Rust | 1.89 | Auto-installed by install_deps.sh |
 
 ### Compiler Setup
@@ -172,10 +172,8 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan:
 
 ```shell
-pip install conan==1.66.0
+pip install conan==2.25.1
 ```
-
-Note: Conan version 2.x is not currently supported, please use version 1.64.1.
 
 #### Go
 
@@ -458,7 +456,7 @@ A: Python 3.12 has removed the imp module, please downgrade to 3.11 for now.
 
 Q: Conan: Unrecognized arguments: — install-folder conan
 
-A: The version is not correct. Please use Conan 1.64.1.
+A: The version is not correct. Please use Conan 2.25.1.
 
 ---
 

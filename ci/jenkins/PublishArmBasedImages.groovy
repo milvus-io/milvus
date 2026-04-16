@@ -57,7 +57,7 @@ pipeline {
                         set +a  # stop automatically
 
 
-                        docker run --net=host -v /root/.conan:/root/.conan  -v \$(pwd):/root/milvus -w /root/milvus milvusdb/milvus-env:ubuntu20.04-\${DATE_VERSION} sh -c "make clean && make install"
+                        docker run --net=host -v /root/.conan2:/root/.conan2  -v \$(pwd):/root/milvus -w /root/milvus milvusdb/milvus-env:ubuntu20.04-\${DATE_VERSION} sh -c "make clean && make install"
                         """
 
 

@@ -56,6 +56,6 @@ runs:
   - name: Mac Cache Conan Packages
     uses: actions/cache/save@v4
     with:
-      path: ~/.conan
-      key: macos15-arm-conan-${{ steps.conan-hash.outputs.hash }}
+      path: ~/.conan2
+      key: macos15-arm-conan2-${{ steps.conan-hash.outputs.hash }}
 
