@@ -49,7 +49,7 @@ func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 
 func (ob *ResourceObserver) Start() {
 	ob.startOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called in Stop()
 		ob.cancel = cancel
 
 		ob.wg.Add(1)
@@ -70,7 +70,7 @@ func (ob *ResourceObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check resource group loop")
 
-	listener := ob.meta.ResourceManager.ListenResourceGroupChanged(ctx)
+	listener := ob.meta.ListenResourceGroupChanged(ctx)
 	for {
 		ob.waitRGChangedOrTimeout(ctx, listener)
 		// stop if the context is canceled.

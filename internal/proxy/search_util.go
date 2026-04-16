@@ -617,7 +617,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
 		if !ok {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			return nil, fmt.Errorf("field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
 	}

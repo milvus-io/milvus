@@ -569,10 +569,7 @@ func (coord *MixCoordMock) DescribeCollection(ctx context.Context, req *milvuspb
 	defer coord.collMtx.RUnlock()
 
 	var collID UniqueID
-	usingID := false
-	if req.CollectionName == "" {
-		usingID = true
-	}
+	usingID := req.CollectionName == ""
 
 	collID, exist := coord.collName2ID[req.CollectionName]
 	if !exist && !usingID {

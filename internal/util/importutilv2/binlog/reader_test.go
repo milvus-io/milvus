@@ -430,15 +430,16 @@ OUTER:
 		for i := 0; i < expectRowCount; i++ {
 			expect := fieldData.GetRow(i)
 			actual := data.GetRow(i)
-			if fieldDataType == schemapb.DataType_Array {
+			switch fieldDataType {
+			case schemapb.DataType_Array:
 				if expect == nil {
 					suite.Nil(expect)
 				} else {
 					suite.True(slices.Equal(expect.(*schemapb.ScalarField).GetIntData().GetData(), actual.(*schemapb.ScalarField).GetIntData().GetData()))
 				}
-			} else if fieldDataType == schemapb.DataType_ArrayOfVector {
+			case schemapb.DataType_ArrayOfVector:
 				suite.True(slices.Equal(expect.(*schemapb.VectorField).GetFloatVector().GetData(), actual.(*schemapb.VectorField).GetFloatVector().GetData()))
-			} else {
+			default:
 				suite.Equal(expect, actual)
 			}
 		}

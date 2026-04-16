@@ -88,7 +88,7 @@ type queryTask struct {
 }
 
 func (t *queryTask) getQueryLabel() string {
-	if label := t.RetrieveRequest.GetQueryLabel(); label != "" {
+	if label := t.GetQueryLabel(); label != "" {
 		return label
 	}
 	return metrics.QueryLabel
@@ -501,14 +501,14 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 
 	// parse aggregates
 	t.plan.GetQuery().Aggregates = agg.AggregatesToPB(t.userAggregates)
-	t.RetrieveRequest.Aggregates = t.plan.GetQuery().GetAggregates()
+	t.Aggregates = t.plan.GetQuery().GetAggregates()
 	// parse group by field ids
 	groupByFieldsIDs, err := translateGroupByFieldIds(t.queryParams.groupByFields, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
 	t.plan.GetQuery().GroupByFieldIds = groupByFieldsIDs
-	t.RetrieveRequest.GroupByFieldIds = groupByFieldsIDs
+	t.GroupByFieldIds = groupByFieldsIDs
 
 	// Validate ORDER BY fields compatibility with GROUP BY
 	// When GROUP BY is used, ORDER BY can only reference groupBy columns or aggregate results
@@ -528,13 +528,13 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	t.plan.GetQuery().OrderByFields = orderByFields
 	// Also populate on RetrieveRequest so QN/Delegator can read directly
 	// without re-parsing serialized_expr_plan.
-	t.RetrieveRequest.OrderByFields = orderByFields
+	t.OrderByFields = orderByFields
 
-	hasAgg := len(t.RetrieveRequest.GroupByFieldIds) > 0 || len(t.RetrieveRequest.Aggregates) > 0
+	hasAgg := len(t.GroupByFieldIds) > 0 || len(t.Aggregates) > 0
 	// parse output field ids
 	if hasAgg {
 		emptyOutputFields := make([]UniqueID, 0)
-		t.RetrieveRequest.OutputFieldsId = emptyOutputFields
+		t.OutputFieldsId = emptyOutputFields
 		t.plan.OutputFieldIds = emptyOutputFields
 		aggFieldMap, err := agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
 		if err != nil {
@@ -547,7 +547,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 			return err
 		}
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-		t.RetrieveRequest.OutputFieldsId = outputFieldIDs
+		t.OutputFieldsId = outputFieldIDs
 		t.plan.OutputFieldIds = outputFieldIDs
 		t.plan.DynamicFields = t.userDynamicFields
 	}
@@ -660,7 +660,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Debug("Validate partition names.")
 
 	// fetch search_growing from query param
-	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
+	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
 	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.queryMode == common.QueryModeLargeTopK)
@@ -672,9 +672,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			"alias or database may have changed"))
 	}
 	if queryParams.reduceType == reduce.IReduceInOrderForBest {
-		t.RetrieveRequest.ReduceStopForBest = true
+		t.ReduceStopForBest = true
 	}
-	t.RetrieveRequest.ReduceType = int32(queryParams.reduceType)
+	t.ReduceType = int32(queryParams.reduceType)
 
 	t.queryParams = queryParams
 
@@ -693,7 +693,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("ORDER BY with iterator is not supported"))
 	}
 
-	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
+	t.Limit = queryParams.limit + queryParams.offset
 
 	if t.ids != nil {
 		pkField := ""
@@ -717,7 +717,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
 	}
-	t.plan.GetQuery().Limit = t.RetrieveRequest.Limit
+	t.plan.GetQuery().Limit = t.Limit
 
 	// Aggregation queries have bounded result sizes:
 	// - global aggregation (no GROUP BY) returns exactly one row
@@ -725,7 +725,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// Both are safe without a limit, so exempt them from the limit requirement.
 	hasAgg := len(t.userAggregates) > 0
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !hasAgg {
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited && !hasAgg {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -745,7 +745,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
 		if err != nil {
 			return err
 		}
@@ -758,14 +758,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = t.request.Namespace
 
-	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
 		return err
 	}
 
 	// Set username for this query request,
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
-		t.RetrieveRequest.Username = username
+		t.Username = username
 	}
 
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
@@ -779,7 +779,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	t.RetrieveRequest.ConsistencyLevel = t.request.GetConsistencyLevel()
+	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -813,7 +813,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
-	t.RetrieveRequest.IsIterator = queryParams.isIterator
+	t.IsIterator = queryParams.isIterator
 
 	if collectionInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
@@ -920,10 +920,10 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.queryParams.offset,
 		t.queryParams.reduceType,
 		orderByFields,
-		t.RetrieveRequest.GetGroupByFieldIds(),
-		t.RetrieveRequest.GetAggregates(),
+		t.GetGroupByFieldIds(),
+		t.GetAggregates(),
 		t.aggregationFieldMap,
-		filterSystemFields(t.RetrieveRequest.GetOutputFieldsId()),
+		filterSystemFields(t.GetOutputFieldsId()),
 	)
 	if err != nil {
 		log.Warn("fail to create query pipeline", zap.Error(err))
@@ -1090,7 +1090,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	}
 
 	// Used in element-level query to limit the number of elements returned
-	var elementLimit int = -1
+	elementLimit := -1
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
@@ -1138,7 +1138,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 
 		// Get element indices for element-level query
-		var elemCount int = 1 // default for doc-level
+		elemCount := 1 // default for doc-level
 		if isElementLevel {
 			elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
 			elemCount = len(elemIndices.GetIndices())

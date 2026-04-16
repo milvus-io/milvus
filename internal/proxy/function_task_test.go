@@ -360,7 +360,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(nil, nil).Maybe()
 		globalMetaCache = cache
 		err := task.PreExecute(ctx)
-		f.ErrorContains(err, "Invalid function config, name not match")
+		f.ErrorContains(err, "invalid function config, name not match")
 	}
 	{
 		functionSchema := &schemapb.FunctionSchema{
@@ -745,6 +745,6 @@ func (f *FunctionTaskSuite) TestDropCollectionFunctionTaskExecute() {
 		}
 
 		err := task.Execute(ctx)
-		f.ErrorContains(err, "Currently does not support droping BM25 function")
+		f.ErrorContains(err, "currently does not support droping BM25 function")
 	}
 }

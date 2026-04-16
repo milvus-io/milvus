@@ -68,7 +68,7 @@ type ExternalCollectionRefreshManager interface {
 
 	// SubmitRefreshJobWithID creates a refresh job with a pre-allocated job ID (from WAL).
 	// This ensures idempotency - if the job already exists, it returns without error.
-	// If there's an existing active job for the same collection, it will be cancelled
+	// If there's an existing active job for the same collection, it will be canceled
 	// and replaced by the new job (the old job will show "superseded by new job" as fail reason).
 	// This method is called from the WAL callback to ensure distributed consistency.
 	SubmitRefreshJobWithID(ctx context.Context, jobID int64, collectionID int64, collectionName string, externalSource, externalSpec string) (int64, error)

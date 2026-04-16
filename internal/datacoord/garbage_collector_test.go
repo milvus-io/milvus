@@ -1530,10 +1530,7 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
-			if collectionID == 123 {
-				return true
-			}
-			return false
+			return collectionID == 123
 		}).Maybe()
 
 	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
@@ -1770,7 +1767,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		afterUntil := afterResume.PauseUntil()
 		s.Equal(firstPauseUntil, afterUntil)
 
-		err = gc.Resume(ctx, 100, ticket)
+		_ = gc.Resume(ctx, 100, ticket)
 
 		_, has = gc.pausedCollection.Get(100)
 		s.False(has)

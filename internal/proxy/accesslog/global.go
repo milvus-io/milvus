@@ -157,9 +157,10 @@ func initFormatter(logCfg *paramtable.AccessLogConfig) (*FormatterManger, error)
 			return nil, err
 		}
 
-		if option == fomaterkey {
+		switch option {
+		case fomaterkey:
 			formatMap[formatterName] = value
-		} else if option == methodKey {
+		case methodKey:
 			methodMap[formatterName] = paramtable.ParseAsStings(value)
 		}
 	}

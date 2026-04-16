@@ -62,9 +62,9 @@ func TestInsertBinlog(t *testing.T) {
 
 	w.SetEventTimeStamp(1000, 2000)
 
-	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	w.AddExtra("test", "testExtra")
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.Error(t, err)
@@ -148,7 +148,7 @@ func TestInsertBinlog(t *testing.T) {
 
 	// descriptor data, extra length
 	extraLength := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	assert.Equal(t, extraLength, w.ExtraLength)
 	pos += int(unsafe.Sizeof(extraLength))
 
 	multiBytes := make([]byte, extraLength)
@@ -313,9 +313,9 @@ func TestDeleteBinlog(t *testing.T) {
 
 	w.SetEventTimeStamp(1000, 2000)
 
-	w.baseBinlogWriter.descriptorEventData.AddExtra("test", "testExtra")
+	w.AddExtra("test", "testExtra")
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.Error(t, err)
@@ -399,7 +399,7 @@ func TestDeleteBinlog(t *testing.T) {
 
 	// descriptor data, extra length
 	extraLength := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	assert.Equal(t, extraLength, w.ExtraLength)
 	pos += int(unsafe.Sizeof(extraLength))
 
 	multiBytes := make([]byte, extraLength)
@@ -565,7 +565,7 @@ func TestIndexFileBinlog(t *testing.T) {
 	w.SetEventTimeStamp(timestamp, timestamp)
 
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.Error(t, err)
@@ -644,7 +644,7 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	// descriptor data, extra length
 	extraLength := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	assert.Equal(t, extraLength, w.ExtraLength)
 	pos += int(unsafe.Sizeof(extraLength))
 
 	multiBytes := make([]byte, extraLength)
@@ -694,7 +694,7 @@ func TestIndexFileBinlogV2(t *testing.T) {
 	w.SetEventTimeStamp(timestamp, timestamp)
 
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	_, err = w.GetBuffer()
 	assert.Error(t, err)
@@ -773,7 +773,7 @@ func TestIndexFileBinlogV2(t *testing.T) {
 
 	// descriptor data, extra length
 	extraLength := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, extraLength, w.baseBinlogWriter.descriptorEventData.ExtraLength)
+	assert.Equal(t, extraLength, w.ExtraLength)
 	pos += int(unsafe.Sizeof(extraLength))
 
 	multiBytes := make([]byte, extraLength)
@@ -843,7 +843,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.Error(t, err)
 
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	err = w.Finish()
 	assert.NoError(t, err)
@@ -872,7 +872,7 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 	assert.Error(t, err)
 
 	sizeTotal := 2000000
-	w.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	w.SetEventTimeStamp(1000, 0)
 	_, err = w.GetBuffer()
@@ -897,7 +897,7 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 	assert.NoError(t, err)
 
 	sizeTotal := 2000000
-	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	insertWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 
 	err = e1.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
@@ -917,7 +917,7 @@ func TestDeleteBinlogWriteCloseError(t *testing.T) {
 	e1, err := deleteWriter.NextDeleteEventWriter()
 	assert.NoError(t, err)
 	sizeTotal := 2000000
-	deleteWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	deleteWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	err = e1.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
 	assert.NoError(t, err)
 	e1.SetEventTimestamp(100, 200)
@@ -981,7 +981,7 @@ var _ EventWriter = (*testEvent)(nil)
 func TestWriterListError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 	sizeTotal := 2000000
-	insertWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	insertWriter.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
 	errorEvent := &testEvent{}
 	insertWriter.eventWriters = append(insertWriter.eventWriters, errorEvent)
 	insertWriter.SetEventTimeStamp(1000, 2000)

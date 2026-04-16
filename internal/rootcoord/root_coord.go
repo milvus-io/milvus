@@ -77,6 +77,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// Helper function to validate resource groups
+func (c *Core) validateResourceGroups(ctx context.Context, properties []*commonpb.KeyValuePair, level string) error {
+	var rgs []string
+	var err error
+
+	switch level {
+	case "database":
+		rgs, err = common.DatabaseLevelResourceGroups(properties)
+	case "collection":
+		rgs, err = common.CollectionLevelResourceGroups(properties)
+	default:
+		return fmt.Errorf("invalid level %s for resource group validation", level)
+	}
+
+	if err != nil || len(rgs) == 0 {
+		// If the property is not found or empty, it's valid (no changes or removed)
+		return nil
+	}
+
+	resp, err := c.broker.ShowResourceGroups(ctx)
+	if err != nil {
+		return err
+	}
+
+	existingRGs := make(map[string]bool)
+	for _, rg := range resp {
+		existingRGs[rg] = true
+	}
+
+	for _, rg := range rgs {
+		if !existingRGs[rg] {
+			return merr.WrapErrResourceGroupNotFound(rg)
+		}
+	}
+	return nil
+}
+
+
 // UniqueID is an alias of typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
 
@@ -337,12 +375,12 @@ func (c *Core) initKVCreator() {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			c.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
 			c.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}

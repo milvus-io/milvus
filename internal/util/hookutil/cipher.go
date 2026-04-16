@@ -282,7 +282,7 @@ func getCollEzPropsByDBProps(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 }
 
 func IsDBEncrypted(dbProperties []*commonpb.KeyValuePair) bool {
-	var hasEzID, hasKey bool = false, false
+	hasEzID, hasKey := false, false
 	for _, property := range dbProperties {
 		if property.Key == common.EncryptionEzIDKey && property.Value != "" {
 			hasEzID = true
@@ -456,7 +456,7 @@ func InitOnceCipher() {
 func buildCipherInitConfig() map[string]string {
 	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
 	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
-	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
+	initConfigs[paramtable.Get().LocalStorageCfg.Path.Key] = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	return initConfigs
 }
 

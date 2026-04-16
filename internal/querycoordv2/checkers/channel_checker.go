@@ -94,7 +94,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		return nil
 	}
 
-	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
+	collectionIDs := c.meta.GetAll(ctx)
 	tasks := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
@@ -105,7 +105,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 				continue
 			}
 
-			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
+			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
 			for _, r := range replicas {
 				replicaTasks := c.checkReplica(ctx, r)
@@ -139,7 +139,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		channelOnQN := c.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
 		collectionChannels := lo.GroupBy(channelOnQN, func(ch *meta.DmChannel) int64 { return ch.CollectionID })
 		for collectionID, channels := range collectionChannels {
-			replica := c.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, nodeID)
+			replica := c.meta.GetByCollectionAndNode(ctx, collectionID, nodeID)
 			if replica == nil {
 				reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
 				task.SetReason("dirty channel exists", reduceTasks...)

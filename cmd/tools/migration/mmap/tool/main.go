@@ -97,7 +97,7 @@ func metaKVCreator() (kv.MetaKv, error) {
 			panic(err)
 		}
 		return kv_tikv.NewTiKV(tikvCli, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(),
-			kv_tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+			kv_tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 	}
 	etcdConfig := &paramtable.Get().EtcdCfg
 	etcdCli, err := etcd.CreateEtcdClient(
@@ -116,7 +116,7 @@ func metaKVCreator() (kv.MetaKv, error) {
 		panic(err)
 	}
 	return etcdkv.NewEtcdKV(etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
-		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+		etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 }
 
 func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) (rootcoord.IMetaTable, metastore.RootCoordCatalog) {

@@ -89,7 +89,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 
 	embdType := models.GetEmbdType(fieldSchema.DataType)
 	if embdType == models.UnsupportEmbd {
-		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+		return nil, fmt.Errorf("unsupported output type: %s", fieldSchema.DataType)
 	}
 
 	outputType := func() string {
@@ -145,12 +145,12 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 		if provider.embdType == models.Float32Embd {
 			resp := r.(*voyageai.EmbeddingResponse[float32])
 			if end-i != len(resp.Data) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+				return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
 
 			for _, item := range resp.Data {
 				if len(item.Embedding) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item.Embedding))
 				}
 				embRet.Append(item.Embedding)
@@ -158,12 +158,12 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 		} else {
 			resp := r.(*voyageai.EmbeddingResponse[int8])
 			if end-i != len(resp.Data) {
-				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+				return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
 
 			for _, item := range resp.Data {
 				if len(item.Embedding) != int(provider.fieldDim) {
-					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+					return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 						provider.fieldDim, len(item.Embedding))
 				}
 				embRet.Append(item.Embedding)

@@ -279,9 +279,9 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			collection.LoadType = querypb.LoadType_LoadCollection
-			balancer.meta.CollectionManager.PutCollection(ctx, collection)
-			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-			balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
+			balancer.meta.PutCollection(ctx, collection)
+			balancer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+			balancer.meta.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -303,7 +303,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, c.nodes[i])
+				suite.balancer.meta.HandleNodeUp(ctx, c.nodes[i])
 			}
 			utils.RecoverAllCollection(balancer.meta)
 
@@ -317,7 +317,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			}
 
 			for _, node := range c.nodes {
-				balancer.meta.ResourceManager.HandleNodeDown(ctx, node)
+				balancer.meta.HandleNodeDown(ctx, node)
 				balancer.nodeManager.Remove(node)
 				balancer.dist.SegmentDistManager.Update(node)
 				balancer.dist.ChannelDistManager.Update(node)
@@ -357,8 +357,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loading
 			collection.LoadType = querypb.LoadType_LoadCollection
-			balancer.meta.CollectionManager.PutCollection(ctx, collection)
-			balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
+			balancer.meta.PutCollection(ctx, collection)
+			balancer.meta.Put(ctx, utils.CreateTestReplica(1, 1, c.nodes))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
@@ -373,7 +373,7 @@ func (suite *RowCountBasedBalancerTestSuite) getCollectionBalancePlans(balancer 
 	collectionID int64,
 ) ([]assign.SegmentAssignPlan, []assign.ChannelAssignPlan) {
 	ctx := context.Background()
-	replicas := balancer.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := balancer.meta.GetByCollection(ctx, collectionID)
 	segmentPlans, channelPlans := make([]assign.SegmentAssignPlan, 0), make([]assign.ChannelAssignPlan, 0)
 	for _, replica := range replicas {
 		sPlans, cPlans := balancer.BalanceReplica(ctx, replica)
@@ -529,9 +529,9 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			collection.LoadType = querypb.LoadType_LoadCollection
-			balancer.meta.CollectionManager.PutCollection(ctx, collection)
-			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-			balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
+			balancer.meta.PutCollection(ctx, collection)
+			balancer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+			balancer.meta.Put(ctx, utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -553,7 +553,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, c.nodes[i])
+				suite.balancer.meta.HandleNodeUp(ctx, c.nodes[i])
 			}
 
 			Params.Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, fmt.Sprint(c.enableBalanceChannel))
@@ -656,10 +656,10 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
-			balancer.meta.CollectionManager.PutCollection(ctx, collection)
-			balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
+			balancer.meta.PutCollection(ctx, collection)
+			balancer.meta.PutPartition(ctx, utils.CreateTestPartition(c.collectionID, c.collectionID))
 			for replicaID, nodes := range c.replicaWithNodes {
-				balancer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
+				balancer.meta.Put(ctx, utils.CreateTestReplica(replicaID, c.collectionID, nodes))
 			}
 			balancer.targetMgr.UpdateCollectionNextTarget(ctx, c.collectionID)
 			balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, c.collectionID)
@@ -683,7 +683,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])
 					suite.balancer.nodeManager.Add(nodeInfo)
-					suite.balancer.meta.ResourceManager.HandleNodeUp(ctx, nodes[i])
+					suite.balancer.meta.HandleNodeUp(ctx, nodes[i])
 				}
 			}
 

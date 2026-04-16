@@ -476,7 +476,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 			s.NotEmpty(path, "binlog path should not be empty")
 
 			// Download the deltalog data
-			blobs, err := s.task.BinlogIO.Download(context.TODO(), []string{path})
+			blobs, err := s.task.Download(context.TODO(), []string{path})
 			s.NoError(err, "should be able to download deltalog for segment %d", segmentID)
 			s.NotEmpty(blobs, "downloaded blobs should not be empty")
 

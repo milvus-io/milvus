@@ -200,10 +200,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// skip dynamic fields, see describeCollectionTask.Execute
 	resp.Schema = &schemapb.CollectionSchema{
-		Name:        c.schema.CollectionSchema.Name,
-		Description: c.schema.CollectionSchema.Description,
-		AutoID:      c.schema.CollectionSchema.AutoID,
-		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
+		Name:        c.schema.Name,
+		Description: c.schema.Description,
+		AutoID:      c.schema.AutoID,
+		Fields: lo.Filter(c.schema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic && field.Name != common.NamespaceFieldName
 		}),
 		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),

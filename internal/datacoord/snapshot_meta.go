@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -411,7 +412,7 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 //   - first tick: runs immediately, loads RefIndexes from S3, narrows the blocks
 //   - subsequent ticks: periodically retry any RefIndex still in Failed state
 //
-// It runs until loaderCtx is cancelled.
+// It runs until loaderCtx is canceled.
 func (sm *snapshotMeta) refIndexLoaderLoop() {
 	defer sm.loaderWg.Done()
 

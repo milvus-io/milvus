@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -1219,7 +1220,7 @@ func (sm *snapshotManager) createRestoreJob(
 				NumOfRows:           segDesc.GetNumOfRows(),
 				State:               commonpb.SegmentState_Importing,
 				MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-				Level:               datapb.SegmentLevel(segDesc.GetSegmentLevel()),
+				Level:               segDesc.GetSegmentLevel(),
 				CreatedByCompaction: false,
 				LastExpireTime:      math.MaxUint64,
 				StartPosition:       startPos,
@@ -1476,7 +1477,7 @@ func (sm *snapshotManager) calculateProgress(job CopySegmentJob) int32 {
 // This eliminates code duplication between GetRestoreState and ListRestoreJobs.
 func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 	if job.GetStartTs() > 0 && job.GetCompleteTs() > 0 {
-		return uint64((job.GetCompleteTs() - job.GetStartTs()) / 1e6) // Convert nanoseconds to milliseconds
+		return (job.GetCompleteTs() - job.GetStartTs()) / 1e6 // Convert nanoseconds to milliseconds
 	}
 	return 0
 }

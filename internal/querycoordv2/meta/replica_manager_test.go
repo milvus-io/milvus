@@ -888,17 +888,18 @@ func TestGetReplicasJSON(t *testing.T) {
 	assert.Len(t, replicas, 2)
 
 	checkResult := func(replica *metricsinfo.Replica) {
-		if replica.ID == 1 {
+		switch replica.ID {
+		case 1:
 			assert.Equal(t, int64(100), replica.CollectionID)
 			assert.Equal(t, "rg1", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{1, 2, 3}, replica.RWNodes)
 			assert.Equal(t, int64(1), replica.DatabaseID)
-		} else if replica.ID == 2 {
+		case 2:
 			assert.Equal(t, int64(200), replica.CollectionID)
 			assert.Equal(t, "rg2", replica.ResourceGroup)
 			assert.ElementsMatch(t, []int64{4, 5, 6}, replica.RWNodes)
 			assert.Equal(t, int64(0), replica.DatabaseID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected replica id", "unexpected replica id %d", replica.ID)
 		}
 	}

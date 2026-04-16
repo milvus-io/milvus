@@ -87,7 +87,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 	// recursive = true may timeout during the recursive browsing the objects.
 	// See also: https://github.com/milvus-io/milvus/issues/19095
 	// So we can change the `ListObjectsMaxKeys` to limit the max keys by batch to avoid timeout.
-	in := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
+	in := minioObjectStorage.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: recursive,
 		MaxKeys:   paramtable.Get().MinioCfg.ListObjectsMaxKeys.GetAsInt(),

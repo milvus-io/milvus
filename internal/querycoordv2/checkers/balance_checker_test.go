@@ -1730,13 +1730,14 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 		// Collection 2: one channel not serviceable
 		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
 			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
-				if collectionID == 1 {
+				switch collectionID {
+				case 1:
 					// All serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					}
-				} else if collectionID == 2 {
+				case 2:
 					// One not serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},

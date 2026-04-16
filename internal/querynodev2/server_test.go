@@ -170,7 +170,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	origConfig, err := os.ReadFile(configPath)
 	suite.Require().NoError(err)
 	suite.T().Cleanup(func() {
-		os.WriteFile(configPath, origConfig, 0o600)
+		os.WriteFile(configPath, origConfig, 0o600) //nolint:gosec // configPath is a hardcoded test path
 	})
 
 	yamlWriter := newYamlConfigWriter(configPath)

@@ -133,9 +133,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 }
 
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg)
-	}))
+	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {

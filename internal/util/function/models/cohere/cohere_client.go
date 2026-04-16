@@ -29,7 +29,7 @@ type CohereClient struct {
 
 func NewCohereClient(apiKey string) (*CohereClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.CohereAIAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.CohereAIAKEnvStr)
 	}
 	return &CohereClient{
 		apiKey: apiKey,
