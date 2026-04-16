@@ -2985,7 +2985,7 @@ func TestRBAC_Restore_Wildcard(t *testing.T) {
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	defer metaKV.RemoveWithPrefix(context.TODO(), "")
 	defer metaKV.Close()
-	c := NewCatalog(metaKV)
+	c := NewCatalog(metaKV, nil)
 
 	ctx := context.Background()
 
