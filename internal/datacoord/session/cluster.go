@@ -84,12 +84,12 @@ type Cluster interface {
 	// DropAnalyze drops an analysis task
 	DropAnalyze(nodeID int64, taskID int64) error
 
-	// CreateExternalCollectionTask creates and executes an external collection task
-	CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error
-	// QueryExternalCollectionTask queries the status of an external collection task
-	QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error)
-	// DropExternalCollectionTask drops an external collection task
-	DropExternalCollectionTask(nodeID int64, taskID int64) error
+	// CreateRefreshExternalCollectionTask dispatches a refresh-external-collection task to the worker
+	CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error
+	// QueryRefreshExternalCollectionTask queries the status of a refresh-external-collection task
+	QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error)
+	// DropRefreshExternalCollectionTask drops a refresh-external-collection task
+	DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error
 
 	// CreateCopySegment creates a copy segment task
 	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error
@@ -627,7 +627,7 @@ func (c *cluster) DropAnalyze(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error {
+func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
 	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -641,7 +641,8 @@ func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateE
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(req.GetTaskID())
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
+	properties.AppendTaskSlot(1)
 
 	payload, err := proto.Marshal(req)
 	if err != nil {
@@ -655,23 +656,23 @@ func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateE
 		Properties: properties,
 	})
 	if err != nil {
-		log.Ctx(ctx).Warn("create external collection task failed", zap.Error(err))
+		log.Ctx(ctx).Warn("create refresh-external-collection task failed", zap.Error(err))
 		return err
 	}
 
 	if err := merr.Error(status); err != nil {
-		log.Ctx(ctx).Warn("create external collection task returned error", zap.Error(err))
+		log.Ctx(ctx).Warn("create refresh-external-collection task returned error", zap.Error(err))
 		return err
 	}
 
 	return nil
 }
 
-func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error) {
+func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
 
 	resp, err := c.queryTask(nodeID, properties)
 	if err != nil {
@@ -679,7 +680,7 @@ func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*data
 	}
 
 	// Unmarshal the response payload
-	result := &datapb.UpdateExternalCollectionResponse{}
+	result := &datapb.RefreshExternalCollectionTaskResponse{}
 	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
 		return nil, err
 	}
@@ -687,11 +688,11 @@ func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*data
 	return result, nil
 }
 
-func (c *cluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
+func (c *cluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
-	properties.AppendType(taskcommon.ExternalCollection)
+	properties.AppendType(taskcommon.RefreshExternalCollection)
 	return c.dropTask(nodeID, properties)
 }
 
