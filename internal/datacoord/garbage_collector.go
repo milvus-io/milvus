@@ -334,7 +334,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedTextIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONStatsFiles(ctx, signal)
-			gc.recyclePendingSnapshots(ctx, signal) // Cleanup orphaned snapshot files from failed 2PC
+			gc.recycleSnapshots(ctx, signal)
 		})
 	}()
 	go func() {
@@ -1590,14 +1590,10 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
-// recyclePendingSnapshots cleans up orphaned snapshot files from failed 2PC commits.
-// This method scans etcd for PENDING snapshots that have exceeded the timeout,
-// computes their S3 directory/file paths from snapshot ID, and cleans up using RemoveWithPrefix.
-//
-// Key design decisions:
-//   - NO S3 list operations: Uses RemoveWithPrefix for directory cleanup
-//   - File paths computed from collection_id + snapshot_id stored in etcd
-//   - Timeout mechanism prevents cleanup of snapshots still being created
+// recycleSnapshots cleans up snapshot resources in three phases:
+//  1. PENDING snapshots: Failed 2PC commits that exceeded timeout — clean S3 + catalog.
+//  2. DELETING snapshots: DropSnapshot succeeded but S3 cleanup failed — retry S3 + catalog.
+//  3. Orphan snapshots: Snapshots whose collection was dropped — clean expired pins, then drop.
 //
 // Process flow:
 //  1. Get all PENDING snapshots from catalog that have exceeded timeout.
@@ -1612,15 +1608,15 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 //     delete the catalog record. This keeps the snapshot eligible for retry in
 //     the next GC cycle, ensuring we do not lose the ability to clean up S3
 //     artifacts.
-func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal <-chan gcCmd) {
+func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
-	log := log.Ctx(ctx).With(zap.String("gcName", "recyclePendingSnapshots"), zap.Time("startAt", start))
-	log.Info("start recyclePendingSnapshots...")
-	defer func() { log.Info("recyclePendingSnapshots done", zap.Duration("timeCost", time.Since(start))) }()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleSnapshots"), zap.Time("startAt", start))
+	log.Info("start recycleSnapshots...")
+	defer func() { log.Info("recycleSnapshots done", zap.Duration("timeCost", time.Since(start))) }()
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 	if snapshotMeta == nil {
-		log.Warn("snapshotMeta is nil, skip recyclePendingSnapshots")
+		log.Warn("snapshotMeta is nil, skip recycleSnapshots")
 		return
 	}
 
@@ -1634,60 +1630,58 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 		return
 	}
 
-	if len(pendingSnapshots) == 0 {
-		return
+	if len(pendingSnapshots) > 0 {
+		log.Info("found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
+		cleanedCount := 0
+
+		for _, snapshot := range pendingSnapshots {
+			snapshotLog := log.With(
+				zap.String("snapshotName", snapshot.GetName()),
+				zap.Int64("snapshotID", snapshot.GetId()),
+				zap.Int64("collectionID", snapshot.GetCollectionId()),
+			)
+
+			gc.ackSignal(signal)
+			// Compute paths from collection_id + snapshot_id
+			manifestDir, metadataPath := GetSnapshotPaths(
+				gc.option.cli.RootPath(),
+				snapshot.GetCollectionId(),
+				snapshot.GetId(),
+			)
+
+			snapshotLog.Info("cleaning up pending snapshot",
+				zap.String("manifestDir", manifestDir),
+				zap.String("metadataPath", metadataPath))
+
+			// Delete manifest directory using RemoveWithPrefix (no list needed)
+			// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
+			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
+				snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
+				// Keep catalog record for retry in next GC cycle.
+				continue
+			}
+
+			// Delete metadata file
+			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
+				snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
+				// Keep catalog record for retry in next GC cycle.
+				continue
+			}
+
+			// Delete etcd record
+			if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
+				snapshotLog.Warn("failed to drop pending snapshot from catalog", zap.Error(err))
+				continue
+			}
+
+			snapshotLog.Info("successfully cleaned up pending snapshot")
+			cleanedCount++
+		}
+
+		log.Info("pending snapshots cleanup completed",
+			zap.Int("totalPending", len(pendingSnapshots)),
+			zap.Int("cleanedCount", cleanedCount))
 	}
-
-	log.Info("found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
-	cleanedCount := 0
-
-	for _, snapshot := range pendingSnapshots {
-		snapshotLog := log.With(
-			zap.String("snapshotName", snapshot.GetName()),
-			zap.Int64("snapshotID", snapshot.GetId()),
-			zap.Int64("collectionID", snapshot.GetCollectionId()),
-		)
-
-		gc.ackSignal(signal)
-		// Compute paths from collection_id + snapshot_id
-		manifestDir, metadataPath := GetSnapshotPaths(
-			gc.option.cli.RootPath(),
-			snapshot.GetCollectionId(),
-			snapshot.GetId(),
-		)
-
-		snapshotLog.Info("cleaning up pending snapshot",
-			zap.String("manifestDir", manifestDir),
-			zap.String("metadataPath", metadataPath))
-
-		// Delete manifest directory using RemoveWithPrefix (no list needed)
-		// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
-		if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
-			snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
-			// Keep catalog record for retry in next GC cycle.
-			continue
-		}
-
-		// Delete metadata file
-		if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
-			snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
-			// Keep catalog record for retry in next GC cycle.
-			continue
-		}
-
-		// Delete etcd record
-		if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
-			snapshotLog.Warn("failed to drop pending snapshot from catalog", zap.Error(err))
-			continue
-		}
-
-		snapshotLog.Info("successfully cleaned up pending snapshot")
-		cleanedCount++
-	}
-
-	log.Info("pending snapshots cleanup completed",
-		zap.Int("totalPending", len(pendingSnapshots)),
-		zap.Int("cleanedCount", cleanedCount))
 
 	// Clean up DELETING snapshots (two-phase delete cleanup)
 	// These are snapshots that were marked for deletion but S3 cleanup failed
@@ -1743,6 +1737,72 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 		log.Info("deleting snapshots cleanup completed",
 			zap.Int("totalDeleting", len(deletingSnapshots)),
 			zap.Int("cleanedCount", deletingCleanedCount))
+	}
+
+	// GC fallback: Two responsibilities per collection:
+	//   1. For EVERY collection with snapshot records, reap expired pin entries
+	//      from SnapshotInfo to bound etcd storage growth. Orphan pins
+	//      (crashed restores, swallowed Unpin errors) would otherwise accumulate
+	//      forever since Pin/Unpin only touch their own entries.
+	//   2. For collections whose owning collection was DROPPED, cascade-delete
+	//      the orphan snapshots. Handles the case where the drop-collection
+	//      cascade callback failed to fully clean up.
+	activeCollectionIDs := snapshotMeta.GetActiveCollectionIDs()
+
+	if len(activeCollectionIDs) > 0 {
+		orphanCleanedCount := 0
+		for _, collectionID := range activeCollectionIDs {
+			gc.ackSignal(signal)
+
+			if ctx.Err() != nil {
+				log.Warn("context canceled, stop snapshot cleanup")
+				break
+			}
+
+			// Step 1: reap expired pins regardless of collection liveness.
+			for _, r := range snapshotMeta.cleanExpiredPinsForCollection(ctx, collectionID) {
+				setSnapshotActivePinsGauge(r.CollectionID, r.SnapshotName, r.ActivePins)
+			}
+
+			// Step 2: if the collection was dropped, cascade-delete orphan snapshots.
+			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+			cancel()
+			if err != nil {
+				log.Warn("failed to check collection existence for orphan snapshot cleanup",
+					zap.Int64("collectionID", collectionID),
+					zap.Error(err))
+				continue
+			}
+			if has {
+				// Collection still exists, not an orphan — expired pins already reaped above.
+				continue
+			}
+
+			log.Info("found orphan snapshots for dropped collection, cleaning up",
+				zap.Int64("collectionID", collectionID))
+
+			dropped, err := snapshotMeta.DropSnapshotsByCollection(ctx, collectionID)
+			for _, n := range dropped {
+				setSnapshotActivePinsGauge(collectionID, n, 0)
+			}
+			if err != nil {
+				log.Warn("failed to drop orphan snapshots for collection",
+					zap.Int64("collectionID", collectionID),
+					zap.Error(err))
+				continue
+			}
+
+			log.Info("successfully cleaned up orphan snapshots for dropped collection",
+				zap.Int64("collectionID", collectionID))
+			orphanCleanedCount++
+		}
+
+		if orphanCleanedCount > 0 {
+			log.Info("orphan snapshots cleanup completed",
+				zap.Int("totalOrphanCollections", len(activeCollectionIDs)),
+				zap.Int("cleanedCount", orphanCleanedCount))
+		}
 	}
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)

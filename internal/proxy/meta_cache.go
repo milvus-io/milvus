@@ -103,6 +103,7 @@ type Cache interface {
 
 type collectionInfo struct {
 	collID                typeutil.UniqueID
+	dbName                string
 	schema                *schemaInfo
 	partInfo              *partitionInfos
 	createdTimestamp      uint64
@@ -494,6 +495,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
 			collID:                collection.CollectionID,
+			dbName:                collection.GetDbName(),
 			schema:                schemaInfo,
 			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
@@ -526,6 +528,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
+		dbName:                collection.GetDbName(),
 		schema:                schemaInfo,
 		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:      collection.CreatedTimestamp,

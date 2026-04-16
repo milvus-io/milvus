@@ -3191,3 +3191,145 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
 	// None of the V3 files should be removed — they are managed by loon
 	assert.Empty(t, removedFiles, "V3 segment files should not be removed by orphan scan")
 }
+
+func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
+	ctx := context.Background()
+
+	setupGCTest := func(t *testing.T, sm *snapshotMeta, broker *broker2.MockBroker) *garbageCollector {
+		m := &meta{
+			snapshotMeta: sm,
+			segments:     &SegmentsInfo{segments: make(map[int64]*SegmentInfo)},
+			channelCPs:   newChannelCps(),
+		}
+		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+		return gc
+	}
+
+	t.Run("orphan_collection_deleted", func(t *testing.T) {
+		// Snapshot belongs to a dropped collection → should be cleaned up
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           1,
+			Name:         "orphan_snap",
+			CollectionId: 100,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(100)).Return(false, nil).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		// Mock catalog calls to skip pending/deleting cleanup, reach orphan cleanup
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		// Mock DropSnapshot internals for DropSnapshotsByCollection
+		mockSave := mockey.Mock((*datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+		defer mockSave.UnPatch()
+		mockDropCatalog := mockey.Mock((*datacoord.Catalog).DropSnapshot).Return(nil).Build()
+		defer mockDropCatalog.UnPatch()
+		mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+		defer mockWriter.UnPatch()
+
+		gc.recycleSnapshots(ctx, nil)
+
+		// Verify orphan snapshot was cleaned up
+		_, exists := sm.snapshotID2Info.Get(int64(1))
+		assert.False(t, exists, "orphan snapshot should be deleted")
+	})
+
+	t.Run("collection_still_exists", func(t *testing.T) {
+		// Snapshot belongs to an active collection → should NOT be cleaned up
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           2,
+			Name:         "active_snap",
+			CollectionId: 200,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(200)).Return(true, nil).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		gc.recycleSnapshots(ctx, nil)
+
+		// Verify snapshot was NOT deleted
+		_, exists := sm.snapshotID2Info.Get(int64(2))
+		assert.True(t, exists, "snapshot of active collection should not be deleted")
+	})
+
+	t.Run("live_collection_reaps_expired_pins_and_keeps_snapshot", func(t *testing.T) {
+		// Regression: the GC hoist moved cleanExpiredPinsForCollection in front
+		// of the HasCollection check so active collections also get their
+		// expired pins reaped — previously they accumulated forever on live
+		// collections. Assert that both effects happen: expired pin removed,
+		// snapshot still present.
+		sm := createTestSnapshotMeta(t)
+		now := time.Now().UnixMilli()
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:            4,
+			Name:          "live_with_expired",
+			CollectionId:  400,
+			State:         datapb.SnapshotState_SnapshotStateCommitted,
+			PinIds:        []int64{9001, 9002},
+			PinExpireAtMs: map[int64]int64{9001: now - 1000, 9002: now + 3600000},
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(400)).Return(true, nil).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+		// cleanExpiredPinsForCollection persists the reap via SaveSnapshot.
+		mockSave := mockey.Mock((*datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+		defer mockSave.UnPatch()
+
+		gc.recycleSnapshots(ctx, nil)
+
+		// Snapshot must still exist (live collection, not orphaned).
+		updated, exists := sm.snapshotID2Info.Get(int64(4))
+		assert.True(t, exists, "snapshot of live collection must not be deleted")
+		// Expired pin 9001 reaped; active pin 9002 preserved.
+		assert.ElementsMatch(t, []int64{9002}, updated.GetPinIds(),
+			"expired pin must be removed, active pin preserved")
+		_, hasExpired := updated.GetPinExpireAtMs()[9001]
+		assert.False(t, hasExpired, "expired pin's expiry entry must be removed")
+	})
+
+	t.Run("has_collection_error_skips", func(t *testing.T) {
+		// HasCollection returns error → should skip, not delete
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           3,
+			Name:         "err_snap",
+			CollectionId: 300,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(300)).Return(false, fmt.Errorf("rpc unavailable")).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		gc.recycleSnapshots(ctx, nil)
+
+		// Verify snapshot was NOT deleted (error → skip)
+		_, exists := sm.snapshotID2Info.Get(int64(3))
+		assert.True(t, exists, "snapshot should not be deleted when HasCollection fails")
+	})
+}
