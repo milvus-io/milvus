@@ -98,12 +98,18 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 			log.Warn("failed to parse new datanode syncmgr pool size", zap.Error(err))
 			return
 		}
-		err = mgr.workerPool.Resize(cpuNum * int(size))
+		newPoolSize := cpuNum * int(size)
+		err = mgr.workerPool.Resize(newPoolSize)
 		if err != nil {
 			log.Warn("failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
 			return
 		}
-		log.Info("sync mgr pool size updated", zap.Int64("newSize", size))
+		semCap := newPoolSize * 2
+		if semCap < 4 {
+			semCap = 4
+		}
+		mgr.keyLockDispatcher.semaphore.SetCapacity(semCap)
+		log.Info("sync mgr pool size updated", zap.Int64("newSize", size), zap.Int("semaphoreCapacity", semCap))
 	}
 }
 
@@ -178,5 +184,8 @@ func (mgr *syncManager) TaskStatsJSON() string {
 func (mgr *syncManager) Close() error {
 	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
-	return mgr.workerPool.ReleaseTimeout(timeout)
+	err := mgr.workerPool.ReleaseTimeout(timeout)
+	// Drain all remaining queued tasks that were never dispatched.
+	mgr.keyLockDispatcher.Close()
+	return err
 }
