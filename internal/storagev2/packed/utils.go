@@ -279,40 +279,6 @@ func BuildCurrentSegmentFragments(
 	return result, nil
 }
 
-// CreateSegmentManifest creates a manifest file for a segment with the given fragments.
-// This is a convenience wrapper around CreateManifestForSegment.
-func CreateSegmentManifest(
-	ctx context.Context,
-	collectionID int64,
-	segmentID int64,
-	format string,
-	columns []string,
-	fragments []Fragment,
-	storageConfig *indexpb.StorageConfig,
-) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Build manifest base path
-	basePath := fmt.Sprintf("external/%d/segments/%d", collectionID, segmentID)
-
-	manifestPath, err := CreateManifestForSegment(
-		basePath,
-		columns,
-		format,
-		fragments,
-		storageConfig,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return manifestPath, nil
-}
-
 // CreateSegmentManifestWithBasePath creates a manifest file with a custom base path.
 // This allows creating temporary manifests that will be renamed later.
 func CreateSegmentManifestWithBasePath(

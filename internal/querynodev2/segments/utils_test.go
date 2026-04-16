@@ -596,3 +596,43 @@ func TestVirtualPKRoundTrip(t *testing.T) {
 			"IsVirtualPKFromSegment should return true for input segmentID=%d", tc.segmentID)
 	}
 }
+
+func TestIsExternalCollectionLazyLoad(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("all_external_fields_disable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_field",
+					ExternalField: "source_col",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupDisable}},
+				},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("non_external_fields_ignored", func(t *testing.T) {
+		// Fields without ExternalField are skipped
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "normal_field"},
+			},
+		}
+		assert.True(t, isExternalCollectionLazyLoad(schema))
+	})
+
+	t.Run("external_field_not_disable", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "ext_field",
+					ExternalField: "source_col",
+					TypeParams:    []*commonpb.KeyValuePair{{Key: common.WarmupKey, Value: common.WarmupSync}},
+				},
+			},
+		}
+		assert.False(t, isExternalCollectionLazyLoad(schema))
+	})
+}
