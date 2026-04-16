@@ -102,7 +102,7 @@ type broadcastTask struct {
 	*taskMetricsGuard
 
 	mu                       sync.Mutex
-	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
+	msg                      message.BroadcastMutableMessage
 	task                     *streamingpb.BroadcastTask
 	dirty                    bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
 	done                     chan struct{}
@@ -133,7 +133,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	vchannels := b.header().VChannels
+	vchannels := b.msg.BroadcastHeader().VChannels
 	result := make(map[string]*types.AppendResult, len(vchannels))
 	for idx, vchannel := range vchannels {
 		if b.task.AckedCheckpoints == nil {
@@ -159,16 +159,8 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 }
 
 // Header returns the header of the broadcast task.
-// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
 func (b *broadcastTask) Header() *message.BroadcastHeader {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.header()
-}
-
-// header returns the header without acquiring the lock.
-// Caller must hold b.mu.
-func (b *broadcastTask) header() *message.BroadcastHeader {
+	// header is a immutable field, no need to lock.
 	return b.msg.BroadcastHeader()
 }
 
@@ -211,15 +203,11 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 
 // IsAlterReplicateConfigMessage returns true if this task is an AlterReplicateConfig message.
 func (b *broadcastTask) IsAlterReplicateConfigMessage() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	return b.msg.MessageType() == message.MessageTypeAlterReplicateConfig
 }
 
 // IsForcePromoteMessage returns true if this task is a force promote AlterReplicateConfig message.
 func (b *broadcastTask) IsForcePromoteMessage() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.msg.MessageType() != message.MessageTypeAlterReplicateConfig {
 		return false
 	}
@@ -239,17 +227,8 @@ func (b *broadcastTask) MarkIgnore() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Deep copy properties to avoid mutating the map shared by the old b.msg.
-	// Without this copy, concurrent readers of the old b.msg (e.g., doAckCallback
-	// reading BroadcastHeader via properties.Get) would race with the Set below.
-	origProps := b.task.Message.Properties
-	copiedProps := make(map[string]string, len(origProps))
-	for k, v := range origProps {
-		copiedProps[k] = v
-	}
-
-	// Parse the message as AlterReplicateConfig using the copied properties
-	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, copiedProps)
+	// Parse the message as AlterReplicateConfig
+	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
 	alterMsg, err := message.AsMutableAlterReplicateConfigMessageV2(msg)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
@@ -258,10 +237,11 @@ func (b *broadcastTask) MarkIgnore() error {
 	// Get current header and set ignore to true
 	header := alterMsg.Header()
 	header.Ignore = true
-	alterMsg.OverwriteHeader(header) // writes to copiedProps, not origProps
+	alterMsg.OverwriteHeader(header)
 
-	// Re-create the broadcast message from the copied (now modified) properties
-	updatedMsg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, copiedProps)
+	// Re-create the broadcast message from updated payload and properties
+	// The OverwriteHeader call above modified the underlying messageImpl properties
+	updatedMsg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
 
 	// Update the task's in-memory message
 	b.task.Message = updatedMsg.IntoMessageProto()
@@ -363,9 +343,7 @@ func (b *broadcastTask) closeAllAcked() {
 // for the operation since 2.6.5, the control channel is always broadcasted.
 // so it's just a dummy function for compatibility.
 func (b *broadcastTask) isControlChannelAcked() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for idx, vc := range b.header().VChannels {
+	for idx, vc := range b.Header().VChannels {
 		if funcutil.IsControlChannel(vc) && b.task.AckedCheckpoints[idx] != nil {
 			return true
 		}
@@ -402,15 +380,15 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
 	for _, msg := range msgs {
 		vchannel := msg.VChannel()
-		idx, err := findIdxOfVChannel(vchannel, b.header().VChannels)
+		idx, err := findIdxOfVChannel(vchannel, b.Header().VChannels)
 		if err != nil {
 			panic(err)
 		}
 		if len(task.AckedVchannelBitmap) == 0 {
-			task.AckedVchannelBitmap = make([]byte, len(b.header().VChannels))
+			task.AckedVchannelBitmap = make([]byte, len(b.Header().VChannels))
 		}
 		if len(task.AckedCheckpoints) == 0 {
-			task.AckedCheckpoints = make([]*streamingpb.AckedCheckpoint, len(b.header().VChannels))
+			task.AckedCheckpoints = make([]*streamingpb.AckedCheckpoint, len(b.Header().VChannels))
 		}
 		if cp := task.AckedCheckpoints[idx]; cp != nil && cp.TimeTick != 0 {
 			// after proto.Clone, the cp is always not nil, so we also need to check the time tick.
@@ -451,7 +429,7 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 
 	b.ObserveBroadcastDone()
 
-	if b.header().AckSyncUp {
+	if b.Header().AckSyncUp {
 		// Because the ack sync up is enabled, the ack operation want to be synced up at comsuming side of streaming node,
 		// so we can not make a fast ack operation here to speed up the ack operation.
 		return nil
@@ -528,7 +506,7 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *log.MLogger
 	}
 	b.dirty = false
 	logger = logger.With(zap.String("state", b.task.State.String()), zap.Int("ackedVChannelCount", ackedCount(b.task)))
-	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
+	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.Header().BroadcastID, b.task); err != nil {
 		logger.Warn("save broadcast task failed", zap.Error(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")

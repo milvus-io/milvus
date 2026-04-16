@@ -542,6 +542,14 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 // since non-major compaction happens under channel+partition level
 // the selected segments are grouped into these categories.
 func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartSegments, error) {
+	// Fail-closed: if any protected snapshot's RefIndex hasn't loaded yet,
+	// block compaction for the entire collection.
+	if signal.collectionID > 0 && t.meta.isCollectionCompactionBlocked(signal.collectionID) {
+		log.Info("skip compaction candidates for collection due to unloaded protected snapshot RefIndex",
+			zap.Int64("collectionID", signal.collectionID))
+		return nil, nil
+	}
+
 	// default filter, select segments which could be compacted
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
@@ -552,7 +560,8 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
 				!segment.GetIsInvisible() &&
-				segment.GetIsSorted()
+				segment.GetIsSorted() &&
+				!t.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 		}),
 	}
 

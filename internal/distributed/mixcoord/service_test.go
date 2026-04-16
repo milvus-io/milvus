@@ -786,4 +786,35 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+
+	t.Run("GetRestoreSnapshotState", func(t *testing.T) {
+		req := &datapb.GetRestoreSnapshotStateRequest{}
+		mockMixCoord.EXPECT().GetRestoreSnapshotState(mock.Anything, req).Return(&datapb.GetRestoreSnapshotStateResponse{
+			Status: merr.Success(),
+			Info: &datapb.RestoreSnapshotInfo{
+				JobId:    1,
+				State:    datapb.RestoreSnapshotState_RestoreSnapshotExecuting,
+				Progress: 50,
+			},
+		}, nil)
+		resp, err := server.GetRestoreSnapshotState(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int64(1), resp.GetInfo().GetJobId())
+	})
+
+	t.Run("ListRestoreSnapshotJobs", func(t *testing.T) {
+		req := &datapb.ListRestoreSnapshotJobsRequest{}
+		mockMixCoord.EXPECT().ListRestoreSnapshotJobs(mock.Anything, req).Return(&datapb.ListRestoreSnapshotJobsResponse{
+			Status: merr.Success(),
+			Jobs: []*datapb.RestoreSnapshotInfo{
+				{JobId: 1, State: datapb.RestoreSnapshotState_RestoreSnapshotCompleted},
+				{JobId: 2, State: datapb.RestoreSnapshotState_RestoreSnapshotExecuting},
+			},
+		}, nil)
+		resp, err := server.ListRestoreSnapshotJobs(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 2, len(resp.GetJobs()))
+	})
 }

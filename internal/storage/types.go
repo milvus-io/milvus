@@ -84,6 +84,8 @@ type ChunkManager interface {
 	MultiRemove(ctx context.Context, filePaths []string) error
 	// RemoveWithPrefix remove files with same @prefix.
 	RemoveWithPrefix(ctx context.Context, prefix string) error
+	// Copy copies @srcFilePath to @dstFilePath.
+	Copy(ctx context.Context, srcFilePath string, dstFilePath string) error
 }
 
 // ListAllChunkWithPrefix is a helper function to list all objects with same @prefix by using `ListWithPrefix`.
