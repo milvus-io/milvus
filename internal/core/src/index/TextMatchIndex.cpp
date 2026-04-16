@@ -175,15 +175,22 @@ TextMatchIndex::Load(const Config& config) {
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     // V2: existing multi-file load path
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    // Files are relative paths; prepend base_path to construct absolute remote paths.
+    // Prepend base_path to construct absolute remote paths.
     // This must happen before extracting index_null_offset so all files have full paths.
+    //
+    // NOTE: files may already be absolute paths when loaded from etcd via
+    // BuildTextLogPaths(), which expands filenames to full paths for backward
+    // compatibility. Skip prepending if the path already starts with base_path
+    // to avoid doubling the prefix (which causes S3 404 errors).
     auto base_path =
         GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
             .value_or("");
     AssertInfo(!base_path.empty(),
                "stats_base_path is required for loading text index");
     for (auto& f : files_value) {
-        f = base_path + "/" + f;
+        if (f.compare(0, base_path.size(), base_path) != 0) {
+            f = base_path + "/" + f;
+        }
     }
 
     auto it = std::find_if(

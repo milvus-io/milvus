@@ -1193,14 +1193,18 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                segment_id_);
 
     // Split index_files into meta, shared_key_index, and shredding_data.
-    // Files are relative paths; prepend base_path to get absolute remote paths.
+    // Prepend base_path to get absolute remote paths.
+    // NOTE: files may already be absolute when loaded from etcd (same reason
+    // as TextMatchIndex::Load — see comment there). Skip if already prefixed.
     // Note: Check directory paths (shared_key_index, shredding_data) BEFORE meta.json,
     // because shared_key_index/meta.json_0 contains "meta.json" but is not the meta file.
     std::vector<std::string> meta_files;
     std::vector<std::string> shared_key_index_files;
     std::vector<std::string> shredding_data_files;
     for (const auto& file : index_files.value()) {
-        auto abs_path = base_path + "/" + file;
+        auto abs_path = file.compare(0, base_path.size(), base_path) != 0
+                            ? base_path + "/" + file
+                            : file;
         if (file.find(JSON_STATS_SHARED_INDEX_PATH) != std::string::npos) {
             shared_key_index_files.emplace_back(abs_path);
         } else if (file.find(JSON_STATS_SHREDDING_DATA_PATH) !=
