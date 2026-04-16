@@ -88,8 +88,9 @@ func SplitFileToFragments(
 // ExternalFetchOptions groups per-collection external table parameters
 // to keep function signatures clean.
 type ExternalFetchOptions struct {
-	CollectionID int64
-	SpecExtfs    map[string]string // extfs overrides from ExternalSpec (already prefix-keyed)
+	CollectionID     int64
+	SpecExtfs        map[string]string // extfs overrides from ExternalSpec (already prefix-keyed)
+	FormatProperties map[string]string // format-specific properties (e.g., "iceberg.snapshot_id")
 	// RowLimit caps rows per fragment when splitting large files. Zero (or
 	// negative) falls back to DefaultFragmentRowLimit.
 	RowLimit int64
@@ -189,6 +190,9 @@ func FetchFragmentsFromExternalSourceWithRange(
 
 	extfsPrefix := ExtfsPrefixForCollection(opts.CollectionID)
 	extfsOverrides := BuildExtfsOverrides(externalSource, storageConfig, extfsPrefix, opts.SpecExtfs)
+	for k, v := range opts.FormatProperties {
+		extfsOverrides[k] = v
+	}
 
 	exploreStart := time.Now()
 	fileInfos, err := ReadFileInfosFromManifestPath(exploreManifestPath, storageConfig)
@@ -277,40 +281,6 @@ func BuildCurrentSegmentFragments(
 		}
 	}
 	return result, nil
-}
-
-// CreateSegmentManifest creates a manifest file for a segment with the given fragments.
-// This is a convenience wrapper around CreateManifestForSegment.
-func CreateSegmentManifest(
-	ctx context.Context,
-	collectionID int64,
-	segmentID int64,
-	format string,
-	columns []string,
-	fragments []Fragment,
-	storageConfig *indexpb.StorageConfig,
-) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
-	}
-
-	// Build manifest base path
-	basePath := fmt.Sprintf("external/%d/segments/%d", collectionID, segmentID)
-
-	manifestPath, err := CreateManifestForSegment(
-		basePath,
-		columns,
-		format,
-		fragments,
-		storageConfig,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return manifestPath, nil
 }
 
 // CreateSegmentManifestWithBasePath creates a manifest file with a custom base path.

@@ -104,6 +104,7 @@ class MilvusConan(ConanFile):
             self.options["arrow"].with_jemalloc = False
             # Use OpenSSL for libcurl on macOS
             self.options["libcurl"].with_ssl = "openssl"
+        self.options["arrow"].with_azure = True
 
     def requirements(self):
         # force=True: override transitive dependency versions (same behavior as Conan 1)
