@@ -33,7 +33,6 @@ type ReplicateConfigValidator struct {
 	incomingConfig       *commonpb.ReplicateConfiguration
 	currentConfig        *commonpb.ReplicateConfiguration
 	isPChannelIncreasing bool // detected during validateConfigComparison
-	isDropConfig         bool // true when incoming config has empty clusters (drop/clear)
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
@@ -55,7 +54,7 @@ func (v *ReplicateConfigValidator) Validate() error {
 	}
 	clusters := v.incomingConfig.GetClusters()
 	if len(clusters) == 0 {
-		return v.validateDropConfig()
+		return fmt.Errorf("clusters list cannot be empty")
 	}
 	// Perform all validation checks
 	if err := v.validateClusterBasic(clusters); err != nil {
@@ -344,27 +343,6 @@ func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming 
 // Must be called after Validate().
 func (v *ReplicateConfigValidator) IsPChannelIncreasing() bool {
 	return v.isPChannelIncreasing
-}
-
-// IsDropConfig returns true if the incoming config is a drop request (empty clusters).
-// Must be called after Validate().
-func (v *ReplicateConfigValidator) IsDropConfig() bool {
-	return v.isDropConfig
-}
-
-// validateDropConfig validates that the current config can be safely dropped.
-// Requirements:
-// 1. Current config must be nil (idempotent) or single-cluster with no topology edges.
-func (v *ReplicateConfigValidator) validateDropConfig() error {
-	v.isDropConfig = true
-	if v.currentConfig == nil {
-		return nil
-	}
-	if len(v.currentConfig.GetClusters()) != 1 || len(v.currentConfig.GetCrossClusterTopology()) > 0 {
-		return fmt.Errorf("drop replicate configuration requires current config to be single-cluster with no topology, got %d clusters and %d topology edges",
-			len(v.currentConfig.GetClusters()), len(v.currentConfig.GetCrossClusterTopology()))
-	}
-	return nil
 }
 
 func equalIgnoreOrder(a, b []string) bool {

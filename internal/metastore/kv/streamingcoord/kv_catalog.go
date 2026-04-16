@@ -222,20 +222,3 @@ func BuildReplicatePChannelMetaKey(meta *streamingpb.ReplicatePChannelMeta) stri
 func buildReplicatePChannelPath(targetClusterID, sourceChannelName string) string {
 	return fmt.Sprintf("%s%s-%s", ReplicatePChannelMetaPrefix, targetClusterID, sourceChannelName)
 }
-
-func (c *catalog) DropReplicateConfiguration(ctx context.Context) error {
-	// Remove replicate configuration key and all replicate pchannel meta keys.
-	keys := []string{ReplicateConfigurationKey}
-
-	// List all replicate pchannel meta keys by prefix.
-	pchannelKeys, _, err := c.metaKV.LoadWithPrefix(ctx, ReplicatePChannelMetaPrefix)
-	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return errors.Wrapf(err, "list replicate pchannel meta keys failed")
-	}
-	keys = append(keys, pchannelKeys...)
-
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.RemoveByBatchWithLimit(keys, maxTxnNum, func(partialKeys []string) error {
-		return c.metaKV.MultiRemove(ctx, partialKeys)
-	})
-}

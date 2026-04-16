@@ -168,23 +168,8 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 		return nil, err
 	}
 
-	// Drop path: empty config means clear all replication configuration.
-	if validator.IsDropConfig() {
-		// Idempotent: proto.Equal(empty, nil) is false, so handle explicitly.
-		if currentConfig == nil {
-			return nil, errReplicateConfigurationSame
-		}
-		b := message.NewAlterReplicateConfigMessageBuilderV2().
-			WithHeader(&message.AlterReplicateConfigMessageHeader{
-				ReplicateConfiguration: nil,
-			}).
-			WithBody(&message.AlterReplicateConfigMessageBody{}).
-			WithClusterLevelBroadcast(cc).
-			MustBuildBroadcast()
-		return b, nil
-	}
-
-	if _, err := replicateutil.NewConfigHelper(currentClusterID, config); err != nil {
+	// TODO: validate the incoming configuration is compatible with the current config.
+	if _, err := replicateutil.NewConfigHelper(paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), config); err != nil {
 		return nil, err
 	}
 	b := message.NewAlterReplicateConfigMessageBuilderV2().

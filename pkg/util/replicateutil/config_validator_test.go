@@ -149,67 +149,15 @@ func TestReplicateConfigValidator_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "config cannot be nil")
 	})
 
-	t.Run("success - empty config drop with single-cluster current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				{
-					ClusterId:       "cluster-1",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "test-token"},
-					Pchannels:       []string{"channel-1", "channel-2"},
-				},
-			},
+	t.Run("error - empty clusters", func(t *testing.T) {
+		config := &commonpb.ReplicateConfiguration{
+			Clusters:             []*commonpb.MilvusCluster{},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
-		currentPChannels := []string{"channel-1", "channel-2"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
-		err := validator.Validate()
-		assert.NoError(t, err)
-		assert.True(t, validator.IsDropConfig())
-	})
-
-	t.Run("success - empty config drop with nil current config (idempotent)", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		validator := NewReplicateConfigValidator(incomingConfig, nil, "cluster-1", []string{"channel-1"})
-		err := validator.Validate()
-		assert.NoError(t, err)
-		assert.True(t, validator.IsDropConfig())
-	})
-
-	t.Run("error - empty config drop with multi-cluster current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := createValidValidatorConfig()
-		currentPChannels := []string{"channel-1", "channel-2"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", []string{})
 		err := validator.Validate()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "drop replicate configuration requires current config to be single-cluster with no topology")
-	})
-
-	t.Run("error - empty config drop with topology in current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				{
-					ClusterId:       "cluster-1",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "test-token"},
-					Pchannels:       []string{"channel-1"},
-				},
-				{
-					ClusterId:       "cluster-2",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19531", Token: "test-token"},
-					Pchannels:       []string{"channel-1"},
-				},
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "cluster-1", TargetClusterId: "cluster-2"},
-			},
-		}
-		currentPChannels := []string{"channel-1"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
-		err := validator.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "drop replicate configuration requires current config to be single-cluster with no topology")
+		assert.Contains(t, err.Error(), "clusters list cannot be empty")
 	})
 }
 

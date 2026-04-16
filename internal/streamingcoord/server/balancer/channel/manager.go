@@ -600,31 +600,9 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	// Both nil — already dropped, idempotent.
-	if config == nil && cm.replicateConfig == nil {
-		return nil
-	}
-
-	// Drop path: nil config means clear all replication state.
-	if config == nil {
-		if err := resource.Resource().StreamingCatalog().DropReplicateConfiguration(ctx); err != nil {
-			cm.Logger().Error("failed to drop replicate configuration", zap.Error(err))
-			return err
-		}
-		cm.Logger().Info("Dropped replicate configuration")
-		cm.replicateConfig = nil
-		for _, ch := range cm.channels {
-			ch.availableInReplication = isChannelAvailableInReplication(ch.Name(), nil)
-		}
-		cm.cond.UnsafeBroadcast()
-		cm.version.Local++
-		cm.metrics.UpdateAssignmentVersion(cm.version.Local)
-		return nil
-	}
-
-	// check if the replicate configuration is changed.
-	// if not changed, return it directly.
 	if cm.replicateConfig != nil && proto.Equal(config.GetReplicateConfiguration(), cm.replicateConfig.GetReplicateConfiguration()) {
+		// check if the replicate configuration is changed.
+		// if not changed, return it directly.
 		return nil
 	}
 
