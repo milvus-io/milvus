@@ -2,20 +2,71 @@ package metautil
 
 import (
 	"path"
+	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
-func BuildSegmentIndexFilePath(rootPath string, buildID, indexVersion, partID, segID int64, fileKey string) string {
-	k := JoinIDPath(buildID, indexVersion, partID, segID)
-	return path.Join(rootPath, common.SegmentIndexPath, k, fileKey)
+// IndexPathBuilder constructs object storage paths for index files.
+// All index file path construction MUST go through this builder.
+// The builder reads IndexStorePathVersion from metadata to decide the path format,
+// providing compile-time safety — callers cannot forget to pass the version.
+type IndexPathBuilder struct {
+	rootPath     string
+	pathVersion  int32
+	collID       int64
+	partID       int64
+	segID        int64
+	buildID      int64
+	indexVersion int64
 }
 
-func BuildSegmentIndexFilePaths(rootPath string, buildID, indexVersion, partID, segID int64, fileKeys []string) []string {
+// NewIndexPathBuilder creates a builder for constructing index file paths.
+// pathVersion: 0 = legacy, >= 1 = collection-partitioned.
+func NewIndexPathBuilder(rootPath string, pathVersion int32, collID, partID, segID, buildID, indexVersion int64) *IndexPathBuilder {
+	return &IndexPathBuilder{
+		rootPath:     rootPath,
+		pathVersion:  pathVersion,
+		collID:       collID,
+		partID:       partID,
+		segID:        segID,
+		buildID:      buildID,
+		indexVersion: indexVersion,
+	}
+}
+
+// BuildFilePath returns the full path for a single index file.
+func (b *IndexPathBuilder) BuildFilePath(fileKey string) string {
+	return path.Join(b.BuildPrefix(), fileKey)
+}
+
+// BuildFilePaths returns full paths for multiple index files.
+func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 	paths := make([]string, 0, len(fileKeys))
 	for _, fileKey := range fileKeys {
-		path := BuildSegmentIndexFilePath(rootPath, buildID, indexVersion, partID, segID, fileKey)
-		paths = append(paths, path)
+		paths = append(paths, b.BuildFilePath(fileKey))
 	}
 	return paths
+}
+
+// BuildPrefix returns the directory prefix containing all files for this index build.
+// v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
+// v1: {root}/index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+func (b *IndexPathBuilder) BuildPrefix() string {
+	if b.pathVersion >= 1 {
+		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)
+		return path.Join(b.rootPath, common.SegmentIndexPath, k)
+	}
+	k := JoinIDPath(b.buildID, b.indexVersion, b.partID, b.segID)
+	return path.Join(b.rootPath, common.SegmentIndexPath, k)
+}
+
+// BuildCollectionPrefix returns the prefix for all index files of a collection.
+// v0: no collection prefix exists, returns index_files root.
+// v1: {root}/index_files/{collID}
+func (b *IndexPathBuilder) BuildCollectionPrefix() string {
+	if b.pathVersion >= 1 {
+		return path.Join(b.rootPath, common.SegmentIndexPath, strconv.FormatInt(b.collID, 10))
+	}
+	return path.Join(b.rootPath, common.SegmentIndexPath)
 }
