@@ -4,12 +4,12 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -810,7 +810,7 @@ func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectio
 
 	if len(errs) > 0 {
 		return dropped, fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
-			len(errs), len(snapshotNames), collectionID, errors.Join(errs...))
+			len(errs), len(snapshotNames), collectionID, merr.Combine(errs...))
 	}
 
 	return dropped, nil
