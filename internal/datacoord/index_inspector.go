@@ -262,7 +262,8 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		BuildID:        buildID,
 		CreatedUTCTime: uint64(time.Now().Unix()),
 		WriteHandoff:   false,
-		IndexType:      indexType,
+		IndexType:              indexType,
+		IndexStorePathVersion: 1,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
