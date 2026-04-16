@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 
@@ -41,8 +42,14 @@ MemChunkTarget::tell() {
 void
 MmapChunkTarget::flush() {
     if (cap_ > size_) {
-        std::string padding(cap_ - size_, 0);
-        file_writer_->Write(padding.data(), cap_ - size_);
+        static constexpr size_t kBufSize = 4096;
+        char zeros[kBufSize] = {};
+        auto remaining = cap_ - size_;
+        while (remaining > 0) {
+            auto to_write = std::min(remaining, kBufSize);
+            file_writer_->Write(zeros, to_write);
+            remaining -= to_write;
+        }
         size_ = cap_;
     }
     file_writer_->Finish();

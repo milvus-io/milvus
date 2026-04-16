@@ -515,7 +515,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::string pointer,
+            const std::string& pointer,
             const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -614,7 +614,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto vals = expr_->vals_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index.get() != nullptr);
 
@@ -810,7 +809,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::string pointer,
+            const std::string& pointer,
             const std::shared_ptr<MultiElement>& terms) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.

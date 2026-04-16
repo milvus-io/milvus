@@ -34,15 +34,15 @@ Int64PKVisitor::operator()<int64_t>(int64_t t) const {
 
 struct StrPKVisitor {
     template <typename T>
-    std::string
-    operator()(T t) const {
+    const std::string&
+    operator()(const T& t) const {
         ThrowInfo(Unsupported, "invalid string pk value");
     }
 };
 
 template <>
-inline std::string
-StrPKVisitor::operator()<std::string>(std::string t) const {
+inline const std::string&
+StrPKVisitor::operator()<std::string>(const std::string& t) const {
     return t;
 }
 

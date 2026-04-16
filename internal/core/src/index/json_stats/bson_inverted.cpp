@@ -72,12 +72,8 @@ void
 BsonInvertedIndex::AddRecord(const std::string& key,
                              uint32_t row_id,
                              uint32_t offset) {
-    if (inverted_index_map_.find(key) == inverted_index_map_.end()) {
-        inverted_index_map_[key] = {EncodeInvertedIndexValue(row_id, offset)};
-    } else {
-        inverted_index_map_[key].push_back(
-            EncodeInvertedIndexValue(row_id, offset));
-    }
+    inverted_index_map_[key].push_back(
+        EncodeInvertedIndexValue(row_id, offset));
 }
 
 void
@@ -151,17 +147,15 @@ BsonInvertedIndex::UploadIndex() {
 
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
+        auto file_path = iter->path().string();
         if (boost::filesystem::is_directory(*iter)) {
-            LOG_WARN("{} is a directory", iter->path().string());
+            LOG_WARN("{} is a directory", file_path);
         } else {
-            LOG_INFO("trying to add bson inverted index file: {}",
-                     iter->path().string());
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(
-                           iter->path().string()),
+            LOG_INFO("trying to add bson inverted index file: {}", file_path);
+            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
                        "failed to add bson inverted index file: {}",
-                       iter->path().string());
-            LOG_INFO("bson inverted index file: {} added",
-                     iter->path().string());
+                       file_path);
+            LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }
 
@@ -169,7 +163,7 @@ BsonInvertedIndex::UploadIndex() {
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());
-    for (auto& file : remote_paths_to_size) {
+    for (const auto& file : remote_paths_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
     return IndexStats::New(disk_file_manager_->GetAddedTotalFileSize(),
