@@ -573,7 +573,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             limit = nb if base in data[0] and isinstance(data[0][base], dict) and key in data[0][base] else 0
         else:
             limit = 0
-        log.info("test_search_with_expression_exists: expression=%s, expected_limit=%d" % (expression, limit))
+        log.info(f"test_search_with_expression_exists: expression={expression}, expected_limit={limit}")
         search_vectors = cf.gen_vectors(default_nq, dim)
         self.search(
             client,

@@ -1391,10 +1391,10 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 # print id and distance for debug
                 # answer and hybrid search result
                 for i1 in range(len(score_answer)):
-                    log.info("answer id: %d, distance: %f" % (ids_answer[i1], score_answer[i1]))
+                    log.info(f"answer id: {ids_answer[i1]}, distance: {score_answer[i1]:f}")
                 for i2 in range(len(hybrid_res[0].ids)):
                     log.info(
-                        "hybrid search res id: %d, distance: %f" % (hybrid_res[0].ids[i2], hybrid_res[0].distances[i2])
+                        f"hybrid search res id: {hybrid_res[0].ids[i2]}, distance: {hybrid_res[0].distances[i2]:f}"
                     )
             assert delta < hybrid_search_epsilon
 

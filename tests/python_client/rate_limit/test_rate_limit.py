@@ -59,9 +59,9 @@ class TestRateLimit(TestcaseBase):
 
         # 3. create maximum numbers of collections in one two limit periods
         for period in range(2):
-            log.info("test_rate_limit_create_collection: starting to check rate limit period %d" % (period + 1))
+            log.info(f"test_rate_limit_create_collection: starting to check rate limit period {period + 1}")
             for collection_num in range(collectionRateLimit):
-                log.info("test_rate_limit_create_collection: creating collection %d" % (collection_num + 1))
+                log.info(f"test_rate_limit_create_collection: creating collection {collection_num + 1}")
                 c_name = cf.gen_unique_str(prefix)
                 self.init_collection_wrap(
                     c_name,
@@ -82,7 +82,7 @@ class TestRateLimit(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Fail to drop collection"}
         for collection_object in self.collection_object_list:
             if collection_object.collection is not None and collection_object.name in collection_list:
-                log.info("test_rate_limit_create_collection: dropping collection %d" % (drop_num + 1))
+                log.info(f"test_rate_limit_create_collection: dropping collection {drop_num + 1}")
                 if drop_num <= collection_rate_limit:
                     collection_list.remove(collection_object.name)
                     collection_object.drop()
