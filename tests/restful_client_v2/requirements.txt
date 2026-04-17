@@ -90,7 +90,7 @@ pycparser==3.0 ; implementation_name != 'PyPy'
     # via cffi
 pycryptodome==3.23.0
     # via minio
-pymilvus==2.6.12
+pymilvus==2.7.0rc185
     # via milvus-restful-client-v2-tests
 pytest==7.2.0
     # via

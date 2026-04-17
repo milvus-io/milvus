@@ -486,7 +486,7 @@ requires-dist = [
     { name = "ml-dtypes", specifier = "==0.2.0" },
     { name = "numpy", specifier = "==1.24.3" },
     { name = "pyarrow", specifier = "==21.0.0" },
-    { name = "pymilvus", specifier = ">=2.6" },
+    { name = "pymilvus", specifier = "==2.7.0rc185", index = "https://test.pypi.org/simple/" },
     { name = "pytest", specifier = "==7.2.0" },
     { name = "pytest-xdist", specifier = "==2.5.0" },
     { name = "pyyaml", specifier = "==6.0" },
@@ -792,8 +792,8 @@ wheels = [
 
 [[package]]
 name = "pymilvus"
-version = "2.6.12"
-source = { registry = "https://pypi.org/simple" }
+version = "2.7.0rc185"
+source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "cachetools" },
     { name = "grpcio" },
@@ -804,9 +804,9 @@ dependencies = [
     { name = "requests" },
     { name = "setuptools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/d7/c5d1381248a33975ccc864a0f980f93270ecc35354de8646c8a16443cccb/pymilvus-2.6.12.tar.gz", hash = "sha256:8323e990dc305e607fef525498eb779e42940a69e0691dde009cd02d48845f7a", size = 1584521, upload-time = "2026-04-09T07:49:11.374Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/9a/95/79cf117a2a42022925cad04ba78665f30c999bde414368ff6b3b1d37b4f0/pymilvus-2.7.0rc185.tar.gz", hash = "sha256:68208d2e7441fe6f424f8fcf297b2175e3ac70e41c2ed50b9fdcd88e52bc7e07", size = 2108771, upload-time = "2026-04-03T10:14:08.859Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/5d/44b0fa94c91503381e6f12298277f84f8e7b0bb00715ab89fc273c4d681e/pymilvus-2.6.12-py3-none-any.whl", hash = "sha256:69051b8b62712f157b2b50aeb7bde7fd7cdb5940aac0122094eb3cd58bc20f0d", size = 315183, upload-time = "2026-04-09T07:49:09.013Z" },
+    { url = "https://test-files.pythonhosted.org/packages/1c/9a/e6d0f2950997cff90c8789abd9bb3155f65613dd89453a740e38d6ee1184/pymilvus-2.7.0rc185-py3-none-any.whl", hash = "sha256:473826943e0ed3d8ccdf21d4218cd0bd11ba3721b2601e0c8d666caeb0b12585", size = 331871, upload-time = "2026-04-03T10:14:06.249Z" },
 ]
 
 [[package]]
