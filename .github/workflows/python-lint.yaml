@@ -38,6 +38,8 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.9.21"
+          enable-cache: true
+          cache-dependency-glob: "tests/uv.lock"
 
       - name: Sync tooling
         working-directory: tests
@@ -54,15 +56,21 @@ jobs:
 
       - name: Resolve changed Python files under tests/
         id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_sha="${{ github.event.pull_request.base.sha }}"
-            head_sha="${{ github.event.pull_request.head.sha }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base_sha="$PR_BASE_SHA"
+            head_sha="$PR_HEAD_SHA"
           else
             # push event: diff against previous commit.
-            base_sha="${{ github.event.before }}"
-            head_sha="${{ github.sha }}"
+            base_sha="$PUSH_BEFORE_SHA"
+            head_sha="$PUSH_HEAD_SHA"
           fi
           # Guard against empty/zero base_sha (e.g. first push to a new branch).
           if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
@@ -76,22 +84,28 @@ jobs:
           else
             echo "Changed files:"
             echo "$files"
-            # Join with spaces, single-line, for downstream xargs.
-            joined=$(echo "$files" | tr '\n' ' ')
-            echo "files=$joined" >> "$GITHUB_OUTPUT"
+            # Emit newline-joined so downstream steps can feed them to xargs safely.
+            {
+              echo "files<<__EOF__"
+              echo "$files"
+              echo "__EOF__"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: ruff check
         if: steps.changed.outputs.files != ''
         working-directory: tests
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
-          # Strip the leading "tests/" prefix since we run inside tests/.
-          files="$(echo '${{ steps.changed.outputs.files }}' | tr ' ' '\n' | sed 's#^tests/##' | tr '\n' ' ')"
-          uv run ruff check $files
+          # Strip the leading "tests/" prefix since we run inside tests/,
+          # then pipe through xargs so each file is passed as a quoted arg.
+          printf '%s\n' "$CHANGED_FILES" | sed 's#^tests/##' | xargs uv run ruff check
 
       - name: ruff format --check
         if: steps.changed.outputs.files != ''
         working-directory: tests
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
-          files="$(echo '${{ steps.changed.outputs.files }}' | tr ' ' '\n' | sed 's#^tests/##' | tr '\n' ' ')"
-          uv run ruff format --check $files
+          printf '%s\n' "$CHANGED_FILES" | sed 's#^tests/##' | xargs uv run ruff format --check
