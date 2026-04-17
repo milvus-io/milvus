@@ -223,3 +223,9 @@ func (d *keyLockDispatcher[K]) Close() {
 func (d *keyLockDispatcher[K]) Pending() int {
 	return d.semaphore.Current()
 }
+
+// SetSemaphoreCapacity dynamically adjusts the semaphore capacity that controls
+// the maximum number of pending (queued + in-flight) tasks.
+func (d *keyLockDispatcher[K]) SetSemaphoreCapacity(capacity int) {
+	d.semaphore.SetCapacity(capacity)
+}

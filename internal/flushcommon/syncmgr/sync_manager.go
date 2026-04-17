@@ -108,7 +108,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 		if semCap < 4 {
 			semCap = 4
 		}
-		mgr.keyLockDispatcher.semaphore.SetCapacity(semCap)
+		mgr.SetSemaphoreCapacity(semCap)
 		log.Info("sync mgr pool size updated", zap.Int64("newSize", size), zap.Int("semaphoreCapacity", semCap))
 	}
 }
