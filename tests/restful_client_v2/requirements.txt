@@ -25,6 +25,8 @@ attrs==26.1.0
     #   pytest
 bm25s==0.2.13
     # via milvus-restful-client-v2-tests
+cachetools==7.0.5
+    # via pymilvus
 certifi==2026.2.25
     # via
     #   minio
@@ -37,7 +39,6 @@ colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   loguru
     #   pytest
-    #   tqdm
 exceptiongroup==1.3.1 ; python_full_version < '3.11'
     # via pytest
 execnet==2.1.2
@@ -56,8 +57,6 @@ joblib==1.5.3
     # via scikit-learn
 loguru==0.7.3
     # via milvus-restful-client-v2-tests
-milvus-lite==2.5.1 ; sys_platform != 'win32'
-    # via pymilvus
 minio==7.2.0
     # via milvus-restful-client-v2-tests
 ml-dtypes==0.2.0
@@ -71,6 +70,8 @@ numpy==1.24.3
     #   scikit-learn
     #   scipy
     #   shapely
+orjson==3.11.8
+    # via pymilvus
 packaging==26.1
     # via pytest
 pandas==2.1.0
@@ -89,7 +90,7 @@ pycparser==3.0 ; implementation_name != 'PyPy'
     # via cffi
 pycryptodome==3.23.0
     # via minio
-pymilvus==2.5.3
+pymilvus==2.6.12
     # via milvus-restful-client-v2-tests
 pytest==7.2.0
     # via
@@ -112,7 +113,9 @@ pytz==2026.1.post1
 pyyaml==6.0
     # via milvus-restful-client-v2-tests
 requests==2.33.1
-    # via milvus-restful-client-v2-tests
+    # via
+    #   milvus-restful-client-v2-tests
+    #   pymilvus
 ruff==0.15.11
 scikit-learn==1.7.2 ; python_full_version < '3.11'
     # via milvus-restful-client-v2-tests
@@ -134,14 +137,10 @@ threadpoolctl==3.6.0
     # via scikit-learn
 tomli==2.4.1 ; python_full_version < '3.11'
     # via pytest
-tqdm==4.67.3 ; sys_platform != 'win32'
-    # via milvus-lite
 typing-extensions==4.15.0 ; python_full_version < '3.11'
     # via exceptiongroup
 tzdata==2026.1
     # via pandas
-ujson==5.12.0
-    # via pymilvus
 urllib3==2.6.3
     # via
     #   milvus-restful-client-v2-tests

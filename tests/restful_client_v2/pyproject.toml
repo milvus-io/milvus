@@ -11,7 +11,9 @@ dependencies = [
     "numpy==1.24.3",
     "allure-pytest>=2.8.18",
     "Faker==19.2.0",
-    "pymilvus",
+    # pymilvus here comes from pypi (stable). python_client pins a specific
+    # rc build from testpypi; this project does not need rc builds.
+    "pymilvus>=2.6",
     "scikit-learn>=1.5.2",
     "pytest-xdist==2.5.0",
     "minio==7.2.0",
@@ -28,16 +30,6 @@ dependencies = [
 dev = [
     "ruff>=0.8.0",
 ]
-
-# pymilvus rc builds live on test.pypi.org. Mark the index explicit so uv
-# only consults it for packages that are explicitly sourced from it.
-[[tool.uv.index]]
-name = "testpypi"
-url = "https://test.pypi.org/simple/"
-explicit = true
-
-[tool.uv.sources]
-pymilvus = { index = "testpypi" }
 
 [tool.ruff]
 extend = "../pyproject.toml"
