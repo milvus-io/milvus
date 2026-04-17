@@ -280,7 +280,7 @@ func TestCachedConfig(t *testing.T) {
 
 		// after refresh, the cached value should be reset
 		ctx := context.Background()
-		client.KV.Put(ctx, "test/config/c/d", "www")
+		client.Put(ctx, "test/config/c/d", "www")
 		assert.Eventually(t, func() bool {
 			_, exist = mgr.GetCachedValue("cd")
 			return !exist
