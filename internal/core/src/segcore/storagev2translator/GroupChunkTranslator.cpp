@@ -445,11 +445,14 @@ GroupChunkTranslator::load_group_chunk(
             continue;
         }
         auto it = field_metas_.find(fid);
-        AssertInfo(
-            it != field_metas_.end(),
-            "[StorageV2] translator {} field id {} not found in field_metas",
-            key_,
-            fid.get());
+        if (it == field_metas_.end()) {
+            // Parquet file may carry extra columns from a previous
+            // column-group layout (e.g. nullable fields later split into
+            // their own groups but physically still present here). Drop
+            // them — the real data will come from the dedicated group's
+            // binlog entry.
+            continue;
+        }
         const auto& field_meta = it->second;
 
         // Merge array vectors from all tables for this field
