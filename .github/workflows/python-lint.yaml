@@ -43,6 +43,15 @@ jobs:
         working-directory: tests
         run: uv sync
 
+      - name: Validate ruff configuration
+        working-directory: tests
+        # Unconditional smoke test: runs even when the diff only touches
+        # pyproject.toml / .python-version / uv.lock (no .py files), so a
+        # broken ruff config never slips through with a green CI signal.
+        # --exit-zero ignores any existing baseline lint violations; this
+        # step only fails if the config itself fails to parse/load.
+        run: uv run ruff check --no-cache --exit-zero scripts/
+
       - name: Resolve changed Python files under tests/
         id: changed
         run: |
