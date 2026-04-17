@@ -2314,13 +2314,24 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "collection",
+			Fields: []*schemapb.FieldSchema{},
+		},
+		Aliases:     []string{"alias"},
+		RequestTime: 1000,
+	}, nil).Once()
+
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionIDs:         []int64{100},
 		PartitionNames:       []string{"par1"},
 		CreatedTimestamps:    []uint64{1000},
 		CreatedUtcTimestamps: []uint64{1000},
-	}, nil).Times(2)
+	}, nil).Times(4)
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
@@ -2329,9 +2340,15 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
 	assert.NoError(t, err)
 
-	cache.RemovePartition(ctx, "db", "collection", "par1", 2000)
+	_, err = cache.GetPartitionInfo(ctx, "db", "alias", "par1")
+	assert.NoError(t, err)
+
+	cache.RemovePartition(ctx, "db", 1, "alias", "par1", 2000)
 
 	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+
+	_, err = cache.GetPartitionInfo(ctx, "db", "alias", "par1")
 	assert.NoError(t, err)
 }
 

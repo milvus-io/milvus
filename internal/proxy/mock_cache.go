@@ -907,9 +907,9 @@ func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// RemovePartition provides a mock function with given fields: ctx, database, collectionName, partitionName, version
-func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionName string, partitionName string, version uint64) {
-	_m.Called(ctx, database, collectionName, partitionName, version)
+// RemovePartition provides a mock function with given fields: ctx, database, collectionID, collectionName, partitionName, version
+func (_m *MockCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
+	_m.Called(ctx, database, collectionID, collectionName, partitionName, version)
 }
 
 // MockCache_RemovePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartition'
@@ -920,16 +920,17 @@ type MockCache_RemovePartition_Call struct {
 // RemovePartition is a helper method to define mock.On call
 //   - ctx context.Context
 //   - database string
+//   - collectionID UniqueID
 //   - collectionName string
 //   - partitionName string
 //   - version uint64
-func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionName interface{}, partitionName interface{}, version interface{}) *MockCache_RemovePartition_Call {
-	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionName, partitionName, version)}
+func (_e *MockCache_Expecter) RemovePartition(ctx interface{}, database interface{}, collectionID interface{}, collectionName interface{}, partitionName interface{}, version interface{}) *MockCache_RemovePartition_Call {
+	return &MockCache_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, database, collectionID, collectionName, partitionName, version)}
 }
 
-func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) Run(run func(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64)) *MockCache_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(uint64))
+		run(args[0].(context.Context), args[1].(string), args[2].(UniqueID), args[3].(string), args[4].(string), args[5].(uint64))
 	})
 	return _c
 }

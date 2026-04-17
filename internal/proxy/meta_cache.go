@@ -100,7 +100,7 @@ type Cache interface {
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
 
-	RemovePartition(ctx context.Context, database, collectionName string, partitionName string, version uint64)
+	RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64)
 	Close()
 }
 
@@ -1219,18 +1219,150 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	return id, nil
 }
 
-func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionName string, partitionName string, version uint64) {
+func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string, version uint64) {
+	m.ensureCollectionForPartitionInvalidation(ctx, database, collectionID, collectionName)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	names := make(map[string]struct{})
+	realNames := make(map[string]struct{})
+	for _, dbName := range partitionInvalidationDatabases(database) {
+		m.collectPartitionCacheNamesLocked(dbName, collectionID, collectionName, names, realNames)
+		for name := range names {
+			if coll, ok := m.getCollectionLocked(dbName, name); ok && coll.schema != nil {
+				realName := coll.schema.GetName()
+				if realName != "" {
+					realNames[realName] = struct{}{}
+				}
+			}
+		}
+		if aliases, ok := m.aliasInfo[dbName]; ok {
+			for alias, entry := range aliases {
+				if entry == nil || entry.collectionName == "" {
+					continue
+				}
+				if _, ok := realNames[entry.collectionName]; ok {
+					names[alias] = struct{}{}
+					names[entry.collectionName] = struct{}{}
+				}
+			}
+		}
+
+		for name := range names {
+			m.stalePartitionCacheLocked(dbName, name, partitionName, version)
+		}
+		clear(names)
+		clear(realNames)
+	}
+
+	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.Int64("collectionID", collectionID), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
+}
+
+func (m *MetaCache) ensureCollectionForPartitionInvalidation(ctx context.Context, database string, collectionID UniqueID, collectionName string) {
+	if collectionID != 0 {
+		for _, dbName := range partitionInvalidationDatabases(database) {
+			if _, ok := m.getCollection(dbName, "", collectionID); ok {
+				return
+			}
+		}
+
+		fetchDB := database
+		if fetchDB == "" {
+			fetchDB = defaultDB
+		}
+		if _, err := m.UpdateByID(ctx, fetchDB, collectionID); err != nil {
+			log.Ctx(ctx).Debug("failed to refresh collection cache before partition invalidation",
+				zap.String("db", fetchDB),
+				zap.Int64("collectionID", collectionID),
+				zap.Error(err))
+		}
+		return
+	}
+
+	if collectionName == "" {
+		return
+	}
+
+	for _, dbName := range partitionInvalidationDatabases(database) {
+		if _, ok := m.getCollection(dbName, collectionName, 0); ok {
+			return
+		}
+	}
+
+	fetchDB := database
+	if fetchDB == "" {
+		fetchDB = defaultDB
+	}
+	if _, err := m.UpdateByName(ctx, fetchDB, collectionName); err != nil {
+		log.Ctx(ctx).Debug("failed to refresh collection cache by name before partition invalidation",
+			zap.String("db", fetchDB),
+			zap.String("collection", collectionName),
+			zap.Error(err))
+	}
+}
+
+func partitionInvalidationDatabases(database string) []string {
+	if database == "" {
+		return []string{database, defaultDB}
+	}
+	return []string{database}
+}
+
+func (m *MetaCache) getCollectionLocked(database, collectionName string) (*collectionInfo, bool) {
+	db, ok := m.collInfo[database]
+	if !ok {
+		return nil, false
+	}
+	collection, ok := db[collectionName]
+	return collection, ok
+}
+
+func (m *MetaCache) collectPartitionCacheNamesLocked(database string, collectionID UniqueID, collectionName string, names, realNames map[string]struct{}) {
+	if collectionName != "" {
+		names[collectionName] = struct{}{}
+		if coll, ok := m.getCollectionLocked(database, collectionName); ok && coll.schema != nil {
+			realName := coll.schema.GetName()
+			if realName != "" {
+				names[realName] = struct{}{}
+				realNames[realName] = struct{}{}
+			}
+			for _, alias := range coll.aliases {
+				names[alias] = struct{}{}
+			}
+		}
+	}
+
+	if collectionID == 0 {
+		return
+	}
+
+	if db, ok := m.collInfo[database]; ok {
+		for name, coll := range db {
+			if coll.collID != collectionID {
+				continue
+			}
+			names[name] = struct{}{}
+			if coll.schema != nil {
+				realName := coll.schema.GetName()
+				if realName != "" {
+					names[realName] = struct{}{}
+					realNames[realName] = struct{}{}
+				}
+			}
+			for _, alias := range coll.aliases {
+				names[alias] = struct{}{}
+			}
+		}
+	}
+}
+
+func (m *MetaCache) stalePartitionCacheLocked(database, collectionName, partitionName string, version uint64) {
 	collectionKey := buildSfKeyByName(database, collectionName)
 	m.sfPartitionCache.Forget(collectionKey)
 	m.partitionCache.Stale(buildPartitionSfKey(database, collectionName, partitionName), version)
-
 	m.sfCollLevelPartitionCache.Forget(collectionKey)
 	m.collLevelPartitionCache.Stale(collectionKey, version)
-
-	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
 }
 
 func (m *MetaCache) backgroundGCLoop(stopCh <-chan struct{}) {
