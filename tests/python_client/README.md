@@ -83,6 +83,25 @@ We recommend using Python 3 (3.8 or higher), consistent with the version support
    $ pip install -r requirements.txt
    ```
 
+   Alternatively, if you have [uv](https://docs.astral.sh/uv/) installed, let it manage the virtualenv and dev tools (ruff, etc.) for you:
+
+   ```bash
+   $ uv sync --group dev            # creates .venv and installs everything
+   $ uv run pytest testcases/       # runs pytest inside the .venv
+   $ uv run ruff check .            # lint before committing
+   $ uv run ruff format .           # auto-format changed files
+   ```
+
+   `requirements.txt` is a generated artifact of `pyproject.toml` + `uv.lock`. Do **not** hand-edit it. When changing dependencies:
+
+   ```bash
+   $ uv add <pkg>                       # or: uv add --group dev <pkg>
+   $ bash ../scripts/regen_requirements.sh .
+   $ git add pyproject.toml uv.lock requirements.txt
+   ```
+
+   CI gates PRs on `ruff check`, `ruff format --check`, and a `requirements.txt` sync check. Skipping any of these will block merge.
+
 2. The default test log path is **/tmp/ci_logs/** under the **config** directory. You can add environment variables to change the path before booting up test cases:
 
    ```bash

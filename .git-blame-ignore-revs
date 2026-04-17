@@ -1,0 +1,20 @@
+# git-blame-ignore-revs
+# Commits listed here are skipped by `git blame` so large mechanical
+# rewrites don't obscure author attribution. Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honours this file automatically in its blame view.
+
+# test: apply ruff format to tests/ python code (246 files)
+fbb1e6d9fbd15408afe36fec00184844daf7ed14
+
+# test: apply ruff check --fix (safe auto-fixes)
+9c914a7de1428baae51d08458676fc1d7b3d3541
+
+# test: apply ruff check --fix --unsafe-fixes
+9b85e97df396258708d2e9cb027aef67ff25f480
+
+# test: rename unused loop variables to _<name> (ruff B007)
+1d65211d89210424c3d6f45a7816dc407eb8cdc4
+
+# test: fix bare except and raise-from (ruff E722 / B904)
+b2e7f9971aa078bc202ec760f962473ffc8e87f1
