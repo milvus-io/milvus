@@ -278,7 +278,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         )
         alter_properties = {"data.replica.number": 2}
         self.alter_database_properties(client, db_name, properties=alter_properties)
-        describe = self.describe_database(client, db_name)[0]
+        self.describe_database(client, db_name)[0]
         self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -342,7 +342,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         )
         drop_properties = {"data.replica.number": 2}
         self.drop_database_properties(client, db_name, property_keys=drop_properties)
-        describe = self.describe_database(client, db_name)[0]
+        self.describe_database(client, db_name)[0]
         self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -444,7 +444,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         db_name = cf.gen_unique_str(db_prefix)
         properties = {"database.force.deny.writing": "false", "database.replica.number": "1"}
         self.create_database(client, db_name, properties=properties)
-        describe = self.describe_database(client, db_name)
+        self.describe_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
         self.describe_database(
@@ -567,7 +567,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         self.using_database(client, db_name)
         drop1 = {"database.replica.number"}
         self.drop_database_properties(client, db_name, property_keys=drop1)
-        describe = self.describe_database(client, db_name)[0]
+        self.describe_database(client, db_name)[0]
         self.describe_database(
             client,
             db_name,
@@ -576,7 +576,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         )
         drop2 = ["database.force.deny.writing", "database.force.deny.reading"]
         self.drop_database_properties(client, db_name, property_keys=drop2)
-        describe = self.describe_database(client, db_name)[0]
+        self.describe_database(client, db_name)[0]
         self.describe_database(
             client,
             db_name,

@@ -132,7 +132,7 @@ def _install_milvus(image_tag="master-latest"):
 class TestChannelExclusiveBalance(TestcaseBase):
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
         connections.disconnect("default")
@@ -175,9 +175,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
-        for i in range(10):
+        for _i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             qn_num += min(qn_num + 1, 8)
             seg_res = bw.show_segment_info(collection_id)
@@ -191,11 +191,11 @@ class TestChannelExclusiveBalance(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
         # in final state, channel exclusive balance is on, so all qn should have only one channel
-        for k, v in res.items():
+        for _k, v in res.items():
             assert len(set(v["channel"])) == 1
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -225,9 +225,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
-        for i in range(10):
+        for _i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             qn_num = max(qn_num - 1, 3)
             milvus_op.scale(release_name, "queryNode", qn_num, namespace)
@@ -242,12 +242,12 @@ class TestChannelExclusiveBalance(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
         # shard num = 2, k = 2, qn_num = 3
         # in final state, channel exclusive balance is off, so all qn should have more than one channel
-        for k, v in res.items():
+        for _k, v in res.items():
             assert len(set(v["channel"])) > 1
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -277,9 +277,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
-        for i in range(10):
+        for _i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
@@ -297,12 +297,12 @@ class TestChannelExclusiveBalance(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
 
         # since shard num is 1, so all qn should have only one channel, no matter what k is
-        for k, v in res.items():
+        for _k, v in res.items():
             assert len(set(v["channel"])) == 1
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -332,9 +332,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
-        for i in range(10):
+        for _i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
@@ -381,7 +381,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
 
@@ -412,9 +412,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
-        for i in range(10):
+        for _i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
@@ -430,6 +430,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)

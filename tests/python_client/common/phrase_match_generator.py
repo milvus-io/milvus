@@ -297,7 +297,7 @@ class PhraseMatchTestGenerator:
 
         new_pattern_documents = []
         start = 1000000
-        for i in range(num_docs_per_pattern):
+        for _i in range(num_docs_per_pattern):
             for doc in pattern_documents:
                 new_doc = dict(doc)
                 new_doc["id"] = start + len(new_pattern_documents)

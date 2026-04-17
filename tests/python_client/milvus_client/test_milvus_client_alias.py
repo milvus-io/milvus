@@ -641,14 +641,14 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
         self.create_alias(client, collection_name, alias)
         self.describe_alias(client, alias)
         # 3. list alias
-        aliases = self.list_aliases(client)[0]
+        self.list_aliases(client)[0]
         # assert alias in aliases
         # 4. assert collection is equal to alias according to partitions
         partition_name_list_alias = self.list_partitions(client, alias)[0]
         assert partition_name_list == partition_name_list_alias
         # 5. drop alias
         self.drop_alias(client, alias)
-        aliases = self.list_aliases(client)[0]
+        self.list_aliases(client)[0]
         # assert alias not in aliases
         self.drop_collection(client, collection_name)
 
@@ -678,7 +678,7 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
         self.alter_alias(client, collection_name, another_alias)
         self.describe_alias(client, alias)
         # 3. list alias
-        aliases = self.list_aliases(client, collection_name)[0]
+        self.list_aliases(client, collection_name)[0]
         # assert alias in aliases
         # assert another_alias in aliases
         # 4. assert collection is equal to alias according to partitions

@@ -140,7 +140,7 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
-        ranker = WeightedRanker(0.2, 0.8)
+        WeightedRanker(0.2, 0.8)
         error = {ct.err_code: 100, ct.err_msg: "collection not found[database=default][collection=1]"}
         self.hybrid_search(
             client,

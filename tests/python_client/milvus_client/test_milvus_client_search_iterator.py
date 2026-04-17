@@ -177,7 +177,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str("nonexistent")
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        insert_ids = [i for i in range(default_nb)]
+        [i for i in range(default_nb)]
         self.search_iterator(
             client, collection_name, vectors_to_search, batch_size=5, check_task=CheckTasks.err_res, check_items=error
         )

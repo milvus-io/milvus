@@ -214,15 +214,14 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
+        np.random.default_rng(seed=19530)
         rows = [
             {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
             for i in range(default_nb)
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: "Insert missed an field `vector` to collection "
-            "without set nullable==true or set default_value",
+            ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1632,7 +1631,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
 
         # Generate data without vector field
-        rng = np.random.default_rng(seed=19530)
+        np.random.default_rng(seed=19530)
         rows = [
             {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
             for i in range(10)
@@ -2933,7 +2932,7 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
             )
         else:
             log.error("Primary key only support int or varchar")
-            assert False
+            raise AssertionError()
 
         # Add vector field
         schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)

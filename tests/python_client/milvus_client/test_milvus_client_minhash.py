@@ -35,8 +35,10 @@ def gen_text_data(nb, min_words=5, max_words=50):
     return [fake.sentence(nb_words=random.randint(min_words, max_words)) for _ in range(nb)]
 
 
-def gen_similar_text_pairs(nb, overlap_ratios=[0.0, 0.25, 0.5, 0.75, 1.0]):
+def gen_similar_text_pairs(nb, overlap_ratios=None):
     """Generate text pairs with known word overlap ratios for Jaccard similarity testing."""
+    if overlap_ratios is None:
+        overlap_ratios = [0.0, 0.25, 0.5, 0.75, 1.0]
     pairs = []
 
     for ratio in overlap_ratios:
@@ -1224,7 +1226,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # Search with each language
-        for i, text in enumerate(texts):
+        for _i, text in enumerate(texts):
             results = self.search(
                 client,
                 collection_name,
@@ -1950,7 +1952,7 @@ class TestMilvusClientMinHashAdvanced(TestMilvusClientV2Base):
 
         # Should have results for all queries
         assert len(results) == len(query_texts)
-        for i, result in enumerate(results):
+        for _i, result in enumerate(results):
             assert len(result) <= 5
             # First result should be exact match
             assert result[0]["distance"] == 1.0
@@ -3631,7 +3633,7 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
             signatures[pk] = list(sig)
 
         def compute_minhash_jaccard(sig1, sig2):
-            return sum(1 for a, b in zip(sig1, sig2) if a == b) / len(sig1)
+            return sum(1 for a, b in zip(sig1, sig2, strict=False) if a == b) / len(sig1)
 
         # Query with base text
         query_pk = 0
@@ -3713,7 +3715,7 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
             signatures[pk] = list(sig)
 
         def compute_jaccard(sig1, sig2):
-            return sum(1 for a, b in zip(sig1, sig2) if a == b) / len(sig1)
+            return sum(1 for a, b in zip(sig1, sig2, strict=False) if a == b) / len(sig1)
 
         # Ground truth for query 0
         query_sig = signatures[0]

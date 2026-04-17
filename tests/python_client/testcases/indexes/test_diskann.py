@@ -82,7 +82,7 @@ class TestDiskannBuildParams(TestMilvusClientV2Base):
             if build_params is not None:
                 for key, value in build_params.items():
                     if value is not None:
-                        assert key in idx_info.keys()
+                        assert key in idx_info
                         assert str(value) == idx_info[key]
 
     @pytest.mark.tags(CaseLabel.L2)

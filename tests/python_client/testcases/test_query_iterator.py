@@ -58,7 +58,9 @@ class TestQueryIterator(TestcaseBase):
             res = iterator.next()
             if len(res) == 0:
                 iterator.close()
-                assert False, f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                raise AssertionError(
+                    f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                )
                 break
             for i in range(len(res)):
                 pk_list1.append(res[i][primary_field])
@@ -258,7 +260,9 @@ class TestQueryIterator(TestcaseBase):
             res = iterator.next()
             if len(res) == 0:
                 iterator.close()
-                assert False, f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                raise AssertionError(
+                    f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                )
                 break
 
         # 2. call a new query iterator to get all the results of the collection
@@ -384,7 +388,9 @@ class TestQueryIterator(TestcaseBase):
             res = iterator2.next()
             if len(res) == 0:
                 iterator2.close()
-                assert False, f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                raise AssertionError(
+                    f"The iterator ends before {first_iter_times} times iterators: iter_times: {iter_times}"
+                )
                 break
 
         # 3. query iterator on the second collection with the same checkpoint file

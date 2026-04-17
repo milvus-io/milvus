@@ -130,7 +130,7 @@ class TestCreateCollection(TestBase):
             if d["key"] == "collection.ttl.seconds":
                 ttl_seconds_actual = int(d["value"])
         assert rsp["code"] == 0
-        assert rsp["data"]["enableDynamicField"] == False
+        assert not rsp["data"]["enableDynamicField"]
         assert rsp["data"]["collectionName"] == name
         assert rsp["data"]["shardsNum"] == num_shards
         assert rsp["data"]["consistencyLevel"] == consistency_level
@@ -634,7 +634,7 @@ class TestCreateCollection(TestBase):
         metric_type = "L2"
         client = self.collection_client
         threads = []
-        for i in range(10):
+        for _i in range(10):
             t = threading.Thread(
                 target=create_collection,
                 args=(
@@ -949,7 +949,7 @@ class TestHasCollections(TestBase):
         """
         client = self.collection_client
         name_list = []
-        for i in range(2):
+        for _i in range(2):
             name = gen_collection_name()
             dim = 128
             payload = {
@@ -976,7 +976,7 @@ class TestHasCollections(TestBase):
         """
         client = self.collection_client
         name_list = []
-        for i in range(2):
+        for _i in range(2):
             name = gen_collection_name()
             name_list.append(name)
         rsp = client.collection_list()
@@ -1119,7 +1119,7 @@ class TestListCollections(TestBase):
         """
         client = self.collection_client
         name_list = []
-        for i in range(2):
+        for _i in range(2):
             name = gen_collection_name()
             dim = 128
             payload = {
@@ -1169,7 +1169,6 @@ class TestDescribeCollection(TestBase):
         expected: info of description is same with param passed to create collection
         """
         name = gen_collection_name()
-        dim = 128
         client = self.collection_client
         fields = [
             FieldSchema(name="reviewer_id", dtype=DataType.INT64, description="", is_primary=True),
@@ -1188,7 +1187,7 @@ class TestDescribeCollection(TestBase):
             partition_key_field="store_address",
         )
 
-        collection = Collection(
+        Collection(
             name=name,
             schema=schema,
         )
@@ -1247,7 +1246,7 @@ class TestDropCollection(TestBase):
         expected: dropped collection was not in collection list
         """
         clo_list = []
-        for i in range(5):
+        for _i in range(5):
             time.sleep(1)
             name = "test_collection_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
             payload = {"collectionName": name, "dimension": 128, "metricType": "L2"}
@@ -1396,7 +1395,7 @@ class TestCollectionWithAuth(TestBase):
         """
         client = self.collection_client
         name_list = []
-        for i in range(2):
+        for _i in range(2):
             name = gen_collection_name()
             dim = 128
             payload = {
@@ -1776,9 +1775,8 @@ class TestCollectionAddField(TestBase):
                 expected_validations.get("has_default")
                 and expected_validations["has_default"]
                 and book_id < nb + nb // 2
-            ):
-                if expected_validations.get("data_validator"):
-                    expected_validations["data_validator"](item, book_id)
+            ) and expected_validations.get("data_validator"):
+                expected_validations["data_validator"](item, book_id)
 
         # Search data after adding field
         search_payload = {

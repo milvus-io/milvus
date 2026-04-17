@@ -525,7 +525,7 @@ class TestPartialUpdate(TestBase):
         assert len(rsp["data"]) == nb
 
         original_ids = [data["book_id"] for data in rsp["data"]]
-        original_data_map = {data["user_id"]: data for data in rsp["data"]}
+        {data["user_id"]: data for data in rsp["data"]}
 
         # Partial update existing records using their auto-generated IDs
         # When autoID=true, partial update should generate NEW IDs for existing records

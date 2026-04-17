@@ -442,15 +442,9 @@ class Checker:
         self.bucket_name = cf.param_info.param_bucket_name
 
         # Initialize MilvusClient - prioritize uri and token
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
-        if cf.param_info.param_token:
-            token = cf.param_info.param_token
-        else:
-            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        token = cf.param_info.param_token or f"{cf.param_info.param_user}:{cf.param_info.param_password}"
         self.milvus_client = MilvusClient(uri=uri, token=token)
 
         # Also create a connection for low-level APIs that MilvusClient doesn't support
@@ -1378,7 +1372,7 @@ class AddFieldChecker(Checker):
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
             _, result = self.insert_data()
-            res = self.milvus_client.query(
+            self.milvus_client.query(
                 collection_name=self.c_name, filter=f"{new_field_name} >= 0", output_fields=[new_field_name]
             )
             result = True
@@ -1484,7 +1478,6 @@ class InsertChecker(Checker):
             limit=len(data_in_client) * 2,
             timeout=timeout,
         )
-        result = True
 
         data_in_server = []
         for r in res:
@@ -1512,7 +1505,7 @@ class InsertFreshnessChecker(Checker):
     def insert_entities(self):
         data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         ts_data = []
-        for i in range(constants.DELTA_PER_INS):
+        for _i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
             offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)
@@ -1757,7 +1750,7 @@ class CollectionDropChecker(Checker):
         self.gen_collection_pool(schema=self.schema)
 
     def gen_collection_pool(self, pool_size=50, schema=None):
-        for i in range(pool_size):
+        for _i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
                 self.milvus_client.create_collection(
@@ -1950,7 +1943,7 @@ class IndexCreateChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
-        for i in range(5):
+        for _i in range(5):
             self.milvus_client.insert(
                 collection_name=self.c_name,
                 data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
@@ -1992,7 +1985,7 @@ class IndexDropChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
-        for i in range(5):
+        for _i in range(5):
             self.milvus_client.insert(
                 collection_name=self.c_name,
                 data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
@@ -2516,7 +2509,7 @@ class BulkInsertChecker(Checker):
     def __init__(
         self,
         collection_name=None,
-        files=[],
+        files=None,
         use_one_collection=False,
         dim=ct.default_dim,
         schema=None,
@@ -2524,6 +2517,8 @@ class BulkInsertChecker(Checker):
         minio_endpoint=None,
         bucket_name=None,
     ):
+        if files is None:
+            files = []
         if collection_name is None:
             collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name, dim=dim, schema=schema, insert_data=insert_data)
@@ -2640,7 +2635,7 @@ class AlterCollectionChecker(Checker):
                 return res, False
             if properties.get("collection.ttl.seconds") != "3600":
                 return res, False
-            if res["enable_dynamic_field"] != True:
+            if not res["enable_dynamic_field"]:
                 return res, False
             return res, True
         except Exception as e:

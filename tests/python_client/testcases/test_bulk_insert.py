@@ -653,10 +653,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         # query data
         for f in scalar_fields:
-            if f == df.string_field:
-                expr = f"{f} > '0'"
-            else:
-                expr = f"{f} > 0"
+            expr = f"{f} > '0'" if f == df.string_field else f"{f} > 0"
             res, result = self.collection_wrap.query(expr=expr, output_fields=["count(*)"])
             log.info(f"query result: {res}")
             assert result
@@ -2379,7 +2376,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         task_ids = []
-        for i in range(file_nums):
+        for _i in range(file_nums):
             files = prepare_bulk_insert_numpy_files(
                 minio_endpoint=self.minio_endpoint,
                 bucket_name=self.bucket_name,
@@ -2550,7 +2547,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         task_ids = []
-        for i in range(file_nums):
+        for _i in range(file_nums):
             files = prepare_bulk_insert_numpy_files(
                 minio_endpoint=self.minio_endpoint,
                 bucket_name=self.bucket_name,
@@ -2812,7 +2809,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
         )
         schema.add_function(bm25_function)
         c_name = cf.gen_unique_str("import_without_embedding")
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
         # prepare import data with function output
         invalid_schema = CollectionSchema(fields=fields, description="test collection")
@@ -2886,7 +2883,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
         )
         schema.add_function(text_embedding_function)
         c_name = cf.gen_unique_str("import_without_embedding")
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        self.init_collection_wrap(name=c_name, schema=schema)
 
         # prepare import data embedding
         invalid_schema = CollectionSchema(fields=fields, description="test collection")

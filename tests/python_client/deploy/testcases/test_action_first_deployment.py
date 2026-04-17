@@ -36,7 +36,7 @@ class TestActionFirstDeployment(TestDeployBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -101,7 +101,7 @@ class TestActionFirstDeployment(TestDeployBase):
             f"segment_status: {segment_status}, index_type: {index_type}"
         )
 
-        is_binary = True if "BIN" in index_type else False
+        is_binary = "BIN" in index_type
 
         # params for search and query
         if is_binary:
@@ -124,10 +124,7 @@ class TestActionFirstDeployment(TestDeployBase):
             with_json=False,
         )[0]
         # params for creating index
-        if is_binary:
-            default_index_field = ct.default_binary_vec_field_name
-        else:
-            default_index_field = ct.default_float_vec_field_name
+        default_index_field = ct.default_binary_vec_field_name if is_binary else ct.default_float_vec_field_name
 
         # create index for vector
         default_index_param = gen_index_param(index_type)
@@ -188,7 +185,7 @@ class TestActionFirstDeployment(TestDeployBase):
         if segment_status == "only_growing":
             pytest.skip("already get growing segment, skip subsequent operations")
         # insert with flush multiple times to generate multiple sealed segment
-        for i in range(5):
+        for _i in range(5):
             self.init_collection_general(
                 insert_data=True,
                 is_binary=is_binary,

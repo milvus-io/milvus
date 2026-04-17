@@ -399,7 +399,7 @@ class TestHighLevelApi(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         pks = [i for i in range(default_nb)]
         # 3. get first primary key
-        first_pk_data = self.get(client, collection_name, ids=pks[0:1])
+        self.get(client, collection_name, ids=pks[0:1])
         # 4. delete
         delete_num = 3
         self.delete(client, collection_name, ids=pks[0:delete_num])

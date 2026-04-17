@@ -13,8 +13,10 @@ from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
 
-def assert_statistic(checkers, expectations={}):
-    for k in checkers.keys():
+def assert_statistic(checkers, expectations=None):
+    if expectations is None:
+        expectations = {}
+    for k in checkers:
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
@@ -103,7 +105,7 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
         assert_statistic(self.health_checkers)
 
         assert_expectations()
-        for k, checker in self.health_checkers.items():
+        for _k, checker in self.health_checkers.items():
             checker.check_result()
             checker.terminate()
 

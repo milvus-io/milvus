@@ -482,7 +482,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def get_compaction_plans(self, timeout=None, check_task=None, check_items={}, **kwargs):
+    def get_compaction_plans(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        if check_items is None:
+            check_items = {}
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.get_compaction_plans, timeout], **kwargs)
@@ -512,7 +514,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def alter_index(self, index_name, extra_params={}, timeout=None, check_task=None, check_items=None, **kwargs):
+    def alter_index(self, index_name, extra_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
+        if extra_params is None:
+            extra_params = {}
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.alter_index, index_name, extra_params, timeout], **kwargs)
@@ -520,7 +524,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def set_properties(self, extra_params={}, timeout=None, check_task=None, check_items=None, **kwargs):
+    def set_properties(self, extra_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
+        if extra_params is None:
+            extra_params = {}
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.set_properties, extra_params, timeout], **kwargs)

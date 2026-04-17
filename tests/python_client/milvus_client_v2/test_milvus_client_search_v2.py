@@ -268,7 +268,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
                 filter_ids.append(_id)
 
         expression = f"{default_bool_field_name} == {bool_type}"
-        log.info("test_search_with_expression_bool: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression_bool: searching with expression: {expression}")
         search_vectors = cf.gen_vectors(default_nq, dim)
 
         expected_limit = min(nb, len(filter_ids))
@@ -486,8 +486,8 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i in range(nb):
-                int32_array = data[i][ct.default_int32_array_field_name]
-                float_array = data[i][ct.default_float_array_field_name]
+                data[i][ct.default_int32_array_field_name]
+                data[i][ct.default_float_array_field_name]
                 string_array = data[i][ct.default_string_array_field_name]
                 # Skip rows with null string_array when expression references it
                 if ct.default_string_array_field_name in expr and string_array is None:
@@ -570,10 +570,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             # JSON subfield: extract base field and key, e.g. "json_field['name']" → ("json_field", "name")
             base = json_field_name.split("[")[0]
             key = json_field_name.split("'")[1]
-            if base in data[0] and isinstance(data[0][base], dict) and key in data[0][base]:
-                limit = nb
-            else:
-                limit = 0
+            limit = nb if base in data[0] and isinstance(data[0][base], dict) and key in data[0][base] else 0
         else:
             limit = 0
         log.info("test_search_with_expression_exists: expression=%s, expected_limit=%d" % (expression, limit))
@@ -653,7 +650,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
         insert_ids = self.shared_insert_ids
 
         expression = f"0 < {default_int64_field_name} < 5001"
-        log.info("test_search_with_expression_large: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression_large: searching with expression: {expression}")
 
         nums = 5000
         search_vectors = cf.gen_vectors(nums, dim)
@@ -1140,7 +1137,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         _id = random.randint(0, default_nb - 1)
         string_value[_id] = string_value[_id].replace('"', '\\"')
         expression = f'{default_string_field_name} == "{string_value[_id]}"'
-        log.debug("test_search_expression_with_double_quotes: searching with expression: %s" % expression)
+        log.debug(f"test_search_expression_with_double_quotes: searching with expression: {expression}")
         search_vectors = cf.gen_vectors(default_nq, default_dim)
         search_res, _ = self.search(
             client,
@@ -1227,7 +1224,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 },
             )
 
-        log.info("test_search_concurrent_two_collections_nullable: searching with %s threads" % threads_num)
+        log.info(f"test_search_concurrent_two_collections_nullable: searching with {threads_num} threads")
         for _ in range(threads_num):
             t = threading.Thread(target=search, args=(collection_name_1,))
             threads.append(t)

@@ -32,7 +32,7 @@ class TestChaosRG(TestcaseBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -198,7 +198,7 @@ class TestChaosRG(TestcaseBase):
             log.info(f"{coll_name} replicas: {replicas}")
 
             # search
-            for i in range(100):
+            for _i in range(100):
                 search_vectors = cf.gen_vectors(ct.default_nq, ct.default_dim)
                 search_params = {"metric_type": "L2", "params": {"ef": 64}}
                 search_res, _ = collection_w.search(

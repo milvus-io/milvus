@@ -66,7 +66,7 @@ class TestIndexNodeScale:
             # insert data
             data = cf.gen_default_dataframe_data(nb)
             loop = 100
-            for i in range(loop):
+            for _i in range(loop):
                 collection_w.insert(data, timeout=60)
             assert collection_w.num_entities == nb * loop
 
@@ -157,7 +157,7 @@ class TestIndexNodeScale:
             collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
             # insert
             loop = 10
-            for i in range(loop):
+            for _i in range(loop):
                 collection_w.insert(data)
             assert collection_w.num_entities == nb * loop
 

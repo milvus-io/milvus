@@ -538,7 +538,7 @@ class TestConnectionOperation(TestcaseBase):
         )
 
         # using default alias to create connection, the connection does not exist
-        err_msg = cem.FailConnect % ("host", str(port))
+        cem.FailConnect % ("host", str(port))
         self.connection_wrap.connect(
             alias=DefaultConfig.DEFAULT_USING,
             check_task=ct.CheckTasks.err_res,

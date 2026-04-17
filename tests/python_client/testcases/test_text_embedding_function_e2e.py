@@ -1830,7 +1830,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             self.client.add_collection_function(
                 collection_name="nonexistent_collection_12345", function=embedding_function
             )
-            assert False, "Expected exception for nonexistent collection"
+            raise AssertionError("Expected exception for nonexistent collection")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 100
@@ -1875,7 +1875,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.add_collection_function(collection_name=c_name, function=duplicate_function)
-            assert False, "Expected exception for duplicate function name"
+            raise AssertionError("Expected exception for duplicate function name")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -1909,7 +1909,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for missing input field"
+            raise AssertionError("Expected exception for missing input field")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -1943,7 +1943,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for missing output field"
+            raise AssertionError("Expected exception for missing output field")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -1977,7 +1977,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.add_collection_function(collection_name=c_name, function=embedding_function)
-            assert False, "Expected exception for dimension mismatch"
+            raise AssertionError("Expected exception for dimension mismatch")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -2004,7 +2004,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             self.client.alter_collection_function(
                 collection_name="nonexistent_collection_12345", function_name="tei", function=new_function
             )
-            assert False, "Expected exception for nonexistent collection"
+            raise AssertionError("Expected exception for nonexistent collection")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 100
@@ -2039,7 +2039,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
             self.client.alter_collection_function(
                 collection_name=c_name, function_name="nonexistent_function", function=new_function
             )
-            assert False, "Expected exception for nonexistent function"
+            raise AssertionError("Expected exception for nonexistent function")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -2083,7 +2083,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.alter_collection_function(collection_name=c_name, function_name="tei", function=new_function)
-            assert False, "Expected exception for invalid endpoint"
+            raise AssertionError("Expected exception for invalid endpoint")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 65535
@@ -2101,7 +2101,7 @@ class TestTextEmbeddingFunctionCURDNegative(TestcaseBase):
 
         try:
             self.client.drop_collection_function(collection_name="nonexistent_collection_12345", function_name="tei")
-            assert False, "Expected exception for nonexistent collection"
+            raise AssertionError("Expected exception for nonexistent collection")
         except Exception as e:
             log.info(f"Expected error: {e}")
             assert e.code == 100

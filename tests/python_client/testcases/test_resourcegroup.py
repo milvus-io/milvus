@@ -1118,7 +1118,6 @@ class TestTransferNode(TestcaseBase):
         5. load partition with different replicas into default rg and rgA
         """
         self._connect()
-        dim = ct.default_dim
         # 1. create a partition and insert data
         collection_w = self.init_collection_wrap()
         partition_name = cf.gen_unique_str("par")
@@ -1194,7 +1193,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         collection_w_a = self.init_collection_wrap(shards_num=2)
         collection_w_b = self.init_collection_wrap(shards_num=2)
         nb = 400
-        for i in range(5):
+        for _i in range(5):
             collection_w_a.insert(cf.gen_default_list_data(nb=nb, dim=dim))
             collection_w_b.insert(cf.gen_default_list_data(nb=nb, dim=dim))
             collection_w_a.flush()

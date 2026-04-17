@@ -217,13 +217,10 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
                     return False
 
                 # Verify non-dropped property is still present with correct value
-                if (
+                return not (
                     "database.diskQuota.mb" not in downstream_props
                     or str(downstream_props["database.diskQuota.mb"]) != "2048"
-                ):
-                    return False
-
-                return True
+                )
             except:
                 return False
 

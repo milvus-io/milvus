@@ -579,7 +579,7 @@ class TestCreateIndexNegative(TestBase):
         logger.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
         # insert data
-        for i in range(1):
+        for _i in range(1):
             data = []
             for j in range(3000):
                 tmp = {

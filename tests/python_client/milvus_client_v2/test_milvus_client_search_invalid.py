@@ -68,7 +68,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_param_missing: Searching collection %s with missing parameters" % self.collection_name)
+        log.info(f"test_search_param_missing: Searching collection {self.collection_name} with missing parameters")
         self.search(
             client,
             self.collection_name,
@@ -221,7 +221,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_param_invalid_limit_type: searching with invalid limit: %s" % invalid_limit)
+        log.info(f"test_search_param_invalid_limit_type: searching with invalid limit: {invalid_limit}")
         self.search(
             client,
             self.collection_name,
@@ -231,7 +231,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             limit=invalid_limit,
             filter=default_search_exp,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1, "err_msg": "`limit` value %s is illegal" % invalid_limit},
+            check_items={"err_code": 1, "err_msg": f"`limit` value {invalid_limit} is illegal"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -292,7 +292,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         invalid_search_expr = f"{ct.default_int64_field_name}=={invalid_expr_value}"
-        log.info("test_search_param_invalid_expr_value: searching with invalid expr: %s" % invalid_search_expr)
+        log.info(f"test_search_param_invalid_expr_value: searching with invalid expr: {invalid_search_expr}")
         self.search(
             client,
             self.collection_name,
@@ -304,7 +304,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 999,
-                "err_msg": "failed to create query plan: cannot parse expression: %s" % invalid_search_expr,
+                "err_msg": f"failed to create query plan: cannot parse expression: {invalid_search_expr}",
             },
         )
 
@@ -319,7 +319,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: searched failed
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression: searching with expression: {expression}")
         search_vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         self.search(
             client,
@@ -332,7 +332,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 1,
-                "err_msg": "failed to create query plan: cannot parse expression: %s" % expression,
+                "err_msg": f"failed to create query plan: cannot parse expression: {expression}",
             },
         )
 
@@ -440,7 +440,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_output_field_vector: Searching collection %s" % self.collection_name)
+        log.info(f"test_search_output_field_vector: Searching collection {self.collection_name}")
         self.search(
             client,
             self.collection_name,
@@ -469,7 +469,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_output_field_invalid_wildcard: Searching collection %s" % self.collection_name)
+        log.info(f"test_search_output_field_invalid_wildcard: Searching collection {self.collection_name}")
         self.search(
             client,
             self.collection_name,
@@ -507,7 +507,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 1,
-                "err_msg": "`guarantee_timestamp` value %s is illegal" % invalid_guarantee_time,
+                "err_msg": f"`guarantee_timestamp` value {invalid_guarantee_time} is illegal",
             },
         )
 
@@ -520,7 +520,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_invalid_round_decimal: Searching collection %s" % self.collection_name)
+        log.info(f"test_search_invalid_round_decimal: Searching collection {self.collection_name}")
         self.search(
             client,
             self.collection_name,
@@ -568,7 +568,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_range_search_invalid_radius: Range searching collection %s" % self.collection_name)
+        log.info(f"test_range_search_invalid_radius: Range searching collection {self.collection_name}")
         range_search_params = {"metric_type": "COSINE", "params": {"radius": invalid_radius, "range_filter": 0}}
         self.search(
             client,
@@ -715,7 +715,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_range_search_invalid_range_filter: Range searching collection %s" % self.collection_name)
+        log.info(f"test_range_search_invalid_range_filter: Range searching collection {self.collection_name}")
         range_search_params = {"metric_type": "COSINE", "params": {"radius": 1, "range_filter": invalid_range_filter}}
         self.search(
             client,
@@ -936,7 +936,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression: searching with expression: {expression}")
         expression = expression.replace("&&", "and").replace("||", "or")
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         self.search(
@@ -950,7 +950,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 999,
-                "err_msg": "failed to create query plan: cannot parse expression: %s" % expression,
+                "err_msg": f"failed to create query plan: cannot parse expression: {expression}",
             },
         )
 
@@ -984,7 +984,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
 
         # 2. search with invalid bool expr
         invalid_search_expr_bool = f"{ct.default_bool_field_name} == {invalid_expr_bool_value}"
-        log.info("test_search_param_invalid_expr_bool: searching with invalid expr: %s" % invalid_search_expr_bool)
+        log.info(f"test_search_param_invalid_expr_bool: searching with invalid expr: {invalid_search_expr_bool}")
         self.search(
             client,
             collection_name,
@@ -1041,7 +1041,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                 check_items={
                     "err_code": 1100,
                     "err_msg": "failed to create query plan: predicate is not a "
-                    "boolean expression: %s, data type: Bool" % expression,
+                    f"boolean expression: {expression}, data type: Bool",
                 },
             )
         expression = f"!{ct.default_bool_field_name}"
@@ -1332,7 +1332,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. search collection without data before load
-        log.info("test_search_with_empty_collection: Searching empty collection %s" % collection_name)
+        log.info(f"test_search_with_empty_collection: Searching empty collection {collection_name}")
         err_msg = "collection not loaded"
         search_vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type)
         self.search(
@@ -1538,7 +1538,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
             filter=default_search_exp,
             partition_names=[partition_name],
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 65535, "err_msg": "partition name %s not found" % partition_name},
+            check_items={"err_code": 65535, "err_msg": f"partition name {partition_name} not found"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1701,7 +1701,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 2. search
-        log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_name)
+        log.info(f"test_search_with_output_fields_not_exist: Searching collection {collection_name}")
         if enable_dynamic and output_fields == "int63":
             # dynamic field enabled: non-existent field name returns success (treated as dynamic field)
             self.search(
@@ -1848,7 +1848,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 4. range search
-        log.info("test_range_search_invalid_radius_range_filter_L2: Range searching collection %s" % collection_name)
+        log.info(f"test_range_search_invalid_radius_range_filter_L2: Range searching collection {collection_name}")
         range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1, "range_filter": 10}}
         self.search(
             client,
@@ -1885,7 +1885,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 4. range search
-        log.info("test_range_search_invalid_radius_range_filter_IP: Range searching collection %s" % collection_name)
+        log.info(f"test_range_search_invalid_radius_range_filter_IP: Range searching collection {collection_name}")
         range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
         self.search(
             client,

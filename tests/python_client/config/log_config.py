@@ -18,15 +18,12 @@ class LogConfig:
         except Exception as e:
             # now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             log_path = "/tmp/ci_logs"
-            print(
-                "[get_env_variable] failed to get environment variables : %s, use default path : %s"
-                % (str(e), log_path)
-            )
+            print(f"[get_env_variable] failed to get environment variables : {str(e)}, use default path : {log_path}")
             return log_path
 
     @staticmethod
     def create_path(log_path):
-        print("[create_path] folder(%s) is not exist." % log_path)
+        print(f"[create_path] folder({log_path}) is not exist.")
         print("[create_path] create path now...")
         folder_path = Path(str(log_path))
         folder_path.mkdir(parents=True, exist_ok=True)
@@ -35,8 +32,8 @@ class LogConfig:
         """Make sure the path exists"""
         log_dir = self.get_env_variable()
         self.log_path = log_dir
-        self.log_report_json = "%s/test_report.json" % log_dir
-        self.log_report_html = "%s/test_report.html" % log_dir
+        self.log_report_json = f"{log_dir}/test_report.json"
+        self.log_report_html = f"{log_dir}/test_report.html"
 
         self.create_path(log_dir)
 

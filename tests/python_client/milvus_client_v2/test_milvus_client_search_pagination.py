@@ -483,8 +483,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, _id in enumerate(self.primary_keys):
-                int64 = total_datas[i][ct.default_int64_field_name]
-                float = total_datas[i][ct.default_float_field_name]
+                total_datas[i][ct.default_int64_field_name]
+                total_datas[i][ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(_id)
             # 2. search

@@ -41,7 +41,7 @@ class TestActionSecondDeployment(TestDeployBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("show collection info")
         log.info(f"collection {self.collection_w.name} has entities: {self.collection_w.num_entities}")
 
@@ -91,7 +91,7 @@ class TestActionSecondDeployment(TestDeployBase):
         schema = collection_w.schema
         data_type = [field.dtype for field in schema.fields]
         field_name = [field.name for field in schema.fields]
-        type_field_map = dict(zip(data_type, field_name))
+        type_field_map = dict(zip(data_type, field_name, strict=False))
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
             vector_index_type = "BIN_IVF_FLAT"
@@ -109,8 +109,8 @@ class TestActionSecondDeployment(TestDeployBase):
             for index in collection_w.indexes
             if index.field_name == type_field_map.get(101, "")
         ]
-        index_field_map = dict([(index.field_name, index.index_name) for index in collection_w.indexes])
-        index_names = [index.index_name for index in collection_w.indexes]  # used to drop index
+        dict([(index.field_name, index.index_name) for index in collection_w.indexes])
+        [index.index_name for index in collection_w.indexes]  # used to drop index
         vector_index_types = binary_vector_index_types + float_vector_index_types
         if len(vector_index_types) > 0:
             vector_index_type = vector_index_types[0]
@@ -146,7 +146,7 @@ class TestActionSecondDeployment(TestDeployBase):
             is_vector_indexed = False
             index_infos = [index.to_dict() for index in collection_w.indexes]
             for index_info in index_infos:
-                if "metric_type" in index_info.keys() or "metric_type" in index_info["index_param"]:
+                if "metric_type" in index_info or "metric_type" in index_info["index_param"]:
                     is_vector_indexed = True
                     break
             if is_vector_indexed is False:
@@ -171,10 +171,7 @@ class TestActionSecondDeployment(TestDeployBase):
             check_task=check_task,
             check_items={"nq": default_nq, "limit": default_limit},
         )
-        if "empty" in name:
-            check_task = None
-        else:
-            check_task = CheckTasks.check_query_not_empty
+        check_task = None if "empty" in name else CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name], check_task=check_task)
 
         # flush
@@ -184,10 +181,7 @@ class TestActionSecondDeployment(TestDeployBase):
             collection_w.collection.num_entities
 
         # search and query
-        if "empty" in name:
-            check_task = None
-        else:
-            check_task = CheckTasks.check_search_results
+        check_task = None if "empty" in name else CheckTasks.check_search_results
         collection_w.search(
             vectors_to_search[:default_nq],
             default_search_field,
@@ -198,14 +192,11 @@ class TestActionSecondDeployment(TestDeployBase):
             check_task=check_task,
             check_items={"nq": default_nq, "limit": default_limit},
         )
-        if "empty" in name:
-            check_task = None
-        else:
-            check_task = CheckTasks.check_query_not_empty
+        check_task = None if "empty" in name else CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name], check_task=check_task)
 
         # insert data and flush
-        for i in range(2):
+        for _i in range(2):
             self.insert_data_general(
                 insert_data=True,
                 is_binary=is_binary,

@@ -139,10 +139,9 @@ def generate_deterministic_rows(
         if is_array:
             # For array fields, generate random arrays for all rows
             for i in range(total_rows):
-                if nullable:
-                    if rng.random() < 0.1:
-                        rows[i][name] = None
-                        continue
+                if nullable and rng.random() < 0.1:
+                    rows[i][name] = None
+                    continue
                 rows[i][name] = make_random_array(element_dtype or DataType.INT64, rng)
             continue
 
@@ -465,7 +464,6 @@ def _milvus_to_python(expr: str) -> str:
         """Replace bare field identifiers with row['field'] lookups."""
         tokens = re.split(r"(\brow\[\'[^\']*\'\]|\"[^\"]*\"|\'[^\']*\'|\b\w+\b|[^\w\s])", text)
         result = []
-        skip_next_paren = False
         for tok in tokens:
             # Skip empty tokens
             if not tok or tok.isspace():
@@ -1196,7 +1194,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                         break
                 if no_idx_field:
                     expr = tmpl.replace("{f}", no_idx_field)
-                    field_names = [fname for fname, _ in group]
+                    [fname for fname, _ in group]
                     expected_idx = eval_filter(expr, test_data)
                     expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
                     actual_ids = results[no_idx_field]

@@ -294,7 +294,7 @@ def gen_binary_super_vectors(vectors, length):
     binary_vectors = []
     dim = len(vectors[0])
     for i in range(length):
-        cnt_1 = np.count_nonzero(vectors[i])
+        np.count_nonzero(vectors[i])
         # raw_vector = [0 for i in range(dim)] ???
         raw_vector = [1 for i in range(dim)]
         raw_vectors.append(raw_vector)
@@ -455,11 +455,13 @@ def gen_search_vectors_params(
     entities,
     top_k,
     nq,
-    search_params={"nprobe": 10},
+    search_params=None,
     rand_vector=False,
     metric_type="L2",
     replace_vecs=None,
 ):
+    if search_params is None:
+        search_params = {"nprobe": 10}
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
@@ -617,7 +619,7 @@ def update_field_value(entities, old_type, new_value):
     tmp_entities = copy.deepcopy(entities)
     for item in tmp_entities:
         if item["type"] == old_type:
-            for index, value in enumerate(item["values"]):
+            for index, _value in enumerate(item["values"]):
                 item["values"][index] = new_value
     return tmp_entities
 
@@ -629,7 +631,7 @@ def update_field_name_row(entities, old_name, new_name):
             item[new_name] = item[old_name]
             item.pop(old_name)
         else:
-            raise Exception("Field %s not in field" % old_name)
+            raise Exception(f"Field {old_name} not in field")
     return tmp_entities
 
 
@@ -643,7 +645,7 @@ def update_field_type_row(entities, old_name, new_name):
 
 def add_vector_field(nb, dimension=default_dim):
     field_name = gen_unique_str()
-    field = {"name": field_name, "type": DataType.FLOAT_VECTOR, "values": gen_vectors(nb, dimension)}
+    {"name": field_name, "type": DataType.FLOAT_VECTOR, "values": gen_vectors(nb, dimension)}
     return field_name
 
 
@@ -673,7 +675,6 @@ def gen_invalid_ips():
 
 
 def gen_invalid_uris():
-    ip = None
     uris = [
         " ",
         "中文",
@@ -871,7 +872,7 @@ def gen_normal_expressions():
 
 def assert_equal_vector(v1, v2):
     if len(v1) != len(v2):
-        assert False
+        raise AssertionError()
     for i in range(len(v1)):
         assert abs(v1[i] - v2[i]) < epsilon
 
@@ -896,7 +897,7 @@ def restart_server(helm_release_name):
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
     # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
-    log.debug("Pod name: %s" % pod_name)
+    log.debug(f"Pod name: {pod_name}")
     if pod_name is not None:
         try:
             v1.delete_namespaced_pod(pod_name, namespace)
@@ -930,19 +931,13 @@ def restart_server(helm_release_name):
                     else:
                         time.sleep(1)
                 if time.time() - start_time > timeout:
-                    log.error("Restart pod: %s timeout" % pod_name_tmp)
+                    log.error(f"Restart pod: {pod_name_tmp} timeout")
                     res = False
                     return res
                 if ready_break:
                     break
     else:
-        raise Exception("Pod: %s not found" % pod_name)
-    follow = True
-    pretty = True
-    previous = True  # bool | Return previous terminated container logs. Defaults to false. (optional)
-    since_seconds = 56  # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
-    timestamps = True  # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
-    container = "milvus"
+        raise Exception(f"Pod: {pod_name} not found")
     # start_time = time.time()
     # while time.time() - start_time <= timeout:
     #     try:
@@ -967,11 +962,7 @@ def compare_list_elements(_first, _second):
     if not isinstance(_first, list) or not isinstance(_second, list) or len(_first) != len(_second):
         return False
 
-    for ele in _first:
-        if ele not in _second:
-            return False
-
-    return True
+    return all(ele in _second for ele in _first)
 
 
 def get_token(url):
@@ -990,7 +981,7 @@ def get_tags(url, token):
         "Content-type": "application/json",
         "charset": "UTF-8",
         "Accept": "application/vnd.docker.distribution.manifest.v2+json",
-        "Authorization": "Bearer %s" % token,
+        "Authorization": f"Bearer {token}",
     }
     try:
         rep = requests.get(url, headers=headers)
@@ -1025,7 +1016,7 @@ def get_config_digest(url, token):
         "Content-type": "application/json",
         "charset": "UTF-8",
         "Accept": "application/vnd.docker.distribution.manifest.v2+json",
-        "Authorization": "Bearer %s" % token,
+        "Authorization": f"Bearer {token}",
     }
     try:
         rep = requests.get(url, headers=headers)
@@ -1046,8 +1037,8 @@ def get_latest_tag(limit=100, tag_prefix="master", tag_latest="master-latest"):
     service = "registry.docker.io"
     repository = "milvusdb/milvus"
 
-    auth_url = "https://auth.docker.io/token?service=%s&scope=repository:%s:pull" % (service, repository)
-    tags_url = "https://index.docker.io/v2/%s/tags/list" % repository
+    auth_url = f"https://auth.docker.io/token?service={service}&scope=repository:{repository}:pull"
+    tags_url = f"https://index.docker.io/v2/{repository}/tags/list"
     tag_url = "https://index.docker.io/v2/milvusdb/milvus/manifests/"
 
     master_latest_digest = get_config_digest(tag_url + tag_latest, get_token(auth_url))
@@ -1067,7 +1058,7 @@ def get_latest_tag(limit=100, tag_prefix="master", tag_latest="master-latest"):
     if latest_tag == "":
         latest_tag = tag_latest
         print("Can't find the latest image name")
-    print("The image name used is %s" % str(latest_tag))
+    print(f"The image name used is {str(latest_tag)}")
     return latest_tag
 
 
@@ -1078,12 +1069,12 @@ class MyThread(threading.Thread):
     def run(self):
         self.exc = None
         try:
-            super(MyThread, self).run()
+            super().run()
         except BaseException as e:
             self.exc = e
             log.error(traceback.format_exc())
 
     def join(self):
-        super(MyThread, self).join()
+        super().join()
         if self.exc:
             raise self.exc

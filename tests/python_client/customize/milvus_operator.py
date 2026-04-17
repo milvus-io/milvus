@@ -46,7 +46,7 @@ class MilvusOperator:
         else:
             d_configs = benedict.from_yaml(template)
 
-        for key in configs.keys():
+        for key in configs:
             d_configs[key] = configs[key]
 
         # return a python dict if it is not none
@@ -113,7 +113,7 @@ class MilvusOperator:
 
         d_configs = benedict()
 
-        for key in configs.keys():
+        for key in configs:
             d_configs[key] = configs[key]
 
         cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
@@ -147,7 +147,7 @@ class MilvusOperator:
             component: the component to scale, e.g: dataNode, queryNode, indexNode, proxy
             namespace: namespace that the milvus is running in
         """
-        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
+        CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         component = component.replace("node", "Node")
         scale_configs = {f"spec.components.{component}.replicas": replicas}
         log.info(f"scale milvus with configs: {scale_configs}")
@@ -207,5 +207,5 @@ class MilvusOperator:
         label_selector = f"app.kubernetes.io/instance={release_name}-etcd, app.kubernetes.io/name=etcd"
         res = get_pod_ip_name_pairs(namespace, label_selector)
         if res:
-            etcd_endpoints = [f"{pod_ip}:2379" for pod_ip in res.keys()]
+            etcd_endpoints = [f"{pod_ip}:2379" for pod_ip in res]
         return etcd_endpoints[0]

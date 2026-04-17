@@ -316,10 +316,7 @@ if __name__ == "__main__":
         # Find the same doc_id in the original data and get the original query
         # Use pandas to find the item with matching doc_id
         # Convert data to DataFrame if it's not already
-        if not isinstance(data, pd.DataFrame):
-            data_df = pd.DataFrame(data)
-        else:
-            data_df = data
+        data_df = pd.DataFrame(data) if not isinstance(data, pd.DataFrame) else data
         # Filter by doc_id and get the text field value
         origin_query = data_df.loc[data_df["doc_id"] == row["doc_id"], ft.text_field_name].iloc[0]
         logger.info(f"Query: {tokenized_query}")
@@ -337,4 +334,4 @@ if __name__ == "__main__":
             logger.info(f"Diff: {res_diff}, {mock_res_diff}")
             if res_diff or mock_res_diff:
                 logger.error(f"Search results inconsistent: {res_diff}, {mock_res_diff}")
-                assert False
+                raise AssertionError()

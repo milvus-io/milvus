@@ -320,7 +320,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
         insert_ids = [i for i in range(len(self.shared_data))]
 
         # 2. search
-        log.info("test_range_search_with_output_field: Searching collection %s" % self.collection_name)
+        log.info(f"test_range_search_with_output_field: Searching collection {self.collection_name}")
         range_search_params = {"metric_type": "COSINE", "params": {"radius": 0, "range_filter": 1}}
         res, _ = self.search(
             client,
@@ -378,7 +378,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             )
 
         # 2. search with multi-threads
-        log.info("test_range_search_concurrent_multi_threads: searching with %s processes" % threads_num)
+        log.info(f"test_range_search_concurrent_multi_threads: searching with {threads_num} processes")
         for _ in range(threads_num):
             t = threading.Thread(
                 target=search,
@@ -407,7 +407,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
         tmp_limit = 5
 
         # 2. search
-        log.info("test_search_round_decimal: Searching collection %s" % self.collection_name)
+        log.info(f"test_search_round_decimal: Searching collection {self.collection_name}")
         range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 1}}
         search_vectors = cf.gen_vectors(tmp_nq, default_dim)
         res, _ = self.search(
@@ -498,8 +498,8 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
 
         # 2. search collection with empty vectors
         log.info(
-            "test_range_search_with_empty_vectors: Range searching collection %s "
-            "using empty vector" % self.collection_name
+            f"test_range_search_with_empty_vectors: Range searching collection {self.collection_name} "
+            "using empty vector"
         )
         range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0, "range_filter": 0}}
         self.search(
@@ -699,7 +699,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         schema.add_field(vec_field_name, vector_data_type, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        for i in range(rounds):
+        for _i in range(rounds):
             data = cf.gen_row_data_by_schema(nb=nb, schema=schema)
             self.insert(client, collection_name, data=data)
 
@@ -711,7 +711,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
 
         if with_growing is True:
             # add some growing segments
-            for j in range(rounds // 2):
+            for _j in range(rounds // 2):
                 data = cf.gen_row_data_by_schema(nb=nb, schema=schema)
                 self.insert(client, collection_name, data=data)
 
@@ -1074,12 +1074,12 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 2. release collection
-        log.info("test_range_search_collection_after_release_load: releasing collection %s" % collection_name)
+        log.info(f"test_range_search_collection_after_release_load: releasing collection {collection_name}")
         self.release_collection(client, collection_name)
-        log.info("test_range_search_collection_after_release_load: released collection %s" % collection_name)
+        log.info(f"test_range_search_collection_after_release_load: released collection {collection_name}")
 
         # 3. Search the pre-released collection after load
-        log.info("test_range_search_collection_after_release_load: loading collection %s" % collection_name)
+        log.info(f"test_range_search_collection_after_release_load: loading collection {collection_name}")
         self.load_collection(client, collection_name)
         log.info("test_range_search_collection_after_release_load: searching after load")
         search_vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
@@ -1804,7 +1804,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         if is_flush:
             self.flush(client, collection_name)
 
-        log.info("auto_id= %s" % auto_id)
+        log.info(f"auto_id= {auto_id}")
 
         # 2. create index
         idx = self.prepare_index_params(client)[0]
@@ -1961,7 +1961,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 4. search
-        log.info("test_range_search_binary_without_flush: searching collection %s" % collection_name)
+        log.info(f"test_range_search_binary_without_flush: searching collection {collection_name}")
         _, search_binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)
         search_params = {"metric_type": metrics, "params": {"radius": 1000, "range_filter": 0}}
         self.search(
@@ -2044,7 +2044,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
             )
 
         # 2. search with multi-threads
-        log.info("test_range_search_concurrent_multi_threads: searching with %s processes" % threads_num)
+        log.info(f"test_range_search_concurrent_multi_threads: searching with {threads_num} processes")
         for _ in range(threads_num):
             t = threading.Thread(
                 target=search,
@@ -2094,7 +2094,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
 
         # 3. search with expression
         expression = f"0 < {default_int64_field_name} < 5001"
-        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression: searching with expression: {expression}")
 
         nums = 5000
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]

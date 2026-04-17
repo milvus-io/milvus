@@ -142,7 +142,7 @@ class ResponseChecker:
         assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
         if isinstance(res, Error):
-            error_code = error_dict[ct.err_code]
+            error_dict[ct.err_code]
             # assert res.code == error_code or error_dict[ct.err_msg] in res.message, (
             #     f"Response of API {self.func_name} "
             #     f"expect get error code {error_dict[ct.err_code]} or error message {error_dict[ct.err_code]}, "
@@ -154,8 +154,8 @@ class ResponseChecker:
             )
 
         else:
-            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
-            assert False, (
+            log.error(f"[CheckFunc] Response of API is not an error: {str(res)}")
+            raise AssertionError(
                 f"Response of API expect get error code {error_dict[ct.err_code]} or "
                 f"error message {error_dict[ct.err_code]}"
                 f"but success"
@@ -168,13 +168,13 @@ class ResponseChecker:
 
         if func_name == "list_connections":
             if not isinstance(res, list):
-                log.error("[CheckFunc] Response of list_connections is not a list: %s" % str(res))
-                assert False
+                log.error(f"[CheckFunc] Response of list_connections is not a list: {str(res)}")
+                raise AssertionError()
 
             list_content = params.get(ct.list_content, None)
             if not isinstance(list_content, list):
-                log.error("[CheckFunc] Check param of list_content is not a list: %s" % str(list_content))
-                assert False
+                log.error(f"[CheckFunc] Check param of list_content is not a list: {str(list_content)}")
+                raise AssertionError()
 
             new_res = pc.get_connect_object_name(res)
             assert pc.list_equal_check(new_res, list_content)
@@ -284,7 +284,7 @@ class ResponseChecker:
             nullable_fields = check_items.get("nullable_fields")
             if not isinstance(nullable_fields, list):
                 log.error("nullable_fields should be a list including all the nullable fields name")
-                assert False
+                raise AssertionError()
             for field in res["fields"]:
                 if field["name"] in nullable_fields:
                     assert field["nullable"] is True
@@ -292,7 +292,7 @@ class ResponseChecker:
             add_fields = check_items.get("add_fields")
             if not isinstance(add_fields, list):
                 log.error("add_fields should be a list including all the added fields name")
-                assert False
+                raise AssertionError()
             for field in res["fields"]:
                 if field["name"] in add_fields:
                     assert field["nullable"] is True
@@ -322,7 +322,7 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         if check_items.get("collection_name", None) is not None:
             assert res["collection_name"] == check_items.get("collection_name")
-        for key in check_items.keys():
+        for key in check_items:
             for field in res["fields"]:
                 if field["name"] == key:
                     assert field["params"].items() >= check_items[key].items()
@@ -431,10 +431,9 @@ class ResponseChecker:
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
-        if check_items.get("_async", None):
-            if check_items["_async"]:
-                search_res.done()
-                search_res = search_res.result()
+        if check_items.get("_async", None) and check_items["_async"]:
+            search_res.done()
+            search_res = search_res.result()
         if check_items.get("output_fields", None):
             assert set(search_res[0][0].entity.fields.keys()) == set(check_items["output_fields"])
             original_entities = check_items.get("original_entities", None)
@@ -784,8 +783,8 @@ class ResponseChecker:
         if isinstance(res, Error):
             assert "permission deny" in res.message
         else:
-            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
-            assert False
+            log.error(f"[CheckFunc] Response of API is not an error: {str(res)}")
+            raise AssertionError()
         return True
 
     @staticmethod
@@ -794,8 +793,8 @@ class ResponseChecker:
         if isinstance(res, Error):
             assert "auth check failure" in res.message
         else:
-            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
-            assert False
+            log.error(f"[CheckFunc] Response of API is not an error: {str(res)}")
+            raise AssertionError()
         return True
 
     def check_insert_response(self, check_items):

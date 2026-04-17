@@ -51,7 +51,7 @@ def check_cluster_nodes(chaos_config):
 
 def record_results(checkers):
     res = ""
-    for k in checkers.keys():
+    for k in checkers:
         check_result = checkers[k].check_result()
         res += f"{str(k):10} {check_result}\n"
     return res
@@ -158,7 +158,7 @@ class TestChaos(TestChaosBase):
         # parse the test expectations in testcases.yaml
         if self.parser_testcase_config(chaos_yaml, chaos_config) is False:
             log.error("Fail to get the testcase info in testcases.yaml")
-            assert False
+            raise AssertionError()
 
         # init report
         dir_name = "./reports"
@@ -251,7 +251,7 @@ class TestChaos(TestChaosBase):
         except Exception as e:
             log.info(f"Fail to write the report: {e}")
         # terminate and restart threads
-        for k, checker in self.health_checkers.items():
+        for _k, checker in self.health_checkers.items():
             checker.terminate()
         sleep(5)
         log.info(f"Alive threads: {threading.enumerate()}")

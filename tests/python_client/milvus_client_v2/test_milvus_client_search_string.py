@@ -84,8 +84,8 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         )
         search_str = query_res[1][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
-        log.info("test_search_string_field_not_primary: searching collection %s" % self.collection_name)
-        log.info("search expr: %s" % search_exp)
+        log.info(f"test_search_string_field_not_primary: searching collection {self.collection_name}")
+        log.info(f"search expr: {search_exp}")
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -118,7 +118,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: all results have int64 >= 0 and varchar >= "0", distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_mix_expr: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_mix_expr: searching collection {self.collection_name}")
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -154,7 +154,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: error 1100 with "cannot parse expression" message
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_with_invalid_expr: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_with_invalid_expr: searching collection {self.collection_name}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         self.search(
             client,
@@ -181,7 +181,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         expected: results have varchar starting with "0", distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_field_not_primary_prefix: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_field_not_primary_prefix: searching collection {self.collection_name}")
         output_fields = [default_float_field_name, default_string_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -217,7 +217,7 @@ class TestSearchStringAutoId(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_string_exp = 'varchar >= ""'
-        log.info("test_search_string_field_not_primary_is_empty: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_field_not_primary_is_empty: searching collection {self.collection_name}")
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -302,8 +302,8 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         )
         search_str = query_res[1][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
-        log.info("test_search_string_field_is_primary_true: searching collection %s" % self.collection_name)
-        log.info("search expr: %s" % search_exp)
+        log.info(f"test_search_string_field_is_primary_true: searching collection {self.collection_name}")
+        log.info(f"search expr: {search_exp}")
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -335,7 +335,7 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         expected: results match prefix filter, distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_string_field_index: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_field_index: searching collection {self.collection_name}")
         output_fields = [default_float_field_name, default_string_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -372,7 +372,7 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         search_string_exp = 'varchar >= ""'
         limit = 1
-        log.info("test_search_string_field_is_primary_insert_empty: searching collection %s" % self.collection_name)
+        log.info(f"test_search_string_field_is_primary_insert_empty: searching collection {self.collection_name}")
         output_fields = [default_string_field_name, default_float_field_name]
         vectors = cf.gen_vectors(default_nq, default_dim)
         res, _ = self.search(
@@ -423,13 +423,13 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
         filter_ids = []
         expression_eval = expression.replace("&&", "and").replace("||", "or")
         for item in query_res:
-            int64 = item[ct.default_int64_field_name]
-            varchar = item[ct.default_string_field_name]
+            item[ct.default_int64_field_name]
+            item[ct.default_string_field_name]
             if not expression_eval or eval(expression_eval):
                 filter_ids.append(item[ct.default_string_field_name])
 
         # search with expression (AUTOINDEX/HNSW may not return all matches, use subset check)
-        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        log.info(f"test_search_with_expression: searching with expression: {expression}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         search_res, _ = self.search(
             client,
@@ -581,7 +581,7 @@ class TestSearchStringBinary(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         dim = 128
-        log.info("test_search_mix_expr_with_binary: searching collection %s" % self.collection_name)
+        log.info(f"test_search_mix_expr_with_binary: searching collection {self.collection_name}")
         _, search_binary_vectors = cf.gen_binary_vectors(default_nq, dim)
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         output_fields = [default_string_field_name, default_float_field_name]
@@ -652,7 +652,7 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         )
         search_str = query_res[0][default_string_field_name]
         search_exp = f"{default_string_field_name} == '{search_str}'"
-        log.info("test_search_string_different_language: searching with language=%s" % language)
+        log.info(f"test_search_string_different_language: searching with language={language}")
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]
         res, _ = self.search(
@@ -712,7 +712,7 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         log.info(
-            "test_search_string_field_is_primary_true_multi_vector_fields: searching collection %s" % collection_name
+            f"test_search_string_field_is_primary_true_multi_vector_fields: searching collection {collection_name}"
         )
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]
@@ -779,7 +779,7 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        log.info("test_range_search_string_field_is_primary_true: searching collection %s" % collection_name)
+        log.info(f"test_range_search_string_field_is_primary_true: searching collection {collection_name}")
         range_search_params = {"metric_type": "L2", "params": {"radius": 1000, "range_filter": 0}}
         search_vectors = cf.gen_vectors(default_nq, dim)
         output_fields = [default_string_field_name, default_float_field_name]

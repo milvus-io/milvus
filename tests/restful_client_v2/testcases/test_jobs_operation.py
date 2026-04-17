@@ -25,7 +25,7 @@ class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.float32):
             return float(obj)
-        return super(NumpyEncoder, self).default(obj)
+        return super().default(obj)
 
 
 @pytest.mark.BulkInsert
@@ -136,7 +136,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         c = Collection(name)
         c.load(_refresh=True, timeou=120)
         res = c.query(
@@ -234,7 +234,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         c = Collection(name)
         c.load(_refresh=True, timeou=120)
         res = c.query(
@@ -331,14 +331,14 @@ class TestCreateImportJob(TestBase):
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
                 if rsp["data"]["state"] == "Completed":
-                    assert False, "import job should not be completed"
+                    raise AssertionError("import job should not be completed")
                 if rsp["data"]["state"] == "Failed":
                     assert True
                     finished = True
                 logger.debug(f"job progress: {rsp}")
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
 
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [1])
@@ -418,7 +418,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         c = Collection(name)
         c.load(_refresh=True, timeou=120)
         res = c.query(
@@ -517,7 +517,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         c = Collection(name)
         c.load(_refresh=True, timeou=120)
         res = c.query(
@@ -610,7 +610,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         time.sleep(10)
         # assert data count
         c = Collection(name)
@@ -695,7 +695,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         time.sleep(10)
         # assert data count
         c = Collection(name)
@@ -785,7 +785,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         time.sleep(10)
         # assert data count
         c = Collection(name)
@@ -920,7 +920,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         time.sleep(10)
         # assert data count
         c = Collection(name)
@@ -1102,7 +1102,7 @@ class TestCreateImportJob(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         time.sleep(10)
         c_restore = Collection(restore_collection_name)
         # since we import both original and sorted segments, the number of entities should be 2x
@@ -1293,10 +1293,10 @@ class TestCreateImportJob(TestBase):
                 )
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field"
+                raise AssertionError("Import should have failed for BM25 function output field")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_json_extra_fields_without_dynamic(self):
         """Test JSON import with extra fields when dynamic field is disabled - should be ignored"""
@@ -1520,10 +1520,10 @@ class TestCreateImportJob(TestBase):
                 )
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field in CSV"
+                raise AssertionError("Import should have failed for BM25 function output field in CSV")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_json_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
         """Test JSON import with non-BM25 function output field is rejected by default"""
@@ -1584,10 +1584,12 @@ class TestCreateImportJob(TestBase):
                 assert "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+                raise AssertionError(
+                    "Import should have failed for non-BM25 function output field without property enabled"
+                )
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_json_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
         """Test JSON import with non-BM25 function output field succeeds after enabling property"""
@@ -1770,10 +1772,12 @@ class TestCreateImportJob(TestBase):
                 assert "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+                raise AssertionError(
+                    "Import should have failed for non-BM25 function output field without property enabled"
+                )
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_csv_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
         """Test CSV import with non-BM25 function output field succeeds after enabling property"""
@@ -1961,10 +1965,12 @@ class TestCreateImportJob(TestBase):
                 assert "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+                raise AssertionError(
+                    "Import should have failed for non-BM25 function output field without property enabled"
+                )
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
         """Test Parquet import with non-BM25 function output field succeeds after enabling property"""
@@ -2165,10 +2171,10 @@ class TestCreateImportJob(TestBase):
                 assert "bm25" in reason or "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field"
+                raise AssertionError("Import should have failed for BM25 function output field")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_json_without_function_output_field(self):
         """Test JSON import without function output field - BM25 should auto-generate"""
@@ -2520,10 +2526,10 @@ class TestCreateImportJob(TestBase):
                 )
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to max_length violation"
+                raise AssertionError("Import should have failed due to max_length violation")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_array_float_nan_validation(self):
         """Test Parquet import with Array<Float> containing NaN - should fail"""
@@ -2589,10 +2595,10 @@ class TestCreateImportJob(TestBase):
                 assert "nan" in reason or "infinite" in reason or "invalid" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to NaN value"
+                raise AssertionError("Import should have failed due to NaN value")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_csv_extra_columns_without_dynamic(self):
         """Test CSV import with extra columns when dynamic field is disabled - should be ignored"""
@@ -2713,10 +2719,10 @@ class TestCreateImportJob(TestBase):
             if rsp["data"]["state"] == "Failed":
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to missing required field"
+                raise AssertionError("Import should have failed due to missing required field")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_csv_required_field_missing(self):
         """Test CSV import with required field missing from header - should fail"""
@@ -2767,10 +2773,10 @@ class TestCreateImportJob(TestBase):
             if rsp["data"]["state"] == "Failed":
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to missing required field in CSV"
+                raise AssertionError("Import should have failed due to missing required field in CSV")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_required_field_missing(self):
         """Test Parquet import with required field missing - should fail"""
@@ -2821,10 +2827,10 @@ class TestCreateImportJob(TestBase):
             if rsp["data"]["state"] == "Failed":
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to missing required field in Parquet"
+                raise AssertionError("Import should have failed due to missing required field in Parquet")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_json_vector_dim_mismatch(self):
         """Test JSON import with wrong vector dimension - should fail"""
@@ -2873,10 +2879,10 @@ class TestCreateImportJob(TestBase):
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to vector dimension mismatch"
+                raise AssertionError("Import should have failed due to vector dimension mismatch")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_csv_vector_dim_mismatch(self):
         """Test CSV import with wrong vector dimension - should fail"""
@@ -2929,10 +2935,10 @@ class TestCreateImportJob(TestBase):
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to vector dimension mismatch in CSV"
+                raise AssertionError("Import should have failed due to vector dimension mismatch in CSV")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_vector_dim_mismatch(self):
         """Test Parquet import with wrong vector dimension - should fail"""
@@ -2984,10 +2990,10 @@ class TestCreateImportJob(TestBase):
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to vector dimension mismatch in Parquet"
+                raise AssertionError("Import should have failed due to vector dimension mismatch in Parquet")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_with_nullable_and_default_fields(self):
         """Test Parquet import with nullable and default fields missing - should auto-fill"""
@@ -3374,10 +3380,10 @@ class TestCreateImportJob(TestBase):
                 assert "bm25" in reason or "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field in CSV"
+                raise AssertionError("Import should have failed for BM25 function output field in CSV")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_with_function_output_field(self):
         """Test Parquet import with BM25 function output field - should fail with error"""
@@ -3451,10 +3457,10 @@ class TestCreateImportJob(TestBase):
                 )
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field in Parquet"
+                raise AssertionError("Import should have failed for BM25 function output field in Parquet")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
     def test_import_parquet_without_function_output_field(self):
         """Test Parquet import without BM25 function output field - should succeed with auto-generation"""
@@ -3600,10 +3606,10 @@ class TestCreateImportJob(TestBase):
                 assert "bm25" in reason or "function output" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed for BM25 function output field"
+                raise AssertionError("Import should have failed for BM25 function output field")
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+                raise AssertionError("Import job timeout")
 
 
 @pytest.mark.L2
@@ -3688,7 +3694,7 @@ class TestImportJobAdvance(TestBase):
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
-                        assert False, "import job timeout"
+                        raise AssertionError("import job timeout")
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
@@ -3757,7 +3763,7 @@ class TestCreateImportJobAdvance(TestBase):
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
-        for i in range(task_num):
+        for _i in range(task_num):
             # create import job
             payload = {
                 "collectionName": name,
@@ -3785,7 +3791,7 @@ class TestCreateImportJobAdvance(TestBase):
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
-                        assert False, "import job timeout"
+                        raise AssertionError("import job timeout")
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
@@ -3851,7 +3857,7 @@ class TestCreateImportJobAdvance(TestBase):
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
-        for i in range(task_num):
+        for _i in range(task_num):
             # create import job
             payload = {
                 "collectionName": name,
@@ -3879,7 +3885,7 @@ class TestCreateImportJobAdvance(TestBase):
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
-                        assert False, "import job timeout"
+                        raise AssertionError("import job timeout")
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
@@ -3985,10 +3991,10 @@ class TestCreateImportJobNegative(TestBase):
                     assert True
                     finished = True
                 if rsp["data"]["state"] == "Completed":
-                    assert False
+                    raise AssertionError()
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
 
     def test_import_job_with_empty_files(self):
         # create collection
@@ -4323,7 +4329,7 @@ class TestCreateImportJobNegative(TestBase):
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
-                    assert False, "import job timeout"
+                    raise AssertionError("import job timeout")
         c = Collection(name)
         time.sleep(10)
         c.load(_refresh=True, timeou=120)

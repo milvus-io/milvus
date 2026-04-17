@@ -133,7 +133,7 @@ class TestQueryPhraseMatch(TestcaseBase):
                     for token in tokens:
                         if token not in text:
                             log.info(f"Token {token} not in text {text}")
-                            assert False
+                            raise AssertionError()
 
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])

@@ -228,7 +228,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         group_size = 5
         client = self._client()
         collection_info = self.describe_collection(client, self.collection_name)[0]
-        for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
+        for field, dim, idx_type, metric in zip(
+            self.vector_fields, self.dims, self.index_types, self.metric_types, strict=False
+        ):
             if field == self.binary_vector_field_name:
                 continue
             search_vectors = cf.gen_vectors(
@@ -293,7 +295,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         req_list = []
         client = self._client()
         collection_info = self.describe_collection(client, self.collection_name)[0]
-        for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
+        for field, dim, idx_type, metric in zip(
+            self.vector_fields, self.dims, self.index_types, self.metric_types, strict=False
+        ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_params = {
@@ -357,7 +361,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         collection_info = self.describe_collection(client, self.collection_name)[0]
         # 3. prepare search params
         req_list = []
-        for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
+        for field, dim, _idx_type, metric in zip(
+            self.vector_fields, self.dims, self.index_types, self.metric_types, strict=False
+        ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_param = {
@@ -391,8 +397,8 @@ class TestGroupSearch(TestMilvusClientV2Base):
 
         # 5. hybrid search with RRFRanker on one vector field with group by
         req_list = []
-        for field, dim, idx_type, metric in zip(
-            self.vector_fields[1:], self.dims[1:], self.index_types[1:], self.metric_types[1:]
+        for field, dim, _idx_type, metric in zip(
+            self.vector_fields[1:], self.dims[1:], self.index_types[1:], self.metric_types[1:], strict=False
         ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
@@ -428,7 +434,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         collection_info = self.describe_collection(client, self.collection_name)[0]
         # 3. prepare search params
         req_list = []
-        for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
+        for field, dim, _idx_type, metric in zip(
+            self.vector_fields, self.dims, self.index_types, self.metric_types, strict=False
+        ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_param = {
@@ -491,7 +499,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
         collection_info = self.describe_collection(client, self.collection_name)[0]
         nq = 2
         limit = 15
-        for field, dim, idx_type, metric in zip(self.vector_fields, self.dims, self.index_types, self.metric_types):
+        for field, dim, idx_type, metric in zip(
+            self.vector_fields, self.dims, self.index_types, self.metric_types, strict=False
+        ):
             if field == self.binary_vector_field_name:
                 continue  # not support group by search on binary vector
             search_vectors = cf.gen_vectors(

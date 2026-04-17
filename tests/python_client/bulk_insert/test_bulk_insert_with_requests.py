@@ -1,4 +1,3 @@
-
 import json
 from time import sleep
 
@@ -17,8 +16,10 @@ from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get
 from utils.util_log import test_log as log
 
 
-def assert_statistic(checkers, expectations={}):
-    for k in checkers.keys():
+def assert_statistic(checkers, expectations=None):
+    if expectations is None:
+        expectations = {}
+    for k in checkers:
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
@@ -98,10 +99,7 @@ class TestChaos(TestChaosBase):
             return
         log.info("bulk_insert checker is in  health checkers, prepare data firstly")
         deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
-        if deploy_tool == "helm":
-            release_name = self.instance_name
-        else:
-            release_name = self.instance_name + "-minio"
+        release_name = self.instance_name if deploy_tool == "helm" else self.instance_name + "-minio"
         minio_ip_pod_pair = get_pod_ip_name_pairs("chaos-testing", f"release={release_name}, app=minio")
         ms = MilvusSys()
         minio_ip = list(minio_ip_pod_pair.keys())[0]
@@ -114,7 +112,7 @@ class TestChaos(TestChaosBase):
         entities = []
         for i in range(nb):
             entity_value = [field_values[i] for field_values in data]
-            entity = dict(zip(fields_name, entity_value))
+            entity = dict(zip(fields_name, entity_value, strict=False))
             entities.append(entity)
         data_dict = {"rows": entities}
         data_source = "/tmp/ci_logs/bulk_insert_data_source.json"

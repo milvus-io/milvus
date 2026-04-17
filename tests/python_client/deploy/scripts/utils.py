@@ -60,7 +60,7 @@ default_index_params = [
     {"M": 48, "efConstruction": 500},
 ]
 
-index_params_map = dict(zip(all_index_types, default_index_params))
+index_params_map = dict(zip(all_index_types, default_index_params, strict=False))
 
 NUM_REPLICAS = 2
 
@@ -226,7 +226,7 @@ def create_index(prefix):
         logger.info(index_info_list)
         is_indexed = False
         for index_info in index_info_list:
-            if "metric_type" in index_info.keys() or "metric_type" in index_info["index_param"]:
+            if "metric_type" in index_info or "metric_type" in index_info["index_param"]:
                 is_indexed = True
                 logger.info(f"collection {col_name} has been indexed with {index_info}")
         if not is_indexed:

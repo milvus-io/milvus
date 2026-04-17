@@ -5784,17 +5784,15 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
     )
     def rerank_fields(self, request):
         tags = request.config.getoption("--tags", default=["L0", "L1", "L2"], skip=True)
-        if CaseLabel.L2 not in tags:
-            if request.param not in [DataType.INT8, DataType.FLOAT]:
-                pytest.skip(f"skip rerank field type {request.param}")
+        if CaseLabel.L2 not in tags and request.param not in [DataType.INT8, DataType.FLOAT]:
+            pytest.skip(f"skip rerank field type {request.param}")
         yield request.param
 
     @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED", "AUTOINDEX", ""])
     def scalar_index(self, request):
         tags = request.config.getoption("--tags", default=["L0", "L1", "L2"], skip=True)
-        if CaseLabel.L2 not in tags:
-            if request.param not in ["INVERTED", ""]:
-                pytest.skip(f"skip scalar index type {request.param}")
+        if CaseLabel.L2 not in tags and request.param not in ["INVERTED", ""]:
+            pytest.skip(f"skip scalar index type {request.param}")
         yield request.param
 
     """
@@ -6819,7 +6817,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         log.info(f"nullable decay results: {results}")
         # 4. verify: non-null rows should have positive scores and be ordered by distance
         non_null_results = [r for r in results if r.get(ct.default_reranker_field_name) is not None]
-        null_results = [r for r in results if r.get(ct.default_reranker_field_name) is None]
+        [r for r in results if r.get(ct.default_reranker_field_name) is None]
         # non-null scores should be positive and in descending order
         non_null_scores = [r["distance"] for r in non_null_results]
         for i, score in enumerate(non_null_scores):
@@ -7049,7 +7047,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
             params={"reranker": "decay", "function": "gauss", "origin": 0, "offset": 0, "decay": 0.5, "scale": 100},
         )
         vectors_to_search = rng.random((1, dim))
-        res = self.search(
+        self.search(
             client,
             collection_name,
             vectors_to_search,
@@ -7627,10 +7625,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         )
 
         # 6. execute search with reranker
-        if ranker_model == "tei":
-            ranker = tei_ranker
-        else:
-            ranker = vllm_ranker
+        ranker = tei_ranker if ranker_model == "tei" else vllm_ranker
 
         for search_type in ["dense", "sparse", "bm25"]:
             log.info(f"Executing {search_type} search with model reranker")
@@ -7753,10 +7748,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "endpoint": vllm_reranker_endpoint,
             },
         )
-        if ranker_model == "tei":
-            ranker = tei_ranker
-        else:
-            ranker = vllm_ranker
+        ranker = tei_ranker if ranker_model == "tei" else vllm_ranker
         # 6. execute search with reranker
         for search_type in ["dense+sparse", "dense+bm25", "sparse+bm25"]:
             log.info(f"Executing {search_type} search with model reranker")

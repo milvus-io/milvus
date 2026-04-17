@@ -148,7 +148,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         partition_nums = 4095
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        for i in range(partition_nums):
+        for _i in range(partition_nums):
             partition_name = cf.gen_unique_str(partition_prefix)
             # 2. create partition
             self.create_partition(client, collection_name, partition_name)
@@ -983,7 +983,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. create partition
         result = self.has_partition(client, collection_name, partition_name)[0]
-        assert result == False
+        assert not result
 
 
 class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
@@ -2122,7 +2122,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
             collection_name,
             [partition_name],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 200, ct.err_msg: "partition not found[partition=%s]" % partition_name},
+            check_items={ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)

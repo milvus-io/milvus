@@ -309,7 +309,6 @@ class TestMemoryStressReplica:
         """
         collection_w = prepare_collection
         utility_w = ApiUtilityWrapper()
-        err = {"err_code": 1, "err_msg": "xxxxxxxxx"}
         # collection_w.load(replica_number=2, timeout=60, check_task=CheckTasks.err_res, check_items=err)
         collection_w.load(replica_number=5)
         utility_w.loading_progress(collection_w.name)

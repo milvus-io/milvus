@@ -520,7 +520,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1]))
+    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1], strict=False))
     def test_search_by_pk_with_different_nq_limits(self, limit, nq):
         """
         target: test search by primary keys with different nq and limit values
@@ -684,7 +684,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        collection_info = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
 
         # Generate vectors to search
         ids_to_search = [self.datas[i][self.pk_field_name] for i in range(default_nq)]
@@ -806,7 +806,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         num_threads = 10
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = []
-            for i in range(num_threads):
+            for _i in range(num_threads):
                 future = executor.submit(
                     self.search,
                     client,
@@ -2076,7 +2076,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
         # 3. search with output field vector
         search_params = cf.get_search_params_params(index)
         ids_to_search = [2]
-        res = self.search(
+        self.search(
             client,
             collection_name,
             ids=ids_to_search,

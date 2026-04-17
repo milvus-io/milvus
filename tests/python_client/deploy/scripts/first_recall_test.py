@@ -13,7 +13,7 @@ pymilvus_version = pymilvus.__version__
 
 all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"M": 48, "efConstruction": 200}]
-index_params_map = dict(zip(all_index_types, default_index_params))
+index_params_map = dict(zip(all_index_types, default_index_params, strict=False))
 
 
 def gen_index_params(index_type, metric_type="L2"):

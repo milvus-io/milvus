@@ -14,7 +14,7 @@ default_index_params = [
     {"nlist": 128},
 ]
 
-index_params_map = dict(zip(all_index_types, default_index_params))
+index_params_map = dict(zip(all_index_types, default_index_params, strict=False))
 
 
 def gen_index_param(index_type):

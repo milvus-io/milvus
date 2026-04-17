@@ -61,15 +61,9 @@ class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token):
         # Prioritize uri and token for connection
-        if uri:
-            actual_uri = uri
-        else:
-            actual_uri = f"http://{host}:{port}"
+        actual_uri = uri or f"http://{host}:{port}"
 
-        if token:
-            actual_token = token
-        else:
-            actual_token = f"{user}:{password}" if user and password else None
+        actual_token = token or (f"{user}:{password}" if user and password else None)
 
         if actual_token:
             connections.connect("default", uri=actual_uri, token=actual_token)
@@ -113,9 +107,9 @@ class TestOperations(TestBase):
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
-        for i in range(10):
+        for _i in range(10):
             sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
         log.info("******assert after chaos deleted: ")
         assert_statistic(self.health_checkers)

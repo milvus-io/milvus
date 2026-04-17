@@ -104,7 +104,7 @@ class TestDatabaseParams(TestcaseBase):
         expected: error
         """
         self._connect()
-        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
+        error = {ct.err_code: 802, ct.err_msg: f"invalid database name[database={db_name}]"}
         if db_name is None:
             error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
         self.database_wrap.create_database(db_name=db_name, check_task=CheckTasks.err_res, check_items=error)
@@ -141,7 +141,7 @@ class TestDatabaseParams(TestcaseBase):
         db_name = cf.gen_unique_str(prefix)
         self.database_wrap.create_database(db_name)
         # drop db
-        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
+        error = {ct.err_code: 802, ct.err_msg: f"invalid database name[database={db_name}]"}
         if db_name is None:
             error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
         self.database_wrap.drop_database(db_name=invalid_name, check_task=CheckTasks.err_res, check_items=error)
@@ -149,7 +149,7 @@ class TestDatabaseParams(TestcaseBase):
         self.database_wrap.create_database(
             db_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: "database already exist: %s" % db_name},
+            check_items={ct.err_code: 65535, ct.err_msg: f"database already exist: {db_name}"},
         )
         self.database_wrap.drop_database(db_name)
         dbs, _ = self.database_wrap.list_database()
@@ -218,10 +218,10 @@ class TestDatabaseParams(TestcaseBase):
         self._connect()
 
         # create collection in default db
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # using db with invalid name
-        error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
+        error = {ct.err_code: 800, ct.err_msg: f"database not found[database={invalid_db_name}]"}
         if invalid_db_name == "中文":
             error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
         self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res, check_items=error)
@@ -284,7 +284,7 @@ class TestDatabaseOperation(TestcaseBase):
         dbs, _ = self.database_wrap.list_database()
 
         # because max num 64 not include default
-        for i in range(ct.max_database_num + 1 - len(dbs)):
+        for _i in range(ct.max_database_num + 1 - len(dbs)):
             self.database_wrap.create_database(cf.gen_unique_str(prefix))
 
         # there are ct.max_database_num-1 dbs (default is not included)
@@ -305,7 +305,7 @@ class TestDatabaseOperation(TestcaseBase):
 
         # create collections
         collections, _ = self.utility_wrap.list_collections()
-        for i in range(ct.max_collections_per_db - len(collections)):
+        for _i in range(ct.max_collections_per_db - len(collections)):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         error = {
@@ -338,7 +338,7 @@ class TestDatabaseOperation(TestcaseBase):
 
         # create 50 collections in db_a
         collection_num_a = 50
-        for i in range(collection_num_a):
+        for _i in range(collection_num_a):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         # create and using db_b
@@ -356,7 +356,7 @@ class TestDatabaseOperation(TestcaseBase):
         self.database_wrap.using_database(db_b)
         log.debug(f"exist collection num: {exist_coll_num}")
         collections, _ = self.utility_wrap.list_collections()
-        for i in range(ct.max_collection_num - exist_coll_num):
+        for _i in range(ct.max_collection_num - exist_coll_num):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         log.debug(f"db_b collection num: {len(self.utility_wrap.list_collections()[0])}")
@@ -480,7 +480,7 @@ class TestDatabaseOperation(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 65535,
-                ct.err_msg: "database:%s not empty, must drop all collections before drop database" % db_name,
+                ct.err_msg: f"database:{db_name} not empty, must drop all collections before drop database",
             },
         )
 
@@ -532,7 +532,7 @@ class TestDatabaseOperation(TestcaseBase):
         # verify current db
         self.utility_wrap.list_collections(
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % db_name},
+            check_items={ct.err_code: 800, ct.err_msg: f"database not found[database={db_name}]"},
         )
         self.database_wrap.list_database()
         self.database_wrap.using_database(ct.default_db)
@@ -709,7 +709,7 @@ class TestDatabaseOtherApi(TestcaseBase):
     @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_connect_invalid_db_name_2(self, host, port, invalid_db_name):
         # connect with invalid db
-        error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
+        error = {ct.err_code: 800, ct.err_msg: f"database not found[database={invalid_db_name}]"}
         if invalid_db_name == "中文":
             error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
         self.connection_wrap.connect(
@@ -939,7 +939,7 @@ class TestDatabaseOtherApi(TestcaseBase):
         res_dynamic, _ = self.collection_wrap.query(
             query_expr, output_fields=[ct.default_int64_field_name, ct.default_string_field_name]
         )
-        assert ct.default_int64_field_name in res_dynamic[0].keys()
+        assert ct.default_int64_field_name in res_dynamic[0]
 
         # query output vector field
         vec_res, _ = self.collection_wrap.query(query_expr, output_fields=[ct.default_float_vec_field_name])

@@ -130,4 +130,4 @@ if __name__ == "__main__":
     tt = time.time() - t0
     logger.info(f"total time cost: {tt:.2f} seconds")
     if diff:
-        assert False, f"diff found between upstream and downstream {json.dumps(diff, indent=2)}"
+        raise AssertionError(f"diff found between upstream and downstream {json.dumps(diff, indent=2)}")

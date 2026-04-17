@@ -71,7 +71,7 @@ class TestMilvusClientDeleteInvalid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(
@@ -179,7 +179,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, ids=[i for i in range(delete_num)])
@@ -237,7 +237,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, filter=f"id < {delete_num}")
@@ -374,7 +374,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                 nullable=True,
                 max_length=64,
             )
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. get partition lists
         partition_names = self.list_partitions(client, collection_name)
         # 4. delete
@@ -487,7 +487,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         if is_flush:
             self.flush(client, collection_name)
         if is_release:

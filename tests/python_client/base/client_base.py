@@ -46,7 +46,7 @@ class Base:
     def setup_method(self, method):
         log.info(("*" * 35) + " setup " + ("*" * 35))
         log.info(f"pymilvus version: {pymilvus.__version__}")
-        log.info("[setup_method] Start setup test case %s." % method.__name__)
+        log.info(f"[setup_method] Start setup test case {method.__name__}.")
         self._setup_objects()
 
     def _setup_objects(self):
@@ -62,15 +62,12 @@ class Base:
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         self._teardown_objects()
 
     def _teardown_objects(self):
         # Prioritize uri and token for connection
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
         if cf.param_info.param_token:
             token = cf.param_info.param_token
@@ -167,10 +164,7 @@ class TestcaseBase(Base):
             return None
 
         # Prioritize uri and token for connection
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
         if cf.param_info.param_token:
             token = cf.param_info.param_token
@@ -199,10 +193,7 @@ class TestcaseBase(Base):
         return res
 
     def get_tokens_by_analyzer(self, text, analyzer_params):
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
         client = MilvusClient(uri=uri, token=cf.param_info.param_token)
         res = client.run_analyzer(text, analyzer_params, with_detail=True, with_hash=True)
@@ -346,11 +337,11 @@ class TestcaseBase(Base):
         enable_dynamic_field=False,
         with_json=True,
         random_primary_key=False,
-        multiple_dim_array=[],
+        multiple_dim_array=None,
         is_partition_key=None,
         vector_data_type=DataType.FLOAT_VECTOR,
-        nullable_fields={},
-        default_value_fields={},
+        nullable_fields=None,
+        default_value_fields=None,
         language=None,
         **kwargs,
     ):
@@ -365,6 +356,12 @@ class TestcaseBase(Base):
                 6. enable insert default value: default_value_fields = {"default_fields_name": default value}
         expected: return collection and raw data, insert ids
         """
+        if default_value_fields is None:
+            default_value_fields = {}
+        if nullable_fields is None:
+            nullable_fields = {}
+        if multiple_dim_array is None:
+            multiple_dim_array = []
         log.info("Test case of search interface: initialize before test case")
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
@@ -373,10 +370,10 @@ class TestcaseBase(Base):
             collection_name = name
         if not isinstance(nullable_fields, dict):
             log.error("nullable_fields should a dict like {'nullable_fields_name': null data percent}")
-            assert False
+            raise AssertionError()
         if not isinstance(default_value_fields, dict):
             log.error("default_value_fields should a dict like {'default_fields_name': default value}")
-            assert False
+            raise AssertionError()
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
@@ -640,8 +637,8 @@ class TestCaseClassBase(TestcaseBase):
 
     def setup_method(self, method):
         log.info(" setup ".center(80, "*"))
-        log.info("[setup_method] Start setup test case %s." % method.__name__)
+        log.info(f"[setup_method] Start setup test case {method.__name__}.")
 
     def teardown_method(self, method):
         log.info(" teardown ".center(80, "*"))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")

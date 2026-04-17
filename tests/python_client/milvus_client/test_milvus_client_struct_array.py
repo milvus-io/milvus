@@ -1628,7 +1628,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data and index
-        data = self.create_collection_with_index(client, collection_name)
+        self.create_collection_with_index(client, collection_name)
 
         # Create search vector
         search_vector = [random.random() for _ in range(default_dim)]
@@ -2429,10 +2429,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         expected: all CRUD operations and search work correctly for each vector type
         """
         # Select metric based on vector type
-        if vector_type == DataType.BINARY_VECTOR:
-            emb_list_metric = "MAX_SIM_HAMMING"
-        else:
-            emb_list_metric = "MAX_SIM_COSINE"
+        emb_list_metric = "MAX_SIM_HAMMING" if vector_type == DataType.BINARY_VECTOR else "MAX_SIM_COSINE"
 
         type_name = vector_type.name.lower()
         collection_name = cf.gen_unique_str(f"{prefix}_search_vtype_{type_name}")
@@ -3182,7 +3179,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data
-        data = self.create_collection_with_data(client, collection_name)
+        self.create_collection_with_data(client, collection_name)
 
         # Query all data
         results, check = self.query(client, collection_name, filter="id >= 0", limit=10)
@@ -3301,7 +3298,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data
-        data = self.create_collection_with_data(client, collection_name, nb=20)
+        self.create_collection_with_data(client, collection_name, nb=20)
 
         # Count all records
         count_result = client.query(collection_name=collection_name, filter="", output_fields=["count(*)"])
@@ -3838,7 +3835,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 )
             else:
                 struct_schema.add_field("unsupported_field", unsupported_type)
-            assert False, f"Expected ParamError when adding {unsupported_type} field to struct schema"
+            raise AssertionError(f"Expected ParamError when adding {unsupported_type} field to struct schema")
         except Exception as e:
             # Verify the error message indicates the type is not supported
             error_msg = str(e)
@@ -4234,7 +4231,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         data = []
         for i in range(nb):
             struct_array = []
-            for j in range(random.randint(1, 10)):
+            for _j in range(random.randint(1, 10)):
                 struct_array.append({"clip_embedding1": [random.random() for _ in range(default_dim)]})
             tmp_data = {
                 "id": i,
@@ -4464,7 +4461,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         # Check if row count matches
         if len(results) != num_rows:
-            assert False, f"Row count mismatch: expected {num_rows}, got {len(results)}"
+            raise AssertionError(f"Row count mismatch: expected {num_rows}, got {len(results)}")
 
         # Convert original data to comparable format (list of dicts per row)
         original_rows = []
@@ -4495,7 +4492,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         if not is_equal:
             deepdiff = (DeepDiff(original_rows, query_rows_formatted, ignore_order=True, significant_digits=3),)
             log.info(f"DeepDiff: {deepdiff}")
-            assert False, "Data verification failed: original data and query results do not match"
+            raise AssertionError("Data verification failed: original data and query results do not match")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [128])

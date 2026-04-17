@@ -22,7 +22,7 @@ class TestLog:
             # self.log.addHandler(ch)
 
         except Exception as e:
-            print("Failed to initialize logger: %s" % str(e))
+            print(f"Failed to initialize logger: {str(e)}")
 
 
 """All modules share this unified log"""

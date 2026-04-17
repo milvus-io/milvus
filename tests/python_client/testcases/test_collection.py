@@ -570,7 +570,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         collection_w.load(replica_number=3)
-        for i in range(total_sq_count):
+        for _i in range(total_sq_count):
             ids = [random.randint(0, 100) for _ in range(5)]
             collection_w.query(f"{ct.default_int64_field_name} in {ids}")
 

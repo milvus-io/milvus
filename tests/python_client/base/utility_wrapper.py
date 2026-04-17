@@ -132,10 +132,7 @@ class ApiUtilityWrapper:
     ):
         tasks_state_distribution = {"success": set(), "failed": set(), "in_progress": set()}
         tasks_state = {}
-        if timeout is not None:
-            task_timeout = timeout
-        else:
-            task_timeout = TIMEOUT
+        task_timeout = timeout if timeout is not None else TIMEOUT
         start = time.time()
         end = time.time()
         log.info(f"wait bulk load timeout is {task_timeout}")
@@ -212,7 +209,7 @@ class ApiUtilityWrapper:
             pending_tasks = self.get_bulk_insert_pending_list()
             working_tasks = self.get_bulk_insert_working_list()
             cur_pending_task_ids = []
-            for task_id in pending_tasks.keys():
+            for task_id in pending_tasks:
                 cur_pending_task_ids.append(task_id)
                 pending_task_ids.add(task_id)
             log.info(
@@ -227,10 +224,7 @@ class ApiUtilityWrapper:
 
     def wait_index_build_completed(self, collection_name, timeout=None):
         start = time.time()
-        if timeout is not None:
-            task_timeout = timeout
-        else:
-            task_timeout = TIMEOUT
+        task_timeout = timeout if timeout is not None else TIMEOUT
         end = time.time()
         while end - start <= task_timeout:
             time.sleep(0.5)

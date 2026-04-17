@@ -22,8 +22,10 @@ def check_config(chaos_config):
     return True
 
 
-def reset_counting(checkers={}):
+def reset_counting(checkers=None):
     """reset checker counts for all checker threads"""
+    if checkers is None:
+        checkers = {}
     for ch in checkers.values():
         ch.reset()
 
@@ -36,8 +38,10 @@ def gen_experiment_config(yaml):
     return _config
 
 
-def start_monitor_threads(checkers={}):
+def start_monitor_threads(checkers=None):
     """start the threads by checkers"""
+    if checkers is None:
+        checkers = {}
     tasks = []
     for k, ch in checkers.items():
         ch._keep_running = True
@@ -102,8 +106,10 @@ def reconnect(connections, alias="default", timeout=360):
     return connections.connect(alias)
 
 
-def assert_statistic(checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49):
-    for k in checkers.keys():
+def assert_statistic(checkers, expectations=None, succ_rate_threshold=0.95, fail_rate_threshold=0.49):
+    if expectations is None:
+        expectations = {}
+    for k in checkers:
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()

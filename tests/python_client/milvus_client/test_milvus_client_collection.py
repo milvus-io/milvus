@@ -1791,7 +1791,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties
-        res = self.describe_collection(
+        self.describe_collection(
             client,
             collection_name,
             check_task=CheckTasks.check_describe_collection_property,
@@ -1816,7 +1816,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties: auto_id should be True
-        res = self.describe_collection(
+        self.describe_collection(
             client,
             collection_name,
             check_task=CheckTasks.check_describe_collection_property,
@@ -2141,7 +2141,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, ids=[i for i in range(delete_num)])
@@ -2199,7 +2199,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        pks = self.insert(client, collection_name, rows)[0]
+        self.insert(client, collection_name, rows)[0]
         # 3. delete
         delete_num = 3
         self.delete(client, collection_name, filter=f"id < {delete_num}")
@@ -2468,7 +2468,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             self.create_collection(client, collection_name, default_dim)
 
         # Start multiple threads to create collections
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=create, args=())
             threads.append(t)
             t.start()
@@ -2501,7 +2501,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             self.create_collection(client, collection_name, default_dim)
             self.drop_collection(client, collection_name)
 
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=create, args=())
             threads.append(t)
             t.start()
@@ -4244,9 +4244,9 @@ class TestMilvusClientHasCollectionValid(TestMilvusClientV2Base):
 
         def has():
             result = self.has_collection(client, collection_name)[0]
-            assert result == True
+            assert result
 
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=has, args=())
             threads.append(t)
             t.start()
@@ -4317,7 +4317,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = "nonexisted"
         result = self.has_collection(client, collection_name)[0]
-        assert result == False
+        assert not result
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_has_collection_deleted_collection(self):
@@ -4332,7 +4332,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         self.drop_collection(client, collection_name)
         result = self.has_collection(client, collection_name)[0]
-        assert result == False
+        assert not result
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_has_collection_after_disconnect(self):
@@ -4414,7 +4414,7 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
             collections_list = self.list_collections(client)[0]
             assert collection_name in collections_list
 
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=_list)
             threads.append(t)
             t.start()
@@ -6057,7 +6057,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         describe_res = self.describe_collection(client, collection_name)[0]
         properties = describe_res.get("properties")
-        assert "mmap.enabled" in properties.keys()
+        assert "mmap.enabled" in properties
         assert properties["mmap.enabled"] == "True"
         # Test disable mmap
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": False})
@@ -6135,7 +6135,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         describe_res = self.describe_collection(client, collection_name)[0]
         properties = describe_res.get("properties")
-        assert "mmap.enabled" not in properties.keys()
+        assert "mmap.enabled" not in properties
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)

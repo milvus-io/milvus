@@ -331,7 +331,7 @@ class TestQueryOperation(TestcaseBase):
         _, check_res = collection_w.search(
             vectors_s[: ct.default_nq], ct.default_float_vec_field_name, ct.default_search_params, limit, multi_exprs
         )
-        assert check_res == True
+        assert check_res
 
 
 class TestQueryString(TestcaseBase):
@@ -1230,19 +1230,18 @@ class TestQueryTextMatch(TestcaseBase):
                 assert token in r[field]
 
             # verify inverted index
-            if enable_inverted_index:
-                if field == "word":
-                    expr = f"{field} == '{token}'"
-                    log.info(f"expr: {expr}")
-                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                    log.info(f"res len {len(res)}")
-                    for r in res:
-                        assert r[field] == token
+            if enable_inverted_index and field == "word":
+                expr = f"{field} == '{token}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                log.info(f"res len {len(res)}")
+                for r in res:
+                    assert r[field] == token
         # query single field for multi-word
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1370,19 +1369,18 @@ class TestQueryTextMatch(TestcaseBase):
                 assert token in r[field]
 
             # verify inverted index
-            if enable_inverted_index:
-                if field == "word":
-                    expr = f"{field} == '{token}'"
-                    log.info(f"expr: {expr}")
-                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                    log.info(f"res len {len(res)}")
-                    for r in res:
-                        assert r[field] == token
+            if enable_inverted_index and field == "word":
+                expr = f"{field} == '{token}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                log.info(f"res len {len(res)}")
+                for r in res:
+                    assert r[field] == token
         # query single field for multi-word
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1497,19 +1495,18 @@ class TestQueryTextMatch(TestcaseBase):
                 assert token in r[field]
 
             # verify inverted index
-            if enable_inverted_index:
-                if field == "word":
-                    expr = f"{field} == '{token}'"
-                    log.info(f"expr: {expr}")
-                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                    log.info(f"res len {len(res)}")
-                    for r in res:
-                        assert r[field] == token
+            if enable_inverted_index and field == "word":
+                expr = f"{field} == '{token}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                log.info(f"res len {len(res)}")
+                for r in res:
+                    assert r[field] == token
         # query single field for multi-word
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1577,10 +1574,9 @@ class TestQueryTextMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
         if tokenizer == "jieba":
-            language = "zh"
             fake = fake_zh
         else:
-            language = "en"
+            pass
         collection_w.create_index(
             "emb",
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
@@ -1640,7 +1636,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1654,7 +1650,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1772,19 +1768,18 @@ class TestQueryTextMatch(TestcaseBase):
                 assert token in r[field]
 
             # verify inverted index
-            if enable_inverted_index:
-                if field == "word":
-                    expr = f"{field} == '{token}'"
-                    log.info(f"expr: {expr}")
-                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-                    log.info(f"res len {len(res)}")
-                    for r in res:
-                        assert r[field] == token
+            if enable_inverted_index and field == "word":
+                expr = f"{field} == '{token}'"
+                log.info(f"expr: {expr}")
+                res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                log.info(f"res len {len(res)}")
+                for r in res:
+                    assert r[field] == token
         # query single field for multi-word
         for field in text_fields:
             # match top 10 most common words
             top_10_tokens = []
-            for word, count in wf_map[field].most_common(10):
+            for word, _count in wf_map[field].most_common(10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -1801,7 +1796,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match latest 10 most common  english words
             top_10_tokens = []
-            for word, count in cf.get_top_english_tokens(wf_map[field], 10):
+            for word, _count in cf.get_top_english_tokens(wf_map[field], 10):
                 top_10_tokens.append(word)
             string_of_top_10_words = " ".join(top_10_tokens)
             expr = f"text_match({field}, '{string_of_top_10_words}')"
@@ -2249,7 +2244,6 @@ class TestQueryTextMatch(TestcaseBase):
         data_size = 5000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
-        language = "en"
         data = [
             {
                 "id": i,
@@ -2322,7 +2316,6 @@ class TestQueryTextMatch(TestcaseBase):
         data_size = 5000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         fake = fake_en
-        language = "en"
         data = [
             {
                 "id": i,
@@ -2566,7 +2559,7 @@ class TestQueryTextMatch(TestcaseBase):
             expr_list = []
             wf_counter = Counter(wf_map[field])
             pd_tmp_res_list = []
-            for word, count in wf_counter.most_common(2):
+            for word, _count in wf_counter.most_common(2):
                 tmp = f"text_match({field}, '{word}')"
                 log.info(f"tmp expr {tmp}")
                 expr_list.append(tmp)
@@ -2680,10 +2673,7 @@ class TestQueryTextMatch(TestcaseBase):
             step_by_step_results = []
             for expr in query:
                 if isinstance(expr, dict):
-                    if "not" in expr:
-                        key = expr["not"]["field"]
-                    else:
-                        key = expr["field"]
+                    key = expr["not"]["field"] if "not" in expr else expr["field"]
 
                     tmp_expr = cf.generate_text_match_expr(expr)
                     res, _ = collection_w.query(expr=tmp_expr, output_fields=text_fields)
@@ -2706,7 +2696,7 @@ class TestQueryTextMatch(TestcaseBase):
             log.info(f"one time res {len(onetime_res)}, final res {len(final_res)}")
             if len(onetime_res) != len(final_res):
                 log.info("res is not same")
-                assert False
+                raise AssertionError()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_text_match_with_multi_lang(self):
@@ -2831,7 +2821,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match top 3 most common words
             multi_words = []
-            for word, count in wf_map[field].most_common(3):
+            for word, _count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
             expr = f"text_match({field}, '{string_of_multi_words}')"
@@ -3175,7 +3165,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match top 3 most common words
             multi_words = []
-            for word, count in wf_map[field].most_common(3):
+            for word, _count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
             expr = f"text_match({field}, '{string_of_multi_words}')"
@@ -3287,7 +3277,7 @@ class TestQueryTextMatch(TestcaseBase):
         for field in text_fields:
             # match top 3 most common words
             multi_words = []
-            for word, count in wf_map[field].most_common(3):
+            for word, _count in wf_map[field].most_common(3):
                 multi_words.append(word)
             string_of_multi_words = " ".join(multi_words)
             expr = f"text_match({field}, '{string_of_multi_words}')"

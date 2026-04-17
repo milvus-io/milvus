@@ -311,7 +311,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-        res3 = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
         assert len(res1.get("properties", {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
         assert len(res1.get("properties", {})) == 1
@@ -326,7 +326,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.drop_collection_properties(
             client, collection_name, property_keys=["mmap.enabled", "collection.ttl.seconds"]
         )
-        res3 = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
         assert len(res1.get("properties", {})) == 1
 
     @pytest.mark.tags(CaseLabel.L1)

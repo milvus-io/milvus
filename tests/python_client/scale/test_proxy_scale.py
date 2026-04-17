@@ -17,7 +17,7 @@ from utils.util_pymilvus import get_latest_tag
 def e2e_milvus_parallel(process_num, host, c_name):
     """e2e milvus"""
     process_list = []
-    for i in range(process_num):
+    for _i in range(process_num):
         p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
         p.start()
         process_list.append(p)

@@ -1776,7 +1776,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         # Update bool field values to alternate between True and False
         for i, row in enumerate(rows):
-            row[ct.default_bool_field_name] = True if i % 2 == 0 else False
+            row[ct.default_bool_field_name] = i % 2 == 0
         self.insert(client, collection_name, rows)
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
@@ -1835,7 +1835,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb * 10, schema=schema_info)
         self.insert(client, collection_name, rows)
         assert len(rows) == default_nb * 10
-        a = rows[:10]
+        rows[:10]
         # 3. filter on int64 fields
         expr_list = [
             f"{default_primary_key_field_name} > 8192 && {default_primary_key_field_name} < 8194",
@@ -2605,9 +2605,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expression = expression.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i in range(default_nb):
-            int8 = np.int8((start + i) % 128)
-            int16 = np.int16((start + i) * 40)
-            int32 = np.int32((start + i) * 2200000)
+            np.int8((start + i) % 128)
+            np.int16((start + i) * 40)
+            np.int32((start + i) * 2200000)
             if not expression or eval(expression):
                 filter_ids.append(start + i)
         # 5. query and verify result
@@ -3289,10 +3289,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, upsert_data)
         self.flush(client, collection_name)
         # 5. query with param ignore_growing
-        if ignore_growing:
-            exp_len = 0
-        else:
-            exp_len = default_nb
+        exp_len = 0 if ignore_growing else default_nb
         res = self.query(client, collection_name, filter=default_search_exp, ignore_growing=ignore_growing)[0]
         assert len(res) == exp_len
         # 6. clean up
@@ -3600,8 +3597,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, row in enumerate(rows):
-                int64 = row[ct.default_int64_field_name]
-                float = row[ct.default_float_field_name]
+                row[ct.default_int64_field_name]
+                row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
 
@@ -3653,8 +3650,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, row in enumerate(rows):
-                int64 = row[ct.default_int64_field_name]
-                float = row[ct.default_float_field_name]
+                row[ct.default_int64_field_name]
+                row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
 
@@ -3778,11 +3775,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             filter_ids = []
             for i, row in enumerate(rows):
                 if enable_dynamic_field:
-                    int64 = row[ct.default_int64_field_name]
-                    float = row[ct.default_float_field_name]
+                    row[ct.default_int64_field_name]
+                    row[ct.default_float_field_name]
                 else:
-                    int64 = row[ct.default_int64_field_name]
-                    float = row[ct.default_float_field_name]
+                    row[ct.default_int64_field_name]
+                    row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
 
@@ -4219,7 +4216,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. query with multi logical expressions
         # Create expression like: int64 == 0 || int64 == 1 || int64 == 2 ... || int64 == 59
         multi_exprs = " || ".join(f"{default_primary_key_field_name} == {i}" for i in range(60))
-        res = self.query(
+        self.query(
             client,
             collection_name,
             filter=multi_exprs,
@@ -4358,7 +4355,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         schema_info = self.describe_collection(client, collection_name)[0]
         insert_offset = 0
         insert_nb = 1000
-        for i in range(10):
+        for _i in range(10):
             rows = cf.gen_row_data_by_schema(nb=insert_nb, schema=schema_info, start=insert_offset)
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
@@ -4369,7 +4366,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
 
         # 4. query with bloom filter and without bloom filter
         start_time = time.perf_counter()
-        res = self.query(
+        self.query(
             client,
             collection_name=collection_name,
             filter=f"{default_primary_key_field_name} != -1",
@@ -4380,7 +4377,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
 
         # with bloom filter
         start_time = time.perf_counter()
-        res = self.query(
+        self.query(
             client,
             collection_name=collection_name,
             filter=f"{default_primary_key_field_name} == -1",
@@ -5491,15 +5488,21 @@ class TestQueryArray(TestMilvusClientV2Base):
         if 'like "0%"' in array_expression:
             # Prefix match: first element starts with "0"
             filter_data = [row for row in string_field_value if row[0].startswith("0")]
-            match_func = lambda x: x.startswith("0")
+
+            def match_func(x):
+                return x.startswith("0")
         elif 'like "%0"' in array_expression:
             # Suffix match: first element ends with "0"
             filter_data = [row for row in string_field_value if row[0].endswith("0")]
-            match_func = lambda x: x.endswith("0")
+
+            def match_func(x):
+                return x.endswith("0")
         elif 'like "%0%"' in array_expression:
             # Inner match: first element contains "0"
             filter_data = [row for row in string_field_value if "0" in row[0]]
-            match_func = lambda x: "0" in x
+
+            def match_func(x):
+                return "0" in x
 
         assert len(res) == len(filter_data)
 
@@ -5628,10 +5631,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 4. query with invalid count output field
-        if invalid_output_field == "count":
-            err_msg = "field count not exist"
-        else:
-            err_msg = "for aggregation:count does not exist"
+        err_msg = "field count not exist" if invalid_output_field == "count" else "for aggregation:count does not exist"
         self.query(
             client,
             collection_name,
@@ -6568,8 +6568,8 @@ class TestQueryCount(TestMilvusClientV2Base):
             filter_ids = []
             for i, row in enumerate(rows):
                 # Set up variables that match the expression field names
-                int64 = row[ct.default_int64_field_name]
-                float = row[ct.default_float_field_name]
+                row[ct.default_int64_field_name]
+                row[ct.default_float_field_name]
                 # Evaluate the expression with the actual field values
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
@@ -6623,7 +6623,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             bool_type_cmp = False
 
         # Count matching rows manually
-        for i, row in enumerate(rows):
+        for _i, row in enumerate(rows):
             if row[ct.default_bool_field_name] == bool_type_cmp:
                 filter_ids.append(row[ct.default_int64_field_name])
         expected_count = len(filter_ids)
@@ -6671,7 +6671,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             # Calculate expected count by filtering the data manually
             filter_ids = []
             for i, row in enumerate(rows):
-                float = row[ct.default_float_field_name]
+                row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
             expected_count = len(filter_ids)

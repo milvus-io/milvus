@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import numpy as np
@@ -26,10 +27,8 @@ def _teardown_rbac(test_instance):
                 user_info, _ = test_instance.describe_user(client, user)
                 if user_info and user_info.get("roles"):
                     for role in user_info["roles"]:
-                        try:
+                        with contextlib.suppress(Exception):
                             test_instance.revoke_role(client, user, role)
-                        except Exception:
-                            pass
                 test_instance.drop_user(client, user)
             except Exception:
                 pass
@@ -56,7 +55,7 @@ def _teardown_rbac(test_instance):
                                     db_name=priv.get("db_name", ""),
                                 )
                             except Exception:
-                                try:
+                                with contextlib.suppress(Exception):
                                     test_instance.revoke_privilege_v2(
                                         client,
                                         role,
@@ -64,24 +63,18 @@ def _teardown_rbac(test_instance):
                                         priv.get("object_name", "*"),
                                         db_name=priv.get("db_name", "*"),
                                     )
-                                except Exception:
-                                    pass
                 except Exception:
                     pass
-            try:
+            with contextlib.suppress(Exception):
                 test_instance.drop_role(client, role)
-            except Exception:
-                pass
 
     # drop custom privilege groups
     try:
         groups, _ = test_instance.list_privilege_groups(client)
         for g in groups:
             if g.get("privilege_group") not in ct.built_in_privilege_groups:
-                try:
+                with contextlib.suppress(Exception):
                     test_instance.drop_privilege_group(client, g["privilege_group"])
-                except Exception:
-                    pass
     except Exception:
         pass
 
@@ -96,10 +89,8 @@ def _teardown_rbac(test_instance):
                 test_instance.using_database(client, "default")
                 test_instance.drop_database(client, db)
             except Exception:
-                try:
+                with contextlib.suppress(Exception):
                     test_instance.using_database(client, "default")
-                except Exception:
-                    pass
 
 
 user_pre = "user"
@@ -573,7 +564,7 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1400,
-                ct.err_msg: "old password not correct for %s: not authenticated" % user_name,
+                ct.err_msg: f"old password not correct for {user_name}: not authenticated",
             },
         )
 
@@ -597,7 +588,7 @@ class TestMilvusClientRbacInvalid(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1400,
-                ct.err_msg: "old password not correct for %s: not authenticated" % user_name,
+                ct.err_msg: f"old password not correct for {user_name}: not authenticated",
             },
         )
 
@@ -2004,7 +1995,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         assert user_name not in role_users
 
         # try to revoke user from role (should fail since user is not in the role)
-        error_msg = "not found the role, maybe the role isn't existed or internal system error"
         self.revoke_role(client, user_name=user_name, role_name=role_name)
 
         # verify user is still not in the role
@@ -3199,7 +3189,7 @@ class TestMilvusClientRbacPrivilegeGroup(TestMilvusClientV2Base):
         """
         client = self._client()
         pg_names = []
-        for i in range(100):
+        for _i in range(100):
             pg_name = cf.gen_unique_str(prefix)
             self.create_privilege_group(client, privilege_group=pg_name)
             pg_names.append(pg_name)
@@ -3245,34 +3235,24 @@ class TestMilvusClientRbacPrefixIsolation(TestMilvusClientV2Base):
         #        → drop aliases → drop collections → drop databases
 
         for role in [self._role1, self._role10, self._role1_read]:
-            try:
+            with contextlib.suppress(Exception):
                 client.drop_role(role, force_drop=True)
-            except Exception:
-                pass
 
         for user in [self._user1, self._user11, self._user1_ro]:
-            try:
+            with contextlib.suppress(Exception):
                 client.drop_user(user)
-            except Exception:
-                pass
 
         for pg in [self._pg1, self._pg10, self._pg1_ext]:
-            try:
+            with contextlib.suppress(Exception):
                 client.drop_privilege_group(pg)
-            except Exception:
-                pass
 
         for alias in [self._alias1, self._alias10, self._alias1_bak]:
-            try:
+            with contextlib.suppress(Exception):
                 client.drop_alias(alias)
-            except Exception:
-                pass
 
         for col in [self._col, self._col_v2, self._collection]:
-            try:
+            with contextlib.suppress(Exception):
                 client.drop_collection(col)
-            except Exception:
-                pass
 
         for db in [self._db1, self._db10]:
             try:

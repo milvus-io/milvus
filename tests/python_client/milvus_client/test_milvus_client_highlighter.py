@@ -309,7 +309,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         expected = []
-        for pre, post in cycle(zip(pre_tags, post_tags)):
+        for pre, post in cycle(zip(pre_tags, post_tags, strict=False)):
             expected.append(f"{pre}key{post}")
             if len(expected) == 8:
                 break

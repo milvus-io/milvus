@@ -204,7 +204,6 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(
             collection_w.collection,
@@ -598,7 +597,7 @@ class TestNewIndexBase(TestcaseBase):
 
         threads_num = 8
         threads = []
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=build, args=(collection_w,))
             threads.append(t)
             t.start()
@@ -748,7 +747,7 @@ class TestNewIndexBase(TestcaseBase):
 
         threads_num = 8
         threads = []
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=build, args=(collection_w,))
             threads.append(t)
             t.start()
@@ -864,7 +863,7 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         params = cf.get_index_params_params("HNSW")
         index_params = {"index_type": "HNSW", "metric_type": "L2", "params": params}
-        for i in range(4):
+        for _i in range(4):
             collection_w.create_index(ct.default_float_vec_field_name, index_params, index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 1
             collection_w.drop_index(index_name=ct.default_index_name)
@@ -1805,9 +1804,9 @@ class TestIndexString(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         collection_w.create_index(default_float_vec_field_name, default_index_params, index_name=index_name1)
-        assert collection_w.has_index(index_name=index_name1)[0] == True
+        assert collection_w.has_index(index_name=index_name1)[0]
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         assert len(collection_w.indexes) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1824,9 +1823,9 @@ class TestIndexString(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data()
         collection_w.insert(data=df)
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         collection_w.create_index(default_binary_vec_field_name, default_binary_index_params, index_name=index_name3)
-        assert collection_w.has_index(index_name=index_name3)[0] == True
+        assert collection_w.has_index(index_name=index_name3)[0]
         assert len(collection_w.indexes) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1881,7 +1880,7 @@ class TestIndexString(TestcaseBase):
         collection_w.insert(data=data)
 
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        assert collection_w.has_index(index_name=index_name2)[0] == True
+        assert collection_w.has_index(index_name=index_name2)[0]
         collection_w.drop_index(index_name=index_name2)
         assert len(collection_w.indexes) == 0
 
@@ -2085,12 +2084,12 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.insert(data=data)
         assert collection_w.num_entities == default_nb
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name="a")
-        assert collection_w.has_index(index_name="a")[0] == True
+        assert collection_w.has_index(index_name="a")[0]
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name="b")
-        assert collection_w.has_index(index_name="b")[0] == True
+        assert collection_w.has_index(index_name="b")[0]
         default_params = {}
         collection_w.create_index("float", default_params, index_name="c")
-        assert collection_w.has_index(index_name="c")[0] == True
+        assert collection_w.has_index(index_name="c")[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_with_partition(self):
@@ -2152,7 +2151,7 @@ class TestIndexDiskann(TestcaseBase):
 
         threads_num = 10
         threads = []
-        for i in range(threads_num):
+        for _i in range(threads_num):
             t = MyThread(target=build, args=(collection_w,))
             threads.append(t)
             t.start()
@@ -2214,9 +2213,8 @@ class TestAutoIndex(TestcaseBase):
         actual_index_params = collection_w.index()[0].params
         log.info(collection_w.index()[0].params)
         expect_autoindex_params = copy.copy(default_autoindex_params)
-        if index_params.get("index_type"):
-            if index_params["index_type"] != "AUTOINDEX":
-                expect_autoindex_params = index_params
+        if index_params.get("index_type") and index_params["index_type"] != "AUTOINDEX":
+            expect_autoindex_params = index_params
         if index_params.get("metric_type"):
             expect_autoindex_params["metric_type"] = index_params["metric_type"]
         assert actual_index_params == expect_autoindex_params
@@ -2371,7 +2369,7 @@ class TestInvertedIndexValid(TestcaseBase):
         index_list = self.utility_wrap.list_indexes(collection_w.name)[0]
         assert index_name in index_list
         collection_w.flush()
-        result = self.utility_wrap.index_building_progress(collection_w.name, index_name)[0]
+        self.utility_wrap.index_building_progress(collection_w.name, index_name)[0]
         # assert False
         start = time.time()
         while True:
@@ -2441,7 +2439,6 @@ class TestInvertedIndexValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_binary_arith_expr_on_inverted_index(self):
         prefix = "test_binary_arith_expr_on_inverted_index"
-        nb = 5000
         collection_w, _, _, insert_ids, _ = self.init_collection_general(
             prefix, insert_data=True, is_index=True, is_all_data_type=True
         )
@@ -2572,7 +2569,7 @@ class TestBitmapIndex(TestcaseBase):
             3. can drop index on loaded collection
         """
         # init params
-        collection_name, nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
+        collection_name, _nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(
@@ -3093,7 +3090,7 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index failed with param `bitmap_cardinality_limit`
         """
         # init params
-        collection_name, primary_field, nb = f"{request.function.__name__}", "int64_pk", 3000
+        collection_name, primary_field, _nb = f"{request.function.__name__}", "int64_pk", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(
@@ -3136,7 +3133,7 @@ class TestBitmapIndex(TestcaseBase):
         """
         # init params
         collection_name = f"{request.function.__name__}_{str(bitmap_cardinality_limit).replace('-', '_')}"
-        primary_field, nb = "int64_pk", 3000
+        primary_field, _nb = "int64_pk", 3000
 
         # create a collection with fields that can build `BITMAP` index
         self.collection_wrap.init_collection(

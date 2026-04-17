@@ -43,9 +43,9 @@ class TestRestartBase:
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
         """
-        ids = connect.bulk_insert(collection, default_entities)
+        connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
-        ids = connect.bulk_insert(collection, default_entities)
+        connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -67,7 +67,7 @@ class TestRestartBase:
         expected: row count equals 0
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        connect.bulk_insert(collection, big_entities)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -99,7 +99,7 @@ class TestRestartBase:
         connect.flush([collection])
         delete_length = 1000
         delete_ids = ids[big_nb // 4 : big_nb // 4 + delete_length]
-        delete_res = connect.delete_entity_by_id(collection, delete_ids)
+        connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -128,7 +128,7 @@ class TestRestartBase:
         expected: row count equals nb
         """
         # disable_autoflush()
-        ids = connect.bulk_insert(collection, big_entities)
+        connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index)
         res_count = connect.count_entities(collection)
@@ -146,7 +146,7 @@ class TestRestartBase:
             if file["field"] == field_name and file["name"] != "_raw":
                 assert file["data_size"] > 0
                 if file["index_type"] != default_index["index_type"]:
-                    assert False
+                    raise AssertionError()
                 else:
                     assert True
 
@@ -159,13 +159,13 @@ class TestRestartBase:
         """
         # disable_autoflush()
         loop = 5
-        for i in range(loop):
-            ids = connect.bulk_insert(collection, big_entities)
+        for _i in range(loop):
+            connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        stats = connect.get_collection_stats(collection)
+        connect.get_collection_stats(collection)
         # logging.getLogger().info(stats)
         # restart server
         assert restart_server(args["service_name"])
@@ -175,7 +175,7 @@ class TestRestartBase:
         logging.getLogger().info(res_count_2)
         assert res_count_2 == loop * big_nb
         status = new_connect._cmd("status")
-        assert json.loads(status)["indexing"] == True
+        assert json.loads(status)["indexing"]
         # timeout = 100
         # start_time = time.time()
         # while time.time() - start_time < timeout:
@@ -212,7 +212,7 @@ class TestRestartBase:
         loop = 10
         for i in range(loop):
             delete_ids = ids[i * delete_length : (i + 1) * delete_length]
-            delete_res = connect.delete_entity_by_id(collection, delete_ids)
+            connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
         res_count = connect.count_entities(collection)
@@ -246,11 +246,11 @@ class TestRestartBase:
         # disable_autoflush()
         collection_num = 2
         collection_list = []
-        for i in range(collection_num):
+        for _i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            ids = connect.bulk_insert(collection_name, big_entities)
+            connect.bulk_insert(collection_name, big_entities)
         connect.flush(collection_list, _async=True)
         res_count = connect.count_entities(collection_list[-1])
         logging.getLogger().info(res_count)
@@ -266,14 +266,14 @@ class TestRestartBase:
             while time.time() - start_time < timeout:
                 count_list = []
                 break_flag = True
-                for index, name in enumerate(collection_list):
+                for _index, name in enumerate(collection_list):
                     tmp_count = new_connect.count_entities(name)
                     count_list.append(tmp_count)
                     logging.getLogger().info(count_list)
                     if tmp_count != big_nb:
                         break_flag = False
                         break
-                if break_flag == True:
+                if break_flag:
                     break
                 time.sleep(10)
             for name in collection_list:
@@ -289,11 +289,11 @@ class TestRestartBase:
         # disable_autoflush()
         partitions_num = 2
         partitions = []
-        for i in range(partitions_num):
+        for _i in range(partitions_num):
             tag_tmp = gen_unique_str()
             partitions.append(tag_tmp)
             connect.create_partition(collection, tag_tmp)
-            ids = connect.bulk_insert(collection, big_entities, partition_name=tag_tmp)
+            connect.bulk_insert(collection, big_entities, partition_name=tag_tmp)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)

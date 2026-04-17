@@ -81,7 +81,7 @@ class TestHnswPRQBuildParams(TestMilvusClientV2Base):
             if build_params is not None:
                 for key, value in build_params.items():
                     if value is not None:
-                        assert key in idx_info.keys()
+                        assert key in idx_info
                         assert str(value) in idx_info.values()
 
     @pytest.mark.skip(reason="ci tests index creation timeout")

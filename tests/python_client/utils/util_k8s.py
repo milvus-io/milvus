@@ -81,7 +81,7 @@ def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
         else:
             log.info(f"timeout for waiting all pods in namespace {namespace} with label {label_selector} ready")
     except ApiException as e:
-        log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
+        log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
         raise Exception(str(e))
 
     return all_pos_ready_flag
@@ -106,7 +106,7 @@ def get_pod_list(namespace, label_selector):
         api_response = api_instance.list_namespaced_pod(namespace=namespace, label_selector=label_selector)
         return api_response.items
     except ApiException as e:
-        log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
+        log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
         raise Exception(str(e))
 
 
@@ -194,7 +194,7 @@ def get_milvus_instance_name(namespace, host="127.0.0.1", port="19530", milvus_s
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
     except ApiException as e:
-        log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
+        log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
         raise Exception(str(e))
     milvus_instance_name = api_response.metadata.labels["app.kubernetes.io/instance"]
     return milvus_instance_name
@@ -220,7 +220,7 @@ def get_milvus_deploy_tool(namespace, milvus_sys):
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
     except ApiException as e:
-        log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
+        log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
         raise Exception(str(e))
     if (
         "app.kubernetes.io/managed-by" in api_response.metadata.labels
@@ -328,7 +328,7 @@ def get_svc_ip(namespace, label_selector):
     try:
         api_response = api_instance.list_namespaced_service(namespace=namespace, label_selector=label_selector)
     except ApiException as e:
-        log.error("Exception when calling CoreV1Api->list_namespaced_service: %s\n" % e)
+        log.error(f"Exception when calling CoreV1Api->list_namespaced_service: {e}\n")
         raise Exception(str(e))
     svc_ip = api_response.items[0].spec.cluster_ip
     return svc_ip

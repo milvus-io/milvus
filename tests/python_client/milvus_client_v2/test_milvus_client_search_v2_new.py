@@ -343,7 +343,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1]))
+    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1], strict=False))
     def test_search_with_different_nq_limits(self, limit, nq):
         """
         target: test search with different nq and limit values
@@ -507,7 +507,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = self.collection_name
-        collection_info = self.describe_collection(client, collection_name)[0]
+        self.describe_collection(client, collection_name)[0]
 
         # Generate vectors to search
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
@@ -629,7 +629,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         num_threads = 10
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = []
-            for i in range(num_threads):
+            for _i in range(num_threads):
                 future = executor.submit(
                     self.search,
                     client,
@@ -1144,7 +1144,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         if to_be_released_partition is not None:
             self.release_partitions(client, collection_name, [to_be_released_partition])
         else:
-            assert False, "expected to find at least one result that not in default partition"
+            raise AssertionError("expected to find at least one result that not in default partition")
 
         # search again
         search_res2, _ = self.search(
@@ -1968,7 +1968,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         # 3. search with output field vector
         search_params = cf.get_search_params_params(index)
         binary_vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.BINARY_VECTOR)
-        res = self.search(
+        self.search(
             client,
             collection_name,
             binary_vectors,

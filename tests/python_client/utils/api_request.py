@@ -24,7 +24,7 @@ def api_request_catch():
                 if kwargs.get("enable_traceback", True):
                     res_str = str(res)
                     log_res = res_str[0:log_row_length] + "......" if len(res_str) > log_row_length else res_str
-                    log.debug("(api_response) : %s " % log_res)
+                    log.debug(f"(api_response) : {log_res} ")
 
                 return res, True
             except Exception as e:
@@ -33,7 +33,7 @@ def api_request_catch():
                 # if enable_traceback == "True":
                 if kwargs.get("enable_traceback", True):
                     log.error(traceback.format_exc())
-                    log.error("(api_response) : %s" % log_e)
+                    log.error(f"(api_response) : {log_e}")
                 return Error(e), False
 
         return inner_wrapper
@@ -53,7 +53,7 @@ def api_request(_list, **kwargs):
                 log_kwargs = (
                     str(kwargs)[0:log_row_length] + "......" if len(str(kwargs)) > log_row_length else str(kwargs)
                 )
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, log_kwargs))
+                log.debug(f"(api_request)  : [{func.__qualname__}] args: {log_arg}, kwargs: {log_kwargs}")
             return func(*arg, **kwargs)
     return False, False
 
@@ -68,13 +68,13 @@ def logger_interceptor():
                 log_kwargs = (
                     str(kwargs)[0:log_row_length] + "......" if len(str(kwargs)) > log_row_length else str(kwargs)
                 )
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, log_kwargs))
+                log.debug(f"(api_request)  : [{func.__name__}] args: {log_arg}, kwargs: {log_kwargs}")
 
         def log_response(res, **kwargs):
             if kwargs.get("enable_traceback", True):
                 res_str = str(res)
                 log_res = res_str[0:log_row_length] + "......" if len(res_str) > log_row_length else res_str
-                log.debug("(api_response) : [%s] %s " % (func.__name__, log_res))
+                log.debug(f"(api_response) : [{func.__name__}] {log_res} ")
             return res, True
 
         async def handler(*args, **kwargs):
@@ -98,7 +98,7 @@ def logger_interceptor():
                 log_e = e_str[0:log_row_length] + "......" if len(e_str) > log_row_length else e_str
                 if kwargs.get("enable_traceback", True):
                     log.error(traceback.format_exc())
-                    log.error("(api_response) : %s" % log_e)
+                    log.error(f"(api_response) : {log_e}")
                 check_res = ResponseChecker(
                     Error(e), sys._getframe().f_code.co_name, check_task, check_items, False
                 ).run()

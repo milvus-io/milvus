@@ -88,7 +88,8 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -384,7 +385,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -787,7 +789,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -1140,7 +1143,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -1672,7 +1676,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -2088,7 +2093,8 @@ class TestBitmapIndexMmap(TestCaseClassBase):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):
@@ -2648,7 +2654,7 @@ class TestMixScenes(TestcaseBase):
         counts = sum(
             [
                 eval(expr_left.replace("INT64", str(i))) and re.search(rex, j) is not None
-                for i, j in zip(insert_data.get("INT64", []), insert_data.get("VARCHAR", []))
+                for i, j in zip(insert_data.get("INT64", []), insert_data.get("VARCHAR", []), strict=False)
             ]
         )
         check_task = None if counts == 0 else CheckTasks.check_search_results

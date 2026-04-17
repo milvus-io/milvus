@@ -63,12 +63,12 @@ class TestFieldPartialLoad(TestcaseBase):
             data=search_vectors, anns_field=vector_field.name, param=search_params, limit=100, output_fields=["*"]
         )
         assert (
-            pk_field.name in res[0][0].fields.keys()
-            and vector_field.name in res[0][0].fields.keys()
-            and load_string_field.name in res[0][0].fields.keys()
-            and load_int64_field.name in res[0][0].fields.keys()
-            and not_load_string_field.name not in res[0][0].fields.keys()
-            and not_load_int64_field.name not in res[0][0].fields.keys()
+            pk_field.name in res[0][0].fields
+            and vector_field.name in res[0][0].fields
+            and load_string_field.name in res[0][0].fields
+            and load_int64_field.name in res[0][0].fields
+            and not_load_string_field.name not in res[0][0].fields
+            and not_load_int64_field.name not in res[0][0].fields
         )
 
         # release and reload with some other fields
@@ -80,12 +80,12 @@ class TestFieldPartialLoad(TestcaseBase):
             data=search_vectors, anns_field=vector_field.name, param=search_params, limit=100, output_fields=["*"]
         )
         assert (
-            pk_field.name in res[0][0].fields.keys()
-            and vector_field.name in res[0][0].fields.keys()
-            and load_string_field.name not in res[0][0].fields.keys()
-            and load_int64_field.name not in res[0][0].fields.keys()
-            and not_load_string_field.name in res[0][0].fields.keys()
-            and not_load_int64_field.name in res[0][0].fields.keys()
+            pk_field.name in res[0][0].fields
+            and vector_field.name in res[0][0].fields
+            and load_string_field.name not in res[0][0].fields
+            and load_int64_field.name not in res[0][0].fields
+            and not_load_string_field.name in res[0][0].fields
+            and not_load_int64_field.name in res[0][0].fields
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -276,7 +276,7 @@ class TestFieldPartialLoad(TestcaseBase):
         res, _ = p1.search(
             data=search_vectors, anns_field=vector_field.name, params=search_params, limit=100, output_fields=["*"]
         )
-        assert pk_field.name in res[0][0].fields.keys() and vector_field.name in res[0][0].fields.keys()
+        assert pk_field.name in res[0][0].fields and vector_field.name in res[0][0].fields
         # load p2 with different fields
         error = {ct.err_code: 999, ct.err_msg: "can't change the load field list for loaded collection"}
         p2.load(
@@ -289,7 +289,7 @@ class TestFieldPartialLoad(TestcaseBase):
         res, _ = p2.search(
             data=search_vectors, anns_field=vector_field.name, params=search_params, limit=100, output_fields=["*"]
         )
-        assert pk_field.name in res[0][0].fields.keys() and vector_field.name in res[0][0].fields.keys()
+        assert pk_field.name in res[0][0].fields and vector_field.name in res[0][0].fields
 
         # load the collection with all fields
         collection_w.load(check_task=CheckTasks.err_res, check_items=error)

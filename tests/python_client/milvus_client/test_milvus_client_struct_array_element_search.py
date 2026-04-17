@@ -182,15 +182,9 @@ def assert_result_ids_match(milvus_results, gt_results, recall_threshold=0.9, is
         is_search: True for search results (List[List[dict]]), False for query (List[dict])
         check_order: If True, also verify top-1 ranking matches
     """
-    if is_search:
-        milvus_ids = [hit["id"] for hit in milvus_results[0]]
-    else:
-        milvus_ids = [hit["id"] for hit in milvus_results]
+    milvus_ids = [hit["id"] for hit in milvus_results[0]] if is_search else [hit["id"] for hit in milvus_results]
 
-    if isinstance(gt_results, set):
-        gt_ids = gt_results
-    else:
-        gt_ids = {r[0] for r in gt_results}
+    gt_ids = gt_results if isinstance(gt_results, set) else {r[0] for r in gt_results}
 
     milvus_id_set = set(milvus_ids)
 
@@ -293,10 +287,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
                 # Use a distinctive unit vector for row 0, element 0 so it
                 # never collides with any seed-generated vector and Top-1
                 # assertions reliably return row 0.
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
+                emb = [1.0] + [0.0] * (dim - 1) if i == 0 and j == 0 else _seed_vector(i * 1000 + j, dim)
                 struct_array.append(
                     {
                         "embedding": emb,
@@ -1091,7 +1082,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         self.insert(client, collection_name, growing_data)
         self.load_collection(client, collection_name)
 
-        all_data = sealed_data + growing_data
+        sealed_data + growing_data
         query_vector = sealed_data[0]["structA"][0]["embedding"]
         results, check = self.search(
             client,
@@ -1288,10 +1279,7 @@ class TestStructArrayMatchFamily(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
+                emb = [1.0] + [0.0] * (dim - 1) if i == 0 and j == 0 else _seed_vector(i * 1000 + j, dim)
                 struct_array.append(
                     {
                         "embedding": emb,
@@ -2244,10 +2232,7 @@ class TestStructArrayNestedIndex(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
+                emb = [1.0] + [0.0] * (dim - 1) if i == 0 and j == 0 else _seed_vector(i * 1000 + j, dim)
                 elem = {
                     "embedding": emb,
                     "int_val": i * 100 + j,
@@ -3408,10 +3393,7 @@ class TestStructArrayMatchQuery(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
+                emb = [1.0] + [0.0] * (dim - 1) if i == 0 and j == 0 else _seed_vector(i * 1000 + j, dim)
                 struct_array.append(
                     {
                         "embedding": emb,
@@ -3791,10 +3773,7 @@ class TestStructArrayElementFilterHybridSearch(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
+                emb = [1.0] + [0.0] * (dim - 1) if i == 0 and j == 0 else _seed_vector(i * 1000 + j, dim)
                 struct_array.append(
                     {
                         "embedding": emb,

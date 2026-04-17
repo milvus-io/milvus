@@ -47,7 +47,7 @@ class TestChaos(TestChaosBase):
 
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self):
-        c_name = cf.gen_unique_str("Checker_")
+        cf.gen_unique_str("Checker_")
         checkers = {
             # Op.create: CollectionCreateChecker(collection_name=c_name),
             # Op.insert: InsertChecker(collection_name=c_name),
@@ -80,12 +80,12 @@ class TestChaos(TestChaosBase):
         data = cf.gen_default_list_data_for_bulk_insert(nb=nb)
         fields_name = [field.name for field in schema.fields]
         if not row_based:
-            data_dict = dict(zip(fields_name, data))
+            data_dict = dict(zip(fields_name, data, strict=False))
         if row_based:
             entities = []
             for i in range(nb):
                 entity_value = [field_values[i] for field_values in data]
-                entity = dict(zip(fields_name, entity_value))
+                entity = dict(zip(fields_name, entity_value, strict=False))
                 entities.append(entity)
             data_dict = {"rows": entities}
         file_name = "bulk_insert_data_source.json"
@@ -121,6 +121,6 @@ class TestChaos(TestChaosBase):
 
         log.info("start checkers")
         sleep(30)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.check_result()
         sleep(600)

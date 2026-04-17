@@ -40,15 +40,9 @@ class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, db_name, milvus_ns):
         # Prioritize uri and token for connection
-        if uri:
-            actual_uri = uri
-        else:
-            actual_uri = f"http://{host}:{port}"
+        actual_uri = uri or f"http://{host}:{port}"
 
-        if token:
-            actual_token = token
-        else:
-            actual_token = f"{user}:{password}" if user and password else None
+        actual_token = token or (f"{user}:{password}" if user and password else None)
 
         if actual_token:
             connections.connect("default", uri=actual_uri, token=actual_token)
@@ -106,7 +100,7 @@ class TestOperations(TestBase):
                 if num_entities < 200000:
                     nb = 5000
                     num_to_insert = 200000 - num_entities
-                    for i in range(num_to_insert // nb):
+                    for _i in range(num_to_insert // nb):
                         op_checker[Op.insert].insert_data(nb=nb)
                 else:
                     log.info(f"collection {c_name} has enough data {num_entities}, skip insert data")
@@ -133,7 +127,7 @@ class TestOperations(TestBase):
         for i in range(10):
             sleep(request_duration // 10)
             for checker in all_checkers:
-                for k, v in checker.items():
+                for _k, v in checker.items():
                     v.check_result()
         try:
             ra = ResultAnalyzer()

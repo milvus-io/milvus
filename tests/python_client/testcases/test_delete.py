@@ -126,7 +126,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         error = {
             ct.err_code: 999,
-            ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str" % str(expr),
+            ct.err_msg: f"Illegal str variables: {{'filter': {str(expr)}}}, expect non-empty str",
         }
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -323,8 +323,8 @@ class TestDeleteParams(TestcaseBase):
 
         error = {
             ct.err_code: 0,
-            ct.err_msg: "Illegal nullable str variables: {'partition_name': %s}, "
-            "expect None or non-empty str" % str(partition_name),
+            ct.err_msg: f"Illegal nullable str variables: {{'partition_name': {str(partition_name)}}}, "
+            "expect None or non-empty str",
         }
         collection_w.delete(tmp_expr, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2043,11 +2043,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         filter_ids = []
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
-                int64 = _vectors[i][ct.default_int64_field_name]
-                float = _vectors[i][ct.default_float_field_name]
+                _vectors[i][ct.default_int64_field_name]
+                _vectors[i][ct.default_float_field_name]
             else:
-                int64 = _vectors.int64[i]
-                float = _vectors.float[i]
+                _vectors.int64[i]
+                _vectors.float[i]
             if not expression or eval(expression):
                 filter_ids.append(_id)
 
@@ -2078,11 +2078,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         filter_ids = []
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
-                int64 = _vectors[i][ct.default_int64_field_name]
-                float = _vectors[i][ct.default_float_field_name]
+                _vectors[i][ct.default_int64_field_name]
+                _vectors[i][ct.default_float_field_name]
             else:
-                int64 = _vectors.int64[i]
-                float = _vectors.float[i]
+                _vectors.int64[i]
+                _vectors.float[i]
             if not expr or eval(expr):
                 filter_ids.append(_id)
 
@@ -2130,9 +2130,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expr = expressions[0].replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i in range(nb):
-            int32_array = data[i][ct.default_int32_array_field_name]
-            float_array = data[i][ct.default_float_array_field_name]
-            string_array = data[i][ct.default_string_array_field_name]
+            data[i][ct.default_int32_array_field_name]
+            data[i][ct.default_float_array_field_name]
+            data[i][ct.default_string_array_field_name]
             if not expr or eval(expr):
                 filter_ids.append(i)
 
@@ -2178,9 +2178,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expr = expressions[0].replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i in range(nb):
-            int32_array = data[i][ct.default_int32_array_field_name]
-            float_array = data[i][ct.default_float_array_field_name]
-            string_array = data[i][ct.default_string_array_field_name]
+            data[i][ct.default_int32_array_field_name]
+            data[i][ct.default_float_array_field_name]
+            data[i][ct.default_string_array_field_name]
             if not expr or eval(expr):
                 filter_ids.append(i)
 
@@ -2476,7 +2476,11 @@ class TestDeleteComplexExpr(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "normal_expressions, json_expressions",
-        zip(cf.gen_normal_expressions_and_templates()[1:4], cf.gen_json_field_expressions_and_templates()[6:9]),
+        zip(
+            cf.gen_normal_expressions_and_templates()[1:4],
+            cf.gen_json_field_expressions_and_templates()[6:9],
+            strict=False,
+        ),
     )
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_expr_complex_mixed(self, normal_expressions, json_expressions, enable_dynamic_field):
@@ -2500,13 +2504,13 @@ class TestDeleteComplexExpr(TestcaseBase):
             if enable_dynamic_field:
                 json_field["number"] = _vectors[i][ct.default_json_field_name]["number"]
                 json_field["float"] = _vectors[i][ct.default_json_field_name]["float"]
-                int64 = _vectors[i][ct.default_int64_field_name]
-                float = _vectors[i][ct.default_float_field_name]
+                _vectors[i][ct.default_int64_field_name]
+                _vectors[i][ct.default_float_field_name]
             else:
                 json_field["number"] = _vectors[ct.default_json_field_name][i]["number"]
                 json_field["float"] = _vectors[ct.default_json_field_name][i]["float"]
-                int64 = _vectors.int64[i]
-                float = _vectors.float[i]
+                _vectors.int64[i]
+                _vectors.float[i]
             if not expr or eval(expr):
                 filter_ids.append(_id)
 
@@ -2560,11 +2564,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         for i in range(nb):
             if enable_dynamic_field:
                 json_field["string"] = _vectors[i][ct.default_json_field_name]["string"]
-                varchar = _vectors[i][ct.default_string_field_name]
-                NewStr = _vectors[i]["NewStr"]
+                _vectors[i][ct.default_string_field_name]
+                _vectors[i]["NewStr"]
             else:
                 json_field["string"] = _vectors[ct.default_json_field_name][i]["string"]
-                varchar = _vectors.varchar[i]
+                _vectors.varchar[i]
             if not expression or eval(expression):
                 filter_ids.append(i)
 

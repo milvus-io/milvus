@@ -138,9 +138,8 @@ def wait_cluster_be_ready(cluster_id, client, timeout=120):
     t0 = time.time()
     while True and time.time() - t0 < timeout:
         rsp = client.cluster_describe(cluster_id)
-        if rsp["code"] == 200:
-            if rsp["data"]["status"] == "RUNNING":
-                return time.time() - t0
+        if rsp["code"] == 200 and rsp["data"]["status"] == "RUNNING":
+            return time.time() - t0
         time.sleep(1)
         logger.debug("wait cluster to be ready, cost time: %s" % (time.time() - t0))
     return -1
@@ -179,7 +178,7 @@ def get_data_by_fields(fields, nb):
             fields_not_auto_id.append(field)
     # logger.info(f"fields_not_auto_id: {fields_not_auto_id}")
     data = []
-    for i in range(nb):
+    for _i in range(nb):
         tmp = {}
         for field in fields_not_auto_id:
             tmp[field["name"]] = gen_data_by_type(field)
@@ -200,7 +199,7 @@ def get_random_json_data(uid=None):
         "phone_number": fake.phone_number(),
         "json": {"name": fake.name(), "address": fake.address()},
     }
-    for i in range(random.randint(1, 10)):
+    for _i in range(random.randint(1, 10)):
         data["key" + str(random.randint(1, 100_000))] = "value" + str(random.randint(1, 100_000))
     return data
 
@@ -233,7 +232,6 @@ def get_data_by_payload(payload, nb=3000):
 
 
 def get_common_fields_by_data(data, exclude_fields=None):
-    fields = set()
     if isinstance(data, dict):
         data = [data]
     if not isinstance(data, list):

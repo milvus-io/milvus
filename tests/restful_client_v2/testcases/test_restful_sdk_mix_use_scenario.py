@@ -277,7 +277,7 @@ class TestRestfulSdkCompatibility(TestBase):
         res = collection.query(expr="uid in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         pk_id_list = []
         for item in res:
-            uid = item["uid"]
+            item["uid"]
             pk_id_list.append(item["id"])
         expr = f"id in {pk_id_list}"
         collection.delete(expr)
@@ -316,7 +316,7 @@ class TestRestfulSdkCompatibility(TestBase):
             pk_id_list.append(item["int64"])
         payload = {"collectionName": name, "filter": f"int64 in {pk_id_list}"}
         # delete data by restful
-        rsp = self.vector_client.vector_delete(payload)
+        self.vector_client.vector_delete(payload)
         time.sleep(5)
         res = collection.query(expr="int64 in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]", output_fields=["*"])
         assert len(res) == 0

@@ -1625,7 +1625,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         desc = client.describe_collection(restored_collection_name)
         # Check auto_id is preserved
         pk_field = [f for f in desc["fields"] if f.get("is_primary")][0]
-        assert pk_field.get("auto_id", False) == True, "auto_id should be preserved"
+        assert pk_field.get("auto_id", False), "auto_id should be preserved"
 
         # Verify can insert without id
         new_rows = [{"vector": list(rng.random(default_dim))} for _ in range(10)]
@@ -2443,7 +2443,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         fields = desc.get("fields", [])
         category_field = [f for f in fields if f.get("name") == "category"]
         assert len(category_field) == 1
-        assert category_field[0].get("is_partition_key") == True, "Partition key should be preserved"
+        assert category_field[0].get("is_partition_key"), "Partition key should be preserved"
 
         # Verify data
         self.load_collection(client, restored_collection_name)
@@ -2918,7 +2918,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["dynamic_str"] == "dynamic_50"
         assert res[0]["dynamic_int"] == 5000
         assert abs(res[0]["dynamic_float"] - 25.0) < 1e-5
-        assert res[0]["dynamic_bool"] == True
+        assert res[0]["dynamic_bool"]
 
         # Verify all data count
         res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])

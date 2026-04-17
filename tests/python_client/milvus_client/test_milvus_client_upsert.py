@@ -306,7 +306,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
+        np.random.default_rng(seed=19530)
         rows = [
             {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
             for i in range(10)
@@ -1645,7 +1645,7 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
         exp = f"{ct.default_int64_field_name} >= 0 && {ct.default_int64_field_name} <= {upsert_nb}"
         res = self.query(client, collection_name, filter=exp, output_fields=[default_float_field_name])[0]
         res_values = [res[i][default_float_field_name] for i in range(upsert_nb)]
-        assert res_values == float_values1 or res_values == float_values2
+        assert res_values in (float_values1, float_values2)
 
         self.drop_collection(client, collection_name)
 
@@ -2142,7 +2142,7 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # 4. Multiple upserts and verify count
-        for i in range(5):
+        for _i in range(5):
             self.upsert(client, collection_name, rows)
             self.flush(client, collection_name)
             res = self.query(

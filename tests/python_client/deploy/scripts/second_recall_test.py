@@ -55,7 +55,7 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
     nq = 10000
     topK = 100
     search_params = gen_search_param(index_type)
-    for i in range(3):
+    for _i in range(3):
         t0 = time.time()
         logger.info("\nSearch...")
         # define output_fields of search result

@@ -14,6 +14,7 @@ Generates two report formats:
 - test_report.html: Human-readable HTML report with color-coded logs
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -247,10 +248,8 @@ class ConditionalLogHandler(logging.Handler):
                         if len(parts) >= 2:
                             error_info["file"] = parts[0].split()[-1] + ".py"
                             line_num = parts[1].split()[0]
-                            try:
+                            with contextlib.suppress(BaseException):
                                 error_info["line_number"] = int(line_num)
-                            except:
-                                pass
                         break
 
             elif hasattr(report, "longrepr"):
@@ -804,7 +803,7 @@ def pytest_configure(config):
             for log_file in [_conditional_handler.report_json, _conditional_handler.report_html]:
                 if not os.path.exists(log_file):
                     try:
-                        with open(log_file, "w", encoding="utf-8") as f:
+                        with open(log_file, "w", encoding="utf-8"):
                             pass  # Create empty file
                     except Exception:
                         pass  # Ignore errors

@@ -2,6 +2,7 @@
 CDC sync tests for RBAC operations.
 """
 
+import contextlib
 import time
 
 import pytest
@@ -419,10 +420,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         assert self.wait_for_sync(check_sync, sync_timeout, f"create privilege group {group_name}")
 
         # Cleanup
-        try:
+        with contextlib.suppress(BaseException):
             upstream_client.drop_privilege_group(group_name)
-        except:
-            pass
 
     def test_drop_privilege_group(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_PRIVILEGE_GROUP operation sync."""
@@ -432,10 +431,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         group_name = self.gen_unique_name("test_priv_group_drop")
 
         # Initial cleanup
-        try:
+        with contextlib.suppress(BaseException):
             upstream_client.drop_privilege_group(group_name)
-        except:
-            pass
 
         # Create privilege group first
         upstream_client.create_privilege_group(group_name)
@@ -576,10 +573,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         group_name = self.gen_unique_name("test_priv_group_add")
 
         # Initial cleanup
-        try:
+        with contextlib.suppress(BaseException):
             upstream_client.drop_privilege_group(group_name)
-        except:
-            pass
 
         # Create privilege group first
         upstream_client.create_privilege_group(group_name)
@@ -647,10 +642,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         assert self.wait_for_sync(check_downstream, sync_timeout, f"add privileges to group {group_name}")
 
         # Cleanup
-        try:
+        with contextlib.suppress(BaseException):
             upstream_client.drop_privilege_group(group_name)
-        except:
-            pass
 
     def test_remove_privileges_from_group(self, upstream_client, downstream_client, sync_timeout):
         """Test REMOVE_PRIVILEGES_FROM_GROUP operation sync."""
@@ -660,10 +653,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         group_name = self.gen_unique_name("test_priv_group_add")
 
         # Initial cleanup
-        try:
+        with contextlib.suppress(BaseException):
             upstream_client.drop_privilege_group(group_name)
-        except:
-            pass
 
         # Create privilege group first
         upstream_client.create_privilege_group(group_name)

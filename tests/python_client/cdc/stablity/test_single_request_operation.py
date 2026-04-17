@@ -114,7 +114,7 @@ class TestOperations(TestBase):
             # add an event so that the chaos can start to apply
             if i == 3:
                 event_records.insert("init_chaos", "ready")
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
@@ -123,7 +123,7 @@ class TestOperations(TestBase):
         wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
         time.sleep(60)
         cc.check_thread_status(tasks)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.pause()
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()

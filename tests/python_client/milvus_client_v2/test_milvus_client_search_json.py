@@ -123,7 +123,7 @@ class TestSearchJSONShared(TestMilvusClientV2Base):
         expected: limit=3 results per query, distances in COSINE order
         """
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_expression_json_contains: Searching collection %s" % self.collection_name)
+        log.info(f"test_search_expression_json_contains: Searching collection {self.collection_name}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         expressions = ["json_contains(json_field['list'], 100)", "JSON_CONTAINS(json_field['list'], 100)"]
         for expression in expressions:
@@ -156,7 +156,7 @@ class TestSearchJSONShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         log.info(
-            "test_search_expression_json_contains_combined_with_normal: Searching collection %s" % self.collection_name
+            f"test_search_expression_json_contains_combined_with_normal: Searching collection {self.collection_name}"
         )
         vectors = cf.gen_vectors(default_nq, default_dim)
         # With data {"number": i, "list": [i, i+1, i+2]}, value 1000 is in lists of rows 998, 999, 1000
@@ -643,7 +643,7 @@ class TestSearchJSONIndependent(TestMilvusClientV2Base):
         idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
-        log.info("test_search_expression_json_contains: Searching collection %s" % collection_name)
+        log.info(f"test_search_expression_json_contains: Searching collection {collection_name}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         expressions = ["json_contains(json_field['list'], 100)", "JSON_CONTAINS(json_field['list'], 100)"]
         for expression in expressions:
@@ -699,7 +699,7 @@ class TestSearchJSONIndependent(TestMilvusClientV2Base):
         idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
-        log.info("test_search_expression_json_contains_list: Searching collection %s" % collection_name)
+        log.info(f"test_search_expression_json_contains_list: Searching collection {collection_name}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         expressions = ["json_contains(json_field, 100)", "JSON_CONTAINS(json_field, 100)"]
         for expression in expressions:
@@ -761,7 +761,7 @@ class TestSearchJSONIndependent(TestMilvusClientV2Base):
         idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
-        log.info("test_search_expression_json_contains_combined_with_normal: Searching collection %s" % collection_name)
+        log.info(f"test_search_expression_json_contains_combined_with_normal: Searching collection {collection_name}")
         vectors = cf.gen_vectors(default_nq, default_dim)
         tar = 1000
         expressions = [

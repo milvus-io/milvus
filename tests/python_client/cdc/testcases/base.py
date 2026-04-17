@@ -532,7 +532,7 @@ class TestCDCSyncBase:
             for _ in range(nb):
                 sparse_indices = random.sample(range(dim), random.randint(5, min(20, dim)))
                 sparse_values = [random.random() for _ in sparse_indices]
-                sparse_vector = {idx: val for idx, val in zip(sparse_indices, sparse_values)}
+                sparse_vector = {idx: val for idx, val in zip(sparse_indices, sparse_values, strict=False)}
                 vectors.append(sparse_vector)
 
         return vectors

@@ -289,14 +289,8 @@ class TestCreateCollectionWithFullTextSearchNegative(TestcaseBase):
             FieldSchema(name="paragraph_sparse_emb", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
-        if valid_input:
-            input_field_names = ["text"]
-        else:
-            input_field_names = ["invalid_inout"]
-        if valid_output:
-            output_field_names = ["text_sparse_emb"]
-        else:
-            output_field_names = ["invalid_output"]
+        input_field_names = ["text"] if valid_input else ["invalid_inout"]
+        output_field_names = ["text_sparse_emb"] if valid_output else ["invalid_output"]
 
         bm25_function = Function(
             name="text_bm25_emb",
@@ -2320,10 +2314,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 3. verify the result
         expected: full text search successfully and result is correct
         """
-        if tokenizer == "jieba":
-            lang_type = "chinese"
-        else:
-            lang_type = "english"
+        lang_type = "chinese" if tokenizer == "jieba" else "english"
 
         analyzer_params = {
             "type": lang_type,
@@ -3918,7 +3909,7 @@ class TestFullTextSearchMultiAnalyzer(TestcaseBase):
             mock_res_diff = mock_res_set - res_set
             if res_diff or mock_res_diff:
                 # log.error(f"result diff: {res_diff}, {mock_res_diff}")
-                assert False, (
+                raise AssertionError(
                     f"result diff: {res_diff} in origin but not in mock, {mock_res_diff} in mock but not in origin"
                 )
 

@@ -194,7 +194,7 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
             check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name},
         )
         tasks.append(query_task)
-        res = await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
         # 6. release collection
         await async_client.release_collection(collection_name)

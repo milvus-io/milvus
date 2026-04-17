@@ -2707,7 +2707,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         index_params.add_index("vector")
         index_params.add_index("geo", index_type="RTREE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        res = self.describe_collection(client, collection_name)
+        self.describe_collection(client, collection_name)
 
         # Insert data
         rng = np.random.default_rng(seed=19530)
@@ -3098,7 +3098,7 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         all_geometries = valid_geometries + invalid_geometries
 
         data = []
-        for i, (geo_wkt, is_valid) in enumerate(all_geometries):
+        for i, (geo_wkt, _is_valid) in enumerate(all_geometries):
             data.append({"id": i, "vector": [random.random() for _ in range(default_dim)], "geo": geo_wkt})
 
         self.insert(client, collection_name, data)
@@ -3741,7 +3741,7 @@ class TestMilvusClientGeometryNegative(TestMilvusClientV2Base):
             ct.err_msg: "invalid coordinate",  # May need to adjust based on actual error message
         }
 
-        for invalid_point, description in invalid_coordinate_cases:
+        for invalid_point, _description in invalid_coordinate_cases:
             # Test query with invalid coordinates
             self.query(
                 client,

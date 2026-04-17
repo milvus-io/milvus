@@ -1058,7 +1058,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         # BM25-generated sparse fields cannot be output, so exclude them from expected
         bm25_sparse_fields = [self.sparse_vector_field_name1, self.sparse_vector_field_name2]
         expected_output_fields = [field_name for field_name in self.all_fields if field_name not in bm25_sparse_fields]
-        res1 = self.hybrid_search(
+        self.hybrid_search(
             client,
             self.collection_name,
             reqs=req_list,
@@ -1091,7 +1091,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         )
         # output all listed fields
         output_fields = expected_output_fields
-        res2 = self.hybrid_search(
+        self.hybrid_search(
             client,
             self.collection_name,
             reqs=req_list,
@@ -1116,7 +1116,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             self.float_vector_field_name1,
             self.float_vector_field_name2,
         ]
-        res3 = self.hybrid_search(
+        self.hybrid_search(
             client,
             self.collection_name,
             reqs=req_list,
@@ -1141,7 +1141,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             self.dynamic_field_name1,
             self.dynamic_field_name2,
         ]
-        res4 = self.hybrid_search(
+        self.hybrid_search(
             client,
             self.collection_name,
             reqs=req_list,

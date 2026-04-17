@@ -690,7 +690,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
             check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name},
         )
         tasks.append(query_task)
-        res = await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
 
         # 6. drop action
         has_partition, _ = await async_client.has_partition(collection_name, partition_name)
@@ -815,7 +815,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
             check_items={"exp_res": rows_1 + rows_2, "with_vec": True, "pk_name": default_primary_key_field_name},
         )
         tasks.append(query_task_multi)
-        res = await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
         # 5. release partitions, search and query
         await async_client.release_partitions(collection_name, partition_name_1)
         error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
@@ -881,7 +881,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
             },
         )
         tasks_after_load.append(query_task)
-        res = await asyncio.gather(*tasks_after_load)
+        await asyncio.gather(*tasks_after_load)
 
         # 7. drop action
         await async_client.drop_collection(collection_name)

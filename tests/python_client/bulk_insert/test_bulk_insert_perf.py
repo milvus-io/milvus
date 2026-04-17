@@ -19,8 +19,10 @@ from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get
 from utils.util_log import test_log as log
 
 
-def assert_statistic(checkers, expectations={}):
-    for k in checkers.keys():
+def assert_statistic(checkers, expectations=None):
+    if expectations is None:
+        expectations = {}
+    for k in checkers:
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
@@ -103,10 +105,7 @@ class TestChaos(TestChaosBase):
             return
         log.info("bulk_insert checker is in health checkers, prepare data firstly")
         deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
-        if deploy_tool == "helm":
-            release_name = self.instance_name
-        else:
-            release_name = self.instance_name + "-minio"
+        release_name = self.instance_name if deploy_tool == "helm" else self.instance_name + "-minio"
         minio_ip_pod_pair = get_pod_ip_name_pairs("chaos-testing", f"release={release_name}, app=minio")
         ms = MilvusSys()
         minio_ip = list(minio_ip_pod_pair.keys())[0]
@@ -144,10 +143,7 @@ class TestChaos(TestChaosBase):
         )
         self.init_health_checkers(dim=int(dim))
         nb = int(nb)
-        if str(with_varchar_field) in ["true", "True"]:
-            with_varchar_field = True
-        else:
-            with_varchar_field = False
+        with_varchar_field = str(with_varchar_field) in ["true", "True"]
         varchar_len = int(varchar_len)
 
         self.prepare_bulk_insert(
@@ -160,7 +156,7 @@ class TestChaos(TestChaosBase):
         assert_statistic(self.health_checkers)
 
         assert_expectations()
-        for k, checker in self.health_checkers.items():
+        for _k, checker in self.health_checkers.items():
             checker.check_result()
             checker.terminate()
 

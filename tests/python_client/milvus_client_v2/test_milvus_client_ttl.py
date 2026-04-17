@@ -248,7 +248,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             )[0]
             assert len(res[0]) > 0
             for hit in res[0]:
-                assert hit.get(bool_field) == False
+                assert not hit.get(bool_field)
 
             # hybrid search data after alter ttl
             sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20, expr="visible==False")
@@ -1386,10 +1386,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
-            if i < 100:
-                ttl_value = future_ttl
-            else:
-                ttl_value = None
+            ttl_value = future_ttl if i < 100 else None
             rows.append(
                 {default_primary_key_field_name: i, "ttl": ttl_value, default_vector_field_name: list(vectors[i])}
             )
@@ -1446,10 +1443,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
-            if i < 100:
-                ttl_value = future_ttl
-            else:
-                ttl_value = None
+            ttl_value = future_ttl if i < 100 else None
             rows.append(
                 {default_primary_key_field_name: i, "ttl": ttl_value, default_vector_field_name: list(vectors[i])}
             )

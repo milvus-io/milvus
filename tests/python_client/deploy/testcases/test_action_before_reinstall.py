@@ -28,7 +28,7 @@ class TestActionBeforeReinstall(TestDeployBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.skip()
@@ -41,7 +41,7 @@ class TestActionBeforeReinstall(TestDeployBase):
         """
         name = "task_1_" + index_type
         insert_data = True
-        is_binary = True if "BIN" in index_type else False
+        is_binary = "BIN" in index_type
         is_flush = False
         collection_w = self.init_collection_general(
             insert_data=insert_data, is_binary=is_binary, nb=data_size, is_flush=is_flush, name=name
@@ -76,7 +76,7 @@ class TestActionBeforeReinstall(TestDeployBase):
         """
         name = "task_2_" + index_type
         insert_data = True
-        is_binary = True if "BIN" in index_type else False
+        is_binary = "BIN" in index_type
         is_flush = False
         # create collection and insert data
         collection_w = self.init_collection_general(

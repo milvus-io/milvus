@@ -141,7 +141,7 @@ def _install_milvus(image_tag="master-latest"):
 class TestResourceGroup(TestcaseBase):
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
         connections.disconnect("default")
@@ -622,7 +622,7 @@ class TestResourceGroup(TestcaseBase):
 class TestReplicasManagement(TestcaseBase):
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
         connections.disconnect("default")
@@ -642,7 +642,7 @@ class TestReplicasManagement(TestcaseBase):
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         resource_groups = []
-        for i in range(4):
+        for _i in range(4):
             name = cf.gen_unique_str("rg")
             self.utility = utility
             self.utility.create_resource_group(
@@ -708,7 +708,7 @@ class TestReplicasManagement(TestcaseBase):
         log.info(f"milvus build version: {mil.build_version}")
         # create  two rg with request node_num=4, limit node_num=6
         resource_groups = []
-        for i in range(3):
+        for _i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
             self.utility.create_resource_group(
@@ -724,7 +724,7 @@ class TestReplicasManagement(TestcaseBase):
         col_list = []
         # create collection and load with multi replicase
         self.skip_connection = True
-        for i in range(3):
+        for _i in range(3):
             prefix = cf.gen_unique_str("test_rg")
             collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[
                 0:2
@@ -754,7 +754,7 @@ class TestReplicasManagement(TestcaseBase):
         log.info(f"milvus build version: {mil.build_version}")
         # create  two rg with request node_num=4, limit node_num=6
         resource_groups = []
-        for i in range(3):
+        for _i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
             self.utility.create_resource_group(
@@ -770,7 +770,7 @@ class TestReplicasManagement(TestcaseBase):
         col_list = []
         # create collection and load with multi replicase
         self.skip_connection = True
-        for i in range(3):
+        for _i in range(3):
             prefix = cf.gen_unique_str("test_rg")
             collection_w, vectors = self.init_collection_general(prefix, insert_data=True, enable_dynamic_field=True)[
                 0:2
@@ -861,7 +861,7 @@ class TestServiceAvailableDuringScale(TestcaseBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
         connections.disconnect("default")
@@ -905,7 +905,7 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         request_duration = 360
         for i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             # scale up querynode when progress is 3/10
             if i == 3:
@@ -919,7 +919,7 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
 
     def test_service_available_during_scale_down(self, image_tag):
@@ -961,7 +961,7 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         request_duration = 360
         for i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             # scale down querynode in rg when progress is 3/10
             if i == 3:
@@ -975,7 +975,7 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()
 
 
@@ -995,7 +995,7 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
         connections.disconnect("default")
@@ -1041,7 +1041,7 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         request_duration = 360
         for i in range(10):
             time.sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
             # transfer replicas from default to another
             if i == 3:
@@ -1060,5 +1060,5 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.terminate()

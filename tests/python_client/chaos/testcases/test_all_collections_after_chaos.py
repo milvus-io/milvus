@@ -25,15 +25,9 @@ class TestAllCollection:
     @pytest.fixture(scope="function")
     def milvus_client(self):
         """Initialize MilvusClient"""
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
-        if cf.param_info.param_token:
-            token = cf.param_info.param_token
-        else:
-            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        token = cf.param_info.param_token or f"{cf.param_info.param_user}:{cf.param_info.param_password}"
 
         client = MilvusClient(uri=uri, token=token)
         yield client
@@ -41,7 +35,7 @@ class TestAllCollection:
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L1)

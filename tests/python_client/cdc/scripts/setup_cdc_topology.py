@@ -65,7 +65,7 @@ def setup_cdc_topology(
     ]
 
     # Add all target clusters
-    for target_id, target_uri in zip(target_cluster_ids, downstream_uris):
+    for target_id, target_uri in zip(target_cluster_ids, downstream_uris, strict=False):
         clusters.append(
             {
                 "cluster_id": target_id,
@@ -102,7 +102,7 @@ def setup_cdc_topology(
 
     # Handle removed clusters - prepare them with empty topology
     if removed_clusters_uris and removed_clusters_uris[0]:  # Check if removed_clusters_uris is not empty
-        for removed_uri, removed_id in zip(removed_clusters_uris, removed_clusters_ids):
+        for removed_uri, removed_id in zip(removed_clusters_uris, removed_clusters_ids, strict=False):
             if removed_uri and removed_id:  # Skip empty URIs and IDs
                 print(f"DEBUG: removed_cluster_uri: {removed_uri}, removed_clusters_token: {removed_clusters_token}")
                 removed_client = MilvusClient(uri=removed_uri, token=removed_clusters_token)

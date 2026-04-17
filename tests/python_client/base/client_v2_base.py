@@ -34,10 +34,7 @@ class TestMilvusClientV2Base(Base):
         """return MilvusClient instance if connected successfully, otherwise return None"""
         if self.skip_connection:
             return None
-        if cf.param_info.param_uri:
-            uri = cf.param_info.param_uri
-        else:
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        uri = cf.param_info.param_uri or "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
         res, is_succ = self.init_milvus_client(
             uri=uri, token=cf.param_info.param_token, active_trace=active_trace, **kwargs
         )

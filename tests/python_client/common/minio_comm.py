@@ -18,7 +18,7 @@ def copy_files_to_bucket(client, r_source, target_files, bucket_name, force=Fals
     for target_file in target_files:
         found = False
         try:
-            result = client.stat_object(bucket_name, target_file)
+            client.stat_object(bucket_name, target_file)
             found = True
         except S3Error:
             pass

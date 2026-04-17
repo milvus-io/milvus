@@ -608,10 +608,7 @@ def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False, 
 def gen_vectors(float_vector, rows, dim):
     vectors = []
     if rows > 0:
-        if float_vector:
-            vectors = gen_float_vectors(rows, dim)
-        else:
-            vectors = gen_binary_vectors(rows, (dim // 8))
+        vectors = gen_float_vectors(rows, dim) if float_vector else gen_binary_vectors(rows, dim // 8)
     return vectors
 
 
@@ -667,15 +664,9 @@ def gen_data_by_data_field(
             else:
                 data = gen_vectors(float_vector=float_vector, rows=rows, dim=dim)
         elif data_field == DataField.float_field:
-            if not nullable:
-                data = [np.float32(random.random()) for _ in range(rows)]
-            else:
-                data = [None for _ in range(rows)]
+            data = [np.float32(random.random()) for _ in range(rows)] if not nullable else [None for _ in range(rows)]
         elif data_field == DataField.double_field:
-            if not nullable:
-                data = [np.float64(random.random()) for _ in range(rows)]
-            else:
-                data = [None for _ in range(rows)]
+            data = [np.float64(random.random()) for _ in range(rows)] if not nullable else [None for _ in range(rows)]
         elif data_field == DataField.pk_field:
             if not nullable:
                 data = [np.int64(i) for i in range(start, start + rows)]
@@ -1320,7 +1311,7 @@ def prepare_bulk_insert_json_files(
     auto_id=True,
     str_pk=False,
     float_vector=True,
-    data_fields=[],
+    data_fields=None,
     file_nums=1,
     multi_folder=False,
     file_type=".json",
@@ -1383,6 +1374,8 @@ def prepare_bulk_insert_json_files(
     :return list
         file names list
     """
+    if data_fields is None:
+        data_fields = []
     data_fields_c = copy.deepcopy(data_fields)
     log.info(f"data_fields: {data_fields}")
     log.info(f"data_fields_c: {data_fields_c}")
@@ -1414,13 +1407,15 @@ def prepare_bulk_insert_new_json_files(
     dim=128,
     float_vector=True,
     file_size=None,
-    data_fields=[],
+    data_fields=None,
     file_nums=1,
     enable_dynamic_field=False,
     err_type="",
     force=False,
     **kwargs,
 ):
+    if data_fields is None:
+        data_fields = []
     log.info(f"data_fields: {data_fields}")
     files = gen_new_json_files(
         float_vector=float_vector,
@@ -1445,7 +1440,7 @@ def prepare_bulk_insert_numpy_files(
     dim=128,
     enable_dynamic_field=False,
     file_size=None,
-    data_fields=[DataField.vec_field],
+    data_fields=None,
     float_vector=True,
     file_nums=1,
     force=False,
@@ -1481,6 +1476,8 @@ def prepare_bulk_insert_numpy_files(
     Return: List
         File name list or file name with sub-folder list
     """
+    if data_fields is None:
+        data_fields = [DataField.vec_field]
     files = gen_npy_files(
         rows=rows,
         dim=dim,
@@ -1507,7 +1504,7 @@ def prepare_bulk_insert_parquet_files(
     file_size=None,
     row_group_size=None,
     enable_dynamic_field=False,
-    data_fields=[DataField.vec_field],
+    data_fields=None,
     float_vector=True,
     file_nums=1,
     force=False,
@@ -1544,6 +1541,8 @@ def prepare_bulk_insert_parquet_files(
     Return: List
         File name list or file name with sub-folder list
     """
+    if data_fields is None:
+        data_fields = [DataField.vec_field]
     files = gen_parquet_files(
         rows=rows,
         dim=dim,
@@ -1626,7 +1625,7 @@ def prepare_bulk_insert_csv_files(
     dim=128,
     auto_id=True,
     float_vector=True,
-    data_fields=[],
+    data_fields=None,
     file_nums=1,
     force=False,
 ):
@@ -1662,6 +1661,8 @@ def prepare_bulk_insert_csv_files(
     :param force: re-generate the file(s) regardless existing or not
     :type force: boolean
     """
+    if data_fields is None:
+        data_fields = []
     data_fields_c = copy.deepcopy(data_fields)
     log.info(f"data_fields: {data_fields}")
     log.info(f"data_fields_c: {data_fields_c}")

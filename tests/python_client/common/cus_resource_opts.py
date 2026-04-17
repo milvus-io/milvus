@@ -1,4 +1,3 @@
-
 import os
 
 from kubernetes import client, config
@@ -40,7 +39,7 @@ class CustomResourceOperations:
             )
             log.info(f"create custom resource response: {api_response}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
+            log.error(f"Exception when calling CustomObjectsApi->create_namespaced_custom_object: {e}\n")
             raise Exception(str(e))
         return api_response
 
@@ -55,7 +54,7 @@ class CustomResourceOperations:
             log.info(f"delete custom resource response: {api_response}")
         except ApiException as e:
             if raise_ex:
-                log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
+                log.error(f"Exception when calling CustomObjectsApi->delete_namespaced_custom_object: {e}\n")
                 raise Exception(str(e))
 
     def patch(self, metadata_name, body):
@@ -67,7 +66,7 @@ class CustomResourceOperations:
             )
             log.debug(f"patch custom resource response: {api_response}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->patch_namespaced_custom_object: %s\n" % e)
+            log.error(f"Exception when calling CustomObjectsApi->patch_namespaced_custom_object: {e}\n")
             raise Exception(str(e))
         return api_response
 
@@ -81,7 +80,7 @@ class CustomResourceOperations:
             )
             log.debug(f"list custom resource response: {api_response}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
+            log.error(f"Exception when calling CustomObjectsApi->list_namespaced_custom_object: {e}\n")
             raise Exception(str(e))
         return api_response
 
@@ -94,7 +93,7 @@ class CustomResourceOperations:
             )
             # log.debug(f"get custom resource response: {api_response}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->get_namespaced_custom_object: %s\n" % e)
+            log.error(f"Exception when calling CustomObjectsApi->get_namespaced_custom_object: {e}\n")
             raise Exception(str(e))
         return api_response
 

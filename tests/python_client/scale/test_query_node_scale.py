@@ -104,11 +104,11 @@ class TestQueryNodeScale:
             c_name = cf.gen_unique_str("scale_query")
             # c_name = 'scale_query_DymS7kI4'
             collection_w = ApiCollectionWrapper()
-            utility_w = ApiUtilityWrapper()
+            ApiUtilityWrapper()
             collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
 
             # insert two segments
-            for i in range(30):
+            for _i in range(30):
                 df = cf.gen_default_dataframe_data(nb)
                 collection_w.insert(df)
                 log.debug(collection_w.num_entities)

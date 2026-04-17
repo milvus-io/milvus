@@ -337,7 +337,6 @@ def pytest_runtest_setup(item):
 def pytest_runtestloop(session):
     if session.config.getoption("--dry_run"):
         total_num = 0
-        file_num = 0
         tags_num = 0
         res = {"total_num": total_num, "tags_num": tags_num}
         for item in session.items:
@@ -364,7 +363,7 @@ def check_server_connection(request):
         try:
             socket.getaddrinfo(host, port, 0, 0, socket.IPPROTO_TCP)
         except Exception as e:
-            print("Socket connnet failed: %s" % str(e))
+            print(f"Socket connnet failed: {str(e)}")
             connected = False
     return connected
 
@@ -400,7 +399,7 @@ def check_server_connection(request):
 # @pytest.fixture(scope="module")
 def connect(request):
     host = request.config.getoption("--host")
-    service_name = request.config.getoption("--service")
+    request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http_port")
     handler = request.config.getoption("--handler")
@@ -427,7 +426,7 @@ def connect(request):
 # @pytest.fixture(scope="module")
 def dis_connect(request):
     host = request.config.getoption("--host")
-    service_name = request.config.getoption("--service")
+    request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http_port")
     handler = request.config.getoption("--handler")
@@ -514,7 +513,7 @@ def binary_collection(request, connect):
         pytest.exit(str(e))
 
     def teardown():
-        collection_names = connect.list_collections()
+        connect.list_collections()
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
 

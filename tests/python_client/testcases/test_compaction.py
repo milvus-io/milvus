@@ -455,7 +455,7 @@ class TestCompactionOperation(TestcaseBase):
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
-        c_plans = collection_w.get_compaction_plans()[0]
+        collection_w.get_compaction_plans()[0]
 
         # assert len(c_plans.plans) == 2
         # todo assert two types compaction plan
@@ -517,7 +517,7 @@ class TestCompactionOperation(TestcaseBase):
         expected: Verify there are 2 merge type complation plans
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
-        for i in range(2):
+        for _i in range(2):
             df = cf.gen_default_dataframe_data(2 * tmp_nb)
             insert_res, _ = collection_w.insert(df)
             log.debug(collection_w.num_entities)
@@ -836,7 +836,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)
 
         # verify the two segments are merged into one
-        c_plans = collection_w.get_compaction_plans()[0]
+        collection_w.get_compaction_plans()[0]
 
         # verify queryNode load the compacted segments
         collection_w.load()
@@ -957,7 +957,7 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans(
             check_task=CheckTasks.check_merge_compact, check_items={"segment_num": num_of_segment}
         )[0]
-        target = c_plans.plans[0].target
+        c_plans.plans[0].target
 
         collection_w.load()
         cost = 180
@@ -1293,7 +1293,7 @@ class TestCompactionOperation(TestcaseBase):
         replica_num = len(replicas.groups)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         if not (len(seg_info) == 1 * replica_num or len(seg_info) == 2 * replica_num):
-            assert False
+            raise AssertionError()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_search(self):

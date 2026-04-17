@@ -31,7 +31,7 @@ class TestActionBeforeReinstall(TestDeployBase):
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         log.info("skip drop collection")
 
     @pytest.mark.skip()
@@ -44,7 +44,7 @@ class TestActionBeforeReinstall(TestDeployBase):
         """
         name = "task_1_" + index_type
         insert_data = False
-        is_binary = True if "BIN" in index_type else False
+        is_binary = "BIN" in index_type
         is_flush = False
         # init collection
         collection_w = self.init_collection_general(
@@ -99,7 +99,7 @@ class TestActionBeforeReinstall(TestDeployBase):
         after reinstall: get collection, search, insert data, create index, load, and search
         """
         name = "task_2_" + index_type
-        is_binary = True if "BIN" in index_type else False
+        is_binary = "BIN" in index_type
         # init collection
         collection_w = self.init_collection_general(
             insert_data=False, is_binary=is_binary, nb=data_size, is_flush=False, name=name, active_trace=True
@@ -174,8 +174,8 @@ class TestActionBeforeReinstall(TestDeployBase):
         after reinstall: get collection, search, create index, load, and search
         """
         name = f"index_type_{index_type}_segment_status_{segment_status}_is_vector_indexed_{is_vector_indexed}_is_string_indexed_{is_string_indexed}_is_compacted_{is_compacted}_is_deleted_{is_deleted}_replica_number_{replica_number}_data_size_{data_size}"
-        ms = MilvusSys()
-        is_binary = True if "BIN" in index_type else False
+        MilvusSys()
+        is_binary = "BIN" in index_type
         # insert with small size data without flush to get growing segment
         collection_w = self.init_collection_general(
             insert_data=True, is_binary=is_binary, nb=3000, is_flush=False, name=name
@@ -192,12 +192,9 @@ class TestActionBeforeReinstall(TestDeployBase):
         if segment_status == "only_growing":
             pytest.skip("already get growing segment, skip testcase")
         # insert with flush multiple times to generate multiple sealed segment
-        for i in range(5):
+        for _i in range(5):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size, is_flush=False, name=name)
-        if is_binary:
-            default_index_field = ct.default_binary_vec_field_name
-        else:
-            default_index_field = ct.default_float_vec_field_name
+        default_index_field = ct.default_binary_vec_field_name if is_binary else ct.default_float_vec_field_name
         if is_vector_indexed:
             # create index
             default_index_param = gen_index_param(index_type)

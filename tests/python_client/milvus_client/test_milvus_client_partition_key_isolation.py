@@ -246,7 +246,7 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
                 log.info(f"search with unsupported expr {expr} get {res}")
         if len(false_result) > 0:
             log.info(f"search with unsupported expr {false_result}, but not raise error\n")
-            assert False
+            raise AssertionError()
 
     def test_par_key_isolation_without_partition_key(self):
         # create

@@ -918,10 +918,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         tokens = analyzer_result.tokens
         assert len(tokens) > 0
         # Handle different token formats - tokens might be strings or dictionaries
-        if isinstance(tokens[0], str):
-            token_texts = tokens
-        else:
-            token_texts = [token["token"] for token in tokens]
+        token_texts = tokens if isinstance(tokens[0], str) else [token["token"] for token in tokens]
         # Check that stop words are filtered out
         assert "the" not in token_texts
         assert "is" not in token_texts

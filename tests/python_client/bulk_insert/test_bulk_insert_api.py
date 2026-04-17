@@ -1024,7 +1024,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         task_ids = []
-        for i in range(file_nums):
+        for _i in range(file_nums):
             files = prepare_bulk_insert_numpy_files(
                 minio_endpoint=self.minio_endpoint,
                 bucket_name=self.bucket_name,
@@ -1197,7 +1197,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.load()
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         task_ids = []
-        for i in range(file_nums):
+        for _i in range(file_nums):
             files = prepare_bulk_insert_numpy_files(
                 minio_endpoint=self.minio_endpoint,
                 bucket_name=self.bucket_name,
@@ -1233,7 +1233,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
 
         # verify data was bulk inserted into different partitions
-        segment_num = len(self.utility_wrap.get_query_segment_info(c_name)[0])
+        len(self.utility_wrap.get_query_segment_info(c_name)[0])
         num_entities = 0
         empty_partition_num = 0
         for p in self.collection_wrap.partitions:
@@ -1265,7 +1265,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        t0 = time.time()
+        time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=None,
@@ -1379,7 +1379,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         # load collection
         self.collection_wrap.load()
         # import data
-        t0 = time.time()
+        time.time()
         err_msg = "row-based import, only allow one JSON file each time"
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
@@ -1408,10 +1408,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             else:
                 file_type = ""  # TODO
         else:
-            if auto_id:
-                file_type = ".csv"
-            else:
-                file_type = ".txt"
+            file_type = ".csv" if auto_id else ".txt"
         files = prepare_bulk_insert_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,

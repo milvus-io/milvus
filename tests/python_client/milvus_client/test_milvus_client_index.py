@@ -1615,10 +1615,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
             params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
         )
         # 3. create index
-        if enable_dynamic_field:
-            index_name = "$meta/" + json_field_name + "/a/b"
-        else:
-            index_name = json_field_name + "/a/b"
+        index_name = "$meta/" + json_field_name + "/a/b" if enable_dynamic_field else json_field_name + "/a/b"
         self.create_index(client, collection_name, index_params)
         self.describe_index(
             client,

@@ -1,4 +1,3 @@
-
 from time import sleep
 
 import pytest
@@ -64,7 +63,7 @@ class TestRateLimit(TestcaseBase):
             for collection_num in range(collectionRateLimit):
                 log.info("test_rate_limit_create_collection: creating collection %d" % (collection_num + 1))
                 c_name = cf.gen_unique_str(prefix)
-                collection_w = self.init_collection_wrap(
+                self.init_collection_wrap(
                     c_name,
                     check_task=CheckTasks.check_collection_property,
                     check_items={exp_name: c_name, exp_schema: default_schema},
@@ -74,7 +73,7 @@ class TestRateLimit(TestcaseBase):
             c_name = cf.gen_unique_str(prefix)
             error = {ct.err_code: 0, ct.err_msg: "Fail to create collection"}
             if rate_limit_enable:
-                collection_w = self.init_collection_wrap(c_name, check_task=CheckTasks.err_res, check_items=error)
+                self.init_collection_wrap(c_name, check_task=CheckTasks.err_res, check_items=error)
                 # 5. sleep 61s to verify create collections in next rate limit period
                 sleep(rate_limit_period)
         # 6. drop maximum+1 numbers of collections in two rate limit period

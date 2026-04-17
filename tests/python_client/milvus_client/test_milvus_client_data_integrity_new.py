@@ -204,7 +204,7 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
                         or (double_array is None)
                         or (string_array is None)
                     ):
-                        if "is null" or "IS NULL" in expression:
+                        if True:
                             compare_dict[field][f"{i}"][field].append(rows_list[j][field])
                             compare_dict[field][f"{i}"]["id_list"].append(
                                 rows_list[j][ct.default_primary_key_field_name]
@@ -240,7 +240,8 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
     def check_query_res(self, res, expr_field: str) -> list:
         """Ensure that primary key field values are unique"""
         real_data = {
-            x[0]: x[1] for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field))
+            x[0]: x[1]
+            for x in zip(self.insert_data.get(self.primary_field), self.insert_data.get(expr_field), strict=False)
         }
 
         if len(real_data) != len(self.insert_data.get(self.primary_field)):

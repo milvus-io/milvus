@@ -64,7 +64,7 @@ class TestBase(Base):
                 "collectionName": self.name,
             }
             try:
-                rsp = self.collection_client.collection_drop(payload)
+                self.collection_client.collection_drop(payload)
             except Exception as e:
                 logger.error(f"drop collection error: {e}")
 
@@ -83,7 +83,7 @@ class TestBase(Base):
         for db_name in self.database_client.db_names[:]:  # Create a copy of the list to iterate
             logger.info(f"database {db_name} exist, drop it")
             try:
-                rsp = self.database_client.database_drop({"dbName": db_name})
+                self.database_client.database_drop({"dbName": db_name})
             except Exception as e:
                 logger.error(f"drop database error: {e}")
 
@@ -142,7 +142,7 @@ class TestBase(Base):
 
         full_data = []
         insert_ids = []
-        for i in range(batch):
+        for _i in range(batch):
             nb = batch_size
             data = get_data_by_payload(schema_payload, nb)
             payload = {"collectionName": collection_name, "data": data}

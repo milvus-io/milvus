@@ -3944,7 +3944,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb, batch = 5000, 2000
+        nb, _batch = 5000, 2000
 
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
@@ -5147,13 +5147,13 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         ]
 
         # same index → results must be bit-identical regardless of warmup mode
-        for idx, (s_pks, a_pks) in enumerate(zip(sync_search, async_search)):
+        for idx, (s_pks, a_pks) in enumerate(zip(sync_search, async_search, strict=False)):
             assert s_pks == a_pks, (
                 f"query {idx}: search results diverged after changing sync→async warmup "
                 f"(same index/data) — only in sync: {s_pks - a_pks}, "
                 f"only in async: {a_pks - s_pks}"
             )
-        for expr, s_pks, a_pks in zip(filter_exprs, sync_filter, async_filter):
+        for expr, s_pks, a_pks in zip(filter_exprs, sync_filter, async_filter, strict=False):
             assert s_pks == a_pks, (
                 f"filter '{expr}': results diverged after sync→async warmup change — "
                 f"missing in async: {s_pks - a_pks}, extra: {a_pks - s_pks}"
