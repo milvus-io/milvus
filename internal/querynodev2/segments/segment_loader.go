@@ -2278,6 +2278,14 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	// Prepend the configured bucket name to StorageV2 binlog paths, matching
+	// the initial Load path. Without this, reopen-time paths stay as bare
+	// "files/..." and the remote file reader fails with "path does not
+	// exist" when opening new field binlogs.
+	for _, loadInfo := range loadInfos {
+		addBucketNameStorageV2(loadInfo)
+	}
+
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)

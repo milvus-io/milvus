@@ -283,20 +283,29 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 void
 ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
                                         milvus::OpContext* op_ctx) {
+    LoadFieldData(load_info, op_ctx, /*is_replace=*/false);
+}
+
+void
+ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
+                                        milvus::OpContext* op_ctx,
+                                        bool is_replace) {
     switch (load_info.storage_version) {
         case 2: {
-            load_column_group_data_internal(load_info, op_ctx);
+            load_column_group_data_internal(load_info, op_ctx, is_replace);
             break;
         }
         default:
-            load_field_data_internal(load_info, op_ctx);
+            load_field_data_internal(load_info, op_ctx, is_replace);
             break;
     }
 }
 
 void
 ChunkedSegmentSealedImpl::load_column_group_data_internal(
-    const LoadFieldDataInfo& load_info, milvus::OpContext* op_ctx) {
+    const LoadFieldDataInfo& load_info,
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -383,7 +392,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                    data_type,
                                    info.enable_mmap,
                                    true,
-                                   op_ctx);
+                                   op_ctx,
+                                   is_replace);
             if (field_id == TimestampFieldID) {
                 auto timestamp_proxy_column = get_column(TimestampFieldID);
                 AssertInfo(timestamp_proxy_column != nullptr,
@@ -426,7 +436,9 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
 void
 ChunkedSegmentSealedImpl::load_field_data_internal(
-    const LoadFieldDataInfo& load_info, milvus::OpContext* op_ctx) {
+    const LoadFieldDataInfo& load_info,
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
     SCOPE_CGO_CALL_METRIC();
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -512,7 +524,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                                    data_type,
                                    info.enable_mmap,
                                    false,
-                                   op_ctx);
+                                   op_ctx,
+                                   is_replace);
         }
     }
 }
@@ -2532,20 +2545,39 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     DataType data_type,
     bool enable_mmap,
     bool is_proxy_column,
-    milvus::OpContext* op_ctx) {
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
     {
         std::unique_lock lck(mutex_);
-        AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
-                       !get_bit(field_data_ready_bitset_, field_id),
-                   "non system field {} data already loaded",
-                   field_id.get());
-        bool already_exists = false;
-        fields_.withRLock([&](auto& fields) {
-            already_exists = fields.find(field_id) != fields.end();
-        });
-        AssertInfo(
-            !already_exists, "field {} column already exists", field_id.get());
-        fields_.wlock()->emplace(field_id, column);
+        if (is_replace) {
+            // Replace path: an earlier load (real binlog or default-filled
+            // empty column from schema evolution) already installed a column
+            // for this field; overwrite it in place instead of asserting.
+            auto old_column = get_column(field_id);
+            if (old_column && !enable_mmap) {
+                if (!is_proxy_column ||
+                    (is_proxy_column &&
+                     field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+                    stats_.mem_size -= old_column->DataByteSize();
+                }
+            }
+            fields_.wlock()->insert_or_assign(field_id, column);
+            LOG_INFO(
+                "Replacing field {} data in segment {}", field_id.get(), id_);
+        } else {
+            AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
+                           !get_bit(field_data_ready_bitset_, field_id),
+                       "non system field {} data already loaded",
+                       field_id.get());
+            bool already_exists = false;
+            fields_.withRLock([&](auto& fields) {
+                already_exists = fields.find(field_id) != fields.end();
+            });
+            AssertInfo(!already_exists,
+                       "field {} column already exists",
+                       field_id.get());
+            fields_.wlock()->emplace(field_id, column);
+        }
         if (enable_mmap) {
             mmap_field_ids_.insert(field_id);
         }
@@ -2570,7 +2602,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     LoadSkipIndex(field_id, data_type, column);
 
     // set pks to offset
-    if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
+    if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_ &&
+        !is_replace) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
         AssertInfo(insert_record_.empty_pks(),
                    "primary key records already exists, current field id {}",
@@ -2582,9 +2615,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
     std::unique_lock lck(mutex_);
-    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
-               "field {} data already loaded",
-               field_id.get());
+    if (!is_replace) {
+        AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+                   "field {} data already loaded",
+                   field_id.get());
+    }
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
     // Only drop field data when the interim index has raw data.
@@ -2652,6 +2687,13 @@ ChunkedSegmentSealedImpl::Reopen(
     {
         std::unique_lock lck(mutex_);
         current = segment_load_info_;
+        // Carry default-fill tracking forward: fields that were previously
+        // installed as empty placeholder columns (or already loaded via a
+        // prior binlog) must still route through the replace path on future
+        // reopens, even if this reopen doesn't touch them.
+        for (auto fid : current.GetFieldsFilledWithDefault()) {
+            new_seg_load_info.MarkFieldFilledWithDefault(fid);
+        }
         segment_load_info_ = new_seg_load_info;
     }
 
@@ -2709,6 +2751,16 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     // load field binlog
     if (!diff.binlogs_to_load.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
+    }
+
+    // replace field binlog: used when a field already has a column installed
+    // (e.g. filled with default values during schema evolution) and a fresh
+    // binlog arrives that should overwrite it.
+    if (!diff.binlogs_to_replace.empty()) {
+        LoadBatchFieldData(trace_ctx,
+                           diff.binlogs_to_replace,
+                           op_ctx,
+                           /*is_replace=*/true);
     }
 
     // drop field
@@ -2814,6 +2866,10 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
 
     fields_.wlock()->emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
+    // Record the field as default-filled so that if a real binlog for it
+    // arrives later (via Reopen), ComputeDiffBinlogs routes the load through
+    // the replace path instead of asserting "data already loaded".
+    segment_load_info_.MarkFieldFilledWithDefault(field_id);
     LOG_INFO(
         "fill empty field {} (data type {}) for growing segment {} "
         "done",
@@ -3115,10 +3171,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
     milvus::tracer::TraceContext& trace_ctx,
     std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>&
         field_binlog_to_load,
-    milvus::OpContext* op_ctx) {
-    LOG_INFO("Loading field binlog for {} fields in segment {}",
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
+    LOG_INFO("Loading field binlog for {} fields in segment {}{}",
              field_binlog_to_load.size(),
-             id_);
+             id_,
+             is_replace ? " (replace)" : "");
 
     std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
@@ -3189,6 +3247,16 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Build FieldBinlogInfo
         FieldBinlogInfo field_binlog_info;
         field_binlog_info.field_id = group_id;
+        // Trust binlog proto's child_fields as the authoritative field list.
+        // Leaving it empty makes load_column_group_data_internal fall back to
+        // parsing the parquet schema, which may carry stale columns from a
+        // previous column-group layout and double-load fields that now live
+        // in their own groups.
+        if (field_binlog.child_fields_size() > 0) {
+            field_binlog_info.child_field_ids.assign(
+                field_binlog.child_fields().begin(),
+                field_binlog.child_fields().end());
+        }
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
@@ -3231,13 +3299,14 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         const auto field_data = load_field_data_info;
         const auto captured_field_id = field_id;
         auto future = pool.Submit(
-            [this, field_data, captured_field_id, op_ctx]() -> void {
+            [this, field_data, captured_field_id, op_ctx, is_replace]()
+                -> void {
                 // Early exit if cancelled while queued
                 CheckCancellation(op_ctx,
                                   id_,
                                   captured_field_id.get(),
                                   "ChunkedSegmentSealedImpl::LoadFieldData()");
-                LoadFieldData(field_data, op_ctx);
+                LoadFieldData(field_data, op_ctx, is_replace);
             });
 
         load_field_futures.push_back(std::move(future));

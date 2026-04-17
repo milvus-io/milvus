@@ -187,6 +187,7 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
         std::vector<FieldId> ids_to_load;
+        std::vector<FieldId> ids_to_replace;
         std::vector<int64_t> child_fields(
             new_field_binlog.child_fields().begin(),
             new_field_binlog.child_fields().end());
@@ -199,14 +200,28 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
             // current_fields is keyed by child field id (see loop above);
             // look up by child_id, not by the new group id.
             auto iter = current_fields.find(child_id);
-            // Load this child if it's absent from current, or its group moved.
+            // Load/replace this child if it's absent from current or its
+            // group moved to a different binlog.
             if (iter == current_fields.end() ||
                 iter->second != new_field_binlog.fieldid()) {
-                ids_to_load.emplace_back(child_id);
+                // Route through the replace path if the child already has a
+                // column installed — either a prior binlog load or a default
+                // value filled during schema evolution. Otherwise it's a
+                // fresh load.
+                if (iter != current_fields.end() ||
+                    IsFieldFilledWithDefault(FieldId(child_id))) {
+                    ids_to_replace.emplace_back(child_id);
+                } else {
+                    ids_to_load.emplace_back(child_id);
+                }
             }
         }
         if (!ids_to_load.empty()) {
             diff.binlogs_to_load.emplace_back(ids_to_load, new_field_binlog);
+        }
+        if (!ids_to_replace.empty()) {
+            diff.binlogs_to_replace.emplace_back(ids_to_replace,
+                                                 new_field_binlog);
         }
     }
 

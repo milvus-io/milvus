@@ -331,13 +331,17 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
+	if req.Collection == nil {
+		return merr.WrapErrServiceInternal("reopen segment without collection handle")
+	}
+
 	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err
 	}
 
-	status := C.ReopenSegment(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+	status := C.ReopenSegment(traceCtx.ctx, s.ptr, req.Collection.rawPointer(), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
 	return ConsumeCStatusIntoError(&status)
 }
 

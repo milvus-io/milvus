@@ -1403,7 +1403,8 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	defer s.ptrLock.Unpin()
 
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo: newLoadInfo,
+		Collection: s.GetCollection().GetCCollection(),
+		LoadInfo:   newLoadInfo,
 	})
 	if err != nil {
 		return err

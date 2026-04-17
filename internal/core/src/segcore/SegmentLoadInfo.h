@@ -46,6 +46,13 @@ struct LoadDiff {
     std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
         binlogs_to_load;
 
+    // Field binlog paths that need to replace existing (already-loaded or
+    // default-filled) field data. Same layout as binlogs_to_load but applied
+    // with is_replace=true so the load path uses insert_or_assign instead of
+    // emplace and skips the "already loaded" assertion.
+    std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
+        binlogs_to_replace;
+
     // list of column group indices and related field ids to load
     // same index could appear multiple times if same group using different setups
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
@@ -72,9 +79,9 @@ struct LoadDiff {
     [[nodiscard]] bool
     HasChanges() const {
         return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
-               !column_groups_to_load.empty() || !fields_to_reload.empty() ||
-               !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               manifest_updated;
+               !binlogs_to_replace.empty() || !column_groups_to_load.empty() ||
+               !fields_to_reload.empty() || !indexes_to_drop.empty() ||
+               !field_data_to_drop.empty() || manifest_updated;
     }
 
     [[nodiscard]] bool
@@ -102,6 +109,23 @@ struct LoadDiff {
         oss << "binlogs_to_load=[";
         first = true;
         for (const auto& [field_ids, binlog] : binlogs_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // binlogs_to_replace
+        oss << "binlogs_to_replace=[";
+        first = true;
+        for (const auto& [field_ids, binlog] : binlogs_to_replace) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -207,6 +231,7 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
+          fields_filled_with_default_(other.fields_filled_with_default_),
           column_groups_(other.column_groups_) {
         BuildCache();
     }
@@ -220,6 +245,8 @@ class SegmentLoadInfo {
           converted_index_infos_(std::move(other.converted_index_infos_)),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
+          fields_filled_with_default_(
+              std::move(other.fields_filled_with_default_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)) {
     }
@@ -233,6 +260,7 @@ class SegmentLoadInfo {
         if (this != &other) {
             info_ = other.info_;
             schema_ = other.schema_;
+            fields_filled_with_default_ = other.fields_filled_with_default_;
             column_groups_ = other.column_groups_;
             BuildCache();
         }
@@ -250,6 +278,8 @@ class SegmentLoadInfo {
             converted_index_infos_ = std::move(other.converted_index_infos_);
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
+            fields_filled_with_default_ =
+                std::move(other.fields_filled_with_default_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
         }
@@ -714,6 +744,27 @@ class SegmentLoadInfo {
         return info_.segmentid() == 0 && info_.num_of_rows() == 0;
     }
 
+    /**
+     * @brief Record a field as currently populated with a default (empty)
+     *        value — e.g. after fill_empty_field runs for a schema-evolved
+     *        column. Consulted by ComputeDiffBinlogs to route subsequent real
+     *        binlog loads through the replace path instead of the load path.
+     */
+    void
+    MarkFieldFilledWithDefault(FieldId field_id) {
+        fields_filled_with_default_.insert(field_id);
+    }
+
+    [[nodiscard]] bool
+    IsFieldFilledWithDefault(FieldId field_id) const {
+        return fields_filled_with_default_.count(field_id) > 0;
+    }
+
+    [[nodiscard]] const std::set<FieldId>&
+    GetFieldsFilledWithDefault() const {
+        return fields_filled_with_default_;
+    }
+
     // ==================== LoadIndexInfo Conversion ====================
 
     /**
@@ -800,6 +851,12 @@ class SegmentLoadInfo {
 
     // set of field ids that corresponding index has raw data
     std::set<FieldId> field_index_has_raw_data_;
+
+    // set of field ids that have been filled with default values
+    // (e.g. via fill_empty_field during schema evolution).
+    // Consulted by ComputeDiffBinlogs: when a new binlog targets such a field
+    // the load goes into binlogs_to_replace instead of binlogs_to_load.
+    std::set<FieldId> fields_filled_with_default_;
 
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
