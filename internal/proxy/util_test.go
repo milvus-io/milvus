@@ -5849,6 +5849,90 @@ func TestCheckAndFlattenStructFieldData_AllNullWithInitializedVectorsOneof(t *te
 	assert.NoError(t, err)
 }
 
+// TestCheckAndFlattenStructFieldData_OmittedVsAllNullSubfieldsEquivalent verifies
+// that "nullable struct omitted entirely" and "nullable struct present but all
+// sub-fields empty" produce the same flattened FieldsData shape: neither adds
+// any sub-field entry, and both rely on downstream checkFieldsDataBySchema to
+// backfill empty FieldData for the missing nullable sub-fields.
+func TestCheckAndFlattenStructFieldData_OmittedVsAllNullSubfieldsEquivalent(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:  200,
+				Name:     "my_struct",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "my_struct[tag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, Nullable: true},
+					{FieldID: 202, Name: "my_struct[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+				},
+			},
+		},
+	}
+
+	pkField := func() *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "pk",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+				},
+			},
+		}
+	}
+
+	// Scenario A: struct entry completely omitted from FieldsData.
+	msgA := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows:    2,
+			FieldsData: []*schemapb.FieldData{pkField()},
+		},
+	}
+
+	// Scenario B: struct entry present, but every sub-field has empty payload
+	// (e.g. what pymilvus sends when the user omits the struct key).
+	msgB := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows: 2,
+			FieldsData: []*schemapb.FieldData{
+				pkField(),
+				{
+					FieldName: "my_struct",
+					Type:      schemapb.DataType_ArrayOfStruct,
+					Field: &schemapb.FieldData_StructArrays{
+						StructArrays: &schemapb.StructArrayField{
+							Fields: []*schemapb.FieldData{
+								{FieldName: "tag", FieldId: 201, Type: schemapb.DataType_Array},
+								{
+									FieldName: "vec", FieldId: 202, Type: schemapb.DataType_ArrayOfVector,
+									Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, checkAndFlattenStructFieldData(schema, msgA))
+	require.NoError(t, checkAndFlattenStructFieldData(schema, msgB))
+
+	// Both scenarios leave FieldsData with only the pk entry — no sub-field
+	// entry is added during flatten. Downstream checkFieldsDataBySchema is
+	// responsible for backfilling.
+	assertOnlyPK := func(name string, fields []*schemapb.FieldData) {
+		require.Equal(t, 1, len(fields), "%s: expected only pk, got %d entries", name, len(fields))
+		assert.Equal(t, "pk", fields[0].FieldName, "%s", name)
+	}
+	assertOnlyPK("scenario A", msgA.GetFieldsData())
+	assertOnlyPK("scenario B", msgB.GetFieldsData())
+}
+
 func TestSubFieldHasData(t *testing.T) {
 	t.Run("scalars with data", func(t *testing.T) {
 		fd := &schemapb.FieldData{
@@ -6164,10 +6248,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataWithoutPayload(t *testing.T) {
 		},
 	}
 
-	// ValidData says row 0 is valid, but there's no actual data payload.
-	// After flatten, checkAndFlattenStructFieldData generates an empty FieldData
-	// with the original ValidData preserved. The downstream fillWithValue/checkAligned
-	// will detect the mismatch and reject it.
+	// ValidData says row 0 is valid, but there's no actual data payload. This is
+	// self-contradictory input — reject it at flatten time instead of deferring to
+	// downstream, where a ValidData=all-false backfill would silently absorb it.
 	insertMsg := &msgstream.InsertMsg{
 		InsertRequest: &msgpb.InsertRequest{
 			NumRows: 2,
@@ -6202,27 +6285,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataWithoutPayload(t *testing.T) {
 		},
 	}
 
-	// Flatten succeeds — it generates empty FieldData preserving ValidData
 	err := checkAndFlattenStructFieldData(schema, insertMsg)
-	require.NoError(t, err)
-
-	// Verify the flattened field preserves ValidData
-	var flattenedField *schemapb.FieldData
-	for _, fd := range insertMsg.GetFieldsData() {
-		if fd.FieldName == "my_struct[a]" {
-			flattenedField = fd
-			break
-		}
-	}
-	require.NotNil(t, flattenedField)
-	assert.Equal(t, []bool{true, false}, flattenedField.ValidData)
-
-	// Downstream validation rejects: ValidData claims 1 valid row but payload has 0 data
-	v := newValidateUtil()
-	helper, err := typeutil.CreateSchemaHelper(schema)
-	require.NoError(t, err)
-	err = v.Validate(insertMsg.GetFieldsData(), helper, uint64(insertMsg.GetNumRows()))
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no payload is provided")
 }
 
 func TestInjectVirtualPKForExternalCollection(t *testing.T) {

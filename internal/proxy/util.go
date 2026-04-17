@@ -2032,48 +2032,48 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		}
 		totalSubFields := len(structArrays.StructArrays.Fields)
 		if hasDataCount == 0 {
-			// All sub-fields have empty payload. Patch nil Fields in-place with
-			// empty wrappers so the normal flatten path below can process them.
-			// Downstream fillWithValue/checkAligned will validate ValidData consistency.
+			// All sub-fields have empty payload — equivalent to the struct being
+			// omitted entirely. Reject illegal ValidData first: when no payload is
+			// provided, any ValidData[i]==true contradicts itself.
 			for _, subField := range structArrays.StructArrays.Fields {
-				subFieldSchema := typeutil.GetFieldByID(schema, subField.FieldId)
-				if subFieldSchema == nil {
-					return fmt.Errorf("sub-field not found in struct schema, fieldName: %s, fieldId: %d, structName: %s", subField.FieldName, subField.FieldId, structName)
+				for j, v := range subField.ValidData {
+					if v {
+						return fmt.Errorf("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
+							subField.FieldName, structName, j)
+					}
 				}
-				emptyField, err := typeutil.GenEmptyFieldData(subFieldSchema)
-				if err != nil {
-					return err
-				}
-				subField.Field = emptyField.Field
 			}
-		} else {
-			if hasDataCount != totalSubFields {
-				return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
-					structName, hasDataCount, totalSubFields)
-			}
+			// Skip flatten and let checkFieldsDataBySchema backfill missing sub-fields
+			// uniformly, so scenario "struct omitted" and scenario "struct present but
+			// empty" share one code path downstream.
+			continue
+		}
+		if hasDataCount != totalSubFields {
+			return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
+				structName, hasDataCount, totalSubFields)
+		}
 
-			// Validate that all sub-fields share the same ValidData mask.
-			// Nullable is a struct-level concept: a row is either entirely null or entirely present.
-			if structSchema.GetNullable() {
-				var refValidData []bool
-				var refFieldName string
-				refInitialized := false
-				for _, subField := range structArrays.StructArrays.Fields {
-					if !refInitialized {
-						refValidData = subField.ValidData
-						refFieldName = subField.FieldName
-						refInitialized = true
-						continue
-					}
-					if len(subField.ValidData) != len(refValidData) {
-						return fmt.Errorf("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
-							structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
-					}
-					for j := range refValidData {
-						if subField.ValidData[j] != refValidData[j] {
-							return fmt.Errorf("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
-								structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
-						}
+		// Validate that all sub-fields share the same ValidData mask.
+		// Nullable is a struct-level concept: a row is either entirely null or entirely present.
+		if structSchema.GetNullable() {
+			var refValidData []bool
+			var refFieldName string
+			refInitialized := false
+			for _, subField := range structArrays.StructArrays.Fields {
+				if !refInitialized {
+					refValidData = subField.ValidData
+					refFieldName = subField.FieldName
+					refInitialized = true
+					continue
+				}
+				if len(subField.ValidData) != len(refValidData) {
+					return fmt.Errorf("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
+						structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
+				}
+				for j := range refValidData {
+					if subField.ValidData[j] != refValidData[j] {
+						return fmt.Errorf("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
+							structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
 					}
 				}
 			}
