@@ -364,7 +364,7 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 		return err
 	}
 	updatedJob := job.Clone()
-	updatedJob.(*importJob).ImportJob.CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
+	updatedJob.(*importJob).CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
 	if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
 		return err
 	}

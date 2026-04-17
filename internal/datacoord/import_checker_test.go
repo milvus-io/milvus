@@ -804,8 +804,8 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitTrue() {
 	// Put the job into Uncommitted state with auto_commit=true (default).
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).ImportJob.AutoCommit = true
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
 	})
 
 	commitCalled := false
@@ -821,8 +821,8 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitTrue() {
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 	// Put the job into Uncommitted state with auto_commit=false.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).ImportJob.AutoCommit = false
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = false
 	})
 
 	commitCalled := false
@@ -840,8 +840,8 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
 	// commitImportFn=nil with auto_commit=true is a programming error and should panic.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).ImportJob.AutoCommit = true
+		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).AutoCommit = true
 	})
 	s.checker.commitImportFn = nil
 
@@ -860,9 +860,9 @@ func (s *ImportCheckerSuite) TestCheckCommittingJob_AllVchannelsDone() {
 
 	// All vchannels committed → expect transition to Completed.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Committing
-		job.(*importJob).ImportJob.Vchannels = []string{"ch0"}
-		job.(*importJob).ImportJob.CommittedVchannels = []string{"ch0"}
+		job.(*importJob).State = internalpb.ImportJobState_Committing
+		job.(*importJob).Vchannels = []string{"ch0"}
+		job.(*importJob).CommittedVchannels = []string{"ch0"}
 	})
 
 	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
@@ -872,9 +872,9 @@ func (s *ImportCheckerSuite) TestCheckCommittingJob_AllVchannelsDone() {
 func (s *ImportCheckerSuite) TestCheckCommittingJob_Partial() {
 	// Only some vchannels committed → job should stay Committing.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Committing
-		job.(*importJob).ImportJob.Vchannels = []string{"ch0", "ch1"}
-		job.(*importJob).ImportJob.CommittedVchannels = []string{"ch0"}
+		job.(*importJob).State = internalpb.ImportJobState_Committing
+		job.(*importJob).Vchannels = []string{"ch0", "ch1"}
+		job.(*importJob).CommittedVchannels = []string{"ch0"}
 	})
 
 	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
@@ -909,7 +909,7 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse()
 
 	// Set auto_commit=false on the job.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.AutoCommit = false
+		job.(*importJob).AutoCommit = false
 	})
 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
@@ -943,7 +943,7 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 
 	// auto_commit=true (the default), so job should go directly to Completed.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).ImportJob.AutoCommit = true
+		job.(*importJob).AutoCommit = true
 	})
 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
