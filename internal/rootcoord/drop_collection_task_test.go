@@ -111,7 +111,8 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}, nil)
 		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
 
-		core := newTestCore(withMeta(meta))
+		broker := &mockBroker{}
+		core := newTestCore(withMeta(meta), withBroker(broker))
 		task := &dropCollectionTask{
 			Core: core,
 			Req: &milvuspb.DropCollectionRequest{

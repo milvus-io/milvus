@@ -1355,3 +1355,19 @@ func WrapErrOldSessionExists(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrSnapshotNotFound(name any, msg ...string) error {
+	err := wrapFields(ErrSnapshotNotFound, value("snapshot", name))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrSnapshotPinned(name any, msg ...string) error {
+	err := wrapFields(ErrSnapshotPinned, value("snapshot", name))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
