@@ -47,6 +47,29 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
+
+# Allow overriding the Conan binary via CONAN_CMD, e.g. for developers who
+# keep Conan 2.x as their default `conan` (for master) but need 1.x here:
+#   CONAN_CMD=conan-1 make
+CONAN="${CONAN_CMD:-conan}"
+
+# This branch uses Conan 1.x. Verify the selected binary is 1.x up-front so
+# we fail with a clear message instead of letting confusing 2.x argparse
+# errors propagate up from `conan install`.
+_major=$("$CONAN" --version 2>/dev/null | grep -oE '[0-9]+' | head -1)
+if [[ "${_major}" != "1" ]]; then
+    if [[ -n "${CONAN_CMD:-}" ]]; then
+        echo "ERROR: CONAN_CMD=${CONAN_CMD} reports major version '${_major:-unknown}', but this branch requires Conan 1.x." >&2
+        echo "If your default 'conan' is already 1.x, unset CONAN_CMD and retry." >&2
+    else
+        echo "ERROR: 'conan' reports major version '${_major:-unknown}', but this branch requires Conan 1.x." >&2
+        echo "If you already have a Conan 1.x binary (e.g. 'conan-1'), set CONAN_CMD, e.g.: CONAN_CMD=conan-1 make" >&2
+    fi
+    echo "Otherwise install Conan 1.x, e.g.: pipx install conan==1.66.0 --suffix=-1" >&2
+    exit 1
+fi
+unset _major
+
 pushd ${BUILD_OUTPUT_DIR}
 
 export CONAN_REVISIONS_ENABLED=1
@@ -56,23 +79,23 @@ export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
 CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
 
-if [[ ! `conan remote list` == *default-conan-local* ]]; then
-    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
+if [[ ! `"$CONAN" remote list` == *default-conan-local* ]]; then
+    "$CONAN" remote add default-conan-local $CONAN_ARTIFACTORY_URL
 fi
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+    "$CONAN" install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     echo "Running on ${OS_NAME}"
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
