@@ -12,3 +12,5 @@ README.md
 LICENSE
 .vscode
 __pycache__
+.venv
+.pytest_cache

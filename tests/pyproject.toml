@@ -1,0 +1,41 @@
+# Shared ruff configuration for Python code under tests/.
+# Individual projects (python_client, restful_client_v2) extend this via
+# `[tool.ruff] extend = "../pyproject.toml"`. Loose scripts under tests/scripts
+# inherit via ruff's upward discovery.
+#
+# This file intentionally has no [project] section; it is tool config only.
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "assets",
+    "cdc/assets",
+    "benchmark",
+    "restful_client",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long — deferred to formatter
+    "B008",   # function call in default arg — common for pytest fixtures/Depends
+    "SIM117", # nested with — test assertions often need this form
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/conftest.py" = ["F401"]
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

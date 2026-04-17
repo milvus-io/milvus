@@ -1,0 +1,76 @@
+[project]
+name = "milvus-python-client-tests"
+version = "0.1.0"
+description = "pymilvus gRPC e2e test suite for Milvus"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest-cov==2.8.1",
+    "requests>=2.32.4",
+    "scikit-learn>=1.5.2",
+    "ujson==5.5.0",
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+    "pytest-timeout==1.3.3",
+    "pytest-repeat==0.8.0",
+    "allure-pytest==2.7.0",
+    "pytest-print==0.2.1",
+    "pytest-level==0.1.1",
+    "pytest-xdist==2.5.0",
+    "pytest-assume==2.4.3",
+    "pytest-rerunfailures==14.0",
+    "pytest_tagging==1.6.0",
+    "pytest-html==3.1.1",
+    "delayed-assert==0.3.5",
+    "kubernetes==17.17.0",
+    "PyYAML==6.0",
+    "pytest-sugar==0.9.5",
+    "pytest-random-order",
+    "pymilvus==2.7.0rc185",
+    "pymilvus[bulk_writer]==2.7.0rc185",
+    "protobuf>=5.29.5",
+    "python-benedict==0.24.3",
+    "minio==7.2.0",
+    "npy-append-array==0.9.15",
+    "Faker==19.2.0",
+    "h5py==3.8.0",
+    "loguru==0.7.0",
+    "psutil==5.9.4",
+    "pandas==1.5.3",
+    "numpy==1.26.4",
+    "tenacity==8.1.0",
+    "rich==13.7.0",
+    "etcd-sdk-python==0.0.6",
+    "deepdiff==8.6.1",
+    "prettytable==3.8.0",
+    "pyarrow==14.0.1",
+    "fastparquet==2023.7.0",
+    "ml-dtypes==0.2.0",
+    "Unidecode==1.3.8",
+    "tantivy==0.22.0",
+    "bm25s==0.2.0",
+    "jieba==0.42.1",
+    "xxhash>=3.0.0",
+    "locust==2.25.0",
+    "typing_extensions==4.12.2",
+    "python-dotenv<=2.0.0",
+    "shapely==2.1.1",
+    "tzdata>=2024.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+]
+
+# pymilvus rc builds live on test.pypi.org. Mark the index explicit so uv
+# only consults it for packages that are explicitly sourced from it.
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+explicit = true
+
+[tool.uv.sources]
+pymilvus = { index = "testpypi" }
+
+[tool.ruff]
+extend = "../pyproject.toml"

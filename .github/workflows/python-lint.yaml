@@ -1,0 +1,62 @@
+name: Python Lint & Requirements Sync
+
+on:
+  pull_request:
+    paths:
+      - 'tests/python_client/**'
+      - 'tests/restful_client_v2/**'
+      - 'tests/scripts/**.py'
+      - 'tests/pyproject.toml'
+      - 'tests/scripts/regen_requirements.sh'
+      - '.github/workflows/python-lint.yaml'
+  push:
+    branches: [master]
+    paths:
+      - 'tests/python_client/**'
+      - 'tests/restful_client_v2/**'
+      - 'tests/scripts/**.py'
+      - 'tests/pyproject.toml'
+      - 'tests/scripts/regen_requirements.sh'
+      - '.github/workflows/python-lint.yaml'
+
+concurrency:
+  group: python-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+      - name: Ruff check
+        run: |
+          uvx ruff check \
+            tests/python_client \
+            tests/restful_client_v2 \
+            tests/scripts
+      - name: Ruff format check
+        run: |
+          uvx ruff format --check \
+            tests/python_client \
+            tests/restful_client_v2 \
+            tests/scripts
+
+  requirements-sync:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [python_client, restful_client_v2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+      - name: Verify uv.lock is in sync with pyproject.toml
+        working-directory: tests/${{ matrix.project }}
+        run: uv lock --locked
+      - name: Verify requirements.txt is in sync with uv.lock
+        run: bash tests/scripts/regen_requirements.sh tests/${{ matrix.project }} --check

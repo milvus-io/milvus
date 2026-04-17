@@ -1,0 +1,43 @@
+[project]
+name = "milvus-restful-client-v2-tests"
+version = "0.1.0"
+description = "Milvus REST API v2 e2e test suite"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32.4",
+    "urllib3>=2.5.0",
+    "pytest==7.2.0",
+    "pyyaml==6.0",
+    "numpy==1.24.3",
+    "allure-pytest>=2.8.18",
+    "Faker==19.2.0",
+    "pymilvus",
+    "scikit-learn>=1.5.2",
+    "pytest-xdist==2.5.0",
+    "minio==7.2.0",
+    "tenacity==8.1.0",
+    "ml-dtypes==0.2.0",
+    "loguru==0.7.3",
+    "bm25s==0.2.13",
+    "jieba==0.42.1",
+    "pyarrow==21.0.0",
+    "shapely>=2.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+]
+
+# pymilvus rc builds live on test.pypi.org. Mark the index explicit so uv
+# only consults it for packages that are explicitly sourced from it.
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+explicit = true
+
+[tool.uv.sources]
+pymilvus = { index = "testpypi" }
+
+[tool.ruff]
+extend = "../pyproject.toml"

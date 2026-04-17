@@ -1,0 +1,13 @@
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# test artefacts
+test_out/
+logs/
+*.html
+.coverage
+
+# uv virtualenv (committed: .python-version, pyproject.toml, uv.lock)
+.venv/
