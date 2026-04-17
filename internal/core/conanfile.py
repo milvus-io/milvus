@@ -104,6 +104,7 @@ class MilvusConan(ConanFile):
             self.options["arrow"].with_jemalloc = False
             # Use OpenSSL for libcurl on macOS
             self.options["libcurl"].with_ssl = "openssl"
+        self.options["arrow"].with_azure = True
 
     def requirements(self):
         # force=True: override transitive dependency versions (same behavior as Conan 1)
@@ -120,6 +121,10 @@ class MilvusConan(ConanFile):
         self.requires("fmt/11.0.2#eb98daa559c7c59d591f4720dde4cd5c", force=True)
         self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
         self.requires("aws-sdk-cpp/1.11.692@milvus/dev#c309ce91fa572fff68f9f4e36d477a04")
+        # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
+        # as a direct dep so CMakeDeps generates standalone cmake config files.
+        # Without this, find_package(Azure) can't find include directories.
+        self.requires("azure-sdk-for-cpp/1.11.3@milvus/dev#395e8e7a0c29644d41ef160088128f14")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection

@@ -1441,7 +1441,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Cont
 	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
 		To(func(_ context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
 			cancel() // cancel the ctx we pass to balanceFragmentsToSegments
-			return "", fmt.Errorf("cancelled")
+			return "", fmt.Errorf("canceled")
 		}).Build()
 	defer m1.UnPatch()
 

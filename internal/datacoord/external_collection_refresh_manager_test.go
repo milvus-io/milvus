@@ -754,7 +754,7 @@ func TestCleanupExploreTempForJob_RemoveError(t *testing.T) {
 
 func TestCleanupExploreTempForJob_RespectsManagerCtxCancel(t *testing.T) {
 	// Build a chunkManager that blocks inside RemoveWithPrefix until the
-	// manager ctx is cancelled. If the cleanup derives its ctx from m.ctx
+	// manager ctx is canceled. If the cleanup derives its ctx from m.ctx
 	// (as intended by P2-7), cancellation must abort the call within the
 	// deadline instead of hanging for the 30s fallback timeout.
 	unblock := make(chan struct{})

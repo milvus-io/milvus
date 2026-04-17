@@ -3637,10 +3637,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         return;
     }
 
-    // For proxy columns (external tables), defer BuildValidRowIds to search time
-    // to avoid triggering S3 data fetches during load when warmup=disable.
-    if (column->IsNullable() && IsVectorDataType(data_type) &&
-        !is_proxy_column) {
+    if (column->IsNullable() && IsVectorDataType(data_type)) {
         column->BuildValidRowIds(op_ctx);
     }
 

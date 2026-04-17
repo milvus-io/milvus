@@ -52,6 +52,10 @@ func toMilvusURI(icebergURI, host string) string {
 //
 //	go test -v -run TestExternalTableIcebergE2E -timeout 30m -tags dynamic,test
 func TestExternalTableIcebergE2E(t *testing.T) {
+	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
+		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
+	}
+
 	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://localhost:9000")
 	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
 	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")

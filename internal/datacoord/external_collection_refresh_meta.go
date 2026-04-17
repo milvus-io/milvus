@@ -249,7 +249,7 @@ func (m *externalCollectionRefreshMeta) GetAllJobs() map[int64]*datapb.ExternalC
 }
 
 // mutateJob applies a persisted in-place mutation to a refresh job under the
-// collection-scoped lock. It centralises the lock → refetch → clone → mutate →
+// collection-scoped lock. It centralizes the lock → refetch → clone → mutate →
 // save → reindex pattern that every Job mutator needs.
 //
 // The mutate callback receives a cloned job and may return:

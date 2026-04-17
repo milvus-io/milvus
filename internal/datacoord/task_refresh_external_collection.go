@@ -481,7 +481,7 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		if t.GetNodeId() != 0 {
 			_ = cluster.DropRefreshExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
-		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job cancelled"); err != nil {
+		if err := t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled"); err != nil {
 			log.Warn("failed to persist Failed state after job cancellation", zap.Error(err))
 		}
 		return
