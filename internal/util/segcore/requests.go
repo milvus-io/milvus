@@ -122,5 +122,10 @@ type AddFieldDataInfoRequest = LoadFieldDataRequest
 type AddFieldDataInfoResult struct{}
 
 type ReopenRequest struct {
-	LoadInfo *querypb.SegmentLoadInfo
+	// Collection is required so that the segment's cached schema can be
+	// synced to the collection's latest version before the load diff is
+	// applied; otherwise, binlogs for fields added via schema evolution
+	// would fail field_metas lookups in segcore.
+	Collection *CCollection
+	LoadInfo   *querypb.SegmentLoadInfo
 }

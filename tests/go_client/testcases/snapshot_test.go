@@ -1718,6 +1718,6 @@ func TestCreateSnapshotCompactionProtectionInvalid(t *testing.T) {
 	// Value exceeding 7 days should be rejected (7*24*3600 = 604800)
 	snapshotName2 := fmt.Sprintf("snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
 	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName2, collName).
-		WithCompactionProtectionSeconds(7*24*3600 + 1))
+		WithCompactionProtectionSeconds(7*24*3600+1))
 	common.CheckErr(t, err, false, "compaction_protection_seconds")
 }

@@ -112,8 +112,15 @@ SegmentLoad(CTraceContext c_trace,
  * load parameters. The segment will be reinitialized with the provided load info
  * while preserving its identity (segment_id).
  *
+ * The collection handle is used to sync the segment's schema to the latest
+ * version before applying the load diff — required when the new load info
+ * carries binlogs for fields added by schema evolution that the segment's
+ * cached schema doesn't yet know about.
+ *
  * @param c_trace Tracing context for distributed tracing and debugging
  * @param c_segment The segment handle to be reopened
+ * @param c_collection The collection handle whose schema should be synced into
+ *                     the segment before the diff is applied
  * @param load_info_blob Serialized SegmentLoadInfo protobuf message containing
  *                       the new load configuration (field data info, index info, etc.)
  * @param load_info_length Length of the load_info_blob in bytes
@@ -122,6 +129,7 @@ SegmentLoad(CTraceContext c_trace,
 CStatus
 ReopenSegment(CTraceContext c_trace,
               CSegmentInterface c_segment,
+              CCollection c_collection,
               const uint8_t* load_info_blob,
               const int64_t load_info_length);
 

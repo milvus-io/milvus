@@ -143,19 +143,27 @@ NewSegmentWithLoadInfo(CCollection collection,
 CStatus
 ReopenSegment(CTraceContext c_trace,
               CSegmentInterface c_segment,
+              CCollection c_collection,
               const uint8_t* load_info_blob,
               const int64_t load_info_length) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         AssertInfo(load_info_blob, "load info is null");
+        AssertInfo(c_collection, "collection handle is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
         auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
         AssertInfo(suc, "unmarshal load info failed");
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto collection =
+            static_cast<milvus::segcore::Collection*>(c_collection);
 
+        // Sync segment schema to the collection's latest before applying the
+        // load diff; without this, binlogs for fields added by schema
+        // evolution would fail the field_metas lookup in LoadBatchFieldData.
+        segment->LazyCheckSchema(collection->get_schema());
         segment->Reopen(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
