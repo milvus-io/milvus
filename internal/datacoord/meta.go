@@ -1415,6 +1415,14 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 // UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
+//
+// Invariant: a non-zero commit_timestamp MUST be >= max(binlog.TimestampTo)
+// across all binlogs on the segment. Row timestamps cannot exceed the commit
+// time logically (the data did not "exist" until commit). Violating inputs
+// (e.g., CDC where source-cluster TSO > target-cluster TSO) are rejected at
+// this entry point rather than letting C++ segcore silently lower row
+// timestamps during the load-time overwrite. ts == 0 is the reset path
+// (used by compaction completion) and always passes.
 func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1422,6 +1430,23 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			log.Ctx(context.TODO()).Warn("meta update: update commit timestamp failed - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
+		}
+		if ts != 0 {
+			var maxTsTo uint64
+			for _, fieldBinlogs := range segment.GetBinlogs() {
+				for _, l := range fieldBinlogs.GetBinlogs() {
+					if l.GetTimestampTo() > maxTsTo {
+						maxTsTo = l.GetTimestampTo()
+					}
+				}
+			}
+			if ts < maxTsTo {
+				log.Ctx(context.TODO()).Error("meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+					zap.Int64("segmentID", segmentID),
+					zap.Uint64("commitTs", ts),
+					zap.Uint64("maxBinlogTimestampTo", maxTsTo))
+				return false
+			}
 		}
 		segment.CommitTimestamp = ts
 		return true

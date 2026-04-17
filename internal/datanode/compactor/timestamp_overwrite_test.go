@@ -14,10 +14,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
-// mockRecord implements storage.Record with a simple timestamp column.
+// mockRecord implements storage.Record with a simple timestamp column and an
+// explicit refcount so tests can assert Retain/Release balance.
 type mockRecord struct {
-	tsArray *array.Int64
-	n       int
+	tsArray  *array.Int64
+	n        int
+	refCount int
 }
 
 func newMockRecord(timestamps []int64) *mockRecord {
@@ -27,7 +29,7 @@ func newMockRecord(timestamps []int64) *mockRecord {
 	}
 	arr := builder.NewInt64Array()
 	builder.Release()
-	return &mockRecord{tsArray: arr, n: len(timestamps)}
+	return &mockRecord{tsArray: arr, n: len(timestamps), refCount: 1}
 }
 
 func (r *mockRecord) Column(i storage.FieldID) arrow.Array {
@@ -37,8 +39,17 @@ func (r *mockRecord) Column(i storage.FieldID) arrow.Array {
 	return nil
 }
 func (r *mockRecord) Len() int { return r.n }
-func (r *mockRecord) Release() { r.tsArray.Release() }
-func (r *mockRecord) Retain()  { r.tsArray.Retain() }
+func (r *mockRecord) Release() {
+	r.refCount--
+	if r.refCount == 0 {
+		r.tsArray.Release()
+	}
+}
+
+func (r *mockRecord) Retain() {
+	r.refCount++
+	r.tsArray.Retain()
+}
 
 func TestOverwriteRecordTimestamps_Zero(t *testing.T) {
 	rec := newMockRecord([]int64{100, 200, 300})
@@ -74,6 +85,41 @@ func TestOverwriteRecordTimestamps_OtherColumnsUnchanged(t *testing.T) {
 
 	// Non-timestamp column should return same as inner
 	assert.Nil(t, out.Column(999))
+}
+
+// TestOverwriteRecordTimestamps_RetainReleaseBalance verifies that the wrapper
+// holds its own reference on the inner record: after wrap + wrapper.Release(),
+// the inner's refcount returns to its pre-wrap value so the caller can
+// independently release the input exactly once.
+func TestOverwriteRecordTimestamps_RetainReleaseBalance(t *testing.T) {
+	rec := newMockRecord([]int64{100, 200, 300})
+	require.Equal(t, 1, rec.refCount)
+
+	out := overwriteRecordTimestamps(rec, 5000)
+	// Wrapper must Retain the inner so caller still owns one reference.
+	assert.Equal(t, 2, rec.refCount)
+
+	out.Release()
+	// Wrapper Release drops exactly one reference on the inner.
+	assert.Equal(t, 1, rec.refCount)
+
+	// Caller's own Release is still needed to fully free the input.
+	rec.Release()
+	assert.Equal(t, 0, rec.refCount)
+}
+
+// TestOverwriteRecordTimestamps_ZeroNoRetain verifies that when commitTs == 0
+// no wrapper is created and no Retain/Release is implicitly issued.
+func TestOverwriteRecordTimestamps_ZeroNoRetain(t *testing.T) {
+	rec := newMockRecord([]int64{100})
+	require.Equal(t, 1, rec.refCount)
+
+	out := overwriteRecordTimestamps(rec, 0)
+	assert.Equal(t, rec, out)
+	assert.Equal(t, 1, rec.refCount)
+
+	rec.Release()
+	assert.Equal(t, 0, rec.refCount)
 }
 
 // mockReader is a simple RecordReader that returns records in sequence.
