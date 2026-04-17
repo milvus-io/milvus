@@ -1410,10 +1410,9 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     ChooseIndexLoadMode(index_length);
 
-    auto priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto priority = GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                        config, milvus::LOAD_PRIORITY)
+                        .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     if (config.contains(MMAP_FILE_PATH) &&
         build_mode_ == BitmapIndexBuildMode::ROARING) {
@@ -1432,20 +1431,19 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
             folly::makeGuard([&tmp_path]() { unlink(tmp_path.c_str()); });
         {
             auto fw = storage::FileWriter(
-                tmp_path,
-                storage::io::GetPriorityFromLoadPriority(priority));
+                tmp_path, storage::io::GetPriorityFromLoadPriority(priority));
             reader.ReadEntryStream(
-                BITMAP_INDEX_DATA, [&](const uint8_t* d, size_t len) {
-                    fw.Write(d, len);
-                });
+                BITMAP_INDEX_DATA,
+                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             fw.Finish();
         }
         auto tmp_size = std::filesystem::file_size(tmp_path);
         auto tmp_file = File::Open(tmp_path, O_RDONLY);
-        auto* tmp_map = mmap(NULL, tmp_size, PROT_READ, MAP_PRIVATE,
-                             tmp_file.Descriptor(), 0);
+        auto* tmp_map = mmap(
+            NULL, tmp_size, PROT_READ, MAP_PRIVATE, tmp_file.Descriptor(), 0);
         AssertInfo(tmp_map != MAP_FAILED,
-                   "failed to mmap temp file: {}", strerror(errno));
+                   "failed to mmap temp file: {}",
+                   strerror(errno));
         tmp_file.Close();
         // Declared after tmp_path_guard so LIFO unwinding runs munmap first,
         // releasing the inode reference before unlink reclaims disk space.
@@ -1463,11 +1461,11 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         auto data_size = reader.GetEntrySize(BITMAP_INDEX_DATA);
         std::vector<uint8_t> buf(data_size);
         size_t wo = 0;
-        reader.ReadEntryStream(
-            BITMAP_INDEX_DATA, [&](const uint8_t* d, size_t len) {
-                memcpy(buf.data() + wo, d, len);
-                wo += len;
-            });
+        reader.ReadEntryStream(BITMAP_INDEX_DATA,
+                               [&](const uint8_t* d, size_t len) {
+                                   memcpy(buf.data() + wo, d, len);
+                                   wo += len;
+                               });
         DeserializeIndexData(
             buf.data(), index_length, rebuild_validity_from_postings);
     }
