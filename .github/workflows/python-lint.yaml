@@ -7,15 +7,11 @@ on:
     paths:
       - 'tests/**/*.py'
       - 'tests/pyproject.toml'
-      - 'tests/.python-version'
-      - 'tests/uv.lock'
       - '.github/workflows/python-lint.yaml'
   pull_request:
     paths:
       - 'tests/**/*.py'
       - 'tests/pyproject.toml'
-      - 'tests/.python-version'
-      - 'tests/uv.lock'
       - '.github/workflows/python-lint.yaml'
 
 concurrency:
@@ -28,84 +24,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          # Need full history so we can diff against the base branch.
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "0.9.21"
-          enable-cache: true
-          cache-dependency-glob: "tests/uv.lock"
-
-      - name: Sync tooling
-        working-directory: tests
-        run: uv sync
-
-      - name: Validate ruff configuration
-        working-directory: tests
-        # Unconditional smoke test: runs even when the diff only touches
-        # pyproject.toml / .python-version / uv.lock (no .py files), so a
-        # broken ruff config never slips through with a green CI signal.
-        # --exit-zero ignores any existing baseline lint violations; this
-        # step only fails if the config itself fails to parse/load.
-        run: uv run ruff check --no-cache --exit-zero scripts/
-
-      - name: Resolve changed Python files under tests/
+      - name: Detect changed Python files under tests/
         id: changed
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          PUSH_HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            base_sha="$PR_BASE_SHA"
-            head_sha="$PR_HEAD_SHA"
-          else
-            # push event: diff against previous commit.
-            base_sha="$PUSH_BEFORE_SHA"
-            head_sha="$PUSH_HEAD_SHA"
-          fi
-          # Guard against empty/zero base_sha (e.g. first push to a new branch).
-          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-            base_sha="$(git rev-parse "$head_sha^" 2>/dev/null || echo "$head_sha")"
-          fi
-          files=$(git diff --name-only --diff-filter=AM "$base_sha" "$head_sha" \
-                    | grep -E '^tests/.*\.py$' || true)
-          if [ -z "$files" ]; then
-            echo "No Python files changed under tests/."
-            echo "files=" >> "$GITHUB_OUTPUT"
-          else
-            echo "Changed files:"
-            echo "$files"
-            # Emit newline-joined so downstream steps can feed them to xargs safely.
-            {
-              echo "files<<__EOF__"
-              echo "$files"
-              echo "__EOF__"
-            } >> "$GITHUB_OUTPUT"
-          fi
+        uses: tj-actions/changed-files@v46
+        with:
+          files: tests/**/*.py
 
       - name: ruff check
-        if: steps.changed.outputs.files != ''
-        working-directory: tests
-        env:
-          CHANGED_FILES: ${{ steps.changed.outputs.files }}
-        run: |
-          # Strip the leading "tests/" prefix since we run inside tests/,
-          # then pipe through xargs so each file is passed as a quoted arg.
-          printf '%s\n' "$CHANGED_FILES" | sed 's#^tests/##' | xargs uv run ruff check
+        if: steps.changed.outputs.any_changed == 'true'
+        uses: astral-sh/ruff-action@v4
+        with:
+          version: "0.15.11"
+          src: ${{ steps.changed.outputs.all_changed_files }}
 
       - name: ruff format --check
-        if: steps.changed.outputs.files != ''
-        working-directory: tests
-        env:
-          CHANGED_FILES: ${{ steps.changed.outputs.files }}
-        run: |
-          printf '%s\n' "$CHANGED_FILES" | sed 's#^tests/##' | xargs uv run ruff format --check
+        if: steps.changed.outputs.any_changed == 'true'
+        uses: astral-sh/ruff-action@v4
+        with:
+          version: "0.15.11"
+          src: ${{ steps.changed.outputs.all_changed_files }}
+          args: "format --check --diff"
+
+      - name: Validate ruff configuration (smoke test)
+        # Always runs so config-only PRs still catch a broken pyproject.toml.
+        # --exit-zero ignores existing baseline violations; only fails when
+        # ruff cannot load the config at all.
+        uses: astral-sh/ruff-action@v4
+        with:
+          version: "0.15.11"
+          src: "tests/scripts"
+          args: "check --exit-zero"
