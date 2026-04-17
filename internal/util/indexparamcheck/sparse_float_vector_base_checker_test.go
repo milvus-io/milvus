@@ -45,7 +45,7 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 	})
 
 	t.Run("invalid inverted_index_algo", func(t *testing.T) {
-		for _, algo := range []string{"INVALID_ALGO", "", "taat_naive", "DAAT_WAND_EXTRA"} {
+		for _, algo := range []string{"INVALID_ALGO", "", "taat_naive", "DAAT_WAND_EXTRA", "BLOCK_MAX", "sindi"} {
 			params := map[string]string{
 				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
 				Metric:                  "IP",
@@ -67,6 +67,18 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 		err := cWand.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "sparse inverted index algo INVALID_ALGO not found or not supported")
+	})
+
+	t.Run("new algos BLOCK_MAX_MAXSCORE BLOCK_MAX_WAND SINDI are valid", func(t *testing.T) {
+		for _, algo := range []string{"BLOCK_MAX_MAXSCORE", "BLOCK_MAX_WAND", "SINDI"} {
+			params := map[string]string{
+				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+				Metric:                  "IP",
+				SparseInvertedIndexAlgo: algo,
+			}
+			err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+			assert.NoError(t, err, "algo %s should be accepted", algo)
+		}
 	})
 
 	t.Run("metric error takes priority over algo error", func(t *testing.T) {

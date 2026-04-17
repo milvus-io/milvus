@@ -68,11 +68,11 @@ var (
 	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	RaftMetrics               = []string{metric.L2, metric.IP}
 	CagraBuildAlgoTypes       = []string{CagraBuildAlgoIVFPQ, CagraBuildAlgoNNDESCENT}
-	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
-	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
-	SparseMetrics             = []string{metric.IP, metric.BM25}                                 // const
-	DeduplicateMetrics        = []string{metric.MHJACCARD}                                       // const
-	SparseInvertedIndexAlgos  = []string{"TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE"}             // const
+	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}                                                   // const
+	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1}                                      // const
+	SparseMetrics             = []string{metric.IP, metric.BM25}                                                                      // const
+	DeduplicateMetrics        = []string{metric.MHJACCARD}                                                                            // const
+	SparseInvertedIndexAlgos  = []string{"TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE", "BLOCK_MAX_MAXSCORE", "BLOCK_MAX_WAND", "SINDI"} // const
 )
 
 const (
