@@ -180,7 +180,7 @@ class TestQueryNodeScale:
             log.debug("Shrink querynode test finished")
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
@@ -268,7 +268,7 @@ class TestQueryNodeScale:
             log.debug("Scale out test finished")
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
@@ -370,7 +370,7 @@ class TestQueryNodeScale:
             assert num_entities == ct.default_nb
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"

@@ -53,7 +53,7 @@ def deep_approx_compare(x, y, epsilon=epsilon):
     if isinstance(x, Iterable) and isinstance(y, Iterable) and not isinstance(x, str):
         try:
             return deep_approx_compare(list(x), list(y), epsilon)
-        except:
+        except Exception:
             pass
 
     # Handle numpy arrays

@@ -365,7 +365,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                     output_fields=[],
                 )
                 return True
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_load, sync_timeout, f"load collection {collection_name}")
@@ -573,7 +573,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                     output_fields=[],
                 )
                 return True
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_setup, sync_timeout, f"setup and load collection {collection_name}")
@@ -593,7 +593,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                     output_fields=[],
                 )
                 return False  # If search succeeds, collection is still loaded
-            except:
+            except Exception:
                 return True  # If search fails, collection is released
 
         assert self.wait_for_sync(check_release, sync_timeout, f"release collection {collection_name}")
@@ -662,7 +662,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                 downstream_stats = downstream_client.get_collection_stats(collection_name)
                 logger.info(f"DEBUG: get collection stats in downstream {collection_name}: {downstream_stats}")
                 return downstream_stats.get("row_count", 0) >= 100
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_flush, sync_timeout, f"flush collection {collection_name}")

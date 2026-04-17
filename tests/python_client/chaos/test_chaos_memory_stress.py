@@ -105,7 +105,7 @@ class TestChaosData:
                 assert len(search_res[0].ids) == ct.default_limit
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             chaos_res.delete(meta_name)
@@ -365,7 +365,7 @@ class TestMemoryStressReplica:
             collection_w.release()
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             # delete chaos
@@ -426,7 +426,7 @@ class TestMemoryStressReplica:
             collection_w.release()
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             log.debug("Test finished")

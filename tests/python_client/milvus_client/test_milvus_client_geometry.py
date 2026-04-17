@@ -41,7 +41,7 @@ def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count:
             return wkt_string
         except Exception as e:
             log.error(f"Failed to parse WKT {geom_type}: {wkt_string}, Error: {e}")
-            raise ValueError(f"Invalid WKT generated for {geom_type}: {wkt_string}")
+            raise ValueError(f"Invalid WKT generated for {geom_type}: {wkt_string}") from e
 
     if wkt_type == "POINT":
         points = []
@@ -470,7 +470,7 @@ def generate_diverse_base_data(count=9, bounds=(0, 100, 0, 100), pk_field_name="
             return wkt_string
         except Exception as e:
             log.error(f"Failed to parse base WKT {geom_type} [{index}]: {wkt_string}, Error: {e}")
-            raise ValueError(f"Invalid WKT generated for base {geom_type} [{index}]: {wkt_string}")
+            raise ValueError(f"Invalid WKT generated for base {geom_type} [{index}]: {wkt_string}") from e
 
     # Generate points (30% of data)
     point_count = int(count * 0.3)
@@ -571,7 +571,7 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
             return wkt_string
         except Exception as e:
             log.error(f"Failed to parse lat/lon WKT [{index}]: {wkt_string}, Error: {e}")
-            raise ValueError(f"Invalid lat/lon WKT generated [{index}]: {wkt_string}")
+            raise ValueError(f"Invalid lat/lon WKT generated [{index}]: {wkt_string}") from e
 
     points = []
 

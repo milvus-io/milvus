@@ -390,7 +390,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Initial cleanup - try to drop if exists
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass  # Ignore if doesn't exist
 
         # Create privilege group in upstream

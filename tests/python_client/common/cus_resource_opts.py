@@ -40,7 +40,7 @@ class CustomResourceOperations:
             log.info(f"create custom resource response: {api_response}")
         except ApiException as e:
             log.error(f"Exception when calling CustomObjectsApi->create_namespaced_custom_object: {e}\n")
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
         return api_response
 
     def delete(self, metadata_name, raise_ex=True):
@@ -55,7 +55,7 @@ class CustomResourceOperations:
         except ApiException as e:
             if raise_ex:
                 log.error(f"Exception when calling CustomObjectsApi->delete_namespaced_custom_object: {e}\n")
-                raise Exception(str(e))
+                raise Exception(str(e)) from e
 
     def patch(self, metadata_name, body):
         """patch a custom resource in k8s"""
@@ -67,7 +67,7 @@ class CustomResourceOperations:
             log.debug(f"patch custom resource response: {api_response}")
         except ApiException as e:
             log.error(f"Exception when calling CustomObjectsApi->patch_namespaced_custom_object: {e}\n")
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
         return api_response
 
     def list_all(self):
@@ -81,7 +81,7 @@ class CustomResourceOperations:
             log.debug(f"list custom resource response: {api_response}")
         except ApiException as e:
             log.error(f"Exception when calling CustomObjectsApi->list_namespaced_custom_object: {e}\n")
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
         return api_response
 
     def get(self, metadata_name):
@@ -94,7 +94,7 @@ class CustomResourceOperations:
             # log.debug(f"get custom resource response: {api_response}")
         except ApiException as e:
             log.error(f"Exception when calling CustomObjectsApi->get_namespaced_custom_object: {e}\n")
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
         return api_response
 
     def delete_all(self):

@@ -163,7 +163,7 @@ class TestCDCSyncDML(TestCDCSyncBase):
                 )
                 count = result[0]["count(*)"] if result else 0
                 return count >= 100
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_data, sync_timeout, f"initial data sync {collection_name}")
@@ -249,7 +249,7 @@ class TestCDCSyncDML(TestCDCSyncBase):
                 )
                 count = result[0]["count(*)"] if result else 0
                 return count >= 50
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_initial, sync_timeout, f"initial data sync {collection_name}")
@@ -550,7 +550,7 @@ class TestCDCSyncDML(TestCDCSyncBase):
                     )
                     count = result[0]["count(*)"] if result else 0
                     return count >= 30
-                except:
+                except Exception:
                     return False
 
             assert self.wait_for_sync(
@@ -844,7 +844,7 @@ class TestCDCSyncDML(TestCDCSyncBase):
                     )
                     count = result[0]["count(*)"] if result else 0
                     return count >= 30
-                except:
+                except Exception:
                     return False
 
             assert self.wait_for_sync(

@@ -105,7 +105,7 @@ class TestIndexNodeScale:
             # assert round(t0 / t2) == 2
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
@@ -196,7 +196,7 @@ class TestIndexNodeScale:
             # assert round(t2 / t0) == 2
 
         except Exception as e:
-            raise Exception(str(e))
+            raise Exception(str(e)) from e
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"

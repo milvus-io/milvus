@@ -25,7 +25,7 @@ def init_k8s_client_config():
         else:
             config.load_kube_config()
     except Exception as e:
-        raise Exception(e)
+        raise Exception(e) from e
 
 
 def get_current_namespace():
@@ -82,7 +82,7 @@ def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
             log.info(f"timeout for waiting all pods in namespace {namespace} with label {label_selector} ready")
     except ApiException as e:
         log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
 
     return all_pos_ready_flag
 
@@ -107,7 +107,7 @@ def get_pod_list(namespace, label_selector):
         return api_response.items
     except ApiException as e:
         log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
 
 
 def get_pod_ip_name_pairs(namespace, label_selector):
@@ -195,7 +195,7 @@ def get_milvus_instance_name(namespace, host="127.0.0.1", port="19530", milvus_s
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
     except ApiException as e:
         log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
     milvus_instance_name = api_response.metadata.labels["app.kubernetes.io/instance"]
     return milvus_instance_name
 
@@ -221,7 +221,7 @@ def get_milvus_deploy_tool(namespace, milvus_sys):
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
     except ApiException as e:
         log.error(f"Exception when calling CoreV1Api->list_namespaced_pod: {e}\n")
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
     if (
         "app.kubernetes.io/managed-by" in api_response.metadata.labels
         and api_response.metadata.labels["app.kubernetes.io/managed-by"] == "milvus-operator"
@@ -266,7 +266,7 @@ def export_pod_logs(namespace, label_selector, release_name=None):
             os.system(f"kubectl logs {pod_name} > {pod_log_path}/{pod_name}.log 2>&1")
     except Exception as e:
         log.error(f"Exception when export pod {pod_name} logs: %s\n" % e)
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
 
 
 def read_pod_log(namespace, label_selector, release_name):
@@ -290,7 +290,7 @@ def read_pod_log(namespace, label_selector, release_name):
 
     except ApiException as e:
         log.error(f"Exception when read pod {pod} logs: %s\n" % e)
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
 
 
 def get_metrics_querynode_sq_req_count():
@@ -329,7 +329,7 @@ def get_svc_ip(namespace, label_selector):
         api_response = api_instance.list_namespaced_service(namespace=namespace, label_selector=label_selector)
     except ApiException as e:
         log.error(f"Exception when calling CoreV1Api->list_namespaced_service: {e}\n")
-        raise Exception(str(e))
+        raise Exception(str(e)) from e
     svc_ip = api_response.items[0].spec.cluster_ip
     return svc_ip
 

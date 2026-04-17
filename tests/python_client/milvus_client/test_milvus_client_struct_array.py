@@ -4388,7 +4388,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             return [[minio_file_path]]
 
         except S3Error as e:
-            raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
+            raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}") from e
 
     def call_bulkinsert(self, collection_name: str, batch_files: list[list[str]]):
         """
