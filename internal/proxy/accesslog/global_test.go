@@ -77,6 +77,7 @@ func TestAccessLogger_InitFailed(t *testing.T) {
 	var Params2 paramtable.ComponentParam
 	Params2.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	Params2.Save(Params2.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params2.Save(Params2.ProxyCfg.AccessLog.Filename.Key, "test_access.log")
 	Params2.Save(Params2.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	Params2.Save(Params2.MinioCfg.Address.Key, "")
 
