@@ -200,7 +200,7 @@ class TestActionFirstDeployment(TestDeployBase):
             if pymilvus_version >= "2.2.0":
                 collection_w.flush()
             else:
-                collection_w.collection.num_entities
+                _ = collection_w.collection.num_entities
         # delete data for sealed segment and before index
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(10, 20)]}"
         if is_deleted == "is_deleted":

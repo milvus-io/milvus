@@ -35,10 +35,8 @@ class LogBuffer:
     def emit(self, record):
         """Add a log record to the buffer - must be thread-safe"""
         # Make a copy of the record to avoid mutation issues
-        try:
+        with contextlib.suppress(Exception):
             self.records.append(record)
-        except Exception:
-            pass  # Silently ignore errors during capture
 
     def get_summary(self, report):
         """Extract test name, duration, outcome"""
@@ -50,10 +48,8 @@ class LogBuffer:
         """Format all captured records"""
         formatted_logs = []
         for record in self.records:
-            try:
+            with contextlib.suppress(Exception):
                 formatted_logs.append(formatter.format(record))
-            except Exception:
-                pass  # Skip records that can't be formatted
         return "\n".join(formatted_logs) if formatted_logs else "(No logs captured)"
 
     def get_structured_logs(self):
@@ -821,10 +817,8 @@ def pytest_runtest_setup(item):
     """Hook before test setup"""
     global _conditional_handler
     if _conditional_handler:
-        try:
+        with contextlib.suppress(Exception):
             _conditional_handler.start_test(item)
-        except Exception:
-            pass  # Don't break test execution
     yield
 
 
@@ -838,10 +832,8 @@ def pytest_runtest_makereport(item, call):
     if report.when == "call":
         global _conditional_handler
         if _conditional_handler:
-            try:
+            with contextlib.suppress(Exception):
                 _conditional_handler.end_test(item, report)
-            except Exception:
-                pass  # Don't break test execution
 
 
 def pytest_sessionfinish(session, exitstatus):

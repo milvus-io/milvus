@@ -707,13 +707,15 @@ def generate_expressions_for_field(
         exprs.extend(_gen_like_expressions(field_name, str_values))
 
     # Arithmetic expressions for numeric types
-    if dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE):
-        if non_none:
-            v = non_none[0]
-            if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-                exprs.append(f"{field_name} + 1 > {repr(v)}")
-                exprs.append(f"{field_name} - 1 < {repr(v)}")
-                exprs.append(f"{field_name} * 2 >= {repr(v)}")
+    if (
+        dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE)
+        and non_none
+    ):
+        v = non_none[0]
+        if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+            exprs.append(f"{field_name} + 1 > {repr(v)}")
+            exprs.append(f"{field_name} - 1 < {repr(v)}")
+            exprs.append(f"{field_name} * 2 >= {repr(v)}")
 
     return exprs
 

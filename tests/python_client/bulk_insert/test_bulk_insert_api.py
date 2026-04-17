@@ -546,7 +546,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if insert_before_bulk_insert:
             # insert data
             self.collection_wrap.insert(data)
-            self.collection_wrap.num_entities
+            _ = self.collection_wrap.num_entities
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(collection_name=c_name, files=files)
@@ -558,7 +558,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if not insert_before_bulk_insert:
             # insert data
             self.collection_wrap.insert(data)
-            self.collection_wrap.num_entities
+            _ = self.collection_wrap.num_entities
 
         num_entities = self.collection_wrap.num_entities
         log.info(f"collection entities: {num_entities}")
@@ -1402,13 +1402,9 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         2. import data
         3. verify import failed with errors
         """
-        if is_row_based:
-            if auto_id:
-                file_type = ".npy"
-            else:
-                file_type = ""  # TODO
-        else:
-            file_type = ".csv" if auto_id else ".txt"
+        # TODO: row-based path yields empty string when auto_id is False
+        row_based_type = ".npy" if auto_id else ""
+        file_type = row_based_type if is_row_based else (".csv" if auto_id else ".txt")
         files = prepare_bulk_insert_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,

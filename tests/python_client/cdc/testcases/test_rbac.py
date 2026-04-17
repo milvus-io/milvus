@@ -388,10 +388,8 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Note: privilege groups need special cleanup handling
 
         # Initial cleanup - try to drop if exists
-        try:
+        with contextlib.suppress(Exception):
             upstream_client.drop_privilege_group(group_name)
-        except Exception:
-            pass  # Ignore if doesn't exist
 
         # Create privilege group in upstream
         upstream_client.create_privilege_group(group_name)

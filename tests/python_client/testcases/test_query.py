@@ -2924,7 +2924,7 @@ class TestQueryTextMatch(TestcaseBase):
             expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
-            pandas_res = df_split[df_split.apply(lambda row: token in row[field], axis=1)]
+            pandas_res = df_split[df_split.apply(lambda row, token=token, field=field: token in row[field], axis=1)]
             log.info(f"res len {len(res)}, pandas res len {len(pandas_res)}")
             log.info(f"pandas res\n{pandas_res}")
             assert len(res) == len(pandas_res)

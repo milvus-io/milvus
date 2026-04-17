@@ -1516,7 +1516,7 @@ class TestUtilityAdvanced(TestcaseBase):
         nb = 3000
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.create_index(default_field_name, default_index_params)
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
@@ -1550,7 +1550,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         # get growing segments
         collection_w.insert(df)
         collection_w.load()
@@ -1598,7 +1598,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         # get growing segments
         collection_w.insert(df)
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
@@ -1643,7 +1643,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         # get growing segments
         collection_w.insert(df)
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
@@ -1735,7 +1735,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.create_index(default_field_name, default_index_params)
         # get growing segments
         collection_w.insert(df)
@@ -1787,7 +1787,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(replica_number=2)
         # get growing segments
@@ -1840,7 +1840,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.load(replica_number=2)
         # get growing segments
         collection_w.insert(df)

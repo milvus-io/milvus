@@ -53,7 +53,7 @@ class TestDeleteParams(TestcaseBase):
         del_res = collection_w.delete(expr)[0]
         assert del_res.delete_count == half_nb
         # This flush will not persist the deleted ids, just delay the time to ensure that queryNode consumes deleteMsg
-        collection_w.num_entities
+        _ = collection_w.num_entities
 
         # query with deleted ids
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
@@ -79,7 +79,7 @@ class TestDeleteParams(TestcaseBase):
         del_res = collection_w.delete(expr)[0]
         assert del_res.delete_count == half_nb
         # This flush will not persist the deleted ids, just delay the time to ensure that queryNode consumes deleteMsg
-        collection_w.num_entities
+        _ = collection_w.num_entities
 
         # query with deleted ids
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
@@ -307,7 +307,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
         del_res, _ = collection_w.delete(tmp_expr, partition_name=ct.default_partition_name)
         assert del_res.delete_count == 1
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.parametrize("partition_name", [1, [], {}, ()])
@@ -360,7 +360,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # assert delete successfully and no exception
         collection_w.delete(expr=tmp_expr)
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=tmp_expr)
 
@@ -1308,7 +1308,7 @@ class TestDeleteString(TestcaseBase):
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)
 
@@ -1488,7 +1488,7 @@ class TestDeleteString(TestcaseBase):
         expr = f'{ct.default_string_field_name} in ["0", "0", "0"]'
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2652,7 +2652,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)
 
@@ -2676,6 +2676,6 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)

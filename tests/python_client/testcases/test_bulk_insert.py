@@ -425,7 +425,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if insert_before_bulk_insert:
             # insert data
             self.collection_wrap.insert(data)
-            self.collection_wrap.num_entities
+            _ = self.collection_wrap.num_entities
 
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
@@ -448,7 +448,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if not insert_before_bulk_insert:
             # insert data
             self.collection_wrap.insert(data)
-            self.collection_wrap.num_entities
+            _ = self.collection_wrap.num_entities
 
         num_entities = self.collection_wrap.num_entities
         log.info(f"collection entities: {num_entities}")

@@ -1197,10 +1197,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(nb, dim=default_dim)
         rows = []
         for i in range(nb):
-            if i < 15:
-                ttl_value = ttl_with_offset  # Explicit timezone offset
-            else:
-                ttl_value = ttl_second_precision  # Second-level precision with Z suffix
+            # first 15 rows: explicit timezone offset; rest: second-level precision with Z suffix
+            ttl_value = ttl_with_offset if i < 15 else ttl_second_precision
             rows.append(
                 {default_primary_key_field_name: i, "ttl": ttl_value, default_vector_field_name: list(vectors[i])}
             )

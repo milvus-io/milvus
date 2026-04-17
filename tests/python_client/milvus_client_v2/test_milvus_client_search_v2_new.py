@@ -2148,16 +2148,16 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 "limit": ct.default_limit,
             },
         )[0]
-        for res in res[0]:
-            res = res.entity
-            assert res.get(ct.default_int8_field_name) == 8
-            assert res.get(ct.default_int16_field_name) == 16
-            assert res.get(ct.default_int32_field_name) == 32
-            assert res.get(ct.default_int64_field_name) == 64
-            assert res.get(ct.default_float_field_name) == np.float32(3.14)
-            assert res.get(ct.default_double_field_name) == 3.1415
-            assert res.get(ct.default_bool_field_name) is False
-            assert res.get(ct.default_string_field_name) == "abc"
+        for hit in res[0]:
+            entity = hit.entity
+            assert entity.get(ct.default_int8_field_name) == 8
+            assert entity.get(ct.default_int16_field_name) == 16
+            assert entity.get(ct.default_int32_field_name) == 32
+            assert entity.get(ct.default_int64_field_name) == 64
+            assert entity.get(ct.default_float_field_name) == np.float32(3.14)
+            assert entity.get(ct.default_double_field_name) == 3.1415
+            assert entity.get(ct.default_bool_field_name) is False
+            assert entity.get(ct.default_string_field_name) == "abc"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_ignore_growing(self):

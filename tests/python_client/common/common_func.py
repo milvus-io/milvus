@@ -30,14 +30,12 @@ from sklearn import preprocessing
 
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
-from common.common_params import ExprCheckParams
+from common.common_params import DefaultIndexSearchParams, Expr, ExprCheckParams
 from customize.milvus_operator import MilvusOperator
 from utils.util_log import test_log as log
 
 fake = Faker()
 
-
-from common.common_params import DefaultIndexSearchParams, Expr
 
 """" Methods of processing data """
 
@@ -756,10 +754,6 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
 
 
 def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
-
-
-def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
 

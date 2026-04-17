@@ -1,12 +1,13 @@
+import re
 import sys
-
-from common import common_type as ct
-
-sys.path.append("..")
 from collections.abc import Iterable
 
 import numpy as np
 from deepdiff import DeepDiff
+
+from common import common_type as ct
+
+sys.path.append("..")
 
 from utils.util_log import test_log as log
 
@@ -65,8 +66,6 @@ def deep_approx_compare(x, y, epsilon=epsilon):
     # Fall back to strict equality for other types
     return x == y
 
-
-import re
 
 # Pre-compile regex patterns for better performance
 _GEO_PATTERN = re.compile(r"(POINT|LINESTRING|POLYGON)\s+\(")

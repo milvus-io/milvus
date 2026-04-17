@@ -2,6 +2,8 @@ import time
 
 import pytest
 from pymilvus import Collection, connections, utility
+from rich.console import Console
+from rich.table import Table
 
 from base.client_base import TestcaseBase
 from chaos import chaos_commons as cc
@@ -17,9 +19,6 @@ from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
-
-from rich.console import Console
-from rich.table import Table
 
 
 def display_segment_distribution_info(collection_name, release_name, segment_info=None):

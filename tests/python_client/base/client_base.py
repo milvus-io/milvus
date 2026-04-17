@@ -488,7 +488,7 @@ class TestcaseBase(Base):
         df_default = cf.gen_default_dataframe_data(nb=half, start=half)
         collection_w.insert(df_default)
         # flush
-        collection_w.num_entities
+        _ = collection_w.num_entities
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default

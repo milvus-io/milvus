@@ -113,7 +113,7 @@ def get_collections(prefix, check=False):
         if pymilvus_version >= "2.2.0":
             c.flush()
         else:
-            c.num_entities
+            _ = c.num_entities
         num_entities = c.num_entities
         logger.info(f"{name}: {num_entities}")
         if check:
@@ -155,7 +155,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
             total_time += end_time - start_time
             if j <= times - 3:
                 collection.flush()
-                collection.num_entities
+                _ = collection.num_entities
             if j == times - 3:
                 collection.compact()
 
@@ -166,7 +166,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
             if pymilvus_version >= "2.2.0":
                 collection.flush()
             else:
-                collection.num_entities
+                _ = collection.num_entities
             logger.info(f"collection entities: {collection.num_entities}")
             end_time = time.time()
             logger.info("Get collection entities time = %.4fs" % (end_time - start_time))

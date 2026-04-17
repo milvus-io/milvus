@@ -617,11 +617,8 @@ def generate_latlon_data_for_dwithin(count: int = 10, center_lat: float = 40.712
         angle = random.uniform(0, 2 * np.pi)
 
         # Use exponential distribution to have more points closer to center
-        # but still cover the full range
-        if random.random() < 0.7:  # 70% within 20km
-            distance = random.uniform(100, 20000)
-        else:  # 30% between 20-100km
-            distance = random.uniform(20000, 100000)
+        # but still cover the full range (70% within 20km, 30% between 20-100km)
+        distance = random.uniform(100, 20000) if random.random() < 0.7 else random.uniform(20000, 100000)
 
         lat_offset = distance * lat_degree_per_meter * np.cos(angle)
         lon_offset = distance * lon_degree_per_meter * np.sin(angle)
@@ -864,12 +861,12 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Prepare data with generated WKT examples
         data = []
-        for i, wkt in enumerate(wkt_data):
+        for i, wkt_str in enumerate(wkt_data):
             data.append(
                 {
                     "id": i,
                     "vector": [random.random() for _ in range(default_dim)],
-                    "geo": wkt,
+                    "geo": wkt_str,
                 }
             )
 
@@ -990,23 +987,23 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
         for i, geom_type in enumerate(geometry_types):
             # Generate multiple geometries of each type
             geometries = generate_wkt_by_type(geom_type, bounds=(0, 100, 0, 100), count=15)
-            for j, wkt in enumerate(geometries):
+            for j, wkt_str in enumerate(geometries):
                 data.append(
                     {
                         "id": i * 15 + j,
                         "vector": [random.random() for _ in range(default_dim)],
-                        "geo": wkt,
+                        "geo": wkt_str,
                     }
                 )
 
         # Add some additional mixed geometry collections
         geometry_collections = generate_wkt_by_type("GEOMETRYCOLLECTION", bounds=(0, 100, 0, 100), count=10)
-        for j, wkt in enumerate(geometry_collections):
+        for j, wkt_str in enumerate(geometry_collections):
             data.append(
                 {
                     "id": len(data) + j,
                     "vector": [random.random() for _ in range(default_dim)],
-                    "geo": wkt,
+                    "geo": wkt_str,
                 }
             )
 

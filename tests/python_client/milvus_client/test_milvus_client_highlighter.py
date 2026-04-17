@@ -209,9 +209,9 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             "甲，甲乙，甲乙丙，甲乙丙丁，甲乙丙丁戊，甲乙丙丁戊己，甲乙丙丁戊己庚，甲乙丙丁戊己庚辛，甲乙丙丁戊己庚辛壬，甲乙丙丁戊己庚辛壬癸",
         ]
 
-        l = len(text)
+        text_count = len(text)
 
-        rows = cf.gen_row_data_by_schema(nb=l, schema=schema)
+        rows = cf.gen_row_data_by_schema(nb=text_count, schema=schema)
         for i, row in enumerate(rows):
             row[default_text_field_name] = text[i]
             row[default_text_field_name_chinese] = text[i]

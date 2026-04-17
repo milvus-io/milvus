@@ -288,9 +288,9 @@ class TestMemoryStressReplica:
         # insert 10 sealed segments
         for i in range(20):
             t0 = datetime.datetime.now()
-            df = cf.gen_default_dataframe_data(nb=nb, dim=dim)
+            df = cf.gen_default_dataframe_data(nb=self.nb, dim=self.dim)
             res = collection_w.insert(df)[0]
-            assert res.insert_count == nb
+            assert res.insert_count == self.nb
             log.info(f"After {i + 1} insert, num_entities: {collection_w.num_entities}")
             tt = datetime.datetime.now() - t0
             log.info(f"{i} insert and flush data cost: {tt}")

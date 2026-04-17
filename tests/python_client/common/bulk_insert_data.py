@@ -755,11 +755,8 @@ def gen_data_by_data_field(
             else:
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.geo_field:
-            if not nullable:
-                # Generate WKT geometry strings for parquet
-                data = gen_wkt_geometry(rows)
-            else:
-                data = [None for _ in range(start, rows + start)]
+            # Generate WKT geometry strings for parquet (None entries for nullable)
+            data = gen_wkt_geometry(rows) if not nullable else [None for _ in range(start, rows + start)]
         elif data_field == DataField.timestamp_field:
             if not nullable:
                 data = [gen_timestamptz_str() for _ in range(start, rows + start)]

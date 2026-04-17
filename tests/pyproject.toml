@@ -36,6 +36,10 @@ ignore = [
     # modules declare `__all__` so consumers still have a documented API.
     "F403",
     "F405",
+    # `pytest.raises(Exception)` is a deliberate pattern here: many tests
+    # assert that an operation fails without pinning the exact exception
+    # type (stability over time). Narrowing would be misleading.
+    "B017",
 ]
 
 [tool.ruff.lint.per-file-ignores]

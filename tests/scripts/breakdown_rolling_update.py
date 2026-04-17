@@ -17,11 +17,11 @@ if __name__ == "__main__":
     while flag and end_time - start_time < 360:
         process_list = [p.info for p in psutil.process_iter(attrs=["pid", "name", "cmdline"])]
         for process in process_list:
-            if isinstance(process.get("cmdline", []), list):
-                if "rollingUpdate.sh" in process.get("cmdline", []):
-                    logger.info(f"rolling update process: {process} started")
-                    flag = False
-                    break
+            cmdline = process.get("cmdline", [])
+            if isinstance(cmdline, list) and "rollingUpdate.sh" in cmdline:
+                logger.info(f"rolling update process: {process} started")
+                flag = False
+                break
         time.sleep(0.5)
         end_time = time.time()
         if flag:

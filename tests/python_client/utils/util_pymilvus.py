@@ -643,12 +643,6 @@ def update_field_type_row(entities, old_name, new_name):
     return tmp_entities
 
 
-def add_vector_field(nb, dimension=default_dim):
-    field_name = gen_unique_str()
-    {"name": field_name, "type": DataType.FLOAT_VECTOR, "values": gen_vectors(nb, dimension)}
-    return field_name
-
-
 def gen_segment_row_limits():
     sizes = [1024, 4096]
     return sizes

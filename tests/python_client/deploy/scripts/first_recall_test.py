@@ -104,7 +104,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
     if pymilvus_version >= "2.2.0":
         collection.flush()
     else:
-        collection.num_entities
+        _ = collection.num_entities
     logger.info(collection.num_entities)
     t1 = time.time()
     logger.info(f"Get collection entities cost {t1 - t0:.4f} seconds")

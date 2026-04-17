@@ -154,12 +154,8 @@ class TestActionSecondDeployment(TestDeployBase):
                 self.create_index(collection_w, default_index_field, default_index_param)
             collection_w.load()
 
-        # search and query
-        if "empty" in name:
-            # if the collection is empty, the search result should be empty, so no need to check
-            check_task = None
-        else:
-            check_task = CheckTasks.check_search_results
+        # search and query — empty collections skip result checks
+        check_task = None if "empty" in name else CheckTasks.check_search_results
 
         collection_w.search(
             vectors_to_search[:default_nq],
@@ -178,7 +174,7 @@ class TestActionSecondDeployment(TestDeployBase):
         if pymilvus_version >= "2.2.0":
             collection_w.flush()
         else:
-            collection_w.collection.num_entities
+            _ = collection_w.collection.num_entities
 
         # search and query
         check_task = None if "empty" in name else CheckTasks.check_search_results
@@ -210,7 +206,7 @@ class TestActionSecondDeployment(TestDeployBase):
         if pymilvus_version >= "2.2.0":
             collection_w.flush()
         else:
-            collection_w.collection.num_entities
+            _ = collection_w.collection.num_entities
 
         # delete data
         delete_expr = f"{ct.default_int64_field_name} in [0,1,2,3,4,5,6,7,8,9]"

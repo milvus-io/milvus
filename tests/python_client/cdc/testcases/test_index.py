@@ -49,7 +49,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
         )
 
         # Wait for creation to sync
-        def check_create():
+        def check_create(collection_name=collection_name):
             return downstream_client.has_collection(collection_name)
 
         assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
@@ -65,7 +65,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
         upstream_client.create_index(collection_name, index_params)
 
         # Wait for index creation to sync
-        def check_index():
+        def check_index(collection_name=collection_name):
             try:
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) > 0
@@ -227,7 +227,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
-                    def check_create():
+                    def check_create(collection_name=collection_name):
                         return downstream_client.has_collection(collection_name)
 
                     assert self.wait_for_sync(
@@ -255,7 +255,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     # Wait for index creation to sync
-                    def check_index():
+                    def check_index(collection_name=collection_name):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
@@ -386,7 +386,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
-                    def check_create():
+                    def check_create(collection_name=collection_name):
                         return downstream_client.has_collection(collection_name)
 
                     assert self.wait_for_sync(
@@ -422,7 +422,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     # Wait for index creation to sync
-                    def check_index():
+                    def check_index(collection_name=collection_name):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
@@ -622,7 +622,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_collection(collection_name=collection_name, schema=schema)
 
                     # Wait for creation to sync
-                    def check_create():
+                    def check_create(collection_name=collection_name):
                         return downstream_client.has_collection(collection_name)
 
                     assert self.wait_for_sync(
@@ -651,7 +651,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     # Wait for index creation to sync
-                    def check_index():
+                    def check_index(collection_name=collection_name):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0

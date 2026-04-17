@@ -317,7 +317,7 @@ class TestCompactionParams(TestcaseBase):
         collection_w.query(expr, check_items=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_compact_after_delete(self):
+    def test_compact_delete_all_requery(self):
         """
         target: test delete and then compact
         method: 1. create a collection and insert data
@@ -539,7 +539,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.load()
         seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
         for seg in seg_info:
-            seg.segmentID in targets
+            assert seg.segmentID in targets
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_after_index(self):
@@ -957,7 +957,7 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans(
             check_task=CheckTasks.check_merge_compact, check_items={"segment_num": num_of_segment}
         )[0]
-        c_plans.plans[0].target
+        _ = c_plans.plans[0].target
 
         collection_w.load()
         cost = 180

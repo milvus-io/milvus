@@ -4,6 +4,8 @@ import pytest
 from pymilvus import connections, utility
 from pymilvus.client.constants import DEFAULT_RESOURCE_GROUP
 from pymilvus.client.types import ResourceGroupConfig, ResourceGroupInfo
+from rich.console import Console
+from rich.table import Table
 
 from base.client_base import TestcaseBase
 from chaos import chaos_commons as cc
@@ -27,9 +29,6 @@ from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
-
-from rich.console import Console
-from rich.table import Table
 
 
 def display_resource_group_info(info: ResourceGroupInfo | list[ResourceGroupInfo]):
