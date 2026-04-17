@@ -332,3 +332,56 @@ func TestGetEarliestTs_CommitTimestamp(t *testing.T) {
 		assert.Equal(t, uint64(50), seg.GetEarliestTs())
 	})
 }
+
+// TestGetEarliestTs_AfterCloneWithReplacedBinlogs exercises the path that
+// compaction completion takes: an import segment with commit_ts != 0 is
+// Clone()d with an option that sets CommitTimestamp=0 and replaces the
+// binlogs. The cloned segment must recompute earliestTs from the new
+// binlogs (cold cache), not return 0 and not return a carried-over value
+// from the original's cache.
+func TestGetEarliestTs_AfterCloneWithReplacedBinlogs(t *testing.T) {
+	orig := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:              1,
+		CommitTimestamp: 9999,
+		Binlogs: []*datapb.FieldBinlog{
+			{Binlogs: []*datapb.Binlog{{TimestampFrom: 100, TimestampTo: 200}}},
+		},
+	})
+	// Populate earliestTs cache on the original via the commit_ts short-circuit
+	// path — not strictly required, just ensuring we don't accidentally depend
+	// on the original's unset cache.
+	assert.Equal(t, uint64(9999), orig.GetEarliestTs())
+
+	// Simulate compaction completion: replace binlogs + clear commit_timestamp.
+	cloned := orig.Clone(func(s *SegmentInfo) {
+		s.CommitTimestamp = 0
+		s.Binlogs = []*datapb.FieldBinlog{
+			{Binlogs: []*datapb.Binlog{{TimestampFrom: 3000, TimestampTo: 4000}}},
+			{Binlogs: []*datapb.Binlog{{TimestampFrom: 2500, TimestampTo: 3500}}},
+		}
+	})
+
+	// Must recompute from the NEW binlogs. Returning 0 would mean the cache
+	// was miscomputed; returning 100 would mean a carried-over stale cache.
+	assert.Equal(t, uint64(2500), cloned.GetEarliestTs(),
+		"Clone with replaced binlogs must recompute earliestTs from new binlogs")
+}
+
+// TestGetEarliestTs_AfterShadowClone verifies that ShadowClone (which shares
+// the underlying proto) still returns the correct value via the commit_ts
+// short-circuit path. This is the non-compaction clone path — binlogs are
+// shared, so a rescan would also be correct but unnecessary.
+func TestGetEarliestTs_AfterShadowClone(t *testing.T) {
+	orig := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:              1,
+		CommitTimestamp: 7777,
+		Binlogs: []*datapb.FieldBinlog{
+			{Binlogs: []*datapb.Binlog{{TimestampFrom: 100, TimestampTo: 200}}},
+		},
+	})
+
+	// ShadowClone shares the proto, so commit_timestamp is still non-zero
+	// on the clone and the short-circuit branch returns it directly.
+	cloned := orig.ShadowClone()
+	assert.Equal(t, uint64(7777), cloned.GetEarliestTs())
+}

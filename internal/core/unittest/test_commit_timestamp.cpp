@@ -202,6 +202,44 @@ TEST(CommitTimestamp, Delete_PreCommitDeleteNotApplied) {
     }
 }
 
+// Boundary: commit_ts == max(row_ts). Overwrite is a no-op semantically; MVCC
+// and TTL behavior is identical to a normal segment with that row_ts.
+// This documents the boundary contract enforced by the Go-side
+// UpdateCommitTimestamp operator (commit_ts >= max(binlog.TimestampTo)).
+TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t N = 10;
+    constexpr Timestamp T_old = 1000;  // row ts range: [1000, 1009]
+    constexpr Timestamp T_commit = 1009;  // == max(row_ts)
+
+    auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
+    auto seg = CreateImportSegment(schema, dataset, T_commit);
+
+    // query_ts < T_commit -> all rows masked (invisible).
+    {
+        BitsetType bs(N, false);
+        BitsetTypeView view(bs);
+        seg->mask_with_timestamps(view, T_commit - 1, /*collection_ttl=*/0);
+        EXPECT_EQ(bs.count(), static_cast<size_t>(N))
+            << "query_ts=" << (T_commit - 1) << " < commit_ts=" << T_commit
+            << ": all rows must be invisible";
+    }
+
+    // query_ts == T_commit -> all rows visible (MVCC is inclusive on ==).
+    {
+        BitsetType bs(N, false);
+        BitsetTypeView view(bs);
+        seg->mask_with_timestamps(view, T_commit, /*collection_ttl=*/0);
+        EXPECT_EQ(bs.count(), 0UL)
+            << "query_ts=" << T_commit << " == commit_ts: all rows visible";
+    }
+}
+
 // I4: Normal segment (commit_ts=0) — existing behavior unchanged
 // Without SetCommitTimestamp the MVCC and TTL behavior is governed by original
 // row timestamps from DataGen.

@@ -33,6 +33,10 @@ func (r *timestampOverwriteRecord) Retain()  { r.tsArray.Retain(); r.inner.Retai
 
 // overwriteRecordTimestamps returns a Record with the timestamp column filled
 // with commitTs. If commitTs is 0, the original record is returned unchanged.
+//
+// When wrapping (commitTs != 0) the wrapper holds its own reference on the
+// inner record via Retain, so the caller can continue to manage the input
+// record independently. The wrapper's Release balances this Retain.
 func overwriteRecordTimestamps(rec storage.Record, commitTs uint64) storage.Record {
 	if commitTs == 0 {
 		return rec
@@ -45,6 +49,7 @@ func overwriteRecordTimestamps(rec storage.Record, commitTs uint64) storage.Reco
 	}
 	tsArray := builder.NewArray()
 	builder.Release()
+	rec.Retain()
 	return &timestampOverwriteRecord{inner: rec, tsArray: tsArray}
 }
 
