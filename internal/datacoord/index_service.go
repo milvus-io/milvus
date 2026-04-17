@@ -209,7 +209,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
+	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJSON)
 	if err != nil {
 		if errors.Is(err, errIndexOperationIgnored) {
 			log.Info("index already exists",

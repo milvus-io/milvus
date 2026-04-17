@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"fmt"
 	"math"
 	"runtime/debug"
 	"time"
