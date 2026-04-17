@@ -133,7 +133,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
 	}
 	if len(funcSchema.GetOutputFieldNames()) != 0 {
-		return nil, fmt.Errorf("Rerank function should not have output field, but now is %d", len(funcSchema.GetOutputFieldNames()))
+		return nil, fmt.Errorf("rerank function should not have output field, but now is %d", len(funcSchema.GetOutputFieldNames()))
 	}
 
 	rerankerName := GetRerankName(funcSchema)
@@ -151,7 +151,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	case BoostName:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName)
+		return nil, fmt.Errorf("unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName)
 	}
 
 	if newRerankErr != nil {
@@ -174,7 +174,7 @@ func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *sc
 				funcScore.reranker = reranker
 			} else {
 				// now only support only use one proxy rerank
-				return nil, fmt.Errorf("Currently only supports one rerank")
+				return nil, fmt.Errorf("currently only supports one rerank")
 			}
 		}
 	}
@@ -201,7 +201,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 		}
 		err = json.Unmarshal([]byte(paramStr), &params)
 		if err != nil {
-			return nil, fmt.Errorf("Parse rerank params failed, err: %s", err)
+			return nil, fmt.Errorf("parse rerank params failed, err: %s", err)
 		}
 	}
 	fSchema := schemapb.FunctionSchema{
@@ -218,14 +218,14 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 				k := reflect.ValueOf(v).Float()
 				fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: RRFParamsKey, Value: strconv.FormatFloat(k, 'f', -1, 64)})
 			} else {
-				return nil, fmt.Errorf("The type of rank param k should be float")
+				return nil, fmt.Errorf("the type of rank param k should be float")
 			}
 		}
 	case weightedRankType:
 		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: WeightedName})
 		if v, ok := params[WeightsParamsKey]; ok {
 			if d, err := json.Marshal(v); err != nil {
-				return nil, fmt.Errorf("The weights param should be an array")
+				return nil, fmt.Errorf("the weights param should be an array")
 			} else {
 				fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: WeightsParamsKey, Value: string(d)})
 			}
@@ -234,7 +234,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 			if ns, ok := normScore.(bool); ok {
 				fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: NormScoreKey, Value: strconv.FormatBool(ns)})
 			} else {
-				return nil, fmt.Errorf("Weighted rerank err, norm_score should been bool type, but [norm_score:%s]'s type is %T", normScore, normScore)
+				return nil, fmt.Errorf("weighted rerank err, norm_score should been bool type, but [norm_score:%s]'s type is %T", normScore, normScore)
 			}
 		}
 	default:

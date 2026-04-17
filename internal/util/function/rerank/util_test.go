@@ -54,7 +54,7 @@ func mockCols(num int) []*columns {
 func (s *UtilSuite) TestScoreMode() {
 	{
 		_, err := getMergeFunc[int64]("test")
-		s.ErrorContains(err, "Unsupport score mode")
+		s.ErrorContains(err, "unsupport score mode")
 	}
 	{
 		f, err := getMergeFunc[int64]("avg")

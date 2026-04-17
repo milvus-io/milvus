@@ -101,21 +101,21 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 	{
 		schema.Fields[3].Nullable = true
 		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Function input field cannot be nullable")
+		s.ErrorContains(err, "function input field cannot be nullable")
 		schema.Fields[3].Nullable = false
 	}
 
 	{
 		funcScores.Functions[0].Params[0].Value = "NotExist"
 		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unsupported rerank function")
+		s.ErrorContains(err, "unsupported rerank function")
 		funcScores.Functions[0].Params[0].Value = DecayFunctionName
 	}
 
 	{
 		funcScores.Functions = append(funcScores.Functions, functionSchema)
 		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Currently only supports one rerank")
+		s.ErrorContains(err, "currently only supports one rerank")
 		funcScores.Functions = funcScores.Functions[:1]
 	}
 
@@ -129,7 +129,7 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 	{
 		funcScores.Functions[0].OutputFieldNames = []string{"text"}
 		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank function should not have output field")
+		s.ErrorContains(err, "rerank function should not have output field")
 		funcScores.Functions[0].OutputFieldNames = []string{""}
 	}
 }
@@ -356,7 +356,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 			{Key: legacyRankParamsKey, Value: "invalid"},
 		}
 		_, err := NewFunctionScoreWithlegacy(schema, rankParams)
-		s.ErrorContains(err, "Parse rerank params failed")
+		s.ErrorContains(err, "parse rerank params failed")
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
@@ -364,7 +364,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 			{Key: legacyRankParamsKey, Value: `{"k": "invalid"}`},
 		}
 		_, err := NewFunctionScoreWithlegacy(schema, rankParams)
-		s.ErrorContains(err, "The type of rank param k should be float")
+		s.ErrorContains(err, "the type of rank param k should be float")
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
@@ -389,7 +389,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 			{Key: legacyRankParamsKey, Value: `{"weights": [1.0], "norm_score": "Invalid"}`},
 		}
 		_, err := NewFunctionScoreWithlegacy(schema, rankParams)
-		s.ErrorContains(err, "Weighted rerank err, norm_score should been bool type")
+		s.ErrorContains(err, "weighted rerank err, norm_score should been bool type")
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
@@ -405,7 +405,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 			{Key: legacyRankParamsKey, Value: `{"weights": [1.0], "norm_score": "false"}`},
 		}
 		_, err := NewFunctionScoreWithlegacy(schema, rankParams)
-		s.ErrorContains(err, "Weighted rerank err, norm_score should been bool type")
+		s.ErrorContains(err, "weighted rerank err, norm_score should been bool type")
 	}
 }
 

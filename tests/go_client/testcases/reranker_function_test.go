@@ -229,7 +229,7 @@ func TestRerankFunctionInvalidParams(t *testing.T) {
 				WithType(entity.FunctionTypeRerank).
 				WithInputFields().
 				WithParam("reranker", "invalid_type"),
-			"Unsupported rerank function",
+			"unsupported rerank function",
 		},
 		{
 			"weighted_invalid_weights",
@@ -239,7 +239,7 @@ func TestRerankFunctionInvalidParams(t *testing.T) {
 				WithInputFields().
 				WithParam("reranker", "weighted").
 				WithParam("weights", "invalid_format"),
-			"Parse weights param failed",
+			"parse weights param failed",
 		},
 		{
 			"decay_missing_params",
@@ -248,7 +248,7 @@ func TestRerankFunctionInvalidParams(t *testing.T) {
 				WithType(entity.FunctionTypeRerank).
 				WithInputFields(common.DefaultInt64FieldName).
 				WithParam("reranker", "decay"),
-			"Decay function lost param",
+			"decay function lost param",
 		},
 		{
 			"model_missing_endpoint",
@@ -258,7 +258,7 @@ func TestRerankFunctionInvalidParams(t *testing.T) {
 				WithInputFields(common.DefaultVarcharFieldName).
 				WithParam("reranker", "model").
 				WithParam("provider", "tei"),
-			"Rerank function lost params",
+			"rerank function lost params",
 		},
 	}
 
@@ -520,7 +520,7 @@ func TestRerankFunctionWeightedNegative(t *testing.T) {
 		normScore     bool
 		expectedError string
 	}{
-		{"invalid_weights_format", "invalid_format", true, "Parse weights param failed"},
+		{"invalid_weights_format", "invalid_format", true, "parse weights param failed"},
 		{"empty_weights", []float64{}, true, "weights not found"},
 		{"negative_weights", []float64{-0.5, 0.5}, true, "rank param weight should be in range [0, 1]"},
 		{"mismatched_weights_count", []float64{0.3}, true, "the length of weights param mismatch with ann search requests"},
@@ -608,7 +608,7 @@ func TestRerankFunctionDecayNegative(t *testing.T) {
 		decay         interface{}
 		expectedError string
 	}{
-		{"invalid_function_type", "invalid", defaultTimestamp, 3600, 0.1, "Invaild decay function"},
+		{"invalid_function_type", "invalid", defaultTimestamp, 3600, 0.1, "invaild decay function"},
 		{"negative_scale", "linear", defaultTimestamp, -3600, 0.1, "scale must > 0"},
 		{"invalid_origin_format", "linear", "invalid", 3600, 0.1, "is not a number"},
 		{"invalid_decay_range", "linear", defaultTimestamp, 3600, 1.5, "decay must 0 < decay < 1"},

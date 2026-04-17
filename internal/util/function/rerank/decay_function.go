@@ -65,7 +65,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	}
 
 	if len(base.GetInputFieldNames()) != 1 {
-		return nil, fmt.Errorf("Decay function only supports single input, but gets [%s] input", base.GetInputFieldNames())
+		return nil, fmt.Errorf("decay function only supports single input, but gets [%s] input", base.GetInputFieldNames())
 	}
 
 	inputType := base.GetInputFieldTypes()[0]
@@ -80,7 +80,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[int64, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("Decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
+			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
 		}
 	} else {
 		switch inputType {
@@ -93,7 +93,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[string, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("Decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
+			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
 		}
 	}
 }
@@ -110,21 +110,21 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 			decayFunc.functionName = param.Value
 		case originKey:
 			if decayFunc.origin, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("Param origin:%s is not a number", param.Value)
+				return nil, fmt.Errorf("param origin:%s is not a number", param.Value)
 			}
 			orginInit = true
 		case scaleKey:
 			if decayFunc.scale, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("Param scale:%s is not a number", param.Value)
+				return nil, fmt.Errorf("param scale:%s is not a number", param.Value)
 			}
 			scaleInit = true
 		case offsetKey:
 			if decayFunc.offset, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("Param offset:%s is not a number", param.Value)
+				return nil, fmt.Errorf("param offset:%s is not a number", param.Value)
 			}
 		case decayKey:
 			if decayFunc.decay, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("Param decay:%s is not a number", param.Value)
+				return nil, fmt.Errorf("param decay:%s is not a number", param.Value)
 			}
 		case normsScorekey:
 			if needNorm, err := strconv.ParseBool(param.Value); err != nil {
@@ -143,23 +143,23 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	}
 
 	if !orginInit {
-		return nil, fmt.Errorf("Decay function lost param: origin")
+		return nil, fmt.Errorf("decay function lost param: origin")
 	}
 
 	if !scaleInit {
-		return nil, fmt.Errorf("Decay function lost param: scale")
+		return nil, fmt.Errorf("decay function lost param: scale")
 	}
 
 	if decayFunc.scale <= 0 {
-		return nil, fmt.Errorf("Decay function param: scale must > 0, but got %f", decayFunc.scale)
+		return nil, fmt.Errorf("decay function param: scale must > 0, but got %f", decayFunc.scale)
 	}
 
 	if decayFunc.offset < 0 {
-		return nil, fmt.Errorf("Decay function param: offset must >= 0, but got %f", decayFunc.offset)
+		return nil, fmt.Errorf("decay function param: offset must >= 0, but got %f", decayFunc.offset)
 	}
 
 	if decayFunc.decay <= 0 || decayFunc.decay >= 1 {
-		return nil, fmt.Errorf("Decay function param: decay must 0 < decay < 1, but got %f", decayFunc.decay)
+		return nil, fmt.Errorf("decay function param: decay must 0 < decay < 1, but got %f", decayFunc.decay)
 	}
 
 	switch decayFunc.functionName {
@@ -170,7 +170,7 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	case linearFunction:
 		decayFunc.reScorer = linearDecay
 	default:
-		return nil, fmt.Errorf("Invaild decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
+		return nil, fmt.Errorf("invaild decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
 	}
 	return decayFunc, nil
 }
