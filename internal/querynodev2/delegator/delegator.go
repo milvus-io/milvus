@@ -133,6 +133,12 @@ func newFunctionState() *functionState {
 	}
 }
 
+// idfOracleSlot wraps IDFOracle so it can be swapped via atomic.Pointer.
+// A nil slot (Load returns nil) means the delegator has no IDF oracle yet.
+type idfOracleSlot struct {
+	oracle IDFOracle
+}
+
 var _ ShardDelegator = (*shardDelegator)(nil)
 
 // shardDelegator maintains the shard distribution and streaming part of the data.
@@ -150,7 +156,11 @@ type shardDelegator struct {
 	lifetime lifetime.Lifetime[lifetime.State]
 
 	distribution *distribution
-	idfOracle    IDFOracle
+	// idfOracle holds the BM25 IDF oracle for the shard.
+	// Accessed via atomic.Pointer to allow on-demand creation during UpdateSchema
+	// (when BM25 functions are added post-construction) without racing concurrent
+	// readers on the search/insert hot paths. A nil Load() means no oracle exists.
+	idfOracle atomic.Pointer[idfOracleSlot]
 
 	segmentManager segments.SegmentManager
 	// stream delete buffer
@@ -199,6 +209,21 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 		zap.String("channel", sd.vchannelName),
 		zap.Int64("replicaID", sd.replicaID),
 	)
+}
+
+// getIDFOracle returns the current IDF oracle or nil if not initialized.
+// Safe for concurrent use.
+func (sd *shardDelegator) getIDFOracle() IDFOracle {
+	slot := sd.idfOracle.Load()
+	if slot == nil {
+		return nil
+	}
+	return slot.oracle
+}
+
+// setIDFOracle atomically installs the given IDF oracle.
+func (sd *shardDelegator) setIDFOracle(oracle IDFOracle) {
+	sd.idfOracle.Store(&idfOracleSlot{oracle: oracle})
 }
 
 func (sd *shardDelegator) NotStopped(state lifetime.State) error {
@@ -1330,15 +1355,24 @@ func (sd *shardDelegator) updateBM25Functions(newSchema *schemapb.CollectionSche
 
 		sd.funcState.Store(fs)
 
-		// Update IDF oracle if it's nil
-		if sd.idfOracle == nil {
+		// Update IDF oracle if it's nil.
+		// Writes happen under schemaChangeMutex (held by UpdateSchema), so concurrent
+		// UpdateSchema calls cannot race. Readers on the search/insert path use the
+		// atomic.Pointer without holding that mutex — the atomic.Pointer is what
+		// provides them the happens-before guarantee.
+		//
+		// Publication order: fully initialize (Start + register with distribution)
+		// BEFORE the atomic Store, so any reader that observes a non-nil oracle sees
+		// a fully live one.
+		if oracle := sd.getIDFOracle(); oracle == nil {
 			log.Info("creating new IDF oracle for BM25 functions")
-			sd.idfOracle = NewIDFOracle(sd.vchannelName, newSchema.GetFunctions())
-			sd.distribution.SetIDFOracle(sd.idfOracle)
-			sd.idfOracle.Start()
+			newOracle := NewIDFOracle(sd.vchannelName, newSchema.GetFunctions())
+			newOracle.Start()
+			sd.distribution.SetIDFOracle(newOracle)
+			sd.setIDFOracle(newOracle)
 		} else {
 			// Update existing IDF oracle with new functions
-			sd.idfOracle.UpdateCurrent(newSchema.GetFunctions())
+			oracle.UpdateCurrent(newSchema.GetFunctions())
 			log.Info("updated existing IDF oracle with new functions")
 		}
 	}
@@ -1362,8 +1396,8 @@ func (sd *shardDelegator) Close() {
 	sd.distribution.RefundAllCandidates()
 
 	// clean idf oracle
-	if sd.idfOracle != nil {
-		sd.idfOracle.Close()
+	if oracle := sd.getIDFOracle(); oracle != nil {
+		oracle.Close()
 	}
 
 	if fs := sd.funcState.Load(); fs != nil {
@@ -1512,9 +1546,10 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sd.funcState.Store(fs)
 
 	if hasBM25Field {
-		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
-		sd.distribution.SetIDFOracle(sd.idfOracle)
-		sd.idfOracle.Start()
+		oracle := NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
+		oracle.Start()
+		sd.distribution.SetIDFOracle(oracle)
+		sd.setIDFOracle(oracle)
 	}
 
 	m := sync.Mutex{}

@@ -153,8 +153,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 
 			if !sd.distribution.GrowingSegmentExists(segmentID) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
-				if sd.idfOracle != nil {
-					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
+				if oracle := sd.getIDFOracle(); oracle != nil {
+					oracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
@@ -168,8 +168,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			}
 
 			sd.growingSegmentLock.Unlock()
-		} else if sd.idfOracle != nil {
-			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		} else if oracle := sd.getIDFOracle(); oracle != nil {
+			oracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
 		}
 		log.Info("insert into growing segment",
 			zap.Int64("collectionID", growing.Collection()),
@@ -386,9 +386,9 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
-	for _, segment := range loaded {
-		if sd.idfOracle != nil {
-			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
+	if oracle := sd.getIDFOracle(); oracle != nil {
+		for _, segment := range loaded {
+			oracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
@@ -407,7 +407,8 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // load bm25 stats for sealed segments.
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
-	if sd.idfOracle == nil {
+	oracle := sd.getIDFOracle()
+	if oracle == nil {
 		return nil
 	}
 
@@ -418,7 +419,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
+			if err := oracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Int64("segmentID", info.GetSegmentID()),
@@ -441,12 +442,13 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 // Delegates to idfOracle.LoadBackfillFields which handles download, field-level
 // idempotency, and current stats update.
 func (sd *shardDelegator) loadBackfillBM25Stats(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if sd.idfOracle == nil {
+	oracle := sd.getIDFOracle()
+	if oracle == nil {
 		return nil
 	}
 
 	for _, info := range req.GetInfos() {
-		if err := sd.idfOracle.LoadBackfillFields(ctx, info.GetSegmentID(), info, sd.chunkManager); err != nil {
+		if err := oracle.LoadBackfillFields(ctx, info.GetSegmentID(), info, sd.chunkManager); err != nil {
 			return err
 		}
 	}
@@ -1128,7 +1130,11 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 		return 0, errors.New("functionRunner return unknown data")
 	}
 
-	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)
+	oracle := sd.getIDFOracle()
+	if oracle == nil {
+		return 0, errors.New("idf oracle not initialized for bm25 field")
+	}
+	idfSparseVector, avgdl, err := oracle.BuildIDF(req.GetFieldId(), tfArray)
 	if err != nil {
 		return 0, err
 	}

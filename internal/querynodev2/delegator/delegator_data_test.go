@@ -997,7 +997,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
-		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+		if s.delegator.getIDFOracle().TargetVersion() >= targetVersion {
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
@@ -1072,11 +1072,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.delegator.getIDFOracle().(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.delegator.getIDFOracle().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1229,11 +1229,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.delegator.getIDFOracle().(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.delegator.getIDFOracle().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1706,6 +1706,48 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.TryCleanExcludedSegments(4)
 	s.True(s.delegator.VerifyExcludedSegments(1, 1))
 	s.True(s.delegator.VerifyExcludedSegments(1, 5))
+}
+
+// TestIDFOracleConcurrentPublish verifies that setIDFOracle/getIDFOracle are
+// race-free. Must pass under `go test -race`. Regressions that revert the
+// atomic.Pointer wrapper to a plain IDFOracle field would be caught here.
+func (s *DelegatorDataSuite) TestIDFOracleConcurrentPublish() {
+	s.genCollectionWithFunction()
+	s.Require().NotNil(s.delegator.getIDFOracle(), "expected BM25 oracle after genCollectionWithFunction")
+
+	const (
+		readerCount = 4
+		writeIters  = 1000
+	)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(readerCount)
+	for i := 0; i < readerCount; i++ {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					if o := s.delegator.getIDFOracle(); o != nil {
+						// TargetVersion exercises the interface method table
+						// and an atomic read on the oracle's internal state.
+						_ = o.TargetVersion()
+					}
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < writeIters; i++ {
+		newOracle := NewIDFOracle(s.delegator.vchannelName, nil)
+		s.delegator.setIDFOracle(newOracle)
+	}
+
+	close(stop)
+	wg.Wait()
 }
 
 func TestDelegatorDataSuite(t *testing.T) {
