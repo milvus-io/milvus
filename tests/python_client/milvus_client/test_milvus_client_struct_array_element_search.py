@@ -8,19 +8,22 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from common.constants import *  # noqa
 from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 from pymilvus.client.embedding_list import EmbeddingList
 
-
-prefix = "struct_elem"
+prefix = "struct_elem_search"
 epsilon = 0.001
-default_nb = ct.default_nb  # 2000
-default_nq = ct.default_nq  # 2
-default_dim = 128
+default_nb = ct.default_nb
+default_nq = ct.default_nq
+default_dim = ct.default_dim
+default_growing_nb = 500
+insert_batch_size = 500
 default_capacity = 100
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
 COLORS = ["Red", "Blue", "Green"]
 SIZES = ["S", "M", "L", "XL"]
+CATEGORIES = ["A", "B", "C", "D"]
 
 
 def _seed_vector(seed, dim=default_dim):
@@ -242,7 +245,7 @@ def _generate_binary_vector(dim, seed=None):
     return rng.bytes(dim // 8)
 
 
-class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
     """Test element_filter() syntax + element-level vector search (22 cases)"""
 
     def _create_schema(self, client, dim=default_dim):
@@ -414,7 +417,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         _assert_distance_order(results, "L2")
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_element_filter_with_doc_level_filter(self):
+    def test_element_filter_search_with_doc_level_filter(self):
         """
         target: combine doc-level filter with element_filter
         method: 'doc_int > 100 && element_filter(structA, $[str_val] == "row_200_elem_0")'
@@ -443,7 +446,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
             f"Top-1 should be row 200, got {results[0][0]['id']}"
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_element_filter_compound_same_element_semantic(self):
+    def test_element_filter_search_compound_same_element_semantic(self):
         """
         target: CORE - verify element_filter compound conditions apply to SAME element
         method: Row 0: elem[0]={Red,S}, elem[1]={Blue,L}
@@ -530,7 +533,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="pymilvus element_indices not yet re-exposed after PR #3240 refactoring")
-    def test_element_filter_verify_in_struct_offset(self):
+    def test_element_filter_search_verify_in_struct_offset(self):
         """
         target: verify element_indices corresponds to correct array subscript
         method: insert known data, search with element_filter matching specific element
@@ -683,32 +686,33 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
     def test_element_filter_search_range_condition(self):
         """
         target: element_filter with range condition
-        method: element_filter(structA, $[int_val] > 10 && $[int_val] < 50)
-        expected: only elements within range matched
+        method: element_filter(structA, $[int_val] > 100 && $[int_val] < 200)
+        expected: only elements within range matched (row 1 elements: 101-109)
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_range")
         data = self._create_collection_and_insert(client, collection_name, nb=1000, metric_type="COSINE")
 
-        query_vector = data[0]["structA"][0]["embedding"]
+        query_vector = data[1]["structA"][0]["embedding"]
         results, check = self.search(
             client, collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
             search_params={"metric_type": "COSINE"},
-            filter='element_filter(structA, $[int_val] > 10 && $[int_val] < 50)',
+            filter='element_filter(structA, $[int_val] > 100 && $[int_val] < 200)',
             limit=10,
             output_fields=["id", "structA"],
         )
         assert check
+        assert len(results[0]) > 0, "Range filter should match row 1 elements (int_val 101-109)"
         # Scalar condition verification: each hit must have element in range
         for hit in results[0]:
-            assert any(10 < e["int_val"] < 50 for e in hit["structA"]), \
-                f"Row {hit['id']} has no element in range (10, 50)"
+            assert any(100 < e["int_val"] < 200 for e in hit["structA"]), \
+                f"Row {hit['id']} has no element in range (100, 200)"
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_element_filter_with_doc_varchar_filter(self):
+    def test_element_filter_search_with_doc_varchar_filter(self):
         """
         target: doc-level varchar filter + element_filter
         method: 'doc_varchar == "cat_1" && element_filter(structA, $[int_val] > 5)'
@@ -734,7 +738,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_element_filter_multiple_matches_per_row(self):
+    def test_element_filter_search_multiple_matches_per_row(self):
         """
         target: same row has multiple elements matching filter
         method: broad filter that matches many elements per row
@@ -763,7 +767,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_element_filter_no_matching_elements(self):
+    def test_element_filter_search_no_matching_elements(self):
         """
         target: no element matches the filter condition
         method: use impossible condition
@@ -1121,7 +1125,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
                     f"nq[{nq_idx}] distances not sorted: {distances[k]} < {distances[k + 1]}"
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_negation(self):
+    def test_element_filter_search_negation(self):
         """
         target: element_filter with negation
         method: element_filter(structA, !($[int_val] < 0))
@@ -1182,7 +1186,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         _assert_distance_order(results, metric_type)
 
 
-class TestStructArrayMatchFamily(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementMatchSearch(TestMilvusClientV2Base):
     """Test MATCH_ALL/ANY/LEAST/MOST/EXACT operators (25 cases)"""
 
     def _create_schema(self, client, dim=default_dim):
@@ -2032,7 +2036,7 @@ class TestStructArrayMatchFamily(TestMilvusClientV2Base):
         assert ids_bf == ids_idx, "Indexed and brute-force MATCH should return same results"
 
 
-class TestStructArrayNestedIndex(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementNestedIndex(TestMilvusClientV2Base):
     """Test INVERTED + STL_SORT nested index creation and acceleration (17 cases)"""
 
     def _create_schema(self, client, dim=default_dim, add_bool=False):
@@ -2581,7 +2585,7 @@ class TestStructArrayNestedIndex(TestMilvusClientV2Base):
         )
 
 
-class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementNonFloatVectors(TestMilvusClientV2Base):
     """Test Float16, BFloat16, Int8, Binary vector types in struct (19 cases)"""
 
     def _create_schema_with_vec_type(self, client, vec_type, dim=default_dim):
@@ -3135,363 +3139,7 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-
-class TestStructArrayMatchQuery(TestMilvusClientV2Base):
-    """Test Match operators in pure query (non-search) context (10 cases)"""
-
-    def _create_schema(self, client, dim=default_dim):
-        """Create schema for Match query tests."""
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
-
-        struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
-        struct_schema.add_field("int_val", DataType.INT64)
-        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
-        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
-
-        schema.add_field(
-            "structA", datatype=DataType.ARRAY,
-            element_type=DataType.STRUCT,
-            struct_schema=struct_schema,
-            max_capacity=default_capacity,
-        )
-        return schema
-
-    def _generate_data(self, nb=500, dim=default_dim):
-        """Generate data for match query tests."""
-        data = []
-        for i in range(nb):
-            rng = random.Random(i)
-            num_elems = rng.randint(3, 10)
-            struct_array = []
-            for j in range(num_elems):
-                if i == 0 and j == 0:
-                    emb = [1.0] + [0.0] * (dim - 1)
-                else:
-                    emb = _seed_vector(i * 1000 + j, dim)
-                struct_array.append({
-                    "embedding": emb,
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "color": COLORS[j % 3],
-                })
-            data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999, dim),
-                "structA": struct_array,
-            })
-        return data
-
-    def _setup_collection(self, client, collection_name, nb=500, flush=True):
-        """Helper: create, insert, index, load."""
-        schema = self._create_schema(client)
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS)
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        data = self._generate_data(nb=nb)
-        self.insert(client, collection_name, data)
-        if flush:
-            self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-        return data
-
-    # ---- L0 tests ----
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_with_match_all(self):
-        """
-        target: query with MATCH_ALL filter
-        method: query(filter='MATCH_ALL(structA, $[int_val] > 0)')
-        expected: all elements in matched rows have int_val > 0
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_all")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ALL(structA, $[int_val] > 0)',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        for hit in results:
-            assert all(e["int_val"] > 0 for e in hit["structA"])
-        gt_ids = gt_match_query(data, "MATCH_ALL", lambda e: e["int_val"] > 0)
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids.issubset(gt_ids), f"False positives: {milvus_ids - gt_ids}"
-        if len(results) < 100:
-            assert milvus_ids == gt_ids, f"Missing IDs: {gt_ids - milvus_ids}"
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_query_with_match_any(self):
-        """
-        target: query with MATCH_ANY filter
-        method: query(filter='MATCH_ANY(structA, $[str_val] == "row_10_elem_0")')
-        expected: at least one matching element per row
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_any")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[str_val] == "row_10_elem_0")',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        assert len(results) > 0
-        for hit in results:
-            assert any(e["str_val"] == "row_10_elem_0" for e in hit["structA"])
-        gt_ids = gt_match_query(data, "MATCH_ANY", lambda e: e["str_val"] == "row_10_elem_0")
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids == gt_ids, f"Expected {gt_ids}, got {milvus_ids}"
-
-    # ---- L1 tests ----
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_with_match_least(self):
-        """
-        target: query with MATCH_LEAST
-        method: MATCH_LEAST(structA, $[int_val] > 5, threshold=2)
-        expected: >= 2 elements match per row
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_least")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_LEAST(structA, $[int_val] > 5, threshold=2)',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        for hit in results:
-            count = sum(1 for e in hit["structA"] if e["int_val"] > 5)
-            assert count >= 2
-        gt_ids = gt_match_query(data, "MATCH_LEAST", lambda e: e["int_val"] > 5, threshold=2)
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids.issubset(gt_ids), f"False positives: {milvus_ids - gt_ids}"
-        if len(results) < 100:
-            assert milvus_ids == gt_ids, f"Missing IDs: {gt_ids - milvus_ids}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_with_match_most(self):
-        """
-        target: query with MATCH_MOST
-        method: MATCH_MOST(structA, $[int_val] > 5, threshold=3)
-        expected: <= 3 elements match per row
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_most")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_MOST(structA, $[int_val] > 5, threshold=3)',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        for hit in results:
-            count = sum(1 for e in hit["structA"] if e["int_val"] > 5)
-            assert count <= 3
-        gt_ids = gt_match_query(data, "MATCH_MOST", lambda e: e["int_val"] > 5, threshold=3)
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids.issubset(gt_ids), f"False positives: {milvus_ids - gt_ids}"
-        if len(results) < 100:
-            assert milvus_ids == gt_ids, f"Missing IDs: {gt_ids - milvus_ids}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_with_match_exact(self):
-        """
-        target: query with MATCH_EXACT
-        method: MATCH_EXACT(structA, $[color] == "Red", threshold=1)
-        expected: exactly 1 Red element per row
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_exact")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_EXACT(structA, $[color] == "Red", threshold=1)',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        for hit in results:
-            count = sum(1 for e in hit["structA"] if e["color"] == "Red")
-            assert count == 1
-        gt_ids = gt_match_query(data, "MATCH_EXACT", lambda e: e["color"] == "Red", threshold=1)
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids.issubset(gt_ids), f"False positives: {milvus_ids - gt_ids}"
-        if len(results) < 100:
-            assert milvus_ids == gt_ids, f"Missing IDs: {gt_ids - milvus_ids}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_match_with_doc_filter(self):
-        """
-        target: MATCH with doc-level filter in query
-        method: 'id > 100 && MATCH_ANY(structA, $[color] == "Red")'
-        expected: combined filter works
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_doc")
-        data = self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='id > 100 && MATCH_ANY(structA, $[color] == "Red")',
-            output_fields=["id", "structA"],
-            limit=100,
-        )
-        assert check
-        for hit in results:
-            assert hit["id"] > 100
-            assert any(e["color"] == "Red" for e in hit["structA"])
-        gt_ids = gt_match_query(
-            data, "MATCH_ANY", lambda e: e["color"] == "Red",
-            doc_filter_fn=lambda row: row["id"] > 100,
-        )
-        milvus_ids = {r["id"] for r in results}
-        assert milvus_ids.issubset(gt_ids), f"False positives: {milvus_ids - gt_ids}"
-        if len(results) < 100:
-            assert milvus_ids == gt_ids, f"Missing IDs: {gt_ids - milvus_ids}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_match_with_output_fields(self):
-        """
-        target: MATCH query with struct sub-field output
-        method: specify output_fields with struct sub-fields
-        expected: output contains requested fields
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_output")
-        self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[color] == "Blue")',
-            output_fields=["id", "structA[color]", "structA[int_val]"],
-            limit=50,
-        )
-        assert check
-        assert len(results) > 0
-
-    # ---- L2 tests ----
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_count_with_match(self):
-        """
-        target: count(*) with MATCH filter
-        method: query with output_fields=["count(*)"] and MATCH filter
-        expected: count returned
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_count")
-        self._setup_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[color] == "Red")',
-            output_fields=["count(*)"],
-        )
-        assert check
-        assert len(results) > 0
-        assert results[0]["count(*)"] > 0
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_match_limit_offset(self):
-        """
-        target: MATCH query with pagination (limit + offset)
-        method: query with limit=10, offset=10
-        expected: second page of results
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_page")
-        self._setup_collection(client, collection_name)
-
-        results_p1, _ = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[color] == "Red")',
-            output_fields=["id"], limit=10, offset=0,
-        )
-        results_p2, _ = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[color] == "Red")',
-            output_fields=["id"], limit=10, offset=10,
-        )
-        ids_p1 = {r["id"] for r in results_p1}
-        ids_p2 = {r["id"] for r in results_p2}
-        assert len(ids_p1 & ids_p2) == 0, "Pages should not overlap"
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_query_match_growing_sealed(self):
-        """
-        target: MATCH query on mixed growing + sealed segments
-        method: insert + flush + insert more, then query
-        expected: results from both segments
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(f"{prefix}_mq_mixed")
-
-        schema = self._create_schema(client)
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="normal_vector", index_type="HNSW",
-                               metric_type="COSINE", params=INDEX_PARAMS)
-        index_params.add_index(field_name="structA[embedding]", index_type="HNSW",
-                               metric_type="MAX_SIM_COSINE", params=INDEX_PARAMS)
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Sealed data
-        sealed_data = self._generate_data(nb=300)
-        self.insert(client, collection_name, sealed_data)
-        self.flush(client, collection_name)
-
-        # Growing data
-        growing_data = []
-        for i in range(300, 500):
-            rng = random.Random(i)
-            num_elems = rng.randint(3, 10)
-            struct_array = []
-            for j in range(num_elems):
-                struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j),
-                    "int_val": i * 100 + j,
-                    "str_val": f"row_{i}_elem_{j}",
-                    "color": COLORS[j % 3],
-                })
-            growing_data.append({
-                "id": i, "doc_int": i,
-                "normal_vector": _seed_vector(i + 999999),
-                "structA": struct_array,
-            })
-        self.insert(client, collection_name, growing_data)
-        self.load_collection(client, collection_name)
-
-        results, check = self.query(
-            client, collection_name,
-            filter='MATCH_ANY(structA, $[color] == "Blue")',
-            output_fields=["id"], limit=500,
-        )
-        assert check
-        ids = [r["id"] for r in results]
-        has_sealed = any(i < 300 for i in ids)
-        has_growing = any(i >= 300 for i in ids)
-        assert has_sealed and has_growing, "Should have results from both segments"
-
-
-class TestStructArrayElementFilterHybridSearch(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
     """Test element_filter search + hybrid search (4 cases)"""
 
     def _create_schema(self, client, dim=default_dim):
@@ -3707,7 +3355,7 @@ class TestStructArrayElementFilterHybridSearch(TestMilvusClientV2Base):
         assert len(results) > 0
 
 
-class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
     """Test invalid usage and boundary conditions (20 cases)"""
 
     def _create_collection_ready(self, client, collection_name, nb=200):
@@ -3762,7 +3410,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         return data
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_nested_not_allowed(self):
+    def test_element_search_invalid_filter_nested(self):
         """
         target: nested element_filter should not be allowed
         method: nested element_filter inside element_filter
@@ -3785,7 +3433,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_not_last_in_and(self):
+    def test_element_search_invalid_filter_not_last_in_and(self):
         """
         target: element_filter must be last in AND expression
         method: element_filter on the left side of AND
@@ -3808,7 +3456,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_not_last_in_or(self):
+    def test_element_search_invalid_filter_not_last_in_or(self):
         """
         target: element_filter must be last in OR expression
         method: element_filter on the left side of OR
@@ -3831,7 +3479,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_nonexistent_field(self):
+    def test_element_search_invalid_filter_nonexistent_field(self):
         """
         target: element_filter on nonexistent struct field
         method: element_filter(nonexistent_field, ...)
@@ -3854,7 +3502,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_nonexistent_subfield(self):
+    def test_element_search_invalid_filter_nonexistent_subfield(self):
         """
         target: element_filter referencing nonexistent sub-field
         method: element_filter(structA, $[nonexistent] > 0)
@@ -3877,7 +3525,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_empty_params(self):
+    def test_element_search_invalid_filter_empty_params(self):
         """
         target: element_filter with empty params
         method: element_filter()
@@ -3900,7 +3548,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_dollar_bracket_outside_context(self):
+    def test_element_search_invalid_dollar_bracket_outside_context(self):
         """
         target: $[...] syntax outside element_filter/MATCH context
         method: use $[int_val] > 1 directly in filter
@@ -3920,7 +3568,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_with_max_sim_metric(self):
+    def test_element_search_invalid_filter_with_max_sim_metric(self):
         """
         target: element_filter search with MAX_SIM metric should be rejected
         method: use MAX_SIM_COSINE with element_filter (index uses COSINE for element-level search)
@@ -3943,7 +3591,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_with_embedding_list(self):
+    def test_element_search_invalid_filter_with_embedding_list(self):
         """
         target: element_filter + EmbeddingList should be mutually exclusive
         method: pass EmbeddingList (multi-vector) with element_filter (single-vector mode)
@@ -3967,7 +3615,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_nested_not_allowed(self):
+    def test_element_search_invalid_match_nested(self):
         """
         target: nested MATCH should not be allowed
         method: MATCH inside MATCH
@@ -3987,7 +3635,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_least_negative_threshold(self):
+    def test_element_search_invalid_match_least_negative_threshold(self):
         """
         target: MATCH_LEAST with negative threshold
         method: threshold=-1
@@ -4007,7 +3655,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_least_zero_threshold(self):
+    def test_element_search_invalid_match_least_zero_threshold(self):
         """
         target: MATCH_LEAST with zero threshold
         method: threshold=0
@@ -4027,7 +3675,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_most_negative_threshold(self):
+    def test_element_search_invalid_match_most_negative_threshold(self):
         """
         target: MATCH_MOST with negative threshold
         method: threshold=-1
@@ -4047,7 +3695,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_exact_negative_threshold(self):
+    def test_element_search_invalid_match_exact_negative_threshold(self):
         """
         target: MATCH_EXACT with negative threshold
         method: threshold=-1
@@ -4067,7 +3715,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_nonexistent_struct(self):
+    def test_element_search_invalid_match_nonexistent_struct(self):
         """
         target: MATCH on nonexistent struct field name
         method: MATCH_ANY(nonexistent, ...)
@@ -4087,7 +3735,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_nonexistent_subfield(self):
+    def test_element_search_invalid_match_nonexistent_subfield(self):
         """
         target: MATCH referencing nonexistent sub-field
         method: MATCH_ANY(structA, $[nonexistent] > 0)
@@ -4107,7 +3755,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_inverted_index_nonexistent_subfield(self):
+    def test_element_search_invalid_inverted_index_nonexistent_subfield(self):
         """
         target: create index on nonexistent sub-field
         method: add_index(field_name="structA[nonexistent]", ...)
@@ -4141,7 +3789,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_stl_sort_index_on_vector_subfield(self):
+    def test_element_search_invalid_stl_sort_index_on_vector_subfield(self):
         """
         target: STL_SORT index on vector sub-field should fail
         method: add STL_SORT index on structA[embedding]
@@ -4176,7 +3824,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_element_filter_missing_expr(self):
+    def test_element_search_invalid_filter_missing_expr(self):
         """
         target: element_filter with only field name, no expression
         method: element_filter(structA)
@@ -4199,7 +3847,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_match_all_missing_expr(self):
+    def test_element_search_invalid_match_all_missing_expr(self):
         """
         target: MATCH_ALL with only field name, no expression
         method: MATCH_ALL(structA)
@@ -4219,7 +3867,7 @@ class TestStructArrayElementSearchInvalid(TestMilvusClientV2Base):
         )
 
 
-class TestStructArrayElementSearchCRUD(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementSearchCRUD(TestMilvusClientV2Base):
     """Test CRUD operations with element-level features (5 cases)"""
 
     def _create_schema(self, client, dim=default_dim):
@@ -4459,7 +4107,7 @@ class TestStructArrayElementSearchCRUD(TestMilvusClientV2Base):
             assert r["id"] >= 10000
 
 
-class TestStructArrayElementSearchIterator(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
     """Test search iterator + element_filter (3 cases)"""
 
     def _setup_collection(self, client, collection_name, nb=500):
@@ -4662,7 +4310,7 @@ class TestStructArrayElementSearchIterator(TestMilvusClientV2Base):
         assert has_sealed and has_growing, "Should have results from both segments"
 
 
-class TestStructArrayArrayContains(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementContainsSearch(TestMilvusClientV2Base):
     """Test ARRAY_CONTAINS on struct sub-fields (6 cases, all skip - depends on PR #47172)"""
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4726,7 +4374,7 @@ class TestStructArrayArrayContains(TestMilvusClientV2Base):
         pass
 
 
-class TestStructArrayElementSearchMmap(TestMilvusClientV2Base):
+class TestMilvusClientStructArrayElementSearchMmap(TestMilvusClientV2Base):
     """Test mmap with element-level features (3 cases)"""
 
     def _setup_collection(self, client, collection_name, nb=500):
@@ -4909,3 +4557,951 @@ class TestStructArrayElementSearchMmap(TestMilvusClientV2Base):
         )
         assert check
         assert len(results) > 0
+
+# ==================== Test Case 3: Group By + Element-level Search ====================
+
+@pytest.mark.xdist_group("TestMilvusClientStructArrayElementGroupBySearch")
+class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
+    """Test group_by_field with element-level search (PR #47252).
+
+    Element-level search on structA[embedding] combined with group_by on
+    doc-level fields (id, doc_int, doc_category). The feature enables
+    element-level ANN search to work alongside group_by deduplication.
+    """
+
+    def _create_schema(self, client, dim=default_dim):
+        """Create schema with doc-level group-by fields and struct array."""
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="doc_category", datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name="doc_group", datatype=DataType.INT32)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("float_val", DataType.FLOAT)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA", datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=default_capacity,
+        )
+        return schema
+
+    def _generate_data(self, nb=default_nb, dim=default_dim, start_id=0):
+        """Generate data with doc-level group-friendly fields."""
+        data = []
+        for i in range(start_id, start_id + nb):
+            rng = random.Random(i)
+            num_elems = rng.randint(3, 8)
+            struct_array = []
+            for j in range(num_elems):
+                struct_array.append({
+                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "int_val": i * 100 + j,
+                    "str_val": f"row_{i}_elem_{j}",
+                    "float_val": float(i + j * 0.1),
+                    "color": COLORS[j % 3],
+                })
+            data.append({
+                "id": i,
+                "doc_int": i,
+                "doc_category": CATEGORIES[i % 4],
+                "doc_group": i % 5,
+                "normal_vector": _seed_vector(i + 999999, dim),
+                "structA": struct_array,
+            })
+        return data
+
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_shared_collection(self, request):
+        """Create one shared collection for all tests in this class."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_gb_shared")
+
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, force_teardown=False)
+
+        # Sealed: 3000 rows in batches
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = self._generate_data(nb=insert_batch_size, start_id=start)
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
+        self.flush(client, collection_name)
+
+        # Growing: 500 rows, no flush
+        growing = self._generate_data(nb=default_growing_nb, start_id=default_nb)
+        self.insert(client, collection_name, growing)
+        data.extend(growing)
+
+        self.load_collection(client, collection_name)
+
+        request.cls.shared_client = client
+        request.cls.shared_collection = collection_name
+        request.cls.shared_data = data
+
+        yield
+
+        client.drop_collection(collection_name)
+
+    # ---- 3.1 Basic group by with element_filter on normal_vector search ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_group_by_with_element_filter_basic(self):
+        """
+        target: group_by on doc-level field with element_filter in normal_vector search
+        method: search on normal_vector with element_filter + group_by_field="doc_category"
+        expected: results grouped by doc_category, element filter applied
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='MATCH_ANY(structA, $[int_val] > 100)',
+            group_by_field="doc_category",
+            limit=10,
+            output_fields=["id", "doc_category", "structA"],
+        )
+        assert check
+        assert len(results) > 0
+
+        # Verify grouping: no duplicate categories
+        seen_categories = []
+        for hit in results[0]:
+            cat = hit.get("doc_category")
+            if cat is not None:
+                assert cat not in seen_categories, \
+                    f"Duplicate category '{cat}' in grouped results"
+                seen_categories.append(cat)
+            # Verify element filter
+            assert any(e["int_val"] > 100 for e in hit["structA"]), \
+                f"Row {hit['id']}: no element with int_val > 100"
+
+    # ---- 3.2 Group by + MATCH_ALL filter ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_group_by_with_match_all(self):
+        """
+        target: group_by + MATCH_ALL filter combined
+        method: normal_vector search + MATCH_ALL filter + group_by
+        expected: grouping and MATCH_ALL filtering both applied
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='MATCH_ALL(structA, $[int_val] > 0)',
+            group_by_field="doc_category",
+            limit=10,
+            output_fields=["id", "doc_category", "structA"],
+        )
+        assert check
+        assert len(results) > 0
+
+        for hit in results[0]:
+            assert all(e["int_val"] > 0 for e in hit["structA"]), \
+                f"Row {hit['id']}: not all elements have int_val > 0"
+
+    # ---- 3.3 Group by + group_size ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_with_group_size(self):
+        """
+        target: group_by with group_size > 1 + struct filter
+        method: search with group_size=3, group_by="doc_group"
+        expected: each group returns at most 3 results
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='MATCH_ANY(structA, $[color] == "Red")',
+            group_by_field="doc_group",
+            group_size=3,
+            limit=20,
+            output_fields=["id", "doc_group"],
+        )
+        assert check
+        assert len(results) > 0
+
+        # Verify each group has at most group_size results
+        groups = {}
+        for hit in results[0]:
+            gval = hit.get("doc_group")
+            if gval is not None:
+                groups.setdefault(gval, []).append(hit)
+        for gval, hits in groups.items():
+            assert len(hits) <= 3, \
+                f"Group '{gval}' has {len(hits)} results, expected <= 3"
+
+    # ---- 3.4 Group by on INT32 field + struct filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_int_field_with_struct_filter(self):
+        """
+        target: group_by on INT32 field with struct array filter
+        method: search on normal_vector with group_by="doc_group" + element_filter
+        expected: results grouped by integer values
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='MATCH_ANY(structA, $[int_val] > 0)',
+            group_by_field="doc_group",
+            limit=10,
+            output_fields=["id", "doc_group"],
+        )
+        assert check
+        assert len(results) > 0
+
+        # Verify no duplicate group values (default group_size=1)
+        seen_groups = []
+        for hit in results[0]:
+            gval = hit.get("doc_group")
+            if gval is not None:
+                assert gval not in seen_groups, \
+                    f"Duplicate doc_group '{gval}' in grouped results"
+                seen_groups.append(gval)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_varchar_with_array_contains(self):
+        """
+        target: group_by on VARCHAR field with array_contains on struct sub-field
+        method: search + array_contains(structA[color], "Red") + group_by="doc_category"
+        expected: results grouped by category, all have Red elements
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='array_contains(structA[color], "Red")',
+            group_by_field="doc_category",
+            limit=10,
+            output_fields=["id", "doc_category", "structA"],
+        )
+        assert check
+        assert len(results) > 0
+
+        seen_categories = []
+        for hit in results[0]:
+            cat = hit.get("doc_category")
+            if cat is not None:
+                assert cat not in seen_categories, \
+                    f"Duplicate doc_category '{cat}' in grouped results"
+                seen_categories.append(cat)
+            colors = [e["color"] for e in hit["structA"]]
+            assert "Red" in colors
+
+    # ---- 3.5 Group by + doc-level filter + struct filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_with_doc_and_struct_filter(self):
+        """
+        target: group_by with both doc-level and struct-level filters
+        method: 'doc_int > 100 && MATCH_ANY(structA, $[color] == "Blue")' + group_by
+        expected: all filters and grouping work together
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[200]["normal_vector"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter='doc_int > 100 && MATCH_ANY(structA, $[color] == "Blue")',
+            group_by_field="doc_category",
+            limit=10,
+            output_fields=["id", "doc_int", "doc_category"],
+        )
+        assert check
+        assert len(results) > 0
+
+
+
+# ==================== Test Case 9: Element-Level Search Without Filter ====================
+
+def gt_element_search_no_filter(data, query_vector, metric_type="COSINE", limit=10):
+    """Ground truth for element-level search without filter.
+    Flattens struct array so each element competes independently by its embedding.
+    For each row, the best matching element determines the row's score."""
+    row_scores = []
+    for row in data:
+        best_score = None
+        best_offset = -1
+        for j, elem in enumerate(row["structA"]):
+            score = _compute_similarity(query_vector, elem["embedding"], metric_type)
+            if best_score is None or (_is_descending(metric_type) and score > best_score) or \
+               (not _is_descending(metric_type) and score < best_score):
+                best_score = score
+                best_offset = j
+        if best_offset >= 0:
+            row_scores.append((row["id"], best_score, best_offset))
+    row_scores.sort(key=lambda x: x[1], reverse=_is_descending(metric_type))
+    return row_scores[:limit]
+
+
+@pytest.mark.xdist_group("TestMilvusClientStructArrayElementSearchNoFilter")
+class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
+    """Test element-level search on structA[embedding] WITHOUT any filter.
+
+    This verifies the struct array flattening behavior: each element's embedding
+    participates independently in ANN search, behaving like traditional dense
+    vector search. No element_filter / MATCH_* / array_contains is applied.
+    """
+
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_shared_collection(self, request):
+        """Create one shared collection for all no-filter search tests."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_nf_search")
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="doc_category", datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA", datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=default_capacity,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, force_teardown=False)
+
+        def _make_rows(start, count):
+            rows = []
+            for i in range(start, start + count):
+                rng = random.Random(i)
+                num_elems = rng.randint(2, 6)
+                struct_array = [{
+                    "embedding": _seed_vector(i * 1000 + j, default_dim),
+                    "int_val": i * 100 + j,
+                    "str_val": f"row_{i}_elem_{j}",
+                    "color": COLORS[j % 3],
+                } for j in range(num_elems)]
+                rows.append({
+                    "id": i,
+                    "doc_int": i,
+                    "doc_category": CATEGORIES[i % 4],
+                    "normal_vector": _seed_vector(i + 999999, default_dim),
+                    "structA": struct_array,
+                })
+            return rows
+
+        # Sealed: default_nb rows in batches
+        data = []
+        for start in range(0, default_nb, insert_batch_size):
+            batch = _make_rows(start, min(insert_batch_size, default_nb - start))
+            self.insert(client, collection_name, batch)
+            data.extend(batch)
+        self.flush(client, collection_name)
+
+        # Growing: default_growing_nb rows, no flush
+        growing_batch = _make_rows(default_nb, default_growing_nb)
+        self.insert(client, collection_name, growing_batch)
+        data.extend(growing_batch)
+
+        self.load_collection(client, collection_name)
+
+        request.cls.shared_client = client
+        request.cls.shared_collection = collection_name
+        request.cls.shared_data = data
+        request.cls.sealed_nb = default_nb
+        request.cls.growing_nb = default_growing_nb
+
+        yield
+
+        client.drop_collection(collection_name)
+
+    # ---- 9.1 Basic element-level search without filter ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_element_search_no_filter_basic(self):
+        """
+        target: element-level search without filter returns valid results
+        method: search on structA[embedding] with no filter
+        expected: results returned with correct output fields
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=10,
+            output_fields=["id", "structA"],
+        )
+        assert check
+        assert len(results) > 0
+        assert len(results[0]) == 10
+
+        # First result should be the query vector itself (self-match)
+        assert results[0][0]["id"] == 0, \
+            f"Expected row 0 as top hit (self-match), got {results[0][0]['id']}"
+
+        # Distance should be ~1.0 for cosine self-match
+        top_distance = results[0][0]["distance"]
+        assert abs(top_distance - 1.0) < epsilon, \
+            f"Self-match distance should be ~1.0, got {top_distance}"
+
+    # ---- 9.2 Ground truth ranking verification ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_element_search_no_filter_ground_truth(self):
+        """
+        target: verify element-level search ranking matches ground truth
+        method: compare Milvus results with brute-force ground truth
+        expected: top-K results match ground truth IDs
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[42]["structA"][1]["embedding"]
+        limit = 20
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == limit
+
+        gt = gt_element_search_no_filter(data, query_vector, "COSINE", limit)
+        gt_ids = [r[0] for r in gt]
+        milvus_ids = [hit["id"] for hit in results[0]]
+
+        # Top-1 must match
+        assert milvus_ids[0] == gt_ids[0], \
+            f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
+
+        # At least 90% overlap in top-K (HNSW recall tolerance)
+        overlap = len(set(milvus_ids) & set(gt_ids))
+        recall = overlap / limit
+        assert recall >= 0.9, \
+            f"Recall too low: {recall:.2f} ({overlap}/{limit})"
+
+    # ---- 9.3 Distance monotonicity ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_element_search_no_filter_distance_order(self):
+        """
+        target: verify returned distances are monotonically decreasing (COSINE)
+        method: search without filter, check distance ordering
+        expected: distances are in descending order for COSINE
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        limit = 50
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == limit
+
+        distances = [hit["distance"] for hit in results[0]]
+        for i in range(len(distances) - 1):
+            assert distances[i] >= distances[i + 1] - epsilon, \
+                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i+1]}"
+
+    # ---- 9.4 Offset / pagination without filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_offset(self):
+        """
+        target: element-level search with offset but no filter
+        method: compare results from offset=0 limit=20 vs offset=10 limit=10
+        expected: offset results match the tail of non-offset results
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[5]["structA"][0]["embedding"]
+
+        results_full, check1 = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=20,
+            output_fields=["id"],
+        )
+        assert check1
+
+        results_offset, check2 = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=10,
+            offset=10,
+            output_fields=["id"],
+        )
+        assert check2
+
+        full_tail_ids = [hit["id"] for hit in results_full[0][10:20]]
+        offset_ids = [hit["id"] for hit in results_offset[0]]
+        assert full_tail_ids == offset_ids, \
+            f"Offset mismatch:\n  full[10:20]={full_tail_ids}\n  offset={offset_ids}"
+
+    # ---- 9.5 Multiple query vectors (batch search) ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_batch(self):
+        """
+        target: batch element-level search with multiple query vectors
+        method: search with 3 different query vectors, no filter
+        expected: each nq returns independent results
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vectors = [
+            data[0]["structA"][0]["embedding"],
+            data[100]["structA"][0]["embedding"],
+            data[200]["structA"][0]["embedding"],
+        ]
+        results, check = self.search(
+            client, collection_name,
+            data=query_vectors,
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=5,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results) == 3
+
+        # Each query should find its own source row as top-1
+        expected_top1 = [0, 100, 200]
+        for i, expected_id in enumerate(expected_top1):
+            assert results[i][0]["id"] == expected_id, \
+                f"Query {i}: expected top-1 id={expected_id}, got {results[i][0]['id']}"
+
+    # ---- 9.6 Large limit ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_large_limit(self):
+        """
+        target: element-level search with large limit value
+        method: search with limit=200, no filter
+        expected: correct number of results, distances still monotonic
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[50]["structA"][0]["embedding"]
+        limit = 200
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == limit
+
+        # No duplicate IDs (each row appears at most once)
+        ids = [hit["id"] for hit in results[0]]
+        assert len(ids) == len(set(ids)), \
+            f"Duplicate IDs in results: {len(ids)} total, {len(set(ids))} unique"
+
+        # Distances monotonically decreasing
+        distances = [hit["distance"] for hit in results[0]]
+        for i in range(len(distances) - 1):
+            assert distances[i] >= distances[i + 1] - epsilon, \
+                f"Distance not monotonic at position {i}"
+
+    # ---- 9.7 Element-level vs normal vector search independence ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_vs_normal_vector_independence(self):
+        """
+        target: element-level search and normal vector search are independent
+        method: same query vector on structA[embedding] vs normal_vector
+        expected: results differ (different vector spaces)
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = _seed_vector(12345, default_dim)
+
+        results_elem, check1 = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check1
+
+        results_normal, check2 = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check2
+
+        elem_ids = [hit["id"] for hit in results_elem[0]]
+        normal_ids = [hit["id"] for hit in results_normal[0]]
+
+        # Results should differ because element embeddings and normal vectors
+        # are generated from different seeds
+        assert elem_ids != normal_ids, \
+            "Element-level and normal vector search returned identical results"
+
+    # ---- 9.8 Range search not supported on element-level embedding ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_range_search_not_supported(self):
+        """
+        target: range search on structA[embedding] should be rejected
+        method: search with radius and range_filter params on element-level field
+        expected: server returns error (range search not supported for vector array)
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        radius = 0.5
+        range_filter = 1.0
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={
+                "metric_type": "COSINE",
+                "params": {"radius": radius, "range_filter": range_filter},
+            },
+            limit=50,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100,
+                         "err_msg": "range search is not supported for vector array"},
+        )
+
+    # ---- 9.9 Growing segment search without filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_growing_segment(self):
+        """
+        target: element-level search finds data in growing (unflushed) segment
+        method: search using a growing row's embedding as query vector
+        expected: growing row appears as top-1 self-match
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        # Pick a row from the growing segment (id >= sealed_nb)
+        growing_row_id = self.sealed_nb  # first growing row
+        query_vector = data[growing_row_id]["structA"][0]["embedding"]
+
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+
+        # Self-match should be top-1
+        assert results[0][0]["id"] == growing_row_id, \
+            f"Expected growing row {growing_row_id} as top-1, got {results[0][0]['id']}"
+        assert abs(results[0][0]["distance"] - 1.0) < epsilon
+
+        # Verify results include both sealed and growing rows
+        result_ids = {hit["id"] for hit in results[0]}
+        sealed_hits = [rid for rid in result_ids if rid < self.sealed_nb]
+        growing_hits = [rid for rid in result_ids if rid >= self.sealed_nb]
+        assert len(sealed_hits) > 0, "No results from sealed segments"
+        assert len(growing_hits) > 0, "No results from growing segment"
+
+    # ---- 9.10 Group by PK on element-level search ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_element_search_no_filter_group_by_pk(self):
+        """
+        target: element-level search with group_by on primary key
+        method: search on structA[embedding] with group_by_field="id" (PK), no filter
+        expected: each row appears at most once (deduplicated by PK),
+                  results are valid and distances monotonically ordered
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        limit = 20
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            group_by_field="id",
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == limit
+
+        # No duplicate PK — group_by PK ensures each row at most once
+        ids = [hit["id"] for hit in results[0]]
+        assert len(ids) == len(set(ids)), \
+            f"Duplicate PKs: {len(ids)} total, {len(set(ids))} unique"
+
+        # Self-match should be top-1
+        assert ids[0] == 0, f"Expected PK 0 as top-1 (self-match), got {ids[0]}"
+
+        # Distance monotonically decreasing
+        distances = [hit["distance"] for hit in results[0]]
+        for i in range(len(distances) - 1):
+            assert distances[i] >= distances[i + 1] - epsilon, \
+                f"Distance not monotonic at position {i}: {distances[i]} < {distances[i+1]}"
+
+    # ---- 9.11 Group by PK with group_size on element-level search ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_no_filter_group_by_pk_with_group_size(self):
+        """
+        target: element-level search with group_by PK and group_size > 1
+        method: search with group_by_field="id", group_size=3
+        expected: each PK group has at most group_size entries (one per matching element)
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[100]["structA"][0]["embedding"]
+        limit = 10
+        group_size = 3
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            group_by_field="id",
+            group_size=group_size,
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+
+        # Count hits per PK group
+        groups = {}
+        for hit in results[0]:
+            groups.setdefault(hit["id"], []).append(hit)
+
+        for pk, hits in groups.items():
+            assert len(hits) <= group_size, \
+                f"PK {pk}: {len(hits)} hits exceeds group_size={group_size}"
+
+        # Distance monotonically decreasing
+        distances = [hit["distance"] for hit in results[0]]
+        for i in range(len(distances) - 1):
+            assert distances[i] >= distances[i + 1] - epsilon, \
+                f"Distance not monotonic at position {i}"
+
+    # ---- 9.12 Group by PK with element_filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_group_by_pk_with_filter(self):
+        """
+        target: element-level search with group_by PK combined with element_filter
+        method: search with group_by_field="id" + element_filter
+        expected: results grouped by PK, only matching elements contribute
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        limit = 20
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter='element_filter(structA, $[int_val] > 500)',
+            group_by_field="id",
+            limit=limit,
+            output_fields=["id", "structA"],
+        )
+        assert check
+        assert len(results[0]) > 0
+
+        # No duplicate PKs
+        ids = [hit["id"] for hit in results[0]]
+        assert len(ids) == len(set(ids)), "Duplicate PKs in group_by results"
+
+        # Every returned row must have at least one element with int_val > 500
+        for hit in results[0]:
+            assert any(e["int_val"] > 500 for e in hit["structA"]), \
+                f"Row {hit['id']}: no element with int_val > 500"
+
+    # ---- 9.13 Group by PK ground truth verification ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_group_by_pk_ground_truth(self):
+        """
+        target: verify group_by PK search ranking against ground truth
+        method: compare Milvus group_by PK results with brute-force best-element-per-row
+        expected: high recall overlap with ground truth
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[50]["structA"][1]["embedding"]
+        limit = 20
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            group_by_field="id",
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == limit
+
+        # Ground truth: for each row pick the best element, rank rows
+        gt = gt_element_search_no_filter(data, query_vector, "COSINE", limit)
+        gt_ids = [r[0] for r in gt]
+        milvus_ids = [hit["id"] for hit in results[0]]
+
+        # Top-1 must match
+        assert milvus_ids[0] == gt_ids[0], \
+            f"Top-1 mismatch: Milvus={milvus_ids[0]}, GT={gt_ids[0]}"
+
+        # At least 90% recall
+        overlap = len(set(milvus_ids) & set(gt_ids))
+        recall = overlap / limit
+        assert recall >= 0.9, \
+            f"Group-by PK recall too low: {recall:.2f} ({overlap}/{limit})"
+
+    # ---- 9.14 Group by non-PK field not supported on element-level search ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_search_group_by_non_pk_not_supported(self):
+        """
+        target: element-level search only supports group_by on PK field
+        method: search on structA[embedding] with group_by_field="doc_category" (non-PK)
+        expected: server returns error
+        """
+        client = self.shared_client
+        collection_name = self.shared_collection
+        data = self.shared_data
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        results, check = self.search(
+            client, collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            group_by_field="doc_category",
+            limit=10,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100,
+                         "err_msg": "only group by primary key is supported for element-level search"},
+        )
