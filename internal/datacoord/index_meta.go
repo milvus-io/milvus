@@ -536,7 +536,7 @@ func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 	return nil
 }
 
-// Precondition: caller holds fieldIndexLock — serialises the indexes map read with MarkIndexAsDeleted.
+// Precondition: caller holds fieldIndexLock — serializes the indexes map read with MarkIndexAsDeleted.
 func (m *indexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta float64) {
 	if delta == 0 {
 		return
@@ -570,7 +570,7 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 		return err
 	}
 
-	// Insert + gauge Add must be serialised vs MarkIndexAsDeleted.
+	// Insert + gauge Add must be serialized vs MarkIndexAsDeleted.
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 
@@ -783,7 +783,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 	}
 
 	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
-	// must not re-subtract. fieldIndexLock.Lock serialises with concurrent RLock gauge adders.
+	// must not re-subtract. fieldIndexLock.Lock serializes with concurrent RLock gauge adders.
 	var totalSize float64
 	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		for indexID := range deletedSet {
@@ -1040,7 +1040,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
 
-	// gauge Add must be serialised vs MarkIndexAsDeleted.
+	// gauge Add must be serialized vs MarkIndexAsDeleted.
 	newSize := taskInfo.GetSerializedSize()
 	m.fieldIndexLock.RLock()
 	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
