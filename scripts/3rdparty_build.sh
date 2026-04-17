@@ -83,6 +83,12 @@ fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
 
+# Allow overriding the Conan binary via CONAN_CMD, e.g. for developers who
+# keep Conan 1.x as their default `conan` (for release-2.5/2.6) but need 2.x
+# here:
+#   CONAN_CMD=conan-2 make
+CONAN="${CONAN_CMD:-conan}"
+
 # Add conan to PATH if installed in user's local bin directory
 if [[ -f "$HOME/.local/bin/conan" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
@@ -91,15 +97,23 @@ fi
 # Ensure conan version matches the required version (2.25.1)
 # CI Docker images may have an older version pre-installed
 REQUIRED_CONAN_VERSION="2.25.1"
-CURRENT_CONAN_VERSION=$(conan --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+CURRENT_CONAN_VERSION=$("$CONAN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
 if [[ "${CURRENT_CONAN_VERSION}" != "${REQUIRED_CONAN_VERSION}" ]]; then
+    # When the user explicitly points at a Conan binary, don't silently
+    # pip-install over some unrelated interpreter -- fail loudly instead.
+    if [[ -n "${CONAN_CMD:-}" ]]; then
+        echo "ERROR: CONAN_CMD=${CONAN_CMD} reports version ${CURRENT_CONAN_VERSION}, but this branch needs ${REQUIRED_CONAN_VERSION}." >&2
+        echo "If your default 'conan' is already ${REQUIRED_CONAN_VERSION}, unset CONAN_CMD and retry." >&2
+        echo "Otherwise install a matching Conan, e.g.: pipx install conan==${REQUIRED_CONAN_VERSION}" >&2
+        exit 1
+    fi
     echo "Conan version mismatch: ${CURRENT_CONAN_VERSION} != ${REQUIRED_CONAN_VERSION}, upgrading..."
     pip3 install conan==${REQUIRED_CONAN_VERSION} 2>/dev/null || pip install conan==${REQUIRED_CONAN_VERSION}
 fi
 
 # Ensure a default profile exists (Conan 2.x requires it; CI images may not have one)
-if [[ ! -f "$(conan config home)/profiles/default" ]]; then
-    conan profile detect
+if [[ ! -f "$("$CONAN" config home)/profiles/default" ]]; then
+    "$CONAN" profile detect
 fi
 
 pushd ${BUILD_OUTPUT_DIR}
@@ -139,10 +153,10 @@ export CMAKE_POLICY_VERSION_MINIMUM=3.5
 # Always ensure the default-conan-local2 remote is the highest priority (index 0) to avoid conflicts with other remotes that may have the same packages
 CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local2}"
 
-if conan remote list | grep -q default-conan-local2; then
-    conan remote remove default-conan-local2
+if "$CONAN" remote list | grep -q default-conan-local2; then
+    "$CONAN" remote remove default-conan-local2
 fi
-conan remote add default-conan-local2 $CONAN_ARTIFACTORY_URL --index 0
+"$CONAN" remote add default-conan-local2 $CONAN_ARTIFACTORY_URL --index 0
 
 # Install a conan pre_build hook that sets LD_LIBRARY_PATH (Linux) or
 # DYLD_LIBRARY_PATH (macOS) before each package build. This ensures that
@@ -150,7 +164,7 @@ conan remote add default-conan-local2 $CONAN_ARTIFACTORY_URL --index 0
 # when invoked during downstream package builds (opentelemetry-cpp, googleapis).
 # Use "conan config home" to get the correct conan home directory, as ~ may
 # differ from the conan home in CI containers.
-CONAN_HOME_DIR=$(conan config home 2>/dev/null || echo "${CONAN_HOME:-$HOME/.conan2}")
+CONAN_HOME_DIR=$("$CONAN" config home 2>/dev/null || echo "${CONAN_HOME:-$HOME/.conan2}")
 mkdir -p "$CONAN_HOME_DIR/extensions/hooks"
 cat > "$CONAN_HOME_DIR/extensions/hooks/hook_fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
@@ -249,7 +263,7 @@ def post_package(conanfile, **kwargs):
         conanfile.output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
 HOOK_EOF
 
-    conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
+    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -261,9 +275,9 @@ HOOK_EOF
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
