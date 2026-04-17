@@ -281,11 +281,23 @@ class FileManagerImpl : public milvus::FileManager {
                                              ? rcm_->GetRootPath()
                                              : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-        boost::filesystem::path path1 =
-            std::to_string(index_meta_.build_id) + "/" +
-            std::to_string(index_meta_.index_version) + "/" +
-            std::to_string(field_meta_.partition_id) + "/" +
-            std::to_string(field_meta_.segment_id);
+        boost::filesystem::path path1;
+        if (index_meta_.index_store_path_version >= 1) {
+            // v1: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
+            path1 =
+                std::to_string(field_meta_.collection_id) + "/" +
+                std::to_string(field_meta_.partition_id) + "/" +
+                std::to_string(field_meta_.segment_id) + "/" +
+                std::to_string(index_meta_.build_id) + "/" +
+                std::to_string(index_meta_.index_version);
+        } else {
+            // v0 (legacy): index_files/{buildID}/{indexVersion}/{partID}/{segID}
+            path1 =
+                std::to_string(index_meta_.build_id) + "/" +
+                std::to_string(index_meta_.index_version) + "/" +
+                std::to_string(field_meta_.partition_id) + "/" +
+                std::to_string(field_meta_.segment_id);
+        }
         return NormalizePath(prefix / path / path1);
     }
 

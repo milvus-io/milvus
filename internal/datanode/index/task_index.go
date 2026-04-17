@@ -316,6 +316,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
 		StorageVersion:            it.req.GetStorageVersion(),
+		IndexStorePathVersion:     it.req.GetIndexStorePathVersion(),
 	}
 	if buildIndexParams.StorageVersion == storage.StorageV2 || buildIndexParams.StorageVersion == storage.StorageV3 {
 		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(

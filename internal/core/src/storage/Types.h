@@ -89,6 +89,10 @@ struct IndexMeta {
     DataType field_type;
     int64_t dim;
     bool index_non_encoding;
+    // Path format version for index files on object storage.
+    // 0 = legacy (index_files/{buildID}/{indexVersion}/{partID}/{segID}),
+    // 1 = collection-partitioned (index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}).
+    int32_t index_store_path_version = 0;
 };
 
 struct StorageConfig {
