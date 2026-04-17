@@ -14,6 +14,8 @@ import (
 
 // TestCreateExternalCollection tests creating an external collection
 func TestCreateExternalCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -86,6 +88,8 @@ func TestCreateExternalCollection(t *testing.T) {
 // TestCreateExternalCollectionMissingExternalField tests that creating external collection
 // without external_field mapping fails
 func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -119,6 +123,8 @@ func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
 // TestCreateExternalCollectionWithPrimaryKey tests that creating external collection
 // with primary key field fails
 func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -152,6 +158,8 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 // TestCreateExternalCollectionWithDynamicField tests that creating external collection
 // with dynamic field enabled fails
 func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -186,6 +194,8 @@ func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
 // TestCreateExternalCollectionWithAutoID tests that creating external collection
 // with auto ID field fails
 func TestCreateExternalCollectionWithAutoID(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -219,6 +229,8 @@ func TestCreateExternalCollectionWithAutoID(t *testing.T) {
 // TestCreateExternalCollectionWithPartitionKey tests that creating external collection
 // with partition key field fails
 func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -253,6 +265,8 @@ func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
 // TestCreateExternalCollectionMultipleVectorFields tests creating external collection
 // with multiple vector fields
 func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

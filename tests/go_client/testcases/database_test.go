@@ -40,6 +40,8 @@ func teardownTest(t *testing.T) func(t *testing.T) {
 }
 
 func TestDatabase(t *testing.T) {
+	t.Parallel()
+
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 
@@ -118,6 +120,8 @@ func TestDatabase(t *testing.T) {
 
 // test create with invalid db name
 func TestCreateDb(t *testing.T) {
+	t.Parallel()
+
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 
@@ -142,6 +146,8 @@ func TestCreateDb(t *testing.T) {
 
 // test drop db
 func TestDropDb(t *testing.T) {
+	t.Parallel()
+
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 
@@ -189,6 +195,8 @@ func TestDropDb(t *testing.T) {
 
 // test using db
 func TestUsingDb(t *testing.T) {
+	t.Parallel()
+
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 
@@ -221,6 +229,8 @@ func TestUsingDb(t *testing.T) {
 }
 
 func TestClientWithDb(t *testing.T) {
+	t.Parallel()
+
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
 
@@ -275,6 +285,8 @@ func TestClientWithDb(t *testing.T) {
 }
 
 func TestDatabasePropertiesCollectionsNum(t *testing.T) {
+	t.Parallel()
+
 	// create db with properties
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
@@ -333,6 +345,8 @@ func TestDatabasePropertiesCollectionsNum(t *testing.T) {
 }
 
 func TestDatabasePropertiesRgReplicas(t *testing.T) {
+	t.Parallel()
+
 	// create db with properties
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)
@@ -389,6 +403,8 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 }
 
 func TestDatabasePropertyDeny(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("https://zilliz.atlassian.net/browse/VDC-7858")
 	// create db with properties
 	teardownSuite := teardownTest(t)
@@ -432,6 +448,8 @@ func TestDatabasePropertyDeny(t *testing.T) {
 }
 
 func TestDatabaseFakeProperties(t *testing.T) {
+	t.Parallel()
+
 	// create db with properties
 	teardownSuite := teardownTest(t)
 	defer teardownSuite(t)

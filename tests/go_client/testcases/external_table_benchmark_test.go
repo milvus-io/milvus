@@ -672,6 +672,8 @@ func (env *benchEnv) makeRandomQueryVec() []float32 {
 // ============================================================================
 
 func TestBenchmarkExternalCreateCollection(t *testing.T) {
+	t.Parallel()
+
 	forEachScaleConfig(t, func(t *testing.T, cfg benchConfig) {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -720,6 +722,8 @@ func TestBenchmarkExternalCreateCollection(t *testing.T) {
 // ============================================================================
 
 func TestBenchmarkExternalRefresh(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, func(t *testing.T, env *benchEnv) {
 		testBenchmarkExternalRefresh(t, env)
 	})
@@ -775,6 +779,8 @@ func testBenchmarkExternalRefresh(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalIncrementalRefresh(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchIncrementalRefresh)
 }
 
@@ -849,6 +855,8 @@ func benchIncrementalRefresh(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalIndexBuilding(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchIndexBuilding)
 }
 
@@ -925,6 +933,8 @@ func benchIndexBuilding(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalLoadCollection(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchLoadCollection)
 }
 
@@ -987,6 +997,8 @@ func benchLoadCollection(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalCountQuery(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchCountQuery)
 }
 
@@ -1008,6 +1020,8 @@ func benchCountQuery(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalScalarFilter(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchScalarFilter)
 }
 
@@ -1068,6 +1082,8 @@ func benchScalarFilter(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalVectorSearch(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchVectorSearch)
 }
 
@@ -1096,6 +1112,8 @@ func benchVectorSearch(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalHybridSearch(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchHybridSearch)
 }
 
@@ -1141,6 +1159,8 @@ func benchHybridSearch(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalMultiVectorSearch(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchMultiVectorSearch)
 }
 
@@ -1173,6 +1193,8 @@ func benchMultiVectorSearch(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalPagination(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchPagination)
 }
 
@@ -1205,6 +1227,8 @@ func benchPagination(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalOutputFields(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchOutputFields)
 }
 
@@ -1255,6 +1279,8 @@ func benchOutputFields(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalVsRegularQuery(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchVsRegularQuery)
 }
 
@@ -1402,6 +1428,8 @@ func benchVsRegularQuery(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalManyFiles(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchManyFiles)
 }
 
@@ -1460,6 +1488,8 @@ func benchManyFiles(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalLargeSingleFile(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchLargeSingleFile)
 }
 
@@ -1520,6 +1550,8 @@ func benchLargeSingleFile(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalConcurrentQuery(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchConcurrentQuery)
 }
 
@@ -1593,6 +1625,8 @@ func benchConcurrentQuery(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalIdempotentRefresh(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchIdempotentRefresh)
 }
 
@@ -1667,6 +1701,8 @@ func benchIdempotentRefresh(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalMultiDataTypes(t *testing.T) {
+	t.Parallel()
+
 	forEachScale(t, benchMultiDataTypes)
 }
 
@@ -1796,5 +1832,7 @@ func benchMultiDataTypes(t *testing.T, env *benchEnv) {
 // ============================================================================
 
 func TestBenchmarkExternalZZReport(t *testing.T) {
+	t.Parallel()
+
 	globalReport.writeMarkdownReport(t)
 }
