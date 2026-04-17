@@ -26,13 +26,14 @@ import (
 // properties keys
 const (
 	// request
-	ClusterIDKey   = "cluster_id"
-	TaskIDKey      = "task_id"
-	TypeKey        = "task_type"
-	SubTypeKey     = "task_sub_type" // optional, only for Stats
-	SlotKey        = "task_slot"
-	NumRowsKey     = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey = "task_version" // optional, only for Index, Stats and Analyze
+	ClusterIDKey    = "cluster_id"
+	TaskIDKey       = "task_id"
+	TypeKey         = "task_type"
+	SubTypeKey      = "task_sub_type" // optional, only for Stats
+	SlotKey         = "task_slot"
+	NumRowsKey      = "num_row"      // optional, only for Index, Stats
+	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	CollectionIDKey = "collection_id"
 
 	// result
 	StateKey  = "task_state"
@@ -83,6 +84,10 @@ func (p Properties) AppendNumRows(rows int64) {
 
 func (p Properties) AppendTaskVersion(version int64) {
 	p[TaskVersionKey] = fmt.Sprintf("%d", version)
+}
+
+func (p Properties) AppendCollectionID(collectionID int64) {
+	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
 }
 
 func (p Properties) AppendReason(reason string) {
@@ -182,4 +187,15 @@ func (p Properties) GetTaskVersion() int64 {
 		return 0
 	}
 	return version
+}
+
+func (p Properties) GetCollectionID() int64 {
+	if _, ok := p[CollectionIDKey]; !ok {
+		return 0
+	}
+	collectionID, err := strconv.ParseInt(p[CollectionIDKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return collectionID
 }

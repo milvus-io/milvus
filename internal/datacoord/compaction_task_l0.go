@@ -121,7 +121,7 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn("l0CompactionTask failed to notify compaction tasks to DataNode",

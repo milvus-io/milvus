@@ -315,7 +315,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
 		return
 	}
-	err = cluster.CreateCopySegment(nodeID, req)
+	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId())
 	if err != nil {
 		log.Warn("failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)

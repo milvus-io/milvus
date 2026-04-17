@@ -266,8 +266,9 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return errors.New("mock error")
 		})
 
@@ -305,8 +306,9 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		}).Twice()
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
+			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return nil
 		})
 

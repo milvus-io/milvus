@@ -198,7 +198,7 @@ func TestCluster_Compaction(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{})
+		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{}, 100)
 		assert.NoError(t, err)
 	})
 
@@ -703,7 +703,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			PlanID:    1,
 			SlotUsage: 1,
 		}
-		err := cluster.CreateCompaction(1, req)
+		err := cluster.CreateCompaction(1, req, 100)
 		assert.NoError(t, err)
 	})
 
@@ -753,6 +753,92 @@ func TestCluster_CreateProperties(t *testing.T) {
 			Version:  1,
 		}
 		err := cluster.CreateAnalyze(1, req)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCluster_CreateProperties_CollectionID(t *testing.T) {
+	const expectedCollectionID int64 = 778899
+
+	mockNodeManager := NewMockNodeManager(t)
+	cluster := NewCluster(mockNodeManager)
+	mockClient := mocks.NewMockDataNodeClient(t)
+	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+	mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+		props := taskcommon.NewProperties(req.GetProperties())
+		assert.Equal(t, expectedCollectionID, props.GetCollectionID(),
+			"collection_id must be propagated into task properties")
+		return true
+	})).Return(merr.Success(), nil)
+
+	t.Run("CreateCompaction", func(t *testing.T) {
+		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, expectedCollectionID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreatePreImport", func(t *testing.T) {
+		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		}, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateImport", func(t *testing.T) {
+		err := cluster.CreateImport(1, &datapb.ImportRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		}, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateIndex", func(t *testing.T) {
+		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{
+			BuildID:      1,
+			TaskSlot:     1,
+			NumRows:      1000,
+			IndexVersion: 1,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateStats", func(t *testing.T) {
+		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{
+			TaskID:       1,
+			TaskSlot:     1,
+			NumRows:      1000,
+			TaskVersion:  1,
+			SubJobType:   indexpb.StatsSubJob_Sort,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateAnalyze", func(t *testing.T) {
+		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{
+			TaskID:       1,
+			TaskSlot:     1,
+			Version:      1,
+			CollectionID: expectedCollectionID,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateCopySegment", func(t *testing.T) {
+		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
+			TaskID:   1,
+			TaskSlot: 1,
+		}, expectedCollectionID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateExternalCollectionTask", func(t *testing.T) {
+		err := cluster.CreateExternalCollectionTask(1, &datapb.UpdateExternalCollectionRequest{
+			TaskID:       1,
+			CollectionID: expectedCollectionID,
+		})
 		assert.NoError(t, err)
 	})
 }
@@ -934,7 +1020,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req)
+		err := cluster.CreateCopySegment(1, req, 100)
 		assert.NoError(t, err)
 	})
 
@@ -950,7 +1036,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req)
+		err := cluster.CreateCopySegment(1, req, 100)
 		assert.Error(t, err)
 	})
 

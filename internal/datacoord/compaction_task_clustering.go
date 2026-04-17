@@ -767,7 +767,7 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		log.Warn("Failed to BuildCompactionRequest", zap.Error(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan())
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn("Failed to notify compaction tasks to DataNode",

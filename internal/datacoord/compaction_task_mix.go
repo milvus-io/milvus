@@ -96,7 +96,7 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
