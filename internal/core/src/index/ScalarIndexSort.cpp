@@ -715,17 +715,16 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                 mmap_filepath_,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
 
-            reader.ReadEntryStream(
-                "index_data", [&](const uint8_t* data, size_t len) {
-                    file_writer.Write(data, len);
-                    total_data_size += len;
-                });
+            reader.ReadEntryStream("index_data",
+                                   [&](const uint8_t* data, size_t len) {
+                                       file_writer.Write(data, len);
+                                       total_data_size += len;
+                                   });
 
             auto aligned_size =
                 ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
             if (aligned_size > total_data_size) {
-                std::vector<uint8_t> padding(
-                    aligned_size - total_data_size, 0);
+                std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
                 file_writer.Write(padding.data(), padding.size());
             }
             std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
@@ -737,9 +736,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         }
 
         auto file = File::Open(mmap_filepath_, O_RDONLY);
-        mmap_data_ = static_cast<char*>(
-            mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE,
-                 file.Descriptor(), 0));
+        mmap_data_ = static_cast<char*>(mmap(
+            NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
         if (mmap_data_ == MAP_FAILED) {
             file.Close();
             remove(mmap_filepath_.c_str());
@@ -788,27 +786,28 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
 
             reader.ReadEntryStream(
-                "idx_to_offsets", [&](const uint8_t* d, size_t len) {
-                    fw.Write(d, len);
-                });
+                "idx_to_offsets",
+                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             reader.ReadEntryStream(
-                "valid_bitset", [&](const uint8_t* d, size_t len) {
-                    fw.Write(d, len);
-                });
+                "valid_bitset",
+                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
             fw.Finish();
         }
 
         mmap_meta_size_ = offsets_bytes + bitset_bytes;
         auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
-        mmap_meta_data_ = static_cast<char*>(
-            mmap(NULL, mmap_meta_size_, PROT_READ, MAP_PRIVATE,
-                 meta_file.Descriptor(), 0));
+        mmap_meta_data_ = static_cast<char*>(mmap(NULL,
+                                                  mmap_meta_size_,
+                                                  PROT_READ,
+                                                  MAP_PRIVATE,
+                                                  meta_file.Descriptor(),
+                                                  0));
         AssertInfo(mmap_meta_data_ != MAP_FAILED,
-                   "failed to mmap meta: {}", strerror(errno));
+                   "failed to mmap meta: {}",
+                   strerror(errno));
         meta_file.Close();
 
-        idx_to_offsets_ptr_ =
-            reinterpret_cast<const int32_t*>(mmap_meta_data_);
+        idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);
         idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
 
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
@@ -822,7 +821,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         reader.ReadEntryStream(
             "idx_to_offsets", [&](const uint8_t* d, size_t len) {
                 memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + wo,
-                       d, len);
+                       d,
+                       len);
                 wo += len;
             });
         idx_to_offsets_ptr_ = idx_to_offsets_.data();

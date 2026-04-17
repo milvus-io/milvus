@@ -165,8 +165,9 @@ class StringIndexSort : public StringIndex {
     TargetBitmap valid_bitset_;
     // idx_to_offsets: maps row_id → unique value index.
     // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
-    std::vector<int32_t> idx_to_offsets_;          // memory mode owner
-    const int32_t* idx_to_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
+    std::vector<int32_t> idx_to_offsets_;  // memory mode owner
+    const int32_t* idx_to_offsets_ptr_ =
+        nullptr;  // read accessor (vec or mmap)
     size_t idx_to_offsets_size_ = 0;
     std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 
