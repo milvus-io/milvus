@@ -98,8 +98,8 @@ class ChunkInflightBudget {
  private:
     ChunkInflightBudget() {
         auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-        max_inflight_ = static_cast<size_t>(
-            pool.GetMaxThreadNum() * kStreamChannelCapacityMultiplier);
+        max_inflight_ = static_cast<size_t>(pool.GetMaxThreadNum() *
+                                            kStreamChannelCapacityMultiplier);
         if (max_inflight_ == 0) {
             max_inflight_ = 1;
         }

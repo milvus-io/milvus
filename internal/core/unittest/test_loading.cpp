@@ -175,20 +175,12 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "STL_SORT"},
          {"mmap", "false"},
          {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
-         0UL,
-         1UL * 1024 * 1024 * 1024,
-         0UL,
-         true}),
+        {1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "STL_SORT"},
          {"mmap", "true"},
          {"field_type", "string"}},
-        {0UL,
-         1UL * 1024 * 1024 * 1024,
-         0UL,
-         1UL * 1024 * 1024 * 1024,
-         true}),
+        {0UL, 1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "false"}, {"field_type", "string"}},
         {1UL * 1024 * 1024 * 1024,
@@ -198,11 +190,7 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "true"}, {"field_type", "string"}},
-        {0UL,
-         1UL * 1024 * 1024 * 1024,
-         0UL,
-         1UL * 1024 * 1024 * 1024,
-         true}),
+        {0UL, 1UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
          {"mmap", "false"},
@@ -240,11 +228,7 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {0UL,
-         2UL * 1024 * 1024 * 1024,
-         0UL,
-         1UL * 1024 * 1024 * 1024,
-         false}),
+        {0UL, 2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "HYBRID"}, {"mmap", "true"}, {"field_type", "string"}},
         {2UL * 1024 * 1024 * 1024,

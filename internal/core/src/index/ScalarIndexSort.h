@@ -257,8 +257,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Config config_;
     // idx_to_offsets: maps row_id → sorted offset.
     // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
-    std::vector<int32_t> idx_to_offsets_;     // memory mode owner
-    const int32_t* idx_to_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
+    std::vector<int32_t> idx_to_offsets_;  // memory mode owner
+    const int32_t* idx_to_offsets_ptr_ =
+        nullptr;  // read accessor (vec or mmap)
     size_t idx_to_offsets_size_ = 0;
 
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;

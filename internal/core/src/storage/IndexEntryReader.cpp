@@ -591,9 +591,8 @@ IndexEntryReader::ReadPlainEntryStream(
 
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto& budget = ChunkInflightBudget::GetInstance();
-    auto channel =
-        std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
-            budget.MaxInflight());
+    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
+        budget.MaxInflight());
 
     size_t next_submit = 0;
     size_t next_consume = 0;
@@ -609,8 +608,8 @@ IndexEntryReader::ReadPlainEntryStream(
             auto r = std::make_shared<ChunkResult>();
             r->seq = seq;
             r->data.resize(len);
-            size_t n = input_->ReadAt(
-                r->data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
+            size_t n =
+                input_->ReadAt(r->data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
             AssertInfo(n == len, "Failed to read entry chunk");
             channel->push(std::move(r));
         });
@@ -692,9 +691,8 @@ IndexEntryReader::ReadEncryptedEntryStream(
 
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto& budget = ChunkInflightBudget::GetInstance();
-    auto channel =
-        std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
-            budget.MaxInflight());
+    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
+        budget.MaxInflight());
 
     size_t next_submit = 0;
     size_t next_consume = 0;
@@ -707,21 +705,18 @@ IndexEntryReader::ReadEncryptedEntryStream(
         pool.Submit([this, channel, seq, slice]() {
             std::vector<uint8_t> cipher(slice.size);
             size_t n = input_->ReadAt(
-                cipher.data(),
-                MILVUS_V3_MAGIC_SIZE + slice.offset,
-                slice.size);
+                cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
             AssertInfo(n == slice.size, "Failed to read encrypted slice");
 
-            auto dec = cipher_plugin_->GetDecryptor(
-                ez_id_, collection_id_, edek_);
+            auto dec =
+                cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
             auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
             auto r = std::make_shared<ChunkResult>();
             r->seq = seq;
             r->data.assign(
                 reinterpret_cast<const uint8_t*>(plain.data()),
-                reinterpret_cast<const uint8_t*>(plain.data()) +
-                    plain.size());
+                reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
             channel->push(std::move(r));
         });
 

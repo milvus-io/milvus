@@ -967,12 +967,10 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
 
     std::vector<uint8_t> reassembled;
     size_t callback_count = 0;
-    reader->ReadEntryStream(
-        "small_data",
-        [&](const uint8_t* d, size_t len) {
-            reassembled.insert(reassembled.end(), d, d + len);
-            callback_count++;
-        });
+    reader->ReadEntryStream("small_data", [&](const uint8_t* d, size_t len) {
+        reassembled.insert(reassembled.end(), d, d + len);
+        callback_count++;
+    });
 
     ASSERT_EQ(reassembled.size(), entry_size);
     VerifyPattern(reassembled, entry_size);
