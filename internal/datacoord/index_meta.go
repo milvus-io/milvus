@@ -536,6 +536,17 @@ func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 	return nil
 }
 
+// Precondition: caller holds fieldIndexLock — serialises the indexes map read with MarkIndexAsDeleted.
+func (m *indexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta float64) {
+	if delta == 0 {
+		return
+	}
+	if idx, ok := m.indexes[collID][indexID]; ok && !idx.IsDeleted {
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", collID)).Add(delta)
+	}
+}
+
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
 func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
 	buildID := segIndex.BuildID
@@ -558,7 +569,18 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 			zap.Int64("buildID", segIndex.BuildID), zap.String("indexType", segIndex.IndexType), zap.Error(err))
 		return err
 	}
+
+	// Insert + gauge Add must be serialised vs MarkIndexAsDeleted.
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
 	m.updateSegmentIndex(segIndex)
+
+	if segIndex.IndexState == commonpb.IndexState_Finished {
+		m.addStoredIndexSizeMetric(segIndex.CollectionID, segIndex.IndexID,
+			float64(segIndex.IndexSerializedSize))
+	}
+
 	log.Ctx(ctx).Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
@@ -760,9 +782,8 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		deletedSet[index.IndexID] = struct{}{}
 	}
 
-	// Subtract gauge: the metric tracks alive indexes only, so drop means
-	// immediate subtraction. segmentIndexes is keyed SegmentID → IndexID,
-	// inner Get is O(1) per segment.
+	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
+	// must not re-subtract. fieldIndexLock.Lock serialises with concurrent RLock gauge adders.
 	var totalSize float64
 	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		for indexID := range deletedSet {
@@ -1019,11 +1040,12 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
 
+	// gauge Add must be serialised vs MarkIndexAsDeleted.
 	newSize := taskInfo.GetSerializedSize()
-	if delta := float64(newSize) - float64(oldSize); delta != 0 && m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", segIdx.CollectionID)).Add(delta)
-	}
+	m.fieldIndexLock.RLock()
+	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
+		float64(newSize)-float64(oldSize))
+	m.fieldIndexLock.RUnlock()
 
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
@@ -1102,6 +1124,13 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	if err != nil {
 		return err
 	}
+
+	// Reclaim size only when the index is still alive (segment-drop case);
+	// MarkIndexAsDeleted already subtracted otherwise.
+	m.fieldIndexLock.RLock()
+	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
+		-float64(segIdx.IndexSerializedSize))
+	m.fieldIndexLock.RUnlock()
 
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
