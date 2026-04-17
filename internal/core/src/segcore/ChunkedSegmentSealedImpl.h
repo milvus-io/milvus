@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -62,6 +63,7 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -1367,4 +1369,18 @@ CreateSealedSegment(
     return std::make_unique<ChunkedSegmentSealedImpl>(
         schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
+
+using ParquetStatisticsByField =
+    std::map<int64_t, ChunkedSegmentSealedImpl::ParquetStatistics>;
+
+struct LoadedGroupChunkMetadata {
+    std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
+    ParquetStatisticsByField parquet_stats_by_field;
+};
+
+LoadedGroupChunkMetadata
+LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
+                       const std::vector<FieldId>& field_ids_for_stats,
+                       const std::string& debug_key);
+
 }  // namespace milvus::segcore

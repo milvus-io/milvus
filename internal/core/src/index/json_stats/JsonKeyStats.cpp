@@ -57,6 +57,7 @@
 #include "nlohmann/json_fwd.hpp"
 #include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -1066,13 +1067,17 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
 
+    auto group_chunk_metadata = milvus::segcore::LoadGroupChunkMetadata(
+        files, {}, fmt::format("seg_{}_jks_{}", segment_id_, field_id_));
+
     auto translator = std::make_unique<
         milvus::segcore::storagev2translator::GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::JSON_KEY_STATS,
         field_meta_map,
         column_group_info,
-        files,
+        std::move(files),
+        std::move(group_chunk_metadata.row_group_meta_list),
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
