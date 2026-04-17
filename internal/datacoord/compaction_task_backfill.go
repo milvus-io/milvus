@@ -231,7 +231,7 @@ func (t *backfillCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sessio
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan)
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		log.Warn("backfillCompactionTask failed to notify compaction tasks to DataNode",
 			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
