@@ -45,7 +45,18 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 	})
 
 	t.Run("invalid inverted_index_algo", func(t *testing.T) {
-		for _, algo := range []string{"INVALID_ALGO", "", "taat_naive", "DAAT_WAND_EXTRA", "BLOCK_MAX", "sindi"} {
+		for _, algo := range []string{
+			"INVALID_ALGO",       // completely unknown
+			"",                   // empty string
+			"taat_naive",         // lowercase of valid value
+			"DAAT_WAND_EXTRA",    // valid prefix with extra suffix
+			"BLOCK_MAX",          // partial name of new algo
+			"sindi",              // lowercase of new algo
+			"block_max_maxscore", // lowercase of new algo
+			"BLOCK_MAX_MAXSCOR",  // new algo with typo
+			"BLOCK_MAX_WAND_",    // new algo with trailing underscore
+			"Sindi",              // new algo with mixed case
+		} {
 			params := map[string]string{
 				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
 				Metric:                  "IP",
@@ -168,6 +179,37 @@ func Test_sparseFloatVectorBaseChecker_CheckTrain(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "sparse inverted index algo INVALID_ALGO not found or not supported")
 	})
+
+	t.Run("new algos BLOCK_MAX_MAXSCORE BLOCK_MAX_WAND SINDI valid through CheckTrain", func(t *testing.T) {
+		for _, algo := range []string{"BLOCK_MAX_MAXSCORE", "BLOCK_MAX_WAND", "SINDI"} {
+			params := map[string]string{
+				common.IndexTypeKey:     "SPARSE_INVERTED_INDEX",
+				Metric:                  "IP",
+				SparseInvertedIndexAlgo: algo,
+			}
+			err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, params)
+			assert.NoError(t, err, "algo %s should be accepted through CheckTrain", algo)
+		}
+	})
+}
+
+// Test_SparseInvertedIndexAlgos_Contract pins the exact set of supported algorithms.
+// If an algorithm is added or removed from knowhere the constant must be updated here too.
+func Test_SparseInvertedIndexAlgos_Contract(t *testing.T) {
+	expected := []string{
+		"TAAT_NAIVE",
+		"DAAT_WAND",
+		"DAAT_MAXSCORE",
+		"BLOCK_MAX_MAXSCORE",
+		"BLOCK_MAX_WAND",
+		"SINDI",
+	}
+	assert.Equal(t, len(expected), len(SparseInvertedIndexAlgos),
+		"SparseInvertedIndexAlgos has wrong number of entries; update both the constant and this test")
+	for _, algo := range expected {
+		assert.Contains(t, SparseInvertedIndexAlgos, algo,
+			"expected algo %q to be present in SparseInvertedIndexAlgos", algo)
+	}
 }
 
 func Test_sparseFloatVectorBaseChecker_CheckValidDataType(t *testing.T) {
