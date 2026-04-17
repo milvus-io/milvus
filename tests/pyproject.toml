@@ -30,6 +30,12 @@ ignore = [
     "E501",   # line too long — deferred to formatter
     "B008",   # function call in default arg — common for pytest fixtures/Depends
     "SIM117", # nested with — test assertions often need this form
+    # Wildcard imports are an accepted test-code convention here: the heavy
+    # `from utils.util_pymilvus import *` / `from common.constants import *`
+    # patterns save boilerplate across hundreds of test cases. The source
+    # modules declare `__all__` so consumers still have a documented API.
+    "F403",
+    "F405",
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -7,6 +7,33 @@ from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection, list_collections,
 )
+
+# Explicit exports for `from utils import *` consumers (action_*.py).
+__all__ = [
+    # re-exported imports
+    "time",
+    "logger",
+    "FieldSchema",
+    "CollectionSchema",
+    "DataType",
+    "Collection",
+    "list_collections",
+    # module-level names
+    "pymilvus_version",
+    "all_index_types",
+    "default_index_params",
+    "index_params_map",
+    "NUM_REPLICAS",
+    "filter_collections_by_prefix",
+    "gen_search_param",
+    "get_collections",
+    "create_collections_and_insert_data",
+    "create_index_flat",
+    "create_index",
+    "release_collection",
+    "load_and_search",
+]
+
 logger.remove()
 logger.add(sys.stderr, format= "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "

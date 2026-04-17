@@ -2,6 +2,27 @@
 
 import utils.util_pymilvus as utils
 
+# Explicit exports for `from common.constants import *` consumers (eliminates F405).
+__all__ = [
+    "default_fields",
+    "default_binary_fields",
+    "default_entity",
+    "default_raw_binary_vector",
+    "default_binary_entity",
+    "default_entity_row",
+    "default_raw_binary_vector_row",
+    "default_binary_entity_row",
+    "default_entities",
+    "default_raw_binary_vectors",
+    "default_binary_entities",
+    "default_entities_new",
+    "default_raw_binary_vectors_new",
+    "default_binary_entities_new",
+    "default_entities_rows",
+    "default_raw_binary_vectors_rows",
+    "default_binary_entities_rows",
+]
+
 default_fields = utils.gen_default_fields()
 default_binary_fields = utils.gen_binary_default_fields()
 
