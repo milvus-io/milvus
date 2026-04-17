@@ -196,8 +196,10 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
-            auto iter = current_fields.find(new_field_binlog.fieldid());
-            // Find binlogs to load: fields in new_info match current
+            // current_fields is keyed by child field id (see loop above);
+            // look up by child_id, not by the new group id.
+            auto iter = current_fields.find(child_id);
+            // Load this child if it's absent from current, or its group moved.
             if (iter == current_fields.end() ||
                 iter->second != new_field_binlog.fieldid()) {
                 ids_to_load.emplace_back(child_id);
