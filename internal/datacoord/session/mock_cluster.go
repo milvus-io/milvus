@@ -69,17 +69,17 @@ func (_c *MockCluster_CreateAnalyze_Call) RunAndReturn(run func(int64, *workerpb
 	return _c
 }
 
-// CreateCompaction provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan) error {
-	ret := _m.Called(nodeID, in)
+// CreateCompaction provides a mock function with given fields: nodeID, in, collectionID
+func (_m *MockCluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error {
+	ret := _m.Called(nodeID, in, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCompaction")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.CompactionPlan) error); ok {
-		r0 = rf(nodeID, in)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.CompactionPlan, int64) error); ok {
+		r0 = rf(nodeID, in, collectionID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -95,13 +95,14 @@ type MockCluster_CreateCompaction_Call struct {
 // CreateCompaction is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *datapb.CompactionPlan
-func (_e *MockCluster_Expecter) CreateCompaction(nodeID interface{}, in interface{}) *MockCluster_CreateCompaction_Call {
-	return &MockCluster_CreateCompaction_Call{Call: _e.mock.On("CreateCompaction", nodeID, in)}
+//   - collectionID int64
+func (_e *MockCluster_Expecter) CreateCompaction(nodeID interface{}, in interface{}, collectionID interface{}) *MockCluster_CreateCompaction_Call {
+	return &MockCluster_CreateCompaction_Call{Call: _e.mock.On("CreateCompaction", nodeID, in, collectionID)}
 }
 
-func (_c *MockCluster_CreateCompaction_Call) Run(run func(nodeID int64, in *datapb.CompactionPlan)) *MockCluster_CreateCompaction_Call {
+func (_c *MockCluster_CreateCompaction_Call) Run(run func(nodeID int64, in *datapb.CompactionPlan, collectionID int64)) *MockCluster_CreateCompaction_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.CompactionPlan))
+		run(args[0].(int64), args[1].(*datapb.CompactionPlan), args[2].(int64))
 	})
 	return _c
 }
@@ -111,22 +112,22 @@ func (_c *MockCluster_CreateCompaction_Call) Return(_a0 error) *MockCluster_Crea
 	return _c
 }
 
-func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionPlan) error) *MockCluster_CreateCompaction_Call {
+func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionPlan, int64) error) *MockCluster_CreateCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateCopySegment provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error {
-	ret := _m.Called(nodeID, in)
+// CreateCopySegment provides a mock function with given fields: nodeID, in, collectionID
+func (_m *MockCluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error {
+	ret := _m.Called(nodeID, in, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCopySegment")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.CopySegmentRequest) error); ok {
-		r0 = rf(nodeID, in)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.CopySegmentRequest, int64) error); ok {
+		r0 = rf(nodeID, in, collectionID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -142,13 +143,14 @@ type MockCluster_CreateCopySegment_Call struct {
 // CreateCopySegment is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *datapb.CopySegmentRequest
-func (_e *MockCluster_Expecter) CreateCopySegment(nodeID interface{}, in interface{}) *MockCluster_CreateCopySegment_Call {
-	return &MockCluster_CreateCopySegment_Call{Call: _e.mock.On("CreateCopySegment", nodeID, in)}
+//   - collectionID int64
+func (_e *MockCluster_Expecter) CreateCopySegment(nodeID interface{}, in interface{}, collectionID interface{}) *MockCluster_CreateCopySegment_Call {
+	return &MockCluster_CreateCopySegment_Call{Call: _e.mock.On("CreateCopySegment", nodeID, in, collectionID)}
 }
 
-func (_c *MockCluster_CreateCopySegment_Call) Run(run func(nodeID int64, in *datapb.CopySegmentRequest)) *MockCluster_CreateCopySegment_Call {
+func (_c *MockCluster_CreateCopySegment_Call) Run(run func(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64)) *MockCluster_CreateCopySegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.CopySegmentRequest))
+		run(args[0].(int64), args[1].(*datapb.CopySegmentRequest), args[2].(int64))
 	})
 	return _c
 }
@@ -158,7 +160,7 @@ func (_c *MockCluster_CreateCopySegment_Call) Return(_a0 error) *MockCluster_Cre
 	return _c
 }
 
-func (_c *MockCluster_CreateCopySegment_Call) RunAndReturn(run func(int64, *datapb.CopySegmentRequest) error) *MockCluster_CreateCopySegment_Call {
+func (_c *MockCluster_CreateCopySegment_Call) RunAndReturn(run func(int64, *datapb.CopySegmentRequest, int64) error) *MockCluster_CreateCopySegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
