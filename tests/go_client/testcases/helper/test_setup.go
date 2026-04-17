@@ -97,6 +97,7 @@ func teardown() {
 	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
 	if err != nil {
 		log.Error("teardown failed to connect milvus with error", zap.Error(err))
+		return
 	}
 	defer mc.Close(ctx)
 
