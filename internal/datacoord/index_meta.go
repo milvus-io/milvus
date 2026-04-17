@@ -1198,6 +1198,9 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 // HasCollectionWithPathVersion checks if any SegmentIndex with this collectionID uses pathVersion >= ver.
 // Used by GC to distinguish collectionID dirs from orphan buildID dirs.
 func (m *indexMeta) HasCollectionWithPathVersion(collectionID int64, pathVersion int32) bool {
+	if m.segmentBuildInfo == nil {
+		return false
+	}
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.CollectionID == collectionID && segIdx.IndexStorePathVersion >= pathVersion {
 			return true
@@ -1209,6 +1212,9 @@ func (m *indexMeta) HasCollectionWithPathVersion(collectionID int64, pathVersion
 // GetDeletedIndexesWithPathVersion returns SegmentIndex entries that are deleted and have pathVersion >= ver.
 // Used by GC to find v1-format indexes that need file cleanup.
 func (m *indexMeta) GetDeletedIndexesWithPathVersion(pathVersion int32) []*model.SegmentIndex {
+	if m.segmentBuildInfo == nil {
+		return nil
+	}
 	var result []*model.SegmentIndex
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted && segIdx.IndexStorePathVersion >= pathVersion {
