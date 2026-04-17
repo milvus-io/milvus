@@ -10,8 +10,19 @@ def pytest_addoption(parser):
     parser.addoption("--root_path", action="store", default="file", help="minio bucket root path")
     parser.addoption("--release_name", action="store", default="my-release", help="release name")
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei endpoint")
-    parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei reranker endpoint")
+    parser.addoption(
+        "--tei_endpoint",
+        action="store",
+        default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80",
+        help="tei endpoint",
+    )
+    parser.addoption(
+        "--tei_reranker_endpoint",
+        action="store",
+        default="http://text-rerank-service.milvus-ci.svc.cluster.local:80",
+        help="tei reranker endpoint",
+    )
+
 
 @pytest.fixture
 def endpoint(request):
@@ -42,9 +53,11 @@ def root_path(request):
 def release_name(request):
     return request.config.getoption("--release_name")
 
+
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
 
 @pytest.fixture
 def tei_reranker_endpoint(request):

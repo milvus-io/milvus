@@ -18,7 +18,7 @@ exp_schema = "schema"
 exp_num = "num_entities"
 exp_primary = "primary"
 exp_shards_num = "shards_num"
-default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
+default_term_expr = f"{ct.default_int64_field_name} in [0, 1]"
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
 default_shards_num = 1
@@ -31,8 +31,8 @@ uid_drop = "drop_collection"
 uid_has = "has_collection"
 uid_list = "list_collections"
 uid_load = "load_collection"
-partition1 = 'partition1'
-partition2 = 'partition2'
+partition1 = "partition1"
+partition2 = "partition2"
 field_name = default_float_vec_field_name
 default_single_query = {
     "data": gen_vectors(1, default_dim),
@@ -54,7 +54,7 @@ SPARSE_FLOAT_VECTOR_data_type = DataType.SPARSE_FLOAT_VECTOR
 
 
 class TestCollectionParams(TestcaseBase):
-    """ Test case of collection interface """
+    """Test case of collection interface"""
 
     @pytest.fixture(scope="function", params=cf.gen_all_type_fields())
     def get_unsupported_primary_field(self, request):
@@ -77,8 +77,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         field, _ = self.field_schema_wrap.init_field_schema(name="field_name", dtype=DataType.INT64, is_primary=True)
         error = {ct.err_code: 0, ct.err_msg: "Schema type must be schema.CollectionSchema"}
-        self.collection_wrap.init_collection(c_name, schema=field,
-                                             check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.init_collection(c_name, schema=field, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_none_schema(self):
@@ -89,8 +88,10 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"Collection '{c_name}' not exist, or you can pass in schema to create one."}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"Collection '{c_name}' not exist, or you can pass in schema to create one.",
+        }
         self.collection_wrap.init_collection(c_name, schema=None, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -111,9 +112,13 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.check_collection_property,
-                                                      check_items={exp_name: c_name, exp_schema: default_schema})
+        self.collection_wrap.construct_from_dataframe(
+            c_name,
+            df,
+            primary_field=ct.default_int64_field_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: c_name, exp_schema: default_schema},
+        )
         # flush
         assert self.collection_wrap.num_entities == ct.default_nb
 
@@ -127,9 +132,13 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df, _ = cf.gen_default_binary_dataframe_data(nb=ct.default_nb)
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.check_collection_property,
-                                                      check_items={exp_name: c_name, exp_schema: default_binary_schema})
+        self.collection_wrap.construct_from_dataframe(
+            c_name,
+            df,
+            primary_field=ct.default_int64_field_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: c_name, exp_schema: default_binary_schema},
+        )
         assert self.collection_wrap.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -155,8 +164,9 @@ class TestCollectionDataframe(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name])
         error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=ct.default_int64_field_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_inconsistent_dataframe(self):
@@ -168,13 +178,16 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         # one field different type df
-        mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
+        mix_data = [(1, 2.0, [0.1, 0.2]), (2, 3.0, 4)]
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
-        error = {ct.err_code: 1,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, "
-                             "{C} field should be a FLOAT_VECTOR, but got a {<class 'list'>} instead."}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
-                                                      check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: "The Input data type is inconsistent with defined schema, "
+            "{C} field should be a FLOAT_VECTOR, but got a {<class 'list'>} instead.",
+        }
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field="A", check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_non_dataframe(self):
@@ -198,10 +211,11 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = pd.DataFrame({"date": pd.date_range('20210101', periods=3), ct.default_int64_field_name: [1, 2, 3]})
+        df = pd.DataFrame({"date": pd.date_range("20210101", periods=3), ct.default_int64_field_name: [1, 2, 3]})
         error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe."}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=ct.default_int64_field_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_from_invalid_field_name(self):
@@ -212,10 +226,11 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df = pd.DataFrame({'%$#': cf.gen_vectors(3, 2), ct.default_int64_field_name: [1, 2, 3]})
+        df = pd.DataFrame({"%$#": cf.gen_vectors(3, 2), ct.default_int64_field_name: [1, 2, 3]})
         error = {ct.err_code: 1, ct.err_msg: "Invalid field name"}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=ct.default_int64_field_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_none_primary_field(self):
@@ -228,8 +243,9 @@ class TestCollectionDataframe(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         error = {ct.err_code: 0, ct.err_msg: "Schema must have a primary key field."}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=None,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=None, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_not_existed_primary_field(self):
@@ -242,8 +258,9 @@ class TestCollectionDataframe(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe."}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=c_name,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=c_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_construct_with_none_auto_id(self):
@@ -256,8 +273,14 @@ class TestCollectionDataframe(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         error = {ct.err_code: 0, ct.err_msg: "Param auto_id must be bool type"}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      auto_id=None, check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name,
+            df,
+            primary_field=ct.default_int64_field_name,
+            auto_id=None,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_construct_auto_id_true_insert(self):
@@ -270,8 +293,14 @@ class TestCollectionDataframe(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(nb=100)
         error = {ct.err_code: 0, ct.err_msg: "Auto_id is True, primary field should not have data."}
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      auto_id=True, check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            c_name,
+            df,
+            primary_field=ct.default_int64_field_name,
+            auto_id=True,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_construct_auto_id_true_no_insert(self):
@@ -285,8 +314,9 @@ class TestCollectionDataframe(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         # df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         df[ct.default_int64_field_name] = None
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      auto_id=True)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=ct.default_int64_field_name, auto_id=True
+        )
         assert self.collection_wrap.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -300,8 +330,9 @@ class TestCollectionDataframe(TestcaseBase):
         nb = 100
         df = cf.gen_default_dataframe_data(nb)
         df.iloc[:, 0] = numpy.NaN
-        res, _ = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                               primary_field=ct.default_int64_field_name, auto_id=True)
+        res, _ = self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name, auto_id=True
+        )
         mutation_res = res[1]
         assert cf._check_primary_keys(mutation_res.primary_keys, 100)
         assert self.collection_wrap.num_entities == nb
@@ -316,8 +347,9 @@ class TestCollectionDataframe(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      auto_id=False)
+        self.collection_wrap.construct_from_dataframe(
+            c_name, df, primary_field=ct.default_int64_field_name, auto_id=False
+        )
         assert not self.collection_wrap.schema.auto_id
         assert self.collection_wrap.num_entities == ct.default_nb
 
@@ -333,9 +365,14 @@ class TestCollectionDataframe(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         df.iloc[:, 0] = numpy.NaN
         error = {ct.err_code: 0, ct.err_msg: "Primary key type must be DataType.INT64"}
-        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                      primary_field=ct.default_int64_field_name, auto_id=False,
-                                                      check_task=CheckTasks.err_res, check_items=error)
+        self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix),
+            df,
+            primary_field=ct.default_int64_field_name,
+            auto_id=False,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_construct_auto_id_false_same_values(self):
@@ -348,8 +385,9 @@ class TestCollectionDataframe(TestcaseBase):
         nb = 100
         df = cf.gen_default_dataframe_data(nb)
         df.iloc[1:, 0] = 1
-        res, _ = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                               primary_field=ct.default_int64_field_name, auto_id=False)
+        res, _ = self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name, auto_id=False
+        )
         collection_w = res[0]
         collection_w.flush()
         assert collection_w.num_entities == nb
@@ -368,8 +406,9 @@ class TestCollectionDataframe(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_values = pd.Series(data=[i for i in range(0, -nb, -1)])
         df[ct.default_int64_field_name] = new_values
-        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                      primary_field=ct.default_int64_field_name, auto_id=False)
+        self.collection_wrap.construct_from_dataframe(
+            cf.gen_unique_str(prefix), df, primary_field=ct.default_int64_field_name, auto_id=False
+        )
         assert self.collection_wrap.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -381,13 +420,20 @@ class TestCollectionDataframe(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, primary_field=ct.default_int64_field_name,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        collection_w = self.init_collection_wrap(
+            name=c_name,
+            primary_field=ct.default_int64_field_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: c_name, exp_schema: default_schema},
+        )
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
-                                                      check_task=CheckTasks.check_collection_property,
-                                                      check_items={exp_name: c_name, exp_schema: default_schema})
+        self.collection_wrap.construct_from_dataframe(
+            c_name,
+            df,
+            primary_field=ct.default_int64_field_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: c_name, exp_schema: default_schema},
+        )
         # flush
         assert collection_w.num_entities == ct.default_nb
         assert collection_w.num_entities == self.collection_wrap.num_entities
@@ -446,9 +492,11 @@ class TestLoadCollection(TestcaseBase):
         assert len(res[0]) == ct.default_limit
 
         # verify query sealed and growing data successfully
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': [{'int64': 0}, {'int64': 3000}]})
+        collection_w.query(
+            expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{"int64": 0}, {"int64": 3000}]},
+        )
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_replica_multiple_shard_leader(self):
@@ -496,9 +544,11 @@ class TestLoadCollection(TestcaseBase):
         assert len(res[0]) == ct.default_limit
 
         # Verify query sealed and growing entities successfully
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': [{'int64': 0}, {'int64': 3000}]})
+        collection_w.query(
+            expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": [{"int64": 0}, {"int64": 3000}]},
+        )
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_replica_sq_count_balance(self):
@@ -511,6 +561,7 @@ class TestLoadCollection(TestcaseBase):
         expected: Infer whether the query request is load balanced.
         """
         from utils.util_k8s import get_metrics_querynode_sq_req_count
+
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb=5000)
         mutation_res, _ = collection_w.insert(df)

@@ -13,9 +13,7 @@ import time
 prefix = "phrase_match"
 
 
-def init_collection_schema(
-        dim: int, tokenizer: str, enable_partition_key: bool
-) -> CollectionSchema:
+def init_collection_schema(dim: int, tokenizer: str, enable_partition_key: bool) -> CollectionSchema:
     """Initialize collection schema with specified parameters"""
     analyzer_params = {"tokenizer": tokenizer}
     fields = [
@@ -45,9 +43,7 @@ class TestQueryPhraseMatch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("tokenizer", ["standard", "jieba", "icu"])
-    def test_query_phrase_match_with_different_tokenizer(
-            self, tokenizer, enable_inverted_index, enable_partition_key
-    ):
+    def test_query_phrase_match_with_different_tokenizer(self, tokenizer, enable_inverted_index, enable_partition_key):
         """
         target: Verify phrase match functionality with different tokenizers (standard, jieba)
         method: 1. Generate test data using PhraseMatchTestGenerator with language-specific content
@@ -81,9 +77,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         df = pd.DataFrame(test_data)
         log.info(f"Test data: \n{df['text']}")
         # Insert data into collection
-        insert_data = [
-            {"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data
-        ]
+        insert_data = [{"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data]
         collection_w.insert(insert_data)
         collection_w.flush()
 
@@ -93,9 +87,7 @@ class TestQueryPhraseMatch(TestcaseBase):
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
         )
         if enable_inverted_index:
-            collection_w.create_index(
-                "text", {"index_type": "INVERTED", "params": {"tokenizer": tokenizer}}
-            )
+            collection_w.create_index("text", {"index_type": "INVERTED", "params": {"tokenizer": tokenizer}})
 
         collection_w.load()
 
@@ -110,35 +102,31 @@ class TestQueryPhraseMatch(TestcaseBase):
             results, _ = collection_w.query(expr=expr, output_fields=["id", "text"])
             if tokenizer == "standard":
                 # Get expected matches using Tantivy
-                expected_matches = generator.get_query_results(
-                    query["query"], query["slop"]
-                )
+                expected_matches = generator.get_query_results(query["query"], query["slop"])
                 # Get actual matches from Milvus
                 actual_matches = [r["id"] for r in results]
                 if set(actual_matches) != set(expected_matches):
                     log.info(f"collection schema: {collection_w.schema}")
                     for match_id in expected_matches:
                         # query by id to get text
-                        res, _ = collection_w.query(
-                            expr=f"id == {match_id}", output_fields=["text"]
-                        )
+                        res, _ = collection_w.query(expr=f"id == {match_id}", output_fields=["text"])
                         text = res[0]["text"]
                         log.info(f"Expected match: {match_id}, text: {text}")
 
                     for match_id in actual_matches:
                         # query by id to get text
-                        res, _ = collection_w.query(
-                            expr=f"id == {match_id}", output_fields=["text"]
-                        )
+                        res, _ = collection_w.query(expr=f"id == {match_id}", output_fields=["text"])
                         text = res[0]["text"]
                         log.info(f"Matched document: {match_id}, text: {text}")
                 # Assert results match
-                assert (
-                        set(actual_matches) == set(expected_matches)
-                ), f"Mismatch in results for query '{query['query']}' with slop {query['slop']}"
+                assert set(actual_matches) == set(expected_matches), (
+                    f"Mismatch in results for query '{query['query']}' with slop {query['slop']}"
+                )
 
             else:
-                log.info("Tokenizer is not standard, verify phrase match results by checking all query tokens in result")
+                log.info(
+                    "Tokenizer is not standard, verify phrase match results by checking all query tokens in result"
+                )
                 for result in results:
                     text = result["text"]
                     tokens = self.get_tokens_by_analyzer(query["query"], analyzer_params)
@@ -150,9 +138,7 @@ class TestQueryPhraseMatch(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    def test_phrase_match_as_filter_in_vector_search(
-            self, tokenizer, enable_inverted_index, enable_partition_key
-    ):
+    def test_phrase_match_as_filter_in_vector_search(self, tokenizer, enable_inverted_index, enable_partition_key):
         """
         target: Verify phrase match functionality when used as a filter in vector search
         method: 1. Generate test data with both text content and vector embeddings
@@ -184,9 +170,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         df = pd.DataFrame(test_data)
         log.info(f"Test data: \n{df['text']}")
         # Insert data into collection
-        insert_data = [
-            {"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data
-        ]
+        insert_data = [{"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data]
         collection_w.insert(insert_data)
         collection_w.flush()
 
@@ -196,9 +180,7 @@ class TestQueryPhraseMatch(TestcaseBase):
             {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
         )
         if enable_inverted_index:
-            collection_w.create_index(
-                "text", {"index_type": "INVERTED", "params": {"tokenizer": tokenizer}}
-            )
+            collection_w.create_index("text", {"index_type": "INVERTED", "params": {"tokenizer": tokenizer}})
 
         collection_w.load()
 
@@ -221,9 +203,7 @@ class TestQueryPhraseMatch(TestcaseBase):
             )
 
             # Get expected matches using Tantivy
-            expected_matches = generator.get_query_results(
-                query["query"], query["slop"]
-            )
+            expected_matches = generator.get_query_results(query["query"], query["slop"])
             # assert results satisfy the filter
             for hits in results:
                 for hit in hits:
@@ -262,9 +242,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         df = pd.DataFrame(test_data)
         log.info(f"Test data: {df['text']}")
         # Insert data into collection
-        insert_data = [
-            {"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data
-        ]
+        insert_data = [{"id": d["id"], "text": d["text"], "emb": d["emb"]} for d in test_data]
         collection_w.insert(insert_data)
         collection_w.flush()
 
@@ -296,23 +274,19 @@ class TestQueryPhraseMatch(TestcaseBase):
                 log.info(f"collection schema: {collection_w.schema}")
                 for match_id in expected_matches:
                     # query by id to get text
-                    res, _ = collection_w.query(
-                        expr=f"id == {match_id}", output_fields=["text"]
-                    )
+                    res, _ = collection_w.query(expr=f"id == {match_id}", output_fields=["text"])
                     text = res[0]["text"]
                     log.info(f"Expected match: {match_id}, text: {text}")
 
                 for match_id in actual_matches:
                     # query by id to get text
-                    res, _ = collection_w.query(
-                        expr=f"id == {match_id}", output_fields=["text"]
-                    )
+                    res, _ = collection_w.query(expr=f"id == {match_id}", output_fields=["text"])
                     text = res[0]["text"]
                     log.info(f"Matched document: {match_id}, text: {text}")
             # Assert results match
-            assert (
-                    set(actual_matches) == set(expected_matches)
-            ), f"Mismatch in results for query '{query['query']}' with slop {slop_value}"
+            assert set(actual_matches) == set(expected_matches), (
+                f"Mismatch in results for query '{query['query']}' with slop {slop_value}"
+            )
 
     def test_query_phrase_match_with_different_patterns(self):
         """
@@ -354,9 +328,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         df = pd.DataFrame(pattern_documents)[["id", "text"]]
         log.info(f"Test data:\n {df}")
         collection.flush()
-        collection.create_index(
-            field_name="text", index_params={"index_type": "INVERTED"}
-        )
+        collection.create_index(field_name="text", index_params={"index_type": "INVERTED"})
         collection.create_index(
             field_name="emb",
             index_params={
@@ -370,11 +342,10 @@ class TestQueryPhraseMatch(TestcaseBase):
 
         for pattern, slop in test_patterns:
             results, _ = collection.query(
-                expr=f'phrase_match(text, "{pattern}", {slop})', output_fields=["text"],
+                expr=f'phrase_match(text, "{pattern}", {slop})',
+                output_fields=["text"],
             )
-            log.info(
-                f"Pattern '{pattern}' with slop {slop} found {len(results)} matches"
-            )
+            log.info(f"Pattern '{pattern}' with slop {slop} found {len(results)} matches")
             assert len(results) >= num_docs_per_pattern
 
 
@@ -403,9 +374,7 @@ class TestQueryPhraseMatchNegative(TestcaseBase):
         data = generator.generate_test_data(100, dim)
         collection.insert(data)
 
-        collection.create_index(
-            field_name="text", index_params={"index_type": "INVERTED"}
-        )
+        collection.create_index(field_name="text", index_params={"index_type": "INVERTED"})
         collection.create_index(
             field_name="emb",
             index_params={
@@ -419,7 +388,7 @@ class TestQueryPhraseMatchNegative(TestcaseBase):
         # Test invalid inputs
         invalid_cases = [
             ("valid query", -1),  # Negative slop
-            ("valid query", 10 ** 31),  # Very large slop
+            ("valid query", 10**31),  # Very large slop
         ]
 
         for query, slop in invalid_cases:

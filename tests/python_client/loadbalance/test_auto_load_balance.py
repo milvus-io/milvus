@@ -1,7 +1,13 @@
 from time import sleep
 from pymilvus import connections, list_collections, utility
-from chaos.checker import (CollectionCreateChecker, InsertFlushChecker,
-                           SearchChecker, QueryChecker, IndexCreateChecker, Op)
+from chaos.checker import (
+    CollectionCreateChecker,
+    InsertFlushChecker,
+    SearchChecker,
+    QueryChecker,
+    IndexCreateChecker,
+    Op,
+)
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
@@ -17,18 +23,19 @@ namespace = "chaos-testing"
 
 
 def install_milvus(release_name):
-    cus_configs = {'spec.components.image': 'milvusdb/milvus:master-20211206-b20a238',
-                   'metadata.namespace': namespace,
-                   'metadata.name': release_name,
-                   'spec.components.proxy.serviceType': 'LoadBalancer'
-                   }
+    cus_configs = {
+        "spec.components.image": "milvusdb/milvus:master-20211206-b20a238",
+        "metadata.namespace": namespace,
+        "metadata.name": release_name,
+        "spec.components.proxy.serviceType": "LoadBalancer",
+    }
     milvus_op = MilvusOperator()
     log.info(f"install milvus with configs: {cus_configs}")
     milvus_op.install(cus_configs)
     healthy = milvus_op.wait_for_healthy(release_name, namespace, timeout=1200)
     log.info(f"milvus healthy: {healthy}")
     if healthy:
-        endpoint = milvus_op.endpoint(release_name, namespace).split(':')
+        endpoint = milvus_op.endpoint(release_name, namespace).split(":")
         log.info(f"milvus endpoint: {endpoint}")
         host = endpoint[0]
         port = endpoint[1]
@@ -38,16 +45,14 @@ def install_milvus(release_name):
 
 
 def scale_up_milvus(release_name):
-    cus_configs = {
-                   'spec.components.queryNode.replicas': 2
-                  }
+    cus_configs = {"spec.components.queryNode.replicas": 2}
     milvus_op = MilvusOperator()
     log.info(f"scale up milvus with configs: {cus_configs}")
     milvus_op.upgrade(release_name, cus_configs, namespace=namespace)
     healthy = milvus_op.wait_for_healthy(release_name, namespace, timeout=1200)
     log.info(f"milvus healthy: {healthy}")
     if healthy:
-        endpoint = milvus_op.endpoint(release_name, namespace).split(':')
+        endpoint = milvus_op.endpoint(release_name, namespace).split(":")
         log.info(f"milvus endpoint: {endpoint}")
         host = endpoint[0]
         port = endpoint[1]
@@ -57,16 +62,12 @@ def scale_up_milvus(release_name):
 
 
 class TestAutoLoadBalance(object):
-
-
     def teardown_method(self):
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
 
     def test_auto_load_balance(self):
-        """
-
-        """
+        """ """
         log.info(f"start to install milvus")
         release_name, host, port = install_milvus("test-auto-load-balance")  # todo add release name
         self.release_name = release_name
@@ -79,7 +80,7 @@ class TestAutoLoadBalance(object):
             Op.flush: InsertFlushChecker(flush=True),
             Op.index: IndexCreateChecker(),
             Op.search: SearchChecker(),
-            Op.query: QueryChecker()
+            Op.query: QueryChecker(),
         }
         cc.start_monitor_threads(self.health_checkers)
         # wait

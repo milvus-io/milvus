@@ -4,30 +4,31 @@ import pytest
 from time import sleep
 import pymilvus
 from pymilvus import connections, utility
-from chaos.checker import (CollectionCreateChecker,
-                           InsertChecker,
-                           BulkInsertChecker,
-                           UpsertChecker,
-                           PartialUpdateChecker,
-                           FlushChecker,
-                           SearchChecker,
-                           FullTextSearchChecker,
-                           HybridSearchChecker,
-                           QueryChecker,
-                           TextMatchChecker,
-                           PhraseMatchChecker,
-                           JsonQueryChecker,
-                           GeoQueryChecker,
-                           IndexCreateChecker,
-                           DeleteChecker,
-                           CollectionDropChecker,
-                           AlterCollectionChecker,
-                           AddFieldChecker,
-                           CollectionRenameChecker,
-                           Op,
-                           EventRecords,
-                           ResultAnalyzer
-                           )
+from chaos.checker import (
+    CollectionCreateChecker,
+    InsertChecker,
+    BulkInsertChecker,
+    UpsertChecker,
+    PartialUpdateChecker,
+    FlushChecker,
+    SearchChecker,
+    FullTextSearchChecker,
+    HybridSearchChecker,
+    QueryChecker,
+    TextMatchChecker,
+    PhraseMatchChecker,
+    JsonQueryChecker,
+    GeoQueryChecker,
+    IndexCreateChecker,
+    DeleteChecker,
+    CollectionDropChecker,
+    AlterCollectionChecker,
+    AddFieldChecker,
+    CollectionRenameChecker,
+    Op,
+    EventRecords,
+    ResultAnalyzer,
+)
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
 from chaos import chaos_commons as cc
@@ -45,17 +46,16 @@ class TestBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, upstream_uri, upstream_token, milvus_ns):
-        connections.connect('default', uri=upstream_uri, token=upstream_token)
+        connections.connect("default", uri=upstream_uri, token=upstream_token)
         if connections.has_connection("default") is False:
             raise Exception("no connections")
         log.info("connect to milvus successfully")
@@ -63,7 +63,7 @@ class TestOperations(TestBase):
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
         log.info(f"pymilvus version: {pymilvus_version}")
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
@@ -88,7 +88,7 @@ class TestOperations(TestBase):
             Op.drop: CollectionDropChecker(collection_name=c_name),
             Op.alter_collection: AlterCollectionChecker(collection_name=c_name),
             Op.add_field: AddFieldChecker(collection_name=c_name),
-            Op.rename_collection: CollectionRenameChecker(collection_name=c_name)
+            Op.rename_collection: CollectionRenameChecker(collection_name=c_name),
         }
         self.health_checkers = checkers
 
@@ -96,7 +96,7 @@ class TestOperations(TestBase):
     def test_operations(self, request_duration, is_check):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         event_records = EventRecords()
         c_name = None
         event_records.insert("init_health_checkers", "start")

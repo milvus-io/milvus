@@ -3,13 +3,7 @@ import time
 from pymilvus import connections, utility, Collection
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
-from chaos.checker import (InsertChecker,
-                           FlushChecker,
-                           UpsertChecker,
-                           DeleteChecker,
-                           Op,
-                           ResultAnalyzer
-                           )
+from chaos.checker import InsertChecker, FlushChecker, UpsertChecker, DeleteChecker, Op, ResultAnalyzer
 from chaos import chaos_commons as cc
 from common import common_func as cf
 from utils.util_k8s import get_querynode_id_pod_pairs
@@ -19,7 +13,7 @@ from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
 
-namespace = 'chaos-testing'
+namespace = "chaos-testing"
 prefix = "test_rg"
 
 from rich.table import Table
@@ -53,7 +47,7 @@ def display_segment_distribution_info(collection_name, release_name, segment_inf
             str(r.state),
             str(channel),
             str(r.nodeIds),
-            str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds])
+            str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds]),
         )
     console = Console()
     console.width = 300
@@ -73,11 +67,7 @@ def display_channel_on_qn_distribution_info(collection_name, release_name, segme
         if r.nodeIds:
             for node_id in r.nodeIds:
                 if node_id not in m:
-                    m[node_id] = {
-                        "node_name": "",
-                        "channel": [],
-                        "segment_id": []
-                    }
+                    m[node_id] = {"node_name": "", "channel": [], "segment_id": []}
                 m[node_id]["segment_id"].append(r.segmentID)
     # get channel info
     for node_id in m.keys():
@@ -102,7 +92,7 @@ def display_channel_on_qn_distribution_info(collection_name, release_name, segme
             str(node_id),
             str(v["node_name"]),
             "\n".join([str(x) for x in set(v["channel"])]),
-            "\n".join([str(x) for x in v["segment_id"]])
+            "\n".join([str(x) for x in v["segment_id"]]),
         )
     console = Console()
     console.width = 300
@@ -112,22 +102,23 @@ def display_channel_on_qn_distribution_info(collection_name, release_name, segme
 
 def _install_milvus(image_tag="master-latest"):
     release_name = f"rg-test-{cf.gen_digits_by_length(6)}"
-    cus_configs = {'spec.mode': 'cluster',
-                   'spec.dependencies.msgStreamType': 'kafka',
-                   'spec.components.image': f'harbor.milvus.io/milvus/milvus:{image_tag}',
-                   'metadata.namespace': namespace,
-                   'metadata.name': release_name,
-                   'spec.components.proxy.serviceType': 'LoadBalancer',
-                   'spec.config.queryCoord.balancer': 'ChannelLevelScoreBalancer',
-                   'spec.config.queryCoord.channelExclusiveNodeFactor': 2
-                   }
+    cus_configs = {
+        "spec.mode": "cluster",
+        "spec.dependencies.msgStreamType": "kafka",
+        "spec.components.image": f"harbor.milvus.io/milvus/milvus:{image_tag}",
+        "metadata.namespace": namespace,
+        "metadata.name": release_name,
+        "spec.components.proxy.serviceType": "LoadBalancer",
+        "spec.config.queryCoord.balancer": "ChannelLevelScoreBalancer",
+        "spec.config.queryCoord.channelExclusiveNodeFactor": 2,
+    }
     milvus_op = MilvusOperator()
     log.info(f"install milvus with configs: {cus_configs}")
     milvus_op.install(cus_configs)
     healthy = milvus_op.wait_for_healthy(release_name, namespace, timeout=1200)
     log.info(f"milvus healthy: {healthy}")
     if healthy:
-        endpoint = milvus_op.endpoint(release_name, namespace).split(':')
+        endpoint = milvus_op.endpoint(release_name, namespace).split(":")
         log.info(f"milvus endpoint: {endpoint}")
         host = endpoint[0]
         port = endpoint[1]
@@ -137,7 +128,6 @@ def _install_milvus(image_tag="master-latest"):
 
 
 class TestChannelExclusiveBalance(TestcaseBase):
-
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
@@ -159,12 +149,12 @@ class TestChannelExclusiveBalance(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_during_qn_scale_up(self, image_tag):
         """
-       steps
-       """
+        steps
+        """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
-        milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+        milvus_op.scale(release_name, "queryNode", qn_num, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -191,7 +181,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
         res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
@@ -206,7 +196,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
         for k, v in res.items():
             assert len(set(v["channel"])) == 1
 
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_during_qn_scale_down(self, image_tag):
         """
@@ -215,7 +204,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 8
-        milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+        milvus_op.scale(release_name, "queryNode", qn_num, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -239,11 +228,11 @@ class TestChannelExclusiveBalance(TestcaseBase):
             for k, v in self.health_checkers.items():
                 v.check_result()
             qn_num = max(qn_num - 1, 3)
-            milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+            milvus_op.scale(release_name, "queryNode", qn_num, namespace)
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
-        milvus_op.scale(release_name, 'queryNode', 1, namespace)
+        milvus_op.scale(release_name, "queryNode", 1, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
         res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
@@ -262,12 +251,12 @@ class TestChannelExclusiveBalance(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_with_channel_num_is_1(self, image_tag):
         """
-       steps
-       """
+        steps
+        """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
-        milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+        milvus_op.scale(release_name, "queryNode", qn_num, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -276,7 +265,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
         c_name = cf.gen_unique_str("Checker_")
-        self.init_health_checkers(collection_name=c_name,  shards_num=1)
+        self.init_health_checkers(collection_name=c_name, shards_num=1)
         c = Collection(name=c_name)
         res = c.describe()
         collection_id = res["collection_id"]
@@ -292,13 +281,13 @@ class TestChannelExclusiveBalance(TestcaseBase):
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
-            milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+            milvus_op.scale(release_name, "queryNode", qn_num, namespace)
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
             for r in res:
                 assert len(set(r["channel"])) == 1
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
         res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
@@ -322,7 +311,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
-        milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+        milvus_op.scale(release_name, "queryNode", qn_num, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -348,11 +337,9 @@ class TestChannelExclusiveBalance(TestcaseBase):
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
             if qn_num == 5:
-                config = {
-                    "spec.config.queryCoord.channelExclusiveNodeFactor": 3
-                }
+                config = {"spec.config.queryCoord.channelExclusiveNodeFactor": 3}
                 milvus_op.upgrade(release_name, config, namespace)
-            milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+            milvus_op.scale(release_name, "queryNode", qn_num, namespace)
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
@@ -384,7 +371,7 @@ class TestChannelExclusiveBalance(TestcaseBase):
                             ready = False
                     time.sleep(10)
                     res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
@@ -399,12 +386,12 @@ class TestChannelExclusiveBalance(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_for_search_performance(self, image_tag):
         """
-       steps
-       """
+        steps
+        """
         milvus_op = MilvusOperator()
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
-        milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+        milvus_op.scale(release_name, "queryNode", qn_num, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -429,11 +416,11 @@ class TestChannelExclusiveBalance(TestcaseBase):
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
-            milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
+            milvus_op.scale(release_name, "queryNode", qn_num, namespace)
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, "queryNode", 8, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
         display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)

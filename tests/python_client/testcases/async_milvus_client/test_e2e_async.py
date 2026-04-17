@@ -19,7 +19,6 @@ default_vector_name = "vector"
 
 
 class TestAsyncMilvusClient(TestMilvusClientV2Base):
-
     def teardown_method(self, method):
         if self.async_milvus_client_wrap.async_milvus_client is not None:
             asyncio.run(self.async_milvus_client_wrap.close())
@@ -39,78 +38,99 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         # insert entities
         rows = [
             {default_pk_name: i, default_vector_name: [random.random() for _ in range(ct.default_dim)]}
-            for i in range(async_default_nb)]
+            for i in range(async_default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, async_default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step])
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step])
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # dql tasks
         tasks = []
         # search default
         vector = cf.gen_vectors(ct.default_nq, ct.default_dim)
-        default_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                   check_task=CheckTasks.check_search_results,
-                                                                   check_items={"enable_milvus_client_api": True,
-                                                                                "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit,
-                                                                                "pk_name": default_pk_name})
+        default_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(default_search_task)
 
         # search with filter & search_params
         sp = {"metric_type": "COSINE", "params": {"ef": "96"}}
-        filter_params_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                         filter=f"{default_pk_name} > 10",
-                                                                         search_params=sp,
-                                                                         check_task=CheckTasks.check_search_results,
-                                                                         check_items={"enable_milvus_client_api": True,
-                                                                                      "nq": ct.default_nq,
-                                                                                      "limit": ct.default_limit,
-                                                                                      "pk_name": default_pk_name})
+        filter_params_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            filter=f"{default_pk_name} > 10",
+            search_params=sp,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(filter_params_search_task)
 
         # search output fields
-        output_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                  output_fields=["*"],
-                                                                  check_task=CheckTasks.check_search_results,
-                                                                  check_items={"enable_milvus_client_api": True,
-                                                                               "nq": ct.default_nq,
-                                                                               "limit": ct.default_limit,
-                                                                               "pk_name": default_pk_name})
+        output_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(output_search_task)
 
         # query with filter and default output "*"
         exp_query_res = [{default_pk_name: i} for i in range(ct.default_limit)]
-        filter_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                                filter=f"{default_pk_name} < {ct.default_limit}",
-                                                                output_fields=[default_pk_name],
-                                                                check_task=CheckTasks.check_query_results,
-                                                                check_items={"exp_res": exp_query_res,
-                                                                             "pk_name": default_pk_name})
+        filter_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            filter=f"{default_pk_name} < {ct.default_limit}",
+            output_fields=[default_pk_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": exp_query_res, "pk_name": default_pk_name},
+        )
         tasks.append(filter_query_task)
         # query with ids and output all fields
-        ids_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                             ids=[i for i in range(ct.default_limit)],
-                                                             output_fields=["*"],
-                                                             check_task=CheckTasks.check_query_results,
-                                                             check_items={"exp_res": rows[:ct.default_limit],
-                                                                          "with_vec": True,
-                                                                          "pk_name": default_pk_name})
+        ids_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            ids=[i for i in range(ct.default_limit)],
+            output_fields=["*"],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows[: ct.default_limit], "with_vec": True, "pk_name": default_pk_name},
+        )
         tasks.append(ids_query_task)
         # get with ids
-        get_task = self.async_milvus_client_wrap.get(c_name,
-                                                     ids=[0, 1],
-                                                     output_fields=[default_pk_name, default_vector_name],
-                                                     check_task=CheckTasks.check_query_results,
-                                                     check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "pk_name": default_pk_name})
+        get_task = self.async_milvus_client_wrap.get(
+            c_name,
+            ids=[0, 1],
+            output_fields=[default_pk_name, default_vector_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows[:2], "with_vec": True, "pk_name": default_pk_name},
+        )
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -132,87 +152,111 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         # insert entities
         rows = [
             {default_pk_name: i, default_vector_name: [random.random() for _ in range(ct.default_dim)]}
-            for i in range(async_default_nb)]
+            for i in range(async_default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, async_default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step], partition_name=p_name)
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step], partition_name=p_name)
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # count from default partition
-        count_res, _ = await self.async_milvus_client_wrap.query(c_name, output_fields=["count(*)"], partition_names=[ct.default_partition_name])
+        count_res, _ = await self.async_milvus_client_wrap.query(
+            c_name, output_fields=["count(*)"], partition_names=[ct.default_partition_name]
+        )
         assert count_res[0]["count(*)"] == 0
 
         # dql tasks
         tasks = []
         # search default
         vector = cf.gen_vectors(ct.default_nq, ct.default_dim)
-        default_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                   partition_names=[p_name],
-                                                                   check_task=CheckTasks.check_search_results,
-                                                                   check_items={"enable_milvus_client_api": True,
-                                                                                "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit,
-                                                                                "pk_name": default_pk_name})
+        default_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            partition_names=[p_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(default_search_task)
 
         # search with filter & search_params
         sp = {"metric_type": "COSINE", "params": {"ef": "96"}}
-        filter_params_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                         filter=f"{default_pk_name} > 10",
-                                                                         search_params=sp,
-                                                                         partition_names=[p_name],
-                                                                         check_task=CheckTasks.check_search_results,
-                                                                         check_items={"enable_milvus_client_api": True,
-                                                                                      "nq": ct.default_nq,
-                                                                                      "limit": ct.default_limit,
-                                                                                      "pk_name": default_pk_name})
+        filter_params_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            filter=f"{default_pk_name} > 10",
+            search_params=sp,
+            partition_names=[p_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(filter_params_search_task)
 
         # search output fields
-        output_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                  output_fields=["*"],
-                                                                  partition_names=[p_name],
-                                                                  check_task=CheckTasks.check_search_results,
-                                                                  check_items={"enable_milvus_client_api": True,
-                                                                               "nq": ct.default_nq,
-                                                                               "limit": ct.default_limit,
-                                                                               "pk_name": default_pk_name})
+        output_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            output_fields=["*"],
+            partition_names=[p_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(output_search_task)
 
         # query with filter and default output "*"
         exp_query_res = [{default_pk_name: i} for i in range(ct.default_limit)]
-        filter_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                                filter=f"{default_pk_name} < {ct.default_limit}",
-                                                                output_fields=[default_pk_name],
-                                                                partition_names=[p_name],
-                                                                check_task=CheckTasks.check_query_results,
-                                                                check_items={"exp_res": exp_query_res,
-                                                                             "pk_name": default_pk_name})
+        filter_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            filter=f"{default_pk_name} < {ct.default_limit}",
+            output_fields=[default_pk_name],
+            partition_names=[p_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": exp_query_res, "pk_name": default_pk_name},
+        )
         tasks.append(filter_query_task)
         # query with ids and output all fields
-        ids_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                             ids=[i for i in range(ct.default_limit)],
-                                                             output_fields=["*"],
-                                                             partition_names=[p_name],
-                                                             check_task=CheckTasks.check_query_results,
-                                                             check_items={"exp_res": rows[:ct.default_limit],
-                                                                          "with_vec": True,
-                                                                          "pk_name": default_pk_name})
+        ids_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            ids=[i for i in range(ct.default_limit)],
+            output_fields=["*"],
+            partition_names=[p_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows[: ct.default_limit], "with_vec": True, "pk_name": default_pk_name},
+        )
         tasks.append(ids_query_task)
         # get with ids
-        get_task = self.async_milvus_client_wrap.get(c_name,
-                                                     ids=[0, 1], partition_names=[p_name],
-                                                     output_fields=[default_pk_name, default_vector_name],
-                                                     check_task=CheckTasks.check_query_results,
-                                                     check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "pk_name": default_pk_name})
+        get_task = self.async_milvus_client_wrap.get(
+            c_name,
+            ids=[0, 1],
+            partition_names=[p_name],
+            output_fields=[default_pk_name, default_vector_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows[:2], "with_vec": True, "pk_name": default_pk_name},
+        )
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -224,8 +268,9 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
-        schema = self.async_milvus_client_wrap.create_schema(auto_id=False,
-                                                             partition_key_field=ct.default_int64_field_name)
+        schema = self.async_milvus_client_wrap.create_schema(
+            auto_id=False, partition_key_field=ct.default_int64_field_name
+        )
         schema.add_field(pk_field_name, DataType.VARCHAR, max_length=100, is_primary=True)
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_partition_key=True)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
@@ -236,22 +281,25 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
         # insert entities
         rows = [
-            {pk_field_name: str(i),
-             ct.default_int64_field_name: i,
-             ct.default_float_vec_field_name: [random.random() for _ in range(ct.default_dim)],
-             default_vector_name: [random.random() for _ in range(ct.default_dim)],
-             } for i in range(async_default_nb)]
+            {
+                pk_field_name: str(i),
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: [random.random() for _ in range(ct.default_dim)],
+                default_vector_name: [random.random() for _ in range(ct.default_dim)],
+            }
+            for i in range(async_default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, async_default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step])
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step])
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # flush
         await self.async_milvus_client_wrap.flush(c_name)
@@ -260,11 +308,14 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
         # create index -> load
         index_params = self.async_milvus_client_wrap.prepare_index_params()[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name,
-                               index_type="HNSW", metric_type="COSINE", M=30,
-                               efConstruction=200)
-        index_params.add_index(field_name=default_vector_name, index_type="IVF_SQ8",
-                               metric_type="L2", nlist=32)
+        index_params.add_index(
+            field_name=ct.default_float_vec_field_name,
+            index_type="HNSW",
+            metric_type="COSINE",
+            M=30,
+            efConstruction=200,
+        )
+        index_params.add_index(field_name=default_vector_name, index_type="IVF_SQ8", metric_type="L2", nlist=32)
         await self.async_milvus_client_wrap.create_index(c_name, index_params)
         await self.async_milvus_client_wrap.load_collection(c_name)
 
@@ -272,21 +323,26 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         assert _index["indexed_rows"] == async_default_nb
         assert _index["state"] == "Finished"
         _load, _ = await self.async_milvus_client_wrap.get_load_state(c_name)
-        assert _load['state'] == LoadState.Loaded
+        assert _load["state"] == LoadState.Loaded
 
         # dql tasks
         tasks = []
         # search default
         vector = cf.gen_vectors(ct.default_nq, ct.default_dim)
-        default_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                   anns_field=ct.default_float_vec_field_name,
-                                                                   search_params={"metric_type": "COSINE",
-                                                                                  "params": {"ef": "96"}},
-                                                                   check_task=CheckTasks.check_search_results,
-                                                                   check_items={"enable_milvus_client_api": True,
-                                                                                "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit,
-                                                                                "pk_name": default_pk_name})
+        default_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            anns_field=ct.default_float_vec_field_name,
+            search_params={"metric_type": "COSINE", "params": {"ef": "96"}},
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(default_search_task)
 
         # hybrid_search
@@ -295,30 +351,32 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             "anns_field": ct.default_float_vec_field_name,
             "param": {"metric_type": "COSINE", "params": {"ef": "96"}},
             "limit": ct.default_limit,
-            "expr": f"{ct.default_int64_field_name} > 10"}
+            "expr": f"{ct.default_int64_field_name} > 10",
+        }
         req = AnnSearchRequest(**search_param)
 
         search_param2 = {
             "data": cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
             "anns_field": default_vector_name,
             "param": {"metric_type": "L2", "params": {"nprobe": "32"}},
-            "limit": ct.default_limit
+            "limit": ct.default_limit,
         }
         req2 = AnnSearchRequest(**search_param2)
         _output_fields = [ct.default_int64_field_name, ct.default_string_field_name]
-        filter_params_search_task = self.async_milvus_client_wrap.hybrid_search(c_name, [req, req2], RRFRanker(),
-                                                                                limit=5,
-                                                                                check_task=CheckTasks.check_search_results,
-                                                                                check_items={
-                                                                                    "enable_milvus_client_api": True,
-                                                                                    "nq": ct.default_nq,
-                                                                                    "limit": 5,
-                                                                                    "pk_name": default_pk_name})
+        filter_params_search_task = self.async_milvus_client_wrap.hybrid_search(
+            c_name,
+            [req, req2],
+            RRFRanker(),
+            limit=5,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": ct.default_nq, "limit": 5, "pk_name": default_pk_name},
+        )
         tasks.append(filter_params_search_task)
 
         # get with ids
-        get_task = self.async_milvus_client_wrap.get(c_name, ids=['0', '1'], output_fields=[ct.default_int64_field_name,
-                                                                                            pk_field_name])
+        get_task = self.async_milvus_client_wrap.get(
+            c_name, ids=["0", "1"], output_fields=[ct.default_int64_field_name, pk_field_name]
+        )
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -336,36 +394,37 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         # insert entities
         rows = [
             {default_pk_name: i, default_vector_name: [random.random() for _ in range(ct.default_dim)]}
-            for i in range(ct.default_nb)]
+            for i in range(ct.default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, ct.default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step])
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step])
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # dml tasks
         # query id -> upsert id -> query id -> delete id -> query id
         _id = 10
-        get_res, _ = await self.async_milvus_client_wrap.get(c_name, ids=[_id],
-                                                             output_fields=[default_pk_name, default_vector_name])
+        get_res, _ = await self.async_milvus_client_wrap.get(
+            c_name, ids=[_id], output_fields=[default_pk_name, default_vector_name]
+        )
         assert len(get_res) == 1
 
         # upsert
-        upsert_row = [{
-            default_pk_name: _id, default_vector_name: [random.random() for _ in range(ct.default_dim)]
-        }]
+        upsert_row = [{default_pk_name: _id, default_vector_name: [random.random() for _ in range(ct.default_dim)]}]
         upsert_res, _ = await self.async_milvus_client_wrap.upsert(c_name, upsert_row)
         assert upsert_res["upsert_count"] == 1
 
         # get _id after upsert
-        get_res, _ = await self.async_milvus_client_wrap.get(c_name, ids=[_id],
-                                                             output_fields=[default_pk_name, default_vector_name])
+        get_res, _ = await self.async_milvus_client_wrap.get(
+            c_name, ids=[_id], output_fields=[default_pk_name, default_vector_name]
+        )
         for j in range(5):
             assert abs(get_res[0][default_vector_name][j] - upsert_row[0][default_vector_name][j]) < ct.epsilon
 
@@ -374,8 +433,9 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         assert del_res["delete_count"] == 1
 
         # query after delete
-        get_res, _ = await self.async_milvus_client_wrap.get(c_name, ids=[_id],
-                                                             output_fields=[default_pk_name, default_vector_name])
+        get_res, _ = await self.async_milvus_client_wrap.get(
+            c_name, ids=[_id], output_fields=[default_pk_name, default_vector_name]
+        )
         assert len(get_res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -397,48 +457,57 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         # insert entities
         rows = [
             {default_pk_name: i, default_vector_name: [random.random() for _ in range(ct.default_dim)]}
-            for i in range(async_default_nb)]
+            for i in range(async_default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, async_default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step])
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step])
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # dql tasks
         tasks = []
         # search default
         vector = cf.gen_vectors(ct.default_nq, ct.default_dim)
-        default_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                   check_task=CheckTasks.check_search_results,
-                                                                   check_items={"enable_milvus_client_api": True,
-                                                                                "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit,
-                                                                                "pk_name": default_pk_name})
+        default_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(default_search_task)
 
         # query with filter and default output "*"
         exp_query_res = [{default_pk_name: i} for i in range(ct.default_limit)]
-        filter_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                                filter=f"{default_pk_name} < {ct.default_limit}",
-                                                                output_fields=[default_pk_name],
-                                                                check_task=CheckTasks.check_query_results,
-                                                                check_items={"exp_res": exp_query_res,
-                                                                             "pk_name": default_pk_name})
+        filter_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            filter=f"{default_pk_name} < {ct.default_limit}",
+            output_fields=[default_pk_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": exp_query_res, "pk_name": default_pk_name},
+        )
         tasks.append(filter_query_task)
 
         # get with ids
-        get_task = self.async_milvus_client_wrap.get(c_name,
-                                                     ids=[0, 1],
-                                                     output_fields=[default_pk_name, default_vector_name],
-                                                     check_task=CheckTasks.check_query_results,
-                                                     check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "pk_name": default_pk_name})
+        get_task = self.async_milvus_client_wrap.get(
+            c_name,
+            ids=[0, 1],
+            output_fields=[default_pk_name, default_vector_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": rows[:2], "with_vec": True, "pk_name": default_pk_name},
+        )
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -475,38 +544,46 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         # insert entities
         rows = [
             {default_pk_name: i, default_vector_name: [random.random() for _ in range(ct.default_dim)]}
-            for i in range(ct.default_nb)]
+            for i in range(ct.default_nb)
+        ]
         start_time = time.time()
         tasks = []
         step = 1000
         for i in range(0, ct.default_nb, step):
-            task = self.async_milvus_client_wrap.insert(c_name, rows[i:i + step])
+            task = self.async_milvus_client_wrap.insert(c_name, rows[i : i + step])
             tasks.append(task)
         insert_res = await asyncio.gather(*tasks)
         end_time = time.time()
         log.info("Total time: {:.2f} seconds".format(end_time - start_time))
         for r in insert_res:
-            assert r[0]['insert_count'] == step
+            assert r[0]["insert_count"] == step
 
         # dql tasks
         tasks = []
         # search default
         vector = cf.gen_vectors(ct.default_nq, ct.default_dim)
-        default_search_task = self.async_milvus_client_wrap.search(c_name, vector, limit=ct.default_limit,
-                                                                   check_task=CheckTasks.check_search_results,
-                                                                   check_items={"enable_milvus_client_api": True,
-                                                                                "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit,
-                                                                                "pk_name": default_pk_name})
+        default_search_task = self.async_milvus_client_wrap.search(
+            c_name,
+            vector,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "pk_name": default_pk_name,
+            },
+        )
         tasks.append(default_search_task)
 
         # query with filter and default output "*"
         exp_query_res = [{default_pk_name: i} for i in range(ct.default_limit)]
-        filter_query_task = self.async_milvus_client_wrap.query(c_name,
-                                                                filter=f"{default_pk_name} < {ct.default_limit}",
-                                                                output_fields=[default_pk_name],
-                                                                check_task=CheckTasks.check_query_results,
-                                                                check_items={"exp_res": exp_query_res,
-                                                                             "pk_name": default_pk_name})
+        filter_query_task = self.async_milvus_client_wrap.query(
+            c_name,
+            filter=f"{default_pk_name} < {ct.default_limit}",
+            output_fields=[default_pk_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": exp_query_res, "pk_name": default_pk_name},
+        )
         tasks.append(filter_query_task)
         await asyncio.gather(*tasks)

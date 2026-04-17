@@ -27,7 +27,6 @@ default_warmup_nb = ct.default_nb
 
 
 class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_alter_index_default(self):
         """
@@ -48,23 +47,37 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
         self.load_collection(client, collection_name)
         res1 = self.describe_index(client, collection_name, index_name=idx_names[0])[0]
-        assert res1.get('mmap.enabled', None) is None
-        error = {ct.err_code: 104,
-                 ct.err_msg: f"can't alter index on loaded collection, "
-                             f"please release the collection first: collection already loaded[collection={collection_name}]"}
+        assert res1.get("mmap.enabled", None) is None
+        error = {
+            ct.err_code: 104,
+            ct.err_msg: f"can't alter index on loaded collection, "
+            f"please release the collection first: collection already loaded[collection={collection_name}]",
+        }
         # 1. alter index after load
-        self.alter_index_properties(client, collection_name, idx_names[0], properties={"mmap.enabled": True},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        self.drop_index_properties(client, collection_name, idx_names[0], property_keys=["mmap.enabled"],
-                                   check_task=CheckTasks.err_res, check_items=error)
+        self.alter_index_properties(
+            client,
+            collection_name,
+            idx_names[0],
+            properties={"mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        self.drop_index_properties(
+            client,
+            collection_name,
+            idx_names[0],
+            property_keys=["mmap.enabled"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         # 2. alter index after release
         self.alter_index_properties(client, collection_name, idx_names[0], properties={"mmap.enabled": True})
         res2 = self.describe_index(client, collection_name, index_name=idx_names[0])[0]
-        assert res2.get('mmap.enabled', None) == 'True'
+        assert res2.get("mmap.enabled", None) == "True"
         self.drop_index_properties(client, collection_name, idx_names[0], property_keys=["mmap.enabled"])
         res3 = self.describe_index(client, collection_name, index_name=idx_names[0])[0]
-        assert res3.get('mmap.enabled', None) is None
+        assert res3.get("mmap.enabled", None) is None
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_index_unsupported_properties(self):
@@ -78,26 +91,37 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
-        pk_field_name = 'id_string'
-        vector_field_name = 'embeddings'
-        str_field_name = 'title'
+        pk_field_name = "id_string"
+        vector_field_name = "embeddings"
+        str_field_name = "title"
         max_length = 16
         schema.add_field(pk_field_name, DataType.VARCHAR, max_length=max_length, is_primary=True, auto_id=False)
         schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=dim, mmap_enabled=True)
         schema.add_field(str_field_name, DataType.VARCHAR, max_length=max_length, mmap_enabled=True)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name, metric_type="COSINE",
-                               index_type="HNSW", params={"M": 16, "efConstruction": 100, "mmap.enabled": True})
+        index_params.add_index(
+            field_name=vector_field_name,
+            metric_type="COSINE",
+            index_type="HNSW",
+            params={"M": 16, "efConstruction": 100, "mmap.enabled": True},
+        )
         index_params.add_index(field_name=str_field_name)
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"mmap.enabled": True})
-        self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
-                                 check_items={str_field_name: {"max_length": max_length, "mmap_enabled": True},
-                                              vector_field_name: {"mmap_enabled": True},
-                                              'properties': {'mmap.enabled': 'False'}})
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, properties={"mmap.enabled": True}
+        )
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_collection_fields_properties,
+            check_items={
+                str_field_name: {"max_length": max_length, "mmap_enabled": True},
+                vector_field_name: {"mmap_enabled": True},
+                "properties": {"mmap.enabled": "False"},
+            },
+        )
         res = self.describe_index(client, collection_name, index_name=vector_field_name)[0]
-        assert res.get('mmap.enabled', None) == 'True'
+        assert res.get("mmap.enabled", None) == "True"
         self.release_collection(client, collection_name)
         properties = self.describe_index(client, collection_name, index_name=vector_field_name)[0]
         for p in properties.items():
@@ -105,9 +129,14 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
                 log.debug(f"try to alter index property: {p[0]}")
                 error = {ct.err_code: 1, ct.err_msg: f"{p[0]} is not a configable index property"}
                 new_value = p[1] + 1 if isinstance(p[1], numbers.Number) else "new_value"
-                self.alter_index_properties(client, collection_name, vector_field_name,
-                                            properties={p[0]: new_value},
-                                            check_task=CheckTasks.err_res, check_items=error)
+                self.alter_index_properties(
+                    client,
+                    collection_name,
+                    vector_field_name,
+                    properties={p[0]: new_value},
+                    check_task=CheckTasks.err_res,
+                    check_items=error,
+                )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_index_unsupported_value(self):
@@ -122,13 +151,18 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
         self.release_collection(client, collection_name)
         res1 = self.describe_index(client, collection_name, index_name=idx_names[0])[0]
-        assert res1.get('mmap.enabled', None) is None
-        unsupported_values = [None, [], '', 20, '  ', 0.01, "new_value"]
+        assert res1.get("mmap.enabled", None) is None
+        unsupported_values = [None, [], "", 20, "  ", 0.01, "new_value"]
         for value in unsupported_values:
             error = {ct.err_code: 1, ct.err_msg: f"invalid mmap.enabled value: {value}, expected: true, false"}
-            self.alter_index_properties(client, collection_name, idx_names[0],
-                                        properties={"mmap.enabled": value},
-                                        check_task=CheckTasks.err_res, check_items=error)
+            self.alter_index_properties(
+                client,
+                collection_name,
+                idx_names[0],
+                properties={"mmap.enabled": value},
+                check_task=CheckTasks.err_res,
+                check_items=error,
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_index_idempotent_with_field_warmup(self):
@@ -155,16 +189,21 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         # 3. alter field to set warmup=sync at field level
         # This adds warmup to field TypeParams, which will be included in CreateIndex request
-        self.alter_collection_field(client, collection_name, field_name=default_vector_field_name,
-                                    field_params={"warmup": "sync"})
+        self.alter_collection_field(
+            client, collection_name, field_name=default_vector_field_name, field_params={"warmup": "sync"}
+        )
         # 4. drop existing index
         self.drop_index(client, collection_name, default_vector_field_name)
         res = self.list_indexes(client, collection_name)[0]
         assert res == []
         # 5. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW",
-                               metric_type="L2", params={"M": 8, "efConstruction": 200})
+        index_params.add_index(
+            field_name=default_vector_field_name,
+            index_type="HNSW",
+            metric_type="L2",
+            params={"M": 8, "efConstruction": 200},
+        )
         # 6. create index (first time) - should succeed
         self.create_index(client, collection_name, index_params)
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
@@ -200,16 +239,19 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         # 2. release collection before altering properties
         self.release_collection(client, collection_name)
         # 3. alter collection properties to set warmup.vectorField=sync
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.vectorField": "sync"})
+        self.alter_collection_properties(client, collection_name, properties={"warmup.vectorField": "sync"})
         # 4. drop existing index
         self.drop_index(client, collection_name, default_vector_field_name)
         res = self.list_indexes(client, collection_name)[0]
         assert res == []
         # 5. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW",
-                               metric_type="L2", params={"M": 8, "efConstruction": 200})
+        index_params.add_index(
+            field_name=default_vector_field_name,
+            index_type="HNSW",
+            metric_type="L2",
+            params={"M": 8, "efConstruction": 200},
+        )
         # 6. create index (first time) - should succeed
         self.create_index(client, collection_name, index_params)
         idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
@@ -242,44 +284,51 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.load_collection(client, collection_name)
         res1 = self.describe_collection(client, collection_name)[0]
-        assert len(res1.get('properties', {})) == 1
+        assert len(res1.get("properties", {})) == 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can not alter mmap properties if collection loaded"}
-        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
-                                         check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
-        self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": False},
-                                         check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can not delete mmap properties if collection loaded"}
-        self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
-                                        check_task=CheckTasks.err_res, check_items=error)
-        # TODO                                
-        error = {ct.err_code: 999,
-                 ct.err_msg: "cannot delete key dynamicfield.enabled"}
-        self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
-                                        check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
+        self.alter_collection_properties(
+            client, collection_name, properties={"mmap.enabled": True}, check_task=CheckTasks.err_res, check_items=error
+        )
+        error = {ct.err_code: 999, ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"dynamicfield.enabled": False},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        error = {ct.err_code: 999, ct.err_msg: "can not delete mmap properties if collection loaded"}
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["mmap.enabled"], check_task=CheckTasks.err_res, check_items=error
+        )
+        # TODO
+        error = {ct.err_code: 999, ct.err_msg: "cannot delete key dynamicfield.enabled"}
+        self.drop_collection_properties(
+            client,
+            collection_name,
+            property_keys=["dynamicfield.enabled"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         res3 = self.describe_collection(client, collection_name)[0]
-        assert len(res1.get('properties', {})) == 1
+        assert len(res1.get("properties", {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
-        assert len(res1.get('properties', {})) == 1
+        assert len(res1.get("properties", {})) == 1
         # 2. alter collection properties after release
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert {'mmap.enabled': 'True'}.items() <= res2.get('properties', {}).items()
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"collection.ttl.seconds": 100})
+        assert {"mmap.enabled": "True"}.items() <= res2.get("properties", {}).items()
+        self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 100})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert {'mmap.enabled': 'True', 'collection.ttl.seconds': '100'}.items()  \
-                <= res2.get('properties', {}).items()
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["mmap.enabled", "collection.ttl.seconds"])
+        assert {"mmap.enabled": "True", "collection.ttl.seconds": "100"}.items() <= res2.get("properties", {}).items()
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["mmap.enabled", "collection.ttl.seconds"]
+        )
         res3 = self.describe_collection(client, collection_name)[0]
-        assert len(res1.get('properties', {})) == 1
+        assert len(res1.get("properties", {})) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_enable_dynamic_collection_field(self):
@@ -303,82 +352,128 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. add new field
         default_value = 100
-        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
-                                  nullable=True, default_value=default_value)
+        self.add_collection_field(
+            client,
+            collection_name,
+            field_name="field_new",
+            data_type=DataType.INT64,
+            nullable=True,
+            default_value=default_value,
+        )
         # 4. alter collection dynamic field enable
         self.alter_collection_properties(client, collection_name, {"dynamicfield.enabled": True})
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('enable_dynamic_field', None) is True
+        assert res.get("enable_dynamic_field", None) is True
         # 5. insert data with dynamic field and new field
         vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows_new = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                     default_string_field_name: str(i), default_new_field_name: i,
-                     default_dynamic_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows_new = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                default_new_field_name: i,
+                default_dynamic_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows_new)
         # 6. create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_dynamic_field_name,
-                               index_type="INVERTED",
-                               params={"json_cast_type": "DOUBLE",
-                                       "json_path": f"{default_dynamic_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=default_dynamic_field_name,
+            index_type="INVERTED",
+            params={"json_cast_type": "DOUBLE", "json_path": f"{default_dynamic_field_name}['a']['b']"},
+        )
         self.create_index(client, collection_name, index_params)
         index_name = "$meta/" + default_dynamic_field_name
-        self.describe_index(client, collection_name, index_name + "/a/b",
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": "DOUBLE",
-                                "json_path": f"{default_dynamic_field_name}['a']['b']",
-                                "index_type": "INVERTED",
-                                "field_name": default_dynamic_field_name,
-                                "index_name": index_name + "/a/b"})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": "DOUBLE",
+                "json_path": f"{default_dynamic_field_name}['a']['b']",
+                "index_type": "INVERTED",
+                "field_name": default_dynamic_field_name,
+                "index_name": index_name + "/a/b",
+            },
+        )
         # 7. query using filter with dynamic field and new field
-        res = self.query(client, collection_name,
-                         filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
-                         output_fields=[default_dynamic_field_name],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: [{"id": item["id"],
-                                                 default_dynamic_field_name: item[default_dynamic_field_name]}
-                                                 for item in rows_new]})[0]
+        res = self.query(
+            client,
+            collection_name,
+            filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
+            output_fields=[default_dynamic_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                exp_res: [
+                    {"id": item["id"], default_dynamic_field_name: item[default_dynamic_field_name]}
+                    for item in rows_new
+                ]
+            },
+        )[0]
         assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
         # 8. search using filter with dynamic field and new field
         vectors_to_search = [vectors[0]]
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
         # 9. add new field same as dynamic field name
-        self.add_collection_field(client, collection_name, field_name=default_dynamic_field_name,
-                                  data_type=DataType.INT64, nullable=True, default_value=default_value)
+        self.add_collection_field(
+            client,
+            collection_name,
+            field_name=default_dynamic_field_name,
+            data_type=DataType.INT64,
+            nullable=True,
+            default_value=default_value,
+        )
         # 10. query using filter with dynamic field and new field
-        res = self.query(client, collection_name,
-                         filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(default_dynamic_field_name,
-                                                                                 default_dynamic_field_name,
-                                                                                 default_value),
-                         output_fields=[default_dynamic_field_name, f'$meta["{default_dynamic_field_name}"]'],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: [{"id": item["id"], default_dynamic_field_name: default_value}
-                                                for item in rows_new]})[0]
+        res = self.query(
+            client,
+            collection_name,
+            filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(
+                default_dynamic_field_name, default_dynamic_field_name, default_value
+            ),
+            output_fields=[default_dynamic_field_name, f'$meta["{default_dynamic_field_name}"]'],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: [{"id": item["id"], default_dynamic_field_name: default_value} for item in rows_new]},
+        )[0]
         # dynamic field same as new field name, output_fields contain dynamic field, result do not contain dynamic field
         # https://github.com/milvus-io/milvus/issues/41702
         assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
         # 11. search using filter with dynamic field and new field
-        self.search(client, collection_name, vectors_to_search,
-                    filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(default_dynamic_field_name,
-                                                                            default_dynamic_field_name, default_value),
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(
+                default_dynamic_field_name, default_dynamic_field_name, default_value
+            ),
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("old_dynamic_flag, new_dynamic_flag", [(True, True), (False, False)])
@@ -402,14 +497,14 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         # 2. alter collection dynamic field
         self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": new_dynamic_flag})
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('enable_dynamic_field', None) is new_dynamic_flag
+        assert res.get("enable_dynamic_field", None) is new_dynamic_flag
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("pk_field_type", [DataType.INT64, DataType.VARCHAR])
     def test_milvus_client_alter_allow_insert_auto_id(self, pk_field_type):
         """
         target: test alter collection allow insert auto id
-        method: 
+        method:
             1. create collection with auto_id=True
             2. try to insert data with primary key
             3. verify insert failed
@@ -438,15 +533,21 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. try to insert data with primary key
-        rows_with_pk = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
-        } for i in range(100)]
+        rows_with_pk = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+            }
+            for i in range(100)
+        ]
         if pk_field_type == DataType.VARCHAR:
-            rows_with_pk = [{
-                default_primary_key_field_name: f"id_{i}",
-                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
-            } for i in range(100)]
+            rows_with_pk = [
+                {
+                    default_primary_key_field_name: f"id_{i}",
+                    default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                }
+                for i in range(100)
+            ]
         error = {ct.err_code: 999, ct.err_msg: f"more fieldData has pass in"}
         self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
 
@@ -461,8 +562,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         filter = f"{default_primary_key_field_name} in [10, 20,90]"
         if pk_field_type == DataType.VARCHAR:
             filter = f"{default_primary_key_field_name} in ['id_10', 'id_20', 'id_90']"
-        res = self.query(client, collection_name, filter=filter,
-                         output_fields=[default_primary_key_field_name])[0]
+        res = self.query(client, collection_name, filter=filter, output_fields=[default_primary_key_field_name])[0]
         assert (len(res)) == 0
 
         # 3. alter collection allow_insert_auto_id=True
@@ -474,39 +574,44 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == 100 * 2
         # 6. verify the new inserted data's primary keys are customized
-        res = self.query(client, collection_name, filter=filter,
-                         output_fields=[default_primary_key_field_name])[0]
+        res = self.query(client, collection_name, filter=filter, output_fields=[default_primary_key_field_name])[0]
         assert (len(res)) == 3
 
         # check the collection info
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('properties').get('allow_insert_auto_id', None) == 'True'
+        assert res.get("properties").get("allow_insert_auto_id", None) == "True"
 
         # drop the collection properties allow_insert_auto_id
         self.drop_collection_properties(client, collection_name, property_keys=["allow_insert_auto_id"])
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('properties').get('allow_insert_auto_id', None) is None
+        assert res.get("properties").get("allow_insert_auto_id", None) is None
         self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
 
         # alter collection allow_insert_auto_id=False
         self.alter_collection_properties(client, collection_name, properties={"allow_insert_auto_id": False})
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('properties').get('allow_insert_auto_id', None) == 'False'
+        assert res.get("properties").get("allow_insert_auto_id", None) == "False"
         self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
 
         # alter collection allow_insert_auto_id=True with string value
         self.alter_collection_properties(client, collection_name, properties={"allow_insert_auto_id": "True"})
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('properties').get('allow_insert_auto_id', None) == 'True'
-        rows_with_pk = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
-        } for i in range(100, 200)]
+        assert res.get("properties").get("allow_insert_auto_id", None) == "True"
+        rows_with_pk = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+            }
+            for i in range(100, 200)
+        ]
         if pk_field_type == DataType.VARCHAR:
-            rows_with_pk = [{
-                default_primary_key_field_name: f"id_{i}",
-                default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]
-            } for i in range(100, 200)]
+            rows_with_pk = [
+                {
+                    default_primary_key_field_name: f"id_{i}",
+                    default_vector_field_name: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                }
+                for i in range(100, 200)
+            ]
         self.insert(client, collection_name, rows_with_pk)
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -527,81 +632,125 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
-        pk_field_name = 'id_string'
-        vector_field_name = 'embeddings'
-        str_field_name = 'title'
-        json_field_name = 'json_field'
-        array_field_name = 'tags'
-        new_field_name = 'field_new'
+        pk_field_name = "id_string"
+        vector_field_name = "embeddings"
+        str_field_name = "title"
+        json_field_name = "json_field"
+        array_field_name = "tags"
+        new_field_name = "field_new"
         max_length = 16
         schema.add_field(pk_field_name, DataType.VARCHAR, max_length=max_length, is_primary=True, auto_id=False)
         schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=dim, mmap_enabled=True)
         schema.add_field(str_field_name, DataType.VARCHAR, max_length=max_length, mmap_enabled=True)
         schema.add_field(json_field_name, DataType.JSON, mmap_enabled=False)
-        schema.add_field(field_name=array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_capacity=10, max_length=max_length)
+        schema.add_field(
+            field_name=array_field_name,
+            datatype=DataType.ARRAY,
+            element_type=DataType.VARCHAR,
+            max_capacity=10,
+            max_length=max_length,
+        )
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name, metric_type="COSINE",
-                               index_type="IVF_FLAT", params={"nlist": 128})
+        index_params.add_index(
+            field_name=vector_field_name, metric_type="COSINE", index_type="IVF_FLAT", params={"nlist": 128}
+        )
         index_params.add_index(field_name=str_field_name)
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        check_items = {str_field_name: {"max_length": max_length, "mmap_enabled": True},
-                       vector_field_name: {"mmap_enabled": True},
-                       json_field_name: {"mmap_enabled": False}}
+        check_items = {
+            str_field_name: {"max_length": max_length, "mmap_enabled": True},
+            vector_field_name: {"mmap_enabled": True},
+            json_field_name: {"mmap_enabled": False},
+        }
         if add_field:
-            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
-                                      nullable=True, max_length=max_length)
+            self.add_collection_field(
+                client,
+                collection_name,
+                field_name="field_new",
+                data_type=DataType.VARCHAR,
+                nullable=True,
+                max_length=max_length,
+            )
             check_items["field_new"] = {"max_length": max_length}
-        self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
-                                 check_items=check_items)
+        self.describe_collection(
+            client, collection_name, check_task=CheckTasks.check_collection_fields_properties, check_items=check_items
+        )
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            pk_field_name: f'id_{i}',
-            vector_field_name: list(rng.random((1, dim))[0]),
-            str_field_name: cf.gen_str_by_length(max_length),
-            json_field_name: {"number": i},
-            array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)],
-            # add new field data (only when add_field is True)
-            **({"field_new": cf.gen_str_by_length(max_length)} if add_field else {})
-        } for i in range(ct.default_nb)]
+        rows = [
+            {
+                pk_field_name: f"id_{i}",
+                vector_field_name: list(rng.random((1, dim))[0]),
+                str_field_name: cf.gen_str_by_length(max_length),
+                json_field_name: {"number": i},
+                array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)],
+                # add new field data (only when add_field is True)
+                **({"field_new": cf.gen_str_by_length(max_length)} if add_field else {}),
+            }
+            for i in range(ct.default_nb)
+        ]
         self.insert(client, collection_name, rows)
 
         # 1. alter collection field before load
         self.release_collection(client, collection_name)
         new_max_length = max_length // 2
         # TODO: use one format of mmap_enabled after #38443 fixed
-        self.alter_collection_field(client, collection_name, field_name=str_field_name,
-                                    field_params={"max_length": new_max_length, "mmap.enabled": False})
-        self.alter_collection_field(client, collection_name, field_name=pk_field_name,
-                                    field_params={"max_length": new_max_length})
-        self.alter_collection_field(client, collection_name, field_name=json_field_name,
-                                    field_params={"mmap.enabled": True})
-        self.alter_collection_field(client, collection_name, field_name=vector_field_name,
-                                    field_params={"mmap.enabled": False})
-        self.alter_collection_field(client, collection_name, field_name=array_field_name,
-                                    field_params={"max_length": new_max_length})
-        self.alter_collection_field(client, collection_name, field_name=array_field_name,
-                                    field_params={"max_capacity": 20})
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name=str_field_name,
+            field_params={"max_length": new_max_length, "mmap.enabled": False},
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=pk_field_name, field_params={"max_length": new_max_length}
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=json_field_name, field_params={"mmap.enabled": True}
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=vector_field_name, field_params={"mmap.enabled": False}
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=array_field_name, field_params={"max_length": new_max_length}
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=array_field_name, field_params={"max_capacity": 20}
+        )
         error = {ct.err_code: 999, ct.err_msg: f"can not modify the maxlength for non-string types"}
-        self.alter_collection_field(client, collection_name, field_name=vector_field_name,
-                                    field_params={"max_length": new_max_length},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name=vector_field_name,
+            field_params={"max_length": new_max_length},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         error = {ct.err_code: 999, ct.err_msg: "element_type does not allow update in collection field param"}
-        self.alter_collection_field(client, collection_name, field_name=array_field_name,
-                                    field_params={"element_type": DataType.INT64},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        check_items_new = {str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
-                           vector_field_name: {"mmap_enabled": False},
-                           json_field_name: {"mmap_enabled": True},
-                           array_field_name: {"max_length": new_max_length, "max_capacity": 20}}
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name=array_field_name,
+            field_params={"element_type": DataType.INT64},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        check_items_new = {
+            str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
+            vector_field_name: {"mmap_enabled": False},
+            json_field_name: {"mmap_enabled": True},
+            array_field_name: {"max_length": new_max_length, "max_capacity": 20},
+        }
         if add_field:
-            self.alter_collection_field(client, collection_name, field_name="field_new",
-                                        field_params={"max_length": new_max_length})
+            self.alter_collection_field(
+                client, collection_name, field_name="field_new", field_params={"max_length": new_max_length}
+            )
             check_items_new["field_new"] = {"max_length": new_max_length}
-        self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
-                                 check_items=check_items_new)
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_collection_fields_properties,
+            check_items=check_items_new,
+        )
         # verify that cannot insert data with the old max_length
         fields_to_verify = [pk_field_name, str_field_name, array_field_name]
         if add_field:
@@ -609,50 +758,74 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         for alter_field in fields_to_verify:
             error = {ct.err_code: 999, ct.err_msg: f"length of varchar field {alter_field} exceeds max length"}
             if alter_field == array_field_name:
-                error = {ct.err_code: 999,
-                         ct.err_msg: f'length of Array array field "{array_field_name}" exceeds max length'}
-            rows = [{
-                pk_field_name: cf.gen_str_by_length(max_length) if alter_field == pk_field_name else f'id_{i}',
-                vector_field_name: list(rng.random((1, dim))[0]),
-                str_field_name: cf.gen_str_by_length(max_length) if alter_field == str_field_name else f'ti_{i}',
-                json_field_name: {"number": i},
-                array_field_name: [cf.gen_str_by_length(max_length) for _ in
-                                   range(10)] if alter_field == array_field_name else [f"tags_{j}" for j in range(10)],
-                **({"field_new": cf.gen_str_by_length(max_length)} if add_field and alter_field == new_field_name else {})
-            } for i in range(ct.default_nb, ct.default_nb + 10)]
+                error = {
+                    ct.err_code: 999,
+                    ct.err_msg: f'length of Array array field "{array_field_name}" exceeds max length',
+                }
+            rows = [
+                {
+                    pk_field_name: cf.gen_str_by_length(max_length) if alter_field == pk_field_name else f"id_{i}",
+                    vector_field_name: list(rng.random((1, dim))[0]),
+                    str_field_name: cf.gen_str_by_length(max_length) if alter_field == str_field_name else f"ti_{i}",
+                    json_field_name: {"number": i},
+                    array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)]
+                    if alter_field == array_field_name
+                    else [f"tags_{j}" for j in range(10)],
+                    **(
+                        {"field_new": cf.gen_str_by_length(max_length)}
+                        if add_field and alter_field == new_field_name
+                        else {}
+                    ),
+                }
+                for i in range(ct.default_nb, ct.default_nb + 10)
+            ]
             self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
         # verify that can insert data with the new max_length
-        rows = [{
-            pk_field_name: f"new_{cf.gen_str_by_length(new_max_length - 4)}",
-            vector_field_name: list(rng.random((1, dim))[0]),
-            str_field_name: cf.gen_str_by_length(new_max_length),
-            json_field_name: {"number": i},
-            array_field_name: [cf.gen_str_by_length(new_max_length) for _ in range(10)],
-            **({"field_new": cf.gen_str_by_length(new_max_length)} if add_field else {})
-        } for i in range(ct.default_nb, ct.default_nb + 10)]
+        rows = [
+            {
+                pk_field_name: f"new_{cf.gen_str_by_length(new_max_length - 4)}",
+                vector_field_name: list(rng.random((1, dim))[0]),
+                str_field_name: cf.gen_str_by_length(new_max_length),
+                json_field_name: {"number": i},
+                array_field_name: [cf.gen_str_by_length(new_max_length) for _ in range(10)],
+                **({"field_new": cf.gen_str_by_length(new_max_length)} if add_field else {}),
+            }
+            for i in range(ct.default_nb, ct.default_nb + 10)
+        ]
         self.insert(client, collection_name, rows)
 
         # 2. alter collection field after load
         self.load_collection(client, collection_name)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can not alter collection field properties if collection loaded"}
-        self.alter_collection_field(client, collection_name, field_name=str_field_name,
-                                    field_params={"max_length": max_length, "mmap.enabled": True},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        self.alter_collection_field(client, collection_name, field_name=vector_field_name,
-                                    field_params={"mmap.enabled": True},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        self.alter_collection_field(client, collection_name, field_name=pk_field_name,
-                                    field_params={"max_length": max_length})
+        error = {ct.err_code: 999, ct.err_msg: "can not alter collection field properties if collection loaded"}
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name=str_field_name,
+            field_params={"max_length": max_length, "mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name=vector_field_name,
+            field_params={"mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        self.alter_collection_field(
+            client, collection_name, field_name=pk_field_name, field_params={"max_length": max_length}
+        )
         if add_field:
-            self.alter_collection_field(client, collection_name, field_name=new_field_name,
-                                        field_params={"max_length": max_length})
-        res = self.query(client, collection_name, filter=f"{pk_field_name} in ['id_10', 'id_20']",
-                         output_fields=["*"])[0]
+            self.alter_collection_field(
+                client, collection_name, field_name=new_field_name, field_params={"max_length": max_length}
+            )
+        res = self.query(client, collection_name, filter=f"{pk_field_name} in ['id_10', 'id_20']", output_fields=["*"])[
+            0
+        ]
         assert (len(res)) == 2
-        res = self.query(client, collection_name, filter=f"{pk_field_name} like 'new_%'",
-                         output_fields=["*"])[0]
+        res = self.query(client, collection_name, filter=f"{pk_field_name} like 'new_%'", output_fields=["*"])[0]
         assert (len(res)) == 10
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -675,38 +848,69 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema)
 
         # try to alert nullable vector field to non-nullable field
-        error = {ct.err_code: 999,
-                 ct.err_msg: "nullable does not allow update in collection field param"}
-        self.alter_collection_field(client, collection_name, field_name="embeddings_1",
-                                    field_params={"nullable": False},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999, ct.err_msg: "nullable does not allow update in collection field param"}
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="embeddings_1",
+            field_params={"nullable": False},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         # try to alert non-nullable vector field to nullable field
-        self.alter_collection_field(client, collection_name, field_name="embeddings_2",
-                                    field_params={"nullable": True},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="embeddings_2",
+            field_params={"nullable": True},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         # try to alert nullable varchar field to non-nullable varchar field
-        self.alter_collection_field(client, collection_name, field_name="varchar_1",
-                                    field_params={"nullable": False},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        # try to alert non-nullable varchar field to nullable varchar field 
-        self.alter_collection_field(client, collection_name, field_name="varchar_2",
-                                    field_params={"nullable": True},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="varchar_1",
+            field_params={"nullable": False},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        # try to alert non-nullable varchar field to nullable varchar field
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="varchar_2",
+            field_params={"nullable": True},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # add a nullable vector field to the collection
-        self.add_collection_field(client, collection_name, field_name="embeddings_3", 
-                                  data_type=DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        self.add_collection_field(
+            client, collection_name, field_name="embeddings_3", data_type=DataType.FLOAT_VECTOR, dim=dim, nullable=True
+        )
         # try to alert the new added nullable vector field to non-nullable field
-        self.alter_collection_field(client, collection_name, field_name="embeddings_3",
-                                    field_params={"nullable": False},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="embeddings_3",
+            field_params={"nullable": False},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         # add a nullable varchar field to the collection
-        self.add_collection_field(client, collection_name, field_name="varchar_3", 
-                                  data_type=DataType.VARCHAR, max_length=64, nullable=True)
+        self.add_collection_field(
+            client, collection_name, field_name="varchar_3", data_type=DataType.VARCHAR, max_length=64, nullable=True
+        )
         # try to alert the new added nullable varchar field to non-nullable varchar field
-        self.alter_collection_field(client, collection_name, field_name="varchar_3",
-                                    field_params={"nullable": False},
-                                    check_task=CheckTasks.err_res, check_items=error)
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="varchar_3",
+            field_params={"nullable": False},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # drop the collection
         self.drop_collection(client, collection_name)
@@ -728,7 +932,7 @@ class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.release_collection(client, collection_name)
-        default_db = 'default'
+        default_db = "default"
         res1 = self.describe_database(client, db_name=default_db)[0]
         if len(res1.keys()) != 1:
             self.drop_database_properties(client, db_name=default_db, property_keys=res1.keys())
@@ -739,7 +943,11 @@ class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
                 self.load_collection(client, collection_name)
 
             # 1. alter default database properties before load
-            properties = {"key1": 1, "key2": "value2", "key3": [1, 2, 3], }
+            properties = {
+                "key1": 1,
+                "key2": "value2",
+                "key3": [1, 2, 3],
+            }
             self.alter_database_properties(client, db_name=default_db, properties=properties)
             res1 = self.describe_database(client, db_name=default_db)[0]
             # assert res1.properties.items() >= properties.items()
@@ -749,7 +957,7 @@ class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
             res1 = self.describe_database(client, db_name=my_db)[0]
             # assert res1.properties.items() >= properties.items()
             assert len(res1.keys()) == 4
-            properties = {"key1": 2, "key2": "value3", "key3": [1, 2, 3], 'key4': 0.123}
+            properties = {"key1": 2, "key2": "value3", "key3": [1, 2, 3], "key4": 0.123}
             self.alter_database_properties(client, db_name=my_db, properties=properties)
             res1 = self.describe_database(client, db_name=my_db)[0]
             # assert res1.properties.items() >= properties.items()
@@ -789,17 +997,19 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         # 2. Alter field description
         new_description = "This is a new description for vector field"
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name=default_vector_field_name,
-            field_params={"field.description": new_description}
+            field_params={"field.description": new_description},
         )
 
         # 3. Verify description changed
         desc_res = self.describe_collection(client, collection_name)[0]
         for field in desc_res.get("fields", []):
             if field.get("name") == default_vector_field_name:
-                assert field.get("description") == new_description, \
+                assert field.get("description") == new_description, (
                     f"Expected description '{new_description}', got '{field.get('description')}'"
+                )
                 break
 
         # 4. Cleanup
@@ -821,9 +1031,10 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         # 2. Alter primary key field description
         new_description = "Primary key field for entity identification"
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name=default_primary_key_field_name,
-            field_params={"field.description": new_description}
+            field_params={"field.description": new_description},
         )
 
         # 3. Verify
@@ -849,16 +1060,13 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         # 1. Create collection with custom schema
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim,
-                         description="original description")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim, description="original description")
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Alter vector field description
         new_description = "Dense embedding vector for similarity search"
         self.alter_collection_field(
-            client, collection_name,
-            field_name="embedding",
-            field_params={"field.description": new_description}
+            client, collection_name, field_name="embedding", field_params={"field.description": new_description}
         )
 
         # 3. Verify
@@ -885,16 +1093,13 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("title", DataType.VARCHAR, max_length=256,
-                         description="original title description")
+        schema.add_field("title", DataType.VARCHAR, max_length=256, description="original title description")
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Alter scalar field description
         new_description = "Title of the document"
         self.alter_collection_field(
-            client, collection_name,
-            field_name="title",
-            field_params={"field.description": new_description}
+            client, collection_name, field_name="title", field_params={"field.description": new_description}
         )
 
         # 3. Verify
@@ -921,18 +1126,11 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         self.create_collection(client, collection_name, default_dim)
 
         # 2. Alter description multiple times
-        descriptions = [
-            "First description",
-            "Second description",
-            "Third description",
-            "Final description"
-        ]
+        descriptions = ["First description", "Second description", "Third description", "Final description"]
 
         for desc in descriptions:
             self.alter_collection_field(
-                client, collection_name,
-                field_name=default_vector_field_name,
-                field_params={"field.description": desc}
+                client, collection_name, field_name=default_vector_field_name, field_params={"field.description": desc}
             )
 
             # Verify each change
@@ -958,15 +1156,17 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         # 1. Create collection with field having description
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim,
-                         description="This field has a description")
+        schema.add_field(
+            default_vector_field_name,
+            DataType.FLOAT_VECTOR,
+            dim=default_dim,
+            description="This field has a description",
+        )
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Clear description
         self.alter_collection_field(
-            client, collection_name,
-            field_name=default_vector_field_name,
-            field_params={"field.description": ""}
+            client, collection_name, field_name=default_vector_field_name, field_params={"field.description": ""}
         )
 
         # 3. Verify description is empty
@@ -980,14 +1180,17 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("description", [
-        "中文描述测试",
-        "Description with emoji 🚀🎉",
-        "Line1\nLine2\nLine3",
-        "Tab\tseparated\tvalues",
-        "Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?",
-        " " * 100,  # Many spaces
-    ])
+    @pytest.mark.parametrize(
+        "description",
+        [
+            "中文描述测试",
+            "Description with emoji 🚀🎉",
+            "Line1\nLine2\nLine3",
+            "Tab\tseparated\tvalues",
+            "Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?",
+            " " * 100,  # Many spaces
+        ],
+    )
     def test_alter_field_description_special_characters(self, description):
         """
         target: test altering field description with special characters
@@ -1002,9 +1205,10 @@ class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Bas
 
         # 2. Alter with special description
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name=default_vector_field_name,
-            field_params={"field.description": description}
+            field_params={"field.description": description},
         )
 
         # 3. Verify
@@ -1035,15 +1239,15 @@ class TestMilvusClientAlterCollectionFieldDescriptionInvalid(TestMilvusClientV2B
         collection_name = cf.gen_collection_name_by_testcase_name()
 
         # Do not create collection, directly alter
-        error = {ct.err_code: 100,
-                 ct.err_msg: "collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
 
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name=default_vector_field_name,
             field_params={"field.description": "new description"},
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1060,15 +1264,15 @@ class TestMilvusClientAlterCollectionFieldDescriptionInvalid(TestMilvusClientV2B
         self.create_collection(client, collection_name, default_dim)
 
         # 2. Alter non-existent field
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "does not exist in collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "does not exist in collection"}
 
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name="nonexistent_field",
             field_params={"field.description": "new description"},
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         # 3. Cleanup
@@ -1084,15 +1288,15 @@ class TestMilvusClientAlterCollectionFieldDescriptionInvalid(TestMilvusClientV2B
         client = self._client()
         collection_name = ""
 
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
+        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
 
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name=default_vector_field_name,
             field_params={"field.description": "new description"},
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1109,18 +1313,16 @@ class TestMilvusClientAlterCollectionFieldDescriptionInvalid(TestMilvusClientV2B
         self.create_collection(client, collection_name, default_dim)
 
         # 2. Alter with empty field name
-        error = {ct.err_code: 1100,
-                 ct.err_msg: "does not exist in collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "does not exist in collection"}
 
         self.alter_collection_field(
-            client, collection_name,
+            client,
+            collection_name,
             field_name="",
             field_params={"field.description": "new description"},
             check_task=CheckTasks.err_res,
-            check_items=error
+            check_items=error,
         )
 
         # 3. Cleanup
         self.drop_collection(client, collection_name)
-
-

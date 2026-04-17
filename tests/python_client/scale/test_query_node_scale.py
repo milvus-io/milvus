@@ -26,7 +26,7 @@ def verify_load_balance(c_name, host, port=19530):
     """
     verify load balance is available after scale
     """
-    connections.connect('default', host=host, port=port)
+    connections.connect("default", host=host, port=port)
     # verify load balance
     utility_w = ApiUtilityWrapper()
     collection_w = ApiCollectionWrapper()
@@ -37,9 +37,11 @@ def verify_load_balance(c_name, host, port=19530):
     segment_distribution = cf.get_segment_distribution(res)
     all_querynodes = [node["identifier"] for node in ms.query_nodes]
     assert len(all_querynodes) > 1
-    all_querynodes = sorted(all_querynodes,
-                            key=lambda x: len(segment_distribution[x]["sealed"])
-                            if x in segment_distribution else 0, reverse=True)
+    all_querynodes = sorted(
+        all_querynodes,
+        key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+        reverse=True,
+    )
     log.debug(all_querynodes)
     src_node_id = all_querynodes[0]
     des_node_ids = all_querynodes[1:]
@@ -62,7 +64,6 @@ def verify_load_balance(c_name, host, port=19530):
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestQueryNodeScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_query_node(self, host):
         """
@@ -77,28 +78,27 @@ class TestQueryNodeScale:
         """
         release_name = "scale-query"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         query_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'spec.mode': 'cluster',
-            'metadata.name': release_name,
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.queryNode.replicas': 1,
-            'spec.config.common.retentionDuration': 60
-
+            "metadata.namespace": constants.NAMESPACE,
+            "spec.mode": "cluster",
+            "metadata.name": release_name,
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.queryNode.replicas": 1,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(query_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             # connect
             connections.add_connection(default={"host": host, "port": 19530})
-            connections.connect(alias='default')
+            connections.connect(alias="default")
 
             # create
             c_name = cf.gen_unique_str("scale_query")
@@ -116,26 +116,31 @@ class TestQueryNodeScale:
             # create index
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
-            assert collection_w.index()[0] == Index(collection_w.collection, ct.default_float_vec_field_name,
-                                                    default_index_params)
+            assert collection_w.index()[0] == Index(
+                collection_w.collection, ct.default_float_vec_field_name, default_index_params
+            )
 
             # load
             collection_w.load()
 
             # scale queryNode to 5
-            mic.upgrade(release_name, {'spec.components.queryNode.replicas': 5}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.queryNode.replicas": 5}, constants.NAMESPACE)
 
             @counter
             def do_search():
-                """ do search """
-                search_res, is_succ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                                          ct.default_float_vec_field_name, ct.default_search_params,
-                                                          ct.default_limit, check_task=CheckTasks.check_nothing)
+                """do search"""
+                search_res, is_succ = collection_w.search(
+                    cf.gen_vectors(1, ct.default_dim),
+                    ct.default_float_vec_field_name,
+                    ct.default_search_params,
+                    ct.default_limit,
+                    check_task=CheckTasks.check_nothing,
+                )
                 assert len(search_res) == 1
                 return search_res, is_succ
 
             def loop_search():
-                """ continuously search """
+                """continuously search"""
                 while True:
                     do_search()
 
@@ -150,11 +155,11 @@ class TestQueryNodeScale:
 
             @counter
             def do_insert():
-                """ do insert """
+                """do insert"""
                 return collection_w.insert(cf.gen_default_dataframe_data(1000), check_task=CheckTasks.check_nothing)
 
             def loop_insert():
-                """ loop insert """
+                """loop insert"""
                 while True:
                     do_insert()
 
@@ -164,7 +169,7 @@ class TestQueryNodeScale:
             time.sleep(20)
             log.debug("Expand querynode test finished")
 
-            mic.upgrade(release_name, {'spec.components.queryNode.replicas': 3}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.queryNode.replicas": 3}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
@@ -179,7 +184,7 @@ class TestQueryNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
@@ -195,30 +200,34 @@ class TestQueryNodeScale:
         """
         release_name = "scale-replica"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         query_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'metadata.name': release_name,
-            'spec.mode': 'cluster',
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.queryNode.replicas': 5,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "metadata.name": release_name,
+            "spec.mode": "cluster",
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.queryNode.replicas": 5,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(query_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             scale_querynode = random.choice([6, 7, 4, 3])
             connections.connect("scale-replica", host=host, port=19530)
 
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_out"), schema=cf.gen_default_collection_schema(),
-                                         using='scale-replica', shards_num=3)
+            collection_w.init_collection(
+                name=cf.gen_unique_str("scale_out"),
+                schema=cf.gen_default_collection_schema(),
+                using="scale-replica",
+                shards_num=3,
+            )
 
             # insert 10 sealed segments
             for i in range(5):
@@ -230,22 +239,26 @@ class TestQueryNodeScale:
 
             @counter
             def do_search():
-                """ do search """
-                search_res, is_succ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                                          ct.default_float_vec_field_name, ct.default_search_params,
-                                                          ct.default_limit, check_task=CheckTasks.check_nothing)
+                """do search"""
+                search_res, is_succ = collection_w.search(
+                    cf.gen_vectors(1, ct.default_dim),
+                    ct.default_float_vec_field_name,
+                    ct.default_search_params,
+                    ct.default_limit,
+                    check_task=CheckTasks.check_nothing,
+                )
                 assert len(search_res) == 1
                 return search_res, is_succ
 
             def loop_search():
-                """ continuously search """
+                """continuously search"""
                 while True:
                     do_search()
 
             threading.Thread(target=loop_search, args=(), daemon=True).start()
 
             # scale out
-            mic.upgrade(release_name, {'spec.components.queryNode.replicas': scale_querynode}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.queryNode.replicas": scale_querynode}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
             log.debug("Scale out querynode success")
@@ -259,7 +272,7 @@ class TestQueryNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
@@ -275,37 +288,41 @@ class TestQueryNodeScale:
         """
         release_name = "scale-in-query"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         query_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'metadata.name': release_name,
-            'spec.mode': 'cluster',
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.queryNode.replicas': 2,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "metadata.name": release_name,
+            "spec.mode": "cluster",
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.queryNode.replicas": 2,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(query_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
         try:
             # prepare collection
             connections.connect("scale-in", host=host, port=19530)
             utility_w = ApiUtilityWrapper()
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema(),
-                                         using="scale-in")
+            collection_w.init_collection(
+                name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema(), using="scale-in"
+            )
             collection_w.insert(cf.gen_default_dataframe_data())
             assert collection_w.num_entities == ct.default_nb
 
             # load multi replicas and search success
             collection_w.load(replica_number=2)
-            search_res, is_succ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                                      ct.default_float_vec_field_name,
-                                                      ct.default_search_params, ct.default_limit)
+            search_res, is_succ = collection_w.search(
+                cf.gen_vectors(1, ct.default_dim),
+                ct.default_float_vec_field_name,
+                ct.default_search_params,
+                ct.default_limit,
+            )
             assert len(search_res[0].ids) == ct.default_limit
             log.info("Search successfully after load with 2 replicas")
             log.debug(collection_w.get_replicas()[0])
@@ -313,24 +330,32 @@ class TestQueryNodeScale:
 
             # scale in querynode from 2 to 1, less than replica number
             log.debug("Scale in querynode from 2 to 1")
-            mic.upgrade(release_name, {'spec.components.queryNode.replicas': 1}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.queryNode.replicas": 1}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             # search and not assure success
-            collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                ct.default_float_vec_field_name, ct.default_search_params,
-                                ct.default_limit, check_task=CheckTasks.check_nothing)
+            collection_w.search(
+                cf.gen_vectors(1, ct.default_dim),
+                ct.default_float_vec_field_name,
+                ct.default_search_params,
+                ct.default_limit,
+                check_task=CheckTasks.check_nothing,
+            )
             log.debug(collection_w.get_replicas(check_task=CheckTasks.check_nothing)[0])
 
             # scale querynode from 1 back to 2
-            mic.upgrade(release_name, {'spec.components.queryNode.replicas': 2}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.queryNode.replicas": 2}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             # verify search success
-            collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                ct.default_float_vec_field_name, ct.default_search_params, ct.default_limit)
+            collection_w.search(
+                cf.gen_vectors(1, ct.default_dim),
+                ct.default_float_vec_field_name,
+                ct.default_search_params,
+                ct.default_limit,
+            )
             # Verify replica info is correct
             replicas = collection_w.get_replicas()[0]
             assert len(replicas.groups) == 2
@@ -349,6 +374,6 @@ class TestQueryNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)

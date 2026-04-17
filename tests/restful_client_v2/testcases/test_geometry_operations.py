@@ -30,29 +30,22 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
-            "indexParams": [
-                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         # Verify collection exists
         rsp = self.collection_client.collection_describe(name)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         logger.info(f"Collection created: {rsp}")
 
-    @pytest.mark.parametrize("wkt_type", [
-        "POINT",
-        "LINESTRING",
-        "POLYGON",
-        "MULTIPOINT",
-        "MULTILINESTRING",
-        "MULTIPOLYGON",
-        "GEOMETRYCOLLECTION"
-    ])
+    @pytest.mark.parametrize(
+        "wkt_type",
+        ["POINT", "LINESTRING", "POLYGON", "MULTIPOINT", "MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION"],
+    )
     def test_insert_wkt_data(self, wkt_type):
         """
         target: test insert various WKT geometry types
@@ -68,35 +61,34 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
-            "indexParams": [
-                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Generate WKT data
         nb = default_nb
         wkt_data = generate_wkt_by_type(wkt_type, bounds=(0, 100, 0, 100), count=nb)
         data = []
         for i, wkt in enumerate(wkt_data):
-            data.append({
-                "id": i,
-                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
-                "geo": wkt
-            })
+            data.append(
+                {
+                    "id": i,
+                    "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                        0
+                    ].tolist(),
+                    "geo": wkt,
+                }
+            )
 
         # Insert data
-        insert_payload = {
-            "collectionName": name,
-            "data": data
-        }
+        insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
-        assert rsp['data']['insertCount'] == nb
+        assert rsp["code"] == 0
+        assert rsp["data"]["insertCount"] == nb
         logger.info(f"Inserted {nb} {wkt_type} geometries")
 
     @pytest.mark.parametrize("index_type", ["RTREE", "AUTOINDEX"])
@@ -115,16 +107,16 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
-                {"fieldName": "geo", "indexName": "geo_idx", "indexType": index_type}
-            ]
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": index_type},
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Insert some geometry data
         nb = 50
@@ -132,36 +124,32 @@ class TestGeometryCollection(TestBase):
         for i in range(nb):
             x = random.uniform(0, 100)
             y = random.uniform(0, 100)
-            data.append({
-                "id": i,
-                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
-                "geo": f"POINT ({x:.2f} {y:.2f})"
-            })
+            data.append(
+                {
+                    "id": i,
+                    "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                        0
+                    ].tolist(),
+                    "geo": f"POINT ({x:.2f} {y:.2f})",
+                }
+            )
 
-        insert_payload = {
-            "collectionName": name,
-            "data": data
-        }
+        insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Load collection
         self.wait_collection_load_completed(name)
 
         # Verify index
         rsp = self.index_client.index_list(name)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         logger.info(f"Indexes: {rsp}")
 
-    @pytest.mark.parametrize("spatial_func", [
-        "ST_INTERSECTS",
-        "ST_CONTAINS",
-        "ST_WITHIN",
-        "ST_EQUALS",
-        "ST_TOUCHES",
-        "ST_OVERLAPS",
-        "ST_CROSSES"
-    ])
+    @pytest.mark.parametrize(
+        "spatial_func",
+        ["ST_INTERSECTS", "ST_CONTAINS", "ST_WITHIN", "ST_EQUALS", "ST_TOUCHES", "ST_OVERLAPS", "ST_CROSSES"],
+    )
     @pytest.mark.parametrize("data_state", ["sealed", "growing", "sealed_and_growing"])
     @pytest.mark.parametrize("with_geo_index", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
@@ -188,13 +176,13 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    geo_field
-                ]
+                    geo_field,
+                ],
             },
-            "indexParams": index_params
+            "indexParams": index_params,
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         nb = default_nb
 
@@ -213,7 +201,9 @@ class TestGeometryCollection(TestBase):
                     y = 25 + (i // 10) * 5
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -221,7 +211,9 @@ class TestGeometryCollection(TestBase):
                         item["geo"] = f"POINT ({x:.2f} {y:.2f})"
                     else:
                         # Small polygon inside query area
-                        item["geo"] = f"POLYGON (({x:.2f} {y:.2f}, {x + 3:.2f} {y:.2f}, {x + 3:.2f} {y + 3:.2f}, {x:.2f} {y + 3:.2f}, {x:.2f} {y:.2f}))"
+                        item["geo"] = (
+                            f"POLYGON (({x:.2f} {y:.2f}, {x + 3:.2f} {y:.2f}, {x + 3:.2f} {y + 3:.2f}, {x:.2f} {y + 3:.2f}, {x:.2f} {y:.2f}))"
+                        )
                     data.append(item)
                 return data
 
@@ -236,7 +228,9 @@ class TestGeometryCollection(TestBase):
                 for i in range(count):
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -264,7 +258,9 @@ class TestGeometryCollection(TestBase):
                     y = 20 + (i // 10) * 6
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -283,7 +279,9 @@ class TestGeometryCollection(TestBase):
                 for i in range(count):
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -307,7 +305,9 @@ class TestGeometryCollection(TestBase):
                 for i in range(count):
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -336,7 +336,9 @@ class TestGeometryCollection(TestBase):
                 for i in range(count):
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -346,10 +348,14 @@ class TestGeometryCollection(TestBase):
                         offset = (i % 4) * 5
                         if i % 2 == 0:
                             # Overlapping from right side
-                            item["geo"] = f"POLYGON (({50 + offset} 45, {70 + offset} 45, {70 + offset} 55, {50 + offset} 55, {50 + offset} 45))"
+                            item["geo"] = (
+                                f"POLYGON (({50 + offset} 45, {70 + offset} 45, {70 + offset} 55, {50 + offset} 55, {50 + offset} 45))"
+                            )
                         else:
                             # Overlapping from bottom
-                            item["geo"] = f"POLYGON ((45 {50 + offset}, 55 {50 + offset}, 55 {70 + offset}, 45 {70 + offset}, 45 {50 + offset}))"
+                            item["geo"] = (
+                                f"POLYGON ((45 {50 + offset}, 55 {50 + offset}, 55 {70 + offset}, 45 {70 + offset}, 45 {50 + offset}))"
+                            )
                     data.append(item)
                 return data
 
@@ -363,7 +369,9 @@ class TestGeometryCollection(TestBase):
                 for i in range(count):
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -384,7 +392,9 @@ class TestGeometryCollection(TestBase):
                     y = 30 + (i // 10) * 4
                     item = {
                         "id": start_id + i,
-                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
                     }
                     if nullable and i % 5 == 0:
                         item["geo"] = None
@@ -398,7 +408,7 @@ class TestGeometryCollection(TestBase):
             data = generate_geo_data(0, nb)
             insert_payload = {"collectionName": name, "data": data}
             rsp = self.vector_client.vector_insert(insert_payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
             rsp = self.collection_client.flush(name)
             self.wait_collection_load_completed(name)
 
@@ -407,33 +417,30 @@ class TestGeometryCollection(TestBase):
             data = generate_geo_data(0, nb)
             insert_payload = {"collectionName": name, "data": data}
             rsp = self.vector_client.vector_insert(insert_payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
 
         else:  # sealed_and_growing
             sealed_data = generate_geo_data(0, nb // 2)
             insert_payload = {"collectionName": name, "data": sealed_data}
             rsp = self.vector_client.vector_insert(insert_payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
             rsp = self.collection_client.flush(name)
             self.wait_collection_load_completed(name)
             growing_data = generate_geo_data(nb // 2, nb // 2)
             insert_payload = {"collectionName": name, "data": growing_data}
             rsp = self.vector_client.vector_insert(insert_payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
 
         filter_expr = f"{spatial_func}(geo, '{query_geom}')"
 
         # 1. Query with spatial filter
-        query_payload = {
-            "collectionName": name,
-            "filter": filter_expr,
-            "outputFields": ["id", "geo"],
-            "limit": 100
-        }
+        query_payload = {"collectionName": name, "filter": filter_expr, "outputFields": ["id", "geo"], "limit": 100}
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
-        query_count = len(rsp.get('data', []))
-        logger.info(f"{spatial_func} ({data_state}, geo_index={with_geo_index}, nullable={nullable}) query returned {query_count} results")
+        assert rsp["code"] == 0
+        query_count = len(rsp.get("data", []))
+        logger.info(
+            f"{spatial_func} ({data_state}, geo_index={with_geo_index}, nullable={nullable}) query returned {query_count} results"
+        )
         # Verify we got results (except for edge cases)
         if not nullable or spatial_func not in ["ST_EQUALS"]:
             assert query_count > 0, f"{spatial_func} query should return results"
@@ -446,12 +453,14 @@ class TestGeometryCollection(TestBase):
             "annsField": "vector",
             "filter": filter_expr,
             "limit": 10,
-            "outputFields": ["id", "geo"]
+            "outputFields": ["id", "geo"],
         }
         rsp = self.vector_client.vector_search(search_payload)
-        assert rsp['code'] == 0
-        search_count = len(rsp.get('data', []))
-        logger.info(f"{spatial_func} ({data_state}, geo_index={with_geo_index}, nullable={nullable}) search returned {search_count} results")
+        assert rsp["code"] == 0
+        search_count = len(rsp.get("data", []))
+        logger.info(
+            f"{spatial_func} ({data_state}, geo_index={with_geo_index}, nullable={nullable}) search returned {search_count} results"
+        )
 
     def test_upsert_geometry_data(self):
         """
@@ -468,16 +477,16 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
-                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"}
-            ]
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"},
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         nb = default_nb
 
@@ -486,25 +495,29 @@ class TestGeometryCollection(TestBase):
             for i in range(count):
                 x = random.uniform(10, 90)
                 y = random.uniform(10, 90)
-                data.append({
-                    "id": start_id + i,
-                    "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
-                    "geo": f"POINT ({x:.2f} {y:.2f})"
-                })
+                data.append(
+                    {
+                        "id": start_id + i,
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
+                        "geo": f"POINT ({x:.2f} {y:.2f})",
+                    }
+                )
             return data
 
         # Insert initial data
         data = generate_geo_data(0, nb)
         insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_collection_load_completed(name)
 
         # Upsert data
         upsert_data = generate_geo_data(0, nb // 2)
         upsert_payload = {"collectionName": name, "data": upsert_data}
         rsp = self.vector_client.vector_upsert(upsert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         logger.info("Upsert geometry data completed successfully")
 
     def test_delete_geometry_data(self):
@@ -522,16 +535,16 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
-                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"}
-            ]
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"},
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         nb = default_nb
 
@@ -540,35 +553,34 @@ class TestGeometryCollection(TestBase):
             for i in range(count):
                 x = random.uniform(10, 90)
                 y = random.uniform(10, 90)
-                data.append({
-                    "id": start_id + i,
-                    "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
-                    "geo": f"POINT ({x:.2f} {y:.2f})"
-                })
+                data.append(
+                    {
+                        "id": start_id + i,
+                        "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                            0
+                        ].tolist(),
+                        "geo": f"POINT ({x:.2f} {y:.2f})",
+                    }
+                )
             return data
 
         # Insert data
         data = generate_geo_data(0, nb)
         insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_collection_load_completed(name)
 
         # Delete data
         delete_ids = list(range(0, nb // 2))
         delete_payload = {"collectionName": name, "filter": f"id in {delete_ids}"}
         rsp = self.vector_client.vector_delete(delete_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Verify deletion by querying
-        query_payload = {
-            "collectionName": name,
-            "filter": "id >= 0",
-            "outputFields": ["id", "geo"],
-            "limit": 200
-        }
+        query_payload = {"collectionName": name, "filter": "id >= 0", "outputFields": ["id", "geo"], "limit": 200}
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         logger.info(f"Delete geometry data completed, remaining: {len(rsp.get('data', []))} records")
 
     def test_geometry_default_value(self):
@@ -587,23 +599,25 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry", "defaultValue": default_geo}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry", "defaultValue": default_geo},
+                ],
             },
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
-                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"}
-            ]
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"},
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         nb = default_nb
         data = []
         for i in range(nb):
             item = {
                 "id": i,
-                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                    0
+                ].tolist(),
             }
             # 30% use default value (omit geo field)
             if i % 3 != 0:
@@ -615,7 +629,7 @@ class TestGeometryCollection(TestBase):
 
         insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_collection_load_completed(name)
 
         # Query for records with default geometry value
@@ -623,23 +637,18 @@ class TestGeometryCollection(TestBase):
             "collectionName": name,
             "filter": f"ST_EQUALS(geo, '{default_geo}')",
             "outputFields": ["id", "geo"],
-            "limit": 100
+            "limit": 100,
         }
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
-        default_count = len(rsp.get('data', []))
+        assert rsp["code"] == 0
+        default_count = len(rsp.get("data", []))
         logger.info(f"Default geometry: found {default_count} records with default value")
 
         # Query all records
-        query_payload = {
-            "collectionName": name,
-            "filter": "id >= 0",
-            "outputFields": ["id", "geo"],
-            "limit": 200
-        }
+        query_payload = {"collectionName": name, "filter": "id >= 0", "outputFields": ["id", "geo"], "limit": 200}
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
-        total_count = len(rsp.get('data', []))
+        assert rsp["code"] == 0
+        total_count = len(rsp.get("data", []))
         logger.info(f"Default geometry: total {total_count} records")
 
         # Spatial query with default value area
@@ -647,17 +656,20 @@ class TestGeometryCollection(TestBase):
             "collectionName": name,
             "filter": "ST_WITHIN(geo, 'POLYGON ((-5 -5, 5 -5, 5 5, -5 5, -5 -5))')",
             "outputFields": ["id", "geo"],
-            "limit": 100
+            "limit": 100,
         }
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         logger.info(f"Default geometry: spatial query near origin returned {len(rsp.get('data', []))} results")
 
-    @pytest.mark.parametrize("spatial_func", [
-        "ST_INTERSECTS",
-        "ST_CONTAINS",
-        "ST_WITHIN",
-    ])
+    @pytest.mark.parametrize(
+        "spatial_func",
+        [
+            "ST_INTERSECTS",
+            "ST_CONTAINS",
+            "ST_WITHIN",
+        ],
+    )
     def test_spatial_query_empty_result(self, spatial_func):
         """
         target: test spatial query returns empty result when no data matches
@@ -673,16 +685,16 @@ class TestGeometryCollection(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
-                    {"fieldName": "geo", "dataType": "Geometry"}
-                ]
+                    {"fieldName": "geo", "dataType": "Geometry"},
+                ],
             },
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
-                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"}
-            ]
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"},
+            ],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Insert data in region (0-50, 0-50)
         nb = 50
@@ -690,15 +702,19 @@ class TestGeometryCollection(TestBase):
         for i in range(nb):
             x = 10 + (i % 10) * 4
             y = 10 + (i // 10) * 4
-            data.append({
-                "id": i,
-                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
-                "geo": f"POINT ({x:.2f} {y:.2f})"
-            })
+            data.append(
+                {
+                    "id": i,
+                    "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[
+                        0
+                    ].tolist(),
+                    "geo": f"POINT ({x:.2f} {y:.2f})",
+                }
+            )
 
         insert_payload = {"collectionName": name, "data": data}
         rsp = self.vector_client.vector_insert(insert_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_collection_load_completed(name)
 
         # Query with geometry far away from all data (region 200-300, 200-300)
@@ -712,14 +728,9 @@ class TestGeometryCollection(TestBase):
             query_geom = "POLYGON ((200 200, 300 200, 300 300, 200 300, 200 200))"
 
         filter_expr = f"{spatial_func}(geo, '{query_geom}')"
-        query_payload = {
-            "collectionName": name,
-            "filter": filter_expr,
-            "outputFields": ["id", "geo"],
-            "limit": 100
-        }
+        query_payload = {"collectionName": name, "filter": filter_expr, "outputFields": ["id", "geo"], "limit": 100}
         rsp = self.vector_client.vector_query(query_payload)
-        assert rsp['code'] == 0
-        result_count = len(rsp.get('data', []))
+        assert rsp["code"] == 0
+        result_count = len(rsp.get("data", []))
         logger.info(f"{spatial_func} empty result test: query returned {result_count} results")
         assert result_count == 0, f"{spatial_func} query should return empty result when no data matches"

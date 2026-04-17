@@ -4,15 +4,17 @@ import numpy as np
 import time
 import concurrent.futures
 from typing import Dict, List
-from utils.utils import gen_collection_name, patch_faker_text, en_vocabularies_distribution, \
-    zh_vocabularies_distribution
+from utils.utils import (
+    gen_collection_name,
+    patch_faker_text,
+    en_vocabularies_distribution,
+    zh_vocabularies_distribution,
+)
 from utils.util_log import test_log as logger
 import pytest
 from base.testbase import TestBase
 from utils.utils import gen_vector
-from pymilvus import (
-    Collection
-)
+from pymilvus import Collection
 from faker import Faker
 
 Faker.seed(19530)
@@ -27,13 +29,12 @@ index_param_map = {
     "IVF_SQ8": {"nlist": 128},
     "HNSW": {"M": 16, "efConstruction": 200},
     "BM25_SPARSE_INVERTED_INDEX": {"bm25_k1": 0.5, "bm25_b": 0.5},
-    "AUTOINDEX": {}
+    "AUTOINDEX": {},
 }
 
 
 @pytest.mark.L0
 class TestCreateIndex(TestBase):
-
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
     @pytest.mark.parametrize("dim", [128])
@@ -52,9 +53,9 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
-            }
+            },
         }
         logger.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
@@ -66,12 +67,14 @@ class TestCreateIndex(TestBase):
         payload = {
             "collectionName": name,
             "indexParams": [
-                {"fieldName": "book_intro", "indexName": "book_intro_vector",
-                 "metricType": f"{metric_type}",
-                 "indexType": f"{index_type}",
-                 "params": index_param_map[index_type]
-                 }
-            ]
+                {
+                    "fieldName": "book_intro",
+                    "indexName": "book_intro_vector",
+                    "metricType": f"{metric_type}",
+                    "indexType": f"{index_type}",
+                    "params": index_param_map[index_type],
+                }
+            ],
         }
 
         # Create multiple index creation tasks
@@ -87,9 +90,9 @@ class TestCreateIndex(TestBase):
             for future in concurrent.futures.as_completed(future_to_payload):
                 try:
                     rsp = future.result()
-                    assert rsp['code'] == 0
+                    assert rsp["code"] == 0
                 except Exception as e:
-                    logger.info(f'Index creation failed with error: {str(e)}')
+                    logger.info(f"Index creation failed with error: {str(e)}")
                     raise
 
         time.sleep(10)  # Wait for all indexes to be ready
@@ -97,15 +100,15 @@ class TestCreateIndex(TestBase):
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name="book_intro_vector")
-        assert rsp['code'] == 0
-        assert len(rsp['data']) == len(payload['indexParams'])
-        expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
-        actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
+        assert rsp["code"] == 0
+        assert len(rsp["data"]) == len(payload["indexParams"])
+        expected_index = sorted(payload["indexParams"], key=lambda x: x["fieldName"])
+        actual_index = sorted(rsp["data"], key=lambda x: x["fieldName"])
         for i in range(len(expected_index)):
-            assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
-            assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['metricType'] == actual_index[i]['metricType']
-            assert expected_index[i]["indexType"] == actual_index[i]['indexType']
+            assert expected_index[i]["fieldName"] == actual_index[i]["fieldName"]
+            assert expected_index[i]["indexName"] == actual_index[i]["indexName"]
+            assert expected_index[i]["metricType"] == actual_index[i]["metricType"]
+            assert expected_index[i]["indexType"] == actual_index[i]["indexType"]
         # check index by pymilvus
         index_info = [index.to_dict() for index in c.indexes]
         logger.info(f"index_info: {index_info}")
@@ -120,15 +123,12 @@ class TestCreateIndex(TestBase):
                 assert index_param.get("params", {}) == index_param_map[index_type]
         # drop index
         for i in range(len(actual_index)):
-            payload = {
-                "collectionName": name,
-                "indexName": actual_index[i]['indexName']
-            }
+            payload = {"collectionName": name, "indexName": actual_index[i]["indexName"]}
             rsp = self.index_client.index_drop(payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
         # list index, expect empty
         rsp = self.index_client.index_list(collection_name=name)
-        assert rsp['data'] == []
+        assert rsp["data"] == []
 
     @pytest.mark.parametrize("index_type", ["INVERTED"])
     @pytest.mark.parametrize("dim", [128])
@@ -147,9 +147,9 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
-            }
+            },
         }
         logger.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
@@ -162,13 +162,11 @@ class TestCreateIndex(TestBase):
                     "word_count": j,
                     "book_describe": f"book_{j}",
                     "book_intro": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
-                        0].tolist(),
+                        0
+                    ].tolist(),
                 }
                 data.append(tmp)
-            payload = {
-                "collectionName": name,
-                "data": data
-            }
+            payload = {"collectionName": name, "data": data}
             rsp = self.vector_client.vector_insert(payload)
         c = Collection(name)
         c.flush()
@@ -178,24 +176,30 @@ class TestCreateIndex(TestBase):
         # create index
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector", "indexType": "INVERTED",
-                             "params": {"index_type": "INVERTED"}}]
+            "indexParams": [
+                {
+                    "fieldName": "word_count",
+                    "indexName": "word_count_vector",
+                    "indexType": "INVERTED",
+                    "params": {"index_type": "INVERTED"},
+                }
+            ],
         }
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         time.sleep(10)
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name="word_count_vector")
-        assert rsp['code'] == 0
-        assert len(rsp['data']) == len(payload['indexParams'])
-        expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
-        actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
+        assert rsp["code"] == 0
+        assert len(rsp["data"]) == len(payload["indexParams"])
+        expected_index = sorted(payload["indexParams"], key=lambda x: x["fieldName"])
+        actual_index = sorted(rsp["data"], key=lambda x: x["fieldName"])
         for i in range(len(expected_index)):
-            assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
-            assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
+            assert expected_index[i]["fieldName"] == actual_index[i]["fieldName"]
+            assert expected_index[i]["indexName"] == actual_index[i]["indexName"]
+            assert expected_index[i]["indexType"] == actual_index[i]["indexType"]
 
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
@@ -215,9 +219,9 @@ class TestCreateIndex(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "binary_vector", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "binary_vector", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
-            }
+            },
         }
         logger.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
@@ -229,13 +233,10 @@ class TestCreateIndex(TestBase):
                     "book_id": j,
                     "word_count": j,
                     "book_describe": f"book_{j}",
-                    "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
+                    "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
                 }
                 data.append(tmp)
-            payload = {
-                "collectionName": name,
-                "data": data
-            }
+            payload = {"collectionName": name, "data": data}
             rsp = self.vector_client.vector_insert(payload)
         c = Collection(name)
         c.flush()
@@ -246,26 +247,33 @@ class TestCreateIndex(TestBase):
         index_name = "binary_vector_index"
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type, "indexType": index_type,
-                             "params": {"index_type": index_type}}]
+            "indexParams": [
+                {
+                    "fieldName": "binary_vector",
+                    "indexName": index_name,
+                    "metricType": metric_type,
+                    "indexType": index_type,
+                    "params": {"index_type": index_type},
+                }
+            ],
         }
         if index_type == "BIN_IVF_FLAT":
             payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         time.sleep(10)
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name=index_name)
-        assert rsp['code'] == 0
-        assert len(rsp['data']) == len(payload['indexParams'])
-        expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
-        actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
+        assert rsp["code"] == 0
+        assert len(rsp["data"]) == len(payload["indexParams"])
+        expected_index = sorted(payload["indexParams"], key=lambda x: x["fieldName"])
+        actual_index = sorted(rsp["data"], key=lambda x: x["fieldName"])
         for i in range(len(expected_index)):
-            assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
-            assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['indexType'] == actual_index[i]['indexType']
+            assert expected_index[i]["fieldName"] == actual_index[i]["fieldName"]
+            assert expected_index[i]["indexName"] == actual_index[i]["indexName"]
+            assert expected_index[i]["indexType"] == actual_index[i]["indexType"]
 
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -273,12 +281,23 @@ class TestCreateIndex(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("tokenizer", ['standard', 'jieba'])
-    @pytest.mark.parametrize("index_type", ['SPARSE_INVERTED_INDEX', 'SPARSE_WAND'])
+    @pytest.mark.parametrize("tokenizer", ["standard", "jieba"])
+    @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"])
     @pytest.mark.parametrize("bm25_k1", [1.2, 1.5])
     @pytest.mark.parametrize("bm25_b", [0.7, 0.5])
-    def test_create_index_for_full_text_search(self, nb, dim, insert_round, auto_id, is_partition_key,
-                                               enable_dynamic_schema, tokenizer, index_type, bm25_k1, bm25_b):
+    def test_create_index_for_full_text_search(
+        self,
+        nb,
+        dim,
+        insert_round,
+        auto_id,
+        is_partition_key,
+        enable_dynamic_schema,
+        tokenizer,
+        index_type,
+        bm25_k1,
+        bm25_b,
+    ):
         """
         Insert a vector with a simple payload
         """
@@ -291,16 +310,26 @@ class TestCreateIndex(TestBase):
                 "enableDynamicField": enable_dynamic_schema,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
-                     "elementTypeParams": {}},
+                    {
+                        "fieldName": "user_id",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "document_content", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
-                                           "analyzer_params": {
-                                               "tokenizer": tokenizer,
-                                           },
-                                           "enable_match": True}},
+                    {
+                        "fieldName": "document_content",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {
+                            "max_length": "1000",
+                            "enable_analyzer": True,
+                            "analyzer_params": {
+                                "tokenizer": tokenizer,
+                            },
+                            "enable_match": True,
+                        },
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
                 ],
                 "functions": [
@@ -309,19 +338,19 @@ class TestCreateIndex(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["document_content"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 0
-        if tokenizer == 'standard':
+        assert rsp["code"] == 0
+        if tokenizer == "standard":
             fake = fake_en
-        elif tokenizer == 'jieba':
+        elif tokenizer == "jieba":
             fake = fake_zh
         else:
             raise Exception("Invalid tokenizer")
@@ -354,30 +383,32 @@ class TestCreateIndex(TestBase):
                 "data": data,
             }
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 0
-            assert rsp['data']['insertCount'] == nb
-        assert rsp['code'] == 0
+            assert rsp["code"] == 0
+            assert rsp["data"]["insertCount"] == nb
+        assert rsp["code"] == 0
 
         # create index
         payload = {
             "collectionName": name,
             "indexParams": [
-                {"fieldName": "sparse_vector", "indexName": "sparse_vector",
-                 "metricType": "BM25",
-                 "indexType": index_type,
-                 "params": {"bm25_k1": bm25_k1, "bm25_b": bm25_b}
-                 }
-            ]
+                {
+                    "fieldName": "sparse_vector",
+                    "indexName": "sparse_vector",
+                    "metricType": "BM25",
+                    "indexType": index_type,
+                    "params": {"bm25_k1": bm25_k1, "bm25_b": bm25_b},
+                }
+            ],
         }
         rsp = self.index_client.index_create(payload)
         c = Collection(name)
         index_info = [index.to_dict() for index in c.indexes]
         logger.info(f"index_info: {index_info}")
         for info in index_info:
-            assert info['index_param']['metric_type'] == 'BM25'
-            assert info['index_param']["params"]['bm25_k1'] == bm25_k1
-            assert info['index_param']["params"]['bm25_b'] == bm25_b
-            assert info['index_param']['index_type'] == index_type
+            assert info["index_param"]["metric_type"] == "BM25"
+            assert info["index_param"]["params"]["bm25_k1"] == bm25_k1
+            assert info["index_param"]["params"]["bm25_b"] == bm25_b
+            assert info["index_param"]["index_type"] == index_type
 
 
 @pytest.mark.L0
@@ -398,9 +429,9 @@ class TestIndexProperties(TestBase):
             "schema": {
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}},
                 ]
-            }
+            },
         }
         collection_client.collection_create(payload)
 
@@ -414,15 +445,14 @@ class TestIndexProperties(TestBase):
                     "indexName": "my_vector",
                     "indexType": "IVF_SQ8",
                     "metricType": "L2",
-                    "params": {"nlist": 128}
+                    "params": {"nlist": 128},
                 }
-
             ],
         }
         index_client.index_create(index_payload)
         # list index
         rsp = index_client.index_list(name)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Alter index properties
         properties = {"mmap.enabled": True}
@@ -431,7 +461,7 @@ class TestIndexProperties(TestBase):
 
         # describe index
         rsp = index_client.index_describe(name, "my_vector")
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
         # Drop index properties
         delete_keys = ["mmap.enabled"]
@@ -440,12 +470,9 @@ class TestIndexProperties(TestBase):
 
         # describe index
         rsp = index_client.index_describe(name, "my_vector")
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
-    @pytest.mark.parametrize("invalid_property", [
-        {"invalid_key": True},
-        {"mmap.enabled": "invalid_value"}
-    ])
+    @pytest.mark.parametrize("invalid_property", [{"invalid_key": True}, {"mmap.enabled": "invalid_value"}])
     def test_alter_index_properties_with_invalid_properties(self, invalid_property):
         """
         target: test alter index properties with invalid properties
@@ -460,9 +487,9 @@ class TestIndexProperties(TestBase):
             "schema": {
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}},
                 ]
-            }
+            },
         }
         collection_client.collection_create(payload)
 
@@ -476,16 +503,15 @@ class TestIndexProperties(TestBase):
                     "indexName": "my_vector",
                     "indexType": "IVF_SQ8",
                     "metricType": "L2",
-                    "params": {"nlist": 128}
+                    "params": {"nlist": 128},
                 }
-
             ],
         }
         index_client.index_create(index_payload)
 
         # Alter index properties with invalid property
         rsp = index_client.alter_index_properties(name, "my_vector", invalid_property)
-        assert rsp['code'] == 1100
+        assert rsp["code"] == 1100
 
     def test_drop_index_properties_with_nonexistent_key(self):
         """
@@ -501,9 +527,9 @@ class TestIndexProperties(TestBase):
             "schema": {
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}},
                 ]
-            }
+            },
         }
         collection_client.collection_create(payload)
 
@@ -517,9 +543,8 @@ class TestIndexProperties(TestBase):
                     "indexName": "my_vector",
                     "indexType": "IVF_SQ8",
                     "metricType": "L2",
-                    "params": {"nlist": 128}
+                    "params": {"nlist": 128},
                 }
-
             ],
         }
         index_client.index_create(index_payload)
@@ -527,18 +552,16 @@ class TestIndexProperties(TestBase):
         # Drop index properties with nonexistent key
         delete_keys = ["nonexistent.key"]
         rsp = index_client.drop_index_properties(name, "my_vector", delete_keys)
-        assert rsp['code'] == 1100
+        assert rsp["code"] == 1100
 
 
 @pytest.mark.L1
 class TestCreateIndexNegative(TestBase):
-
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
     @pytest.mark.parametrize("dim", [128])
     def test_index_for_binary_vector_field_with_mismatch_metric_type(self, dim, metric_type, index_type):
-        """
-        """
+        """ """
         name = gen_collection_name()
         client = self.collection_client
         payload = {
@@ -548,9 +571,9 @@ class TestCreateIndexNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "binary_vector", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "binary_vector", "dataType": "BinaryVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
-            }
+            },
         }
         logger.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
@@ -562,13 +585,10 @@ class TestCreateIndexNegative(TestBase):
                     "book_id": j,
                     "word_count": j,
                     "book_describe": f"book_{j}",
-                    "binary_vector": gen_vector(datatype="BinaryVector", dim=dim)
+                    "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
                 }
                 data.append(tmp)
-            payload = {
-                "collectionName": name,
-                "data": data
-            }
+            payload = {"collectionName": name, "data": data}
             rsp = self.vector_client.vector_insert(payload)
         c = Collection(name)
         c.flush()
@@ -579,11 +599,17 @@ class TestCreateIndexNegative(TestBase):
         index_name = "binary_vector_index"
         payload = {
             "collectionName": name,
-            "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,
-                             "params": {"index_type": index_type}}]
+            "indexParams": [
+                {
+                    "fieldName": "binary_vector",
+                    "indexName": index_name,
+                    "metricType": metric_type,
+                    "params": {"index_type": index_type},
+                }
+            ],
         }
         if index_type == "BIN_IVF_FLAT":
             payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 1100
-        assert "not supported" in rsp['message']
+        assert rsp["code"] == 1100
+        assert "not supported" in rsp["message"]

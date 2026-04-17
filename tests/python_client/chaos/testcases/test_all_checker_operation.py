@@ -24,7 +24,7 @@ from chaos.checker import (
     QueryChecker,
     Op,
     EventRecords,
-    ResultAnalyzer
+    ResultAnalyzer,
 )
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
@@ -43,14 +43,13 @@ class TestBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestOperations(TestBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, uri, token, milvus_ns, database_name):
         # Prioritize uri and token for connection
@@ -65,9 +64,9 @@ class TestOperations(TestBase):
             actual_token = f"{user}:{password}" if user and password else None
 
         if actual_token:
-            connections.connect('default', uri=actual_uri, token=actual_token)
+            connections.connect("default", uri=actual_uri, token=actual_token)
         else:
-            connections.connect('default', uri=actual_uri)
+            connections.connect("default", uri=actual_uri)
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -82,7 +81,7 @@ class TestOperations(TestBase):
         self.password = password
         self.uri = actual_uri
         self.token = actual_token
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
@@ -107,7 +106,7 @@ class TestOperations(TestBase):
             Op.search: SearchChecker(collection_name=c_name),
             Op.query: QueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
-            Op.drop: CollectionDropChecker(collection_name=c_name)
+            Op.drop: CollectionDropChecker(collection_name=c_name),
         }
         self.health_checkers = checkers
 
@@ -115,7 +114,7 @@ class TestOperations(TestBase):
     def test_operations(self, request_duration, is_check):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         event_records = EventRecords()
         c_name = None
         event_records.insert("init_health_checkers", "start")

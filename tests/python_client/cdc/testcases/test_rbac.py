@@ -68,9 +68,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         def check_create():
             return role_name in downstream_client.list_roles()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create role {role_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create role {role_name}")
 
         # Drop role in upstream
         upstream_client.drop_role(role_name)
@@ -156,14 +154,9 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
 
         # Wait for creation to sync
         def check_create():
-            return (
-                username in downstream_client.list_users()
-                and role_name in downstream_client.list_roles()
-            )
+            return username in downstream_client.list_users() and role_name in downstream_client.list_roles()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, "create user/role for grant"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, "create user/role for grant")
 
         # Grant role to user
         upstream_client.grant_role(username, role_name)
@@ -182,9 +175,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking user roles: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_grant, sync_timeout, f"grant role {role_name} to user {username}"
-        )
+        assert self.wait_for_sync(check_grant, sync_timeout, f"grant role {role_name} to user {username}")
 
     def test_revoke_role(self, upstream_client, downstream_client, sync_timeout):
         """Test REVOKE_ROLE operation sync."""
@@ -225,9 +216,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking user roles: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_revoke, sync_timeout, f"revoke role {role_name} from user {username}"
-        )
+        assert self.wait_for_sync(check_revoke, sync_timeout, f"revoke role {role_name} from user {username}")
 
     def test_grant_privilege(self, upstream_client, downstream_client, sync_timeout):
         """Test GRANT_PRIVILEGE operation sync."""
@@ -247,9 +236,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         def check_create():
             return role_name in downstream_client.list_roles()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create role for privilege {role_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create role for privilege {role_name}")
 
         # Grant privilege to role
         upstream_client.grant_privilege(
@@ -275,9 +262,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                     print(
                         f"DEBUG: privilege_info.get('object_type') in check_grant: {privilege_info.get('object_type')}"
                     )
-                    print(
-                        f"DEBUG: privilege_info.get('privilege') in check_grant: {privilege_info.get('privilege')}"
-                    )
+                    print(f"DEBUG: privilege_info.get('privilege') in check_grant: {privilege_info.get('privilege')}")
                     print(
                         f"DEBUG: privilege_info.get('object_name') in check_grant: {privilege_info.get('object_name')}"
                     )
@@ -292,9 +277,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking role privileges: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_grant, sync_timeout, f"grant privilege to role {role_name}"
-        )
+        assert self.wait_for_sync(check_grant, sync_timeout, f"grant privilege to role {role_name}")
 
     def test_revoke_privilege(self, upstream_client, downstream_client, sync_timeout):
         """Test REVOKE_PRIVILEGE operation sync."""
@@ -346,13 +329,9 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking role privileges: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_revoke, sync_timeout, f"revoke privilege from role {role_name}"
-        )
+        assert self.wait_for_sync(check_revoke, sync_timeout, f"revoke privilege from role {role_name}")
 
-    def test_update_password(
-        self, upstream_client, downstream_client, sync_timeout, downstream_uri
-    ):
+    def test_update_password(self, upstream_client, downstream_client, sync_timeout, downstream_uri):
         """Test UPDATE_PASSWORD operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -385,9 +364,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 from pymilvus import MilvusClient
 
                 # Try to connect with new password
-                test_client = MilvusClient(
-                    uri=downstream_uri, token=f"{username}:{new_password}"
-                )
+                test_client = MilvusClient(uri=downstream_uri, token=f"{username}:{new_password}")
                 # Simple operation to verify connection works
                 test_client.list_collections()
                 test_client.close()
@@ -396,13 +373,9 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error verifying new password: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_password_update, sync_timeout, f"update password for user {username}"
-        )
+        assert self.wait_for_sync(check_password_update, sync_timeout, f"update password for user {username}")
 
-    def test_create_privilege_group(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_create_privilege_group(self, upstream_client, downstream_client, sync_timeout):
         """Test CREATE_PRIVILEGE_GROUP operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -424,31 +397,23 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 upstream_groups = upstream_client.list_privilege_groups()
                 print(f"DEBUG: upstream_groups in check_create: {upstream_groups}")
-                return group_name in [
-                    group["privilege_group"] for group in upstream_groups
-                ]
+                return group_name in [group["privilege_group"] for group in upstream_groups]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create privilege group {group_name}")
 
         # Wait for sync to downstream
         def check_sync():
             try:
                 downstream_groups = downstream_client.list_privilege_groups()
-                return group_name in [
-                    group["privilege_group"] for group in downstream_groups
-                ]
+                return group_name in [group["privilege_group"] for group in downstream_groups]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_sync, sync_timeout, f"create privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_sync, sync_timeout, f"create privilege group {group_name}")
 
         # Cleanup
         try:
@@ -456,9 +421,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         except:
             pass
 
-    def test_drop_privilege_group(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_drop_privilege_group(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_PRIVILEGE_GROUP operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -477,17 +440,12 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Wait for creation to sync
         def check_create():
             try:
-                return group_name in [
-                    group["privilege_group"]
-                    for group in downstream_client.list_privilege_groups()
-                ]
+                return group_name in [group["privilege_group"] for group in downstream_client.list_privilege_groups()]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create privilege group {group_name}")
 
         # Drop privilege group in upstream
         upstream_client.drop_privilege_group(group_name)
@@ -500,16 +458,12 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         def check_drop():
             try:
                 downstream_groups = downstream_client.list_privilege_groups()
-                return group_name not in [
-                    group["privilege_group"] for group in downstream_groups
-                ]
+                return group_name not in [group["privilege_group"] for group in downstream_groups]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_drop, sync_timeout, f"drop privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_drop, sync_timeout, f"drop privilege group {group_name}")
 
     def test_grant_privilege_v2(self, upstream_client, downstream_client, sync_timeout):
         """Test GRANT_PRIVILEGE_V2 operation sync."""
@@ -529,14 +483,10 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         def check_create():
             return role_name in downstream_client.list_roles()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create role for privilege v2 {role_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create role for privilege v2 {role_name}")
 
         # Grant privilege using v2 API
-        upstream_client.grant_privilege_v2(
-            role_name=role_name, privilege="Query", collection_name="*"
-        )
+        upstream_client.grant_privilege_v2(role_name=role_name, privilege="Query", collection_name="*")
         # check privilege in upstream
         upstream_privilege = upstream_client.describe_role(role_name)["privileges"]
         print(f"DEBUG: upstream_privilege in check_grant: {upstream_privilege}")
@@ -548,23 +498,16 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 role_info = downstream_client.describe_role(role_name)
                 for privilege_info in role_info["privileges"]:
-                    if (
-                        privilege_info.get("privilege") == "Query"
-                        and privilege_info.get("object_name") == "*"
-                    ):
+                    if privilege_info.get("privilege") == "Query" and privilege_info.get("object_name") == "*":
                         return True
                 return False
             except Exception as e:
                 logger.debug(f"Error checking role privileges v2: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_grant, sync_timeout, f"grant privilege v2 to role {role_name}"
-        )
+        assert self.wait_for_sync(check_grant, sync_timeout, f"grant privilege v2 to role {role_name}")
 
-    def test_revoke_privilege_v2(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_revoke_privilege_v2(self, upstream_client, downstream_client, sync_timeout):
         """Test REVOKE_PRIVILEGE_V2 operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -577,9 +520,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
 
         # Create role and grant privilege using v2 API
         upstream_client.create_role(role_name)
-        upstream_client.grant_privilege_v2(
-            role_name=role_name, privilege="Query", collection_name="*"
-        )
+        upstream_client.grant_privilege_v2(role_name=role_name, privilege="Query", collection_name="*")
 
         # Wait for setup
         time.sleep(3)
@@ -593,24 +534,17 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 role_info = downstream_client.describe_role(role_name)
                 for privilege_info in role_info["privileges"]:
-                    if (
-                        privilege_info.get("privilege") == "Query"
-                        and privilege_info.get("object_name") == "*"
-                    ):
+                    if privilege_info.get("privilege") == "Query" and privilege_info.get("object_name") == "*":
                         return True
                 return False
             except Exception as e:
                 logger.debug(f"Error checking role privileges v2: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_grant, sync_timeout, f"grant privilege v2 to role {role_name}"
-        )
+        assert self.wait_for_sync(check_grant, sync_timeout, f"grant privilege v2 to role {role_name}")
 
         # Revoke privilege using v2 API
-        upstream_client.revoke_privilege_v2(
-            role_name=role_name, privilege="Query", collection_name="*"
-        )
+        upstream_client.revoke_privilege_v2(role_name=role_name, privilege="Query", collection_name="*")
         # check privilege in upstream
         upstream_privilege = upstream_client.describe_role(role_name)["privileges"]
         print(f"DEBUG: upstream_privilege in check_revoke: {upstream_privilege}")
@@ -622,23 +556,16 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 role_info = downstream_client.describe_role(role_name)
                 for privilege_info in role_info["privileges"]:
-                    if (
-                        privilege_info.get("privilege") == "Query"
-                        and privilege_info.get("object_name") == "*"
-                    ):
+                    if privilege_info.get("privilege") == "Query" and privilege_info.get("object_name") == "*":
                         return False  # Should not find the privilege
                 return True
             except Exception as e:
                 logger.debug(f"Error checking role privileges v2: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_revoke, sync_timeout, f"revoke privilege v2 from role {role_name}"
-        )
+        assert self.wait_for_sync(check_revoke, sync_timeout, f"revoke privilege v2 from role {role_name}")
 
-    def test_add_privileges_to_group(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_add_privileges_to_group(self, upstream_client, downstream_client, sync_timeout):
         """Test ADD_PRIVILEGES_TO_GROUP operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -659,16 +586,12 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 downstream_groups = downstream_client.list_privilege_groups()
                 print(f"DEBUG: downstream_groups in check_create: {downstream_groups}")
-                return group_name in [
-                    group["privilege_group"] for group in downstream_groups
-                ]
+                return group_name in [group["privilege_group"] for group in downstream_groups]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create privilege group {group_name}")
 
         # Add privileges to group in upstream
         privileges_to_add = ["Search", "Query"]
@@ -695,9 +618,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_upstream, sync_timeout, f"add privileges to group {group_name}"
-        )
+        assert self.wait_for_sync(check_upstream, sync_timeout, f"add privileges to group {group_name}")
 
         # Wait for add privileges to sync
         def check_downstream():
@@ -720,9 +641,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_downstream, sync_timeout, f"add privileges to group {group_name}"
-        )
+        assert self.wait_for_sync(check_downstream, sync_timeout, f"add privileges to group {group_name}")
 
         # Cleanup
         try:
@@ -730,9 +649,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         except:
             pass
 
-    def test_remove_privileges_from_group(
-        self, upstream_client, downstream_client, sync_timeout
-    ):
+    def test_remove_privileges_from_group(self, upstream_client, downstream_client, sync_timeout):
         """Test REMOVE_PRIVILEGES_FROM_GROUP operation sync."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
@@ -753,16 +670,12 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
             try:
                 downstream_groups = downstream_client.list_privilege_groups()
                 print(f"DEBUG: downstream_groups in check_create: {downstream_groups}")
-                return group_name in [
-                    group["privilege_group"] for group in downstream_groups
-                ]
+                return group_name in [group["privilege_group"] for group in downstream_groups]
             except Exception as e:
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create privilege group {group_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create privilege group {group_name}")
 
         # Add privileges to group in upstream
         privileges_to_add = ["Search", "Query"]
@@ -789,9 +702,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_upstream, sync_timeout, f"add privileges to group {group_name}"
-        )
+        assert self.wait_for_sync(check_upstream, sync_timeout, f"add privileges to group {group_name}")
 
         # Wait for add privileges to sync
         def check_downstream():
@@ -814,9 +725,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_downstream, sync_timeout, f"add privileges to group {group_name}"
-        )
+        assert self.wait_for_sync(check_downstream, sync_timeout, f"add privileges to group {group_name}")
 
         # remove privileges from group in upstream
         privileges_to_remove = ["Search", "Query"]
@@ -843,9 +752,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_upstream, sync_timeout, f"remove privileges from group {group_name}"
-        )
+        assert self.wait_for_sync(check_upstream, sync_timeout, f"remove privileges from group {group_name}")
 
         # Wait for remove privileges to sync
         def check_downstream():
@@ -868,6 +775,4 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
                 logger.debug(f"Error checking privilege groups: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_downstream, sync_timeout, f"remove privileges from group {group_name}"
-        )
+        assert self.wait_for_sync(check_downstream, sync_timeout, f"remove privileges from group {group_name}")

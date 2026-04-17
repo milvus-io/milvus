@@ -13,7 +13,7 @@ prefix = "db"
 
 @pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseParams(TestcaseBase):
-    """ Test case of database """
+    """Test case of database"""
 
     def setup_method(self, method):
         param_info.param_user = ct.default_user
@@ -107,8 +107,7 @@ class TestDatabaseParams(TestcaseBase):
         error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
         if db_name is None:
             error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
-        self.database_wrap.create_database(db_name=db_name, check_task=CheckTasks.err_res,
-                                           check_items=error)
+        self.database_wrap.create_database(db_name=db_name, check_task=CheckTasks.err_res, check_items=error)
 
     def test_create_db_without_connection(self):
         """
@@ -118,8 +117,7 @@ class TestDatabaseParams(TestcaseBase):
         """
         self.connection_wrap.disconnect(ct.default_alias)
         error = {ct.err_code: 1, ct.err_msg: "should create connect first"}
-        self.database_wrap.create_database(cf.gen_unique_str(), check_task=CheckTasks.err_res,
-                                           check_items=error)
+        self.database_wrap.create_database(cf.gen_unique_str(), check_task=CheckTasks.err_res, check_items=error)
 
     def test_create_default_db(self):
         """
@@ -148,9 +146,11 @@ class TestDatabaseParams(TestcaseBase):
             error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
         self.database_wrap.drop_database(db_name=invalid_name, check_task=CheckTasks.err_res, check_items=error)
         # created db is existing
-        self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 65535,
-                                                        ct.err_msg: "database already exist: %s" % db_name})
+        self.database_wrap.create_database(
+            db_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "database already exist: %s" % db_name},
+        )
         self.database_wrap.drop_database(db_name)
         dbs, _ = self.database_wrap.list_database()
         assert db_name not in dbs
@@ -165,8 +165,11 @@ class TestDatabaseParams(TestcaseBase):
         self._connect()
 
         # list db with not existed using
-        self.database_wrap.list_database(using="random", check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1, ct.err_msg: "should create connect first."})
+        self.database_wrap.list_database(
+            using="random",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "should create connect first."},
+        )
 
     @pytest.mark.parametrize("timeout", ["", -1, 0])
     def test_list_db_with_invalid_timeout(self, timeout):
@@ -179,9 +182,11 @@ class TestDatabaseParams(TestcaseBase):
         self._connect()
 
         # list db with not existed using
-        self.database_wrap.list_database(timeout=timeout, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1,
-                                                      ct.err_msg: "StatusCode.DEADLINE_EXCEEDED"})
+        self.database_wrap.list_database(
+            timeout=timeout,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "StatusCode.DEADLINE_EXCEEDED"},
+        )
 
     @pytest.mark.parametrize("invalid_db_name", [(), [], 1, [1, "2", 3], (1,), {1: 1}])
     def test_using_invalid_db(self, invalid_db_name):
@@ -197,8 +202,11 @@ class TestDatabaseParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # using db with invalid name
-        self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 1, ct.err_msg: "db existed"})
+        self.database_wrap.using_database(
+            db_name=invalid_db_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "db existed"},
+        )
 
         # verify using db is default db
         collections, _ = self.utility_wrap.list_collections()
@@ -216,13 +224,11 @@ class TestDatabaseParams(TestcaseBase):
         error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
         if invalid_db_name == "中文":
             error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
-        self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res,
-                                          check_items=error)
+        self.database_wrap.using_database(db_name=invalid_db_name, check_task=CheckTasks.err_res, check_items=error)
 
 
 @pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseOperation(TestcaseBase):
-
     def setup_method(self, method):
         param_info.param_user = ct.default_user
         param_info.param_password = ct.default_password
@@ -282,8 +288,7 @@ class TestDatabaseOperation(TestcaseBase):
             self.database_wrap.create_database(cf.gen_unique_str(prefix))
 
         # there are ct.max_database_num-1 dbs (default is not included)
-        error = {ct.err_code: 801,
-                 ct.err_msg: f"exceeded the limit number of database[limit={ct.max_database_num}]"}
+        error = {ct.err_code: 801, ct.err_msg: f"exceeded the limit number of database[limit={ct.max_database_num}]"}
         self.database_wrap.create_database(cf.gen_unique_str(prefix), check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
@@ -303,11 +308,17 @@ class TestDatabaseOperation(TestcaseBase):
         for i in range(ct.max_collections_per_db - len(collections)):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
 
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"failed to create collection, maxCollectionNumPerDB={ct.max_collections_per_db}, exceeded the limit number of "
-                             f"collections per DB)"}
-        self.collection_wrap.init_collection(cf.gen_unique_str(prefix), cf.gen_default_collection_schema(),
-                                             check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"failed to create collection, maxCollectionNumPerDB={ct.max_collections_per_db}, exceeded the limit number of "
+            f"collections per DB)",
+        }
+        self.collection_wrap.init_collection(
+            cf.gen_unique_str(prefix),
+            cf.gen_default_collection_schema(),
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/24182")
     def test_create_db_collections_exceeds_max_num(self):
@@ -343,12 +354,12 @@ class TestDatabaseOperation(TestcaseBase):
 
         # create collection so that total collection num exceed maxCollectionNum
         self.database_wrap.using_database(db_b)
-        log.debug(f'exist collection num: {exist_coll_num}')
+        log.debug(f"exist collection num: {exist_coll_num}")
         collections, _ = self.utility_wrap.list_collections()
         for i in range(ct.max_collection_num - exist_coll_num):
             self.init_collection_wrap(cf.gen_unique_str(prefix))
 
-        log.debug(f'db_b collection num: {len(self.utility_wrap.list_collections()[0])}')
+        log.debug(f"db_b collection num: {len(self.utility_wrap.list_collections()[0])}")
 
         dbs, _ = self.database_wrap.list_database()
         total_coll_num = 0
@@ -356,11 +367,17 @@ class TestDatabaseOperation(TestcaseBase):
             self.database_wrap.using_database(db)
             total_coll_num += len(self.utility_wrap.list_collections()[0])
 
-        log.debug(f'total collection num: {total_coll_num}')
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"failed to create collection, maxCollectionNum={ct.max_collection_num}, exceeded the limit number of"}
-        self.collection_wrap.init_collection(cf.gen_unique_str(prefix), cf.gen_default_collection_schema(),
-                                             check_task=CheckTasks.err_res, check_items=error)
+        log.debug(f"total collection num: {total_coll_num}")
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"failed to create collection, maxCollectionNum={ct.max_collection_num}, exceeded the limit number of",
+        }
+        self.collection_wrap.init_collection(
+            cf.gen_unique_str(prefix),
+            cf.gen_default_collection_schema(),
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     def test_create_collection_name_same_db(self):
         """
@@ -432,8 +449,11 @@ class TestDatabaseOperation(TestcaseBase):
         self._connect()
 
         # drop default db
-        self.database_wrap.drop_database(db_name=ct.default_db, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1, ct.err_msg: "can not drop default database"})
+        self.database_wrap.drop_database(
+            db_name=ct.default_db,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "can not drop default database"},
+        )
 
         dbs, _ = self.database_wrap.list_database()
         assert ct.default_db in dbs
@@ -455,10 +475,14 @@ class TestDatabaseOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str())
 
         # drop db
-        self.database_wrap.drop_database(db_name, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 65535,
-                                                      ct.err_msg: "database:%s not empty, must drop all "
-                                                                  "collections before drop database" % db_name})
+        self.database_wrap.drop_database(
+            db_name,
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 65535,
+                ct.err_msg: "database:%s not empty, must drop all collections before drop database" % db_name,
+            },
+        )
 
         # drop collection and drop db
         collection_w.drop()
@@ -506,9 +530,10 @@ class TestDatabaseOperation(TestcaseBase):
         self.database_wrap.drop_database(db_name)
 
         # verify current db
-        self.utility_wrap.list_collections(check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 800,
-                                                        ct.err_msg: "database not found[database=%s]" % db_name})
+        self.utility_wrap.list_collections(
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % db_name},
+        )
         self.database_wrap.list_database()
         self.database_wrap.using_database(ct.default_db)
 
@@ -526,8 +551,11 @@ class TestDatabaseOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
 
         # list collection with not exist using db -> exception
-        self.database_wrap.using_database(db_name=cf.gen_unique_str(), check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 1, ct.err_msg: "database not found"})
+        self.database_wrap.using_database(
+            db_name=cf.gen_unique_str(),
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "database not found"},
+        )
 
         # change using to default and list collections
         self.database_wrap.using_database(db_name=ct.default_db)
@@ -586,10 +614,13 @@ class TestDatabaseOperation(TestcaseBase):
         assert self.utility_wrap.list_collections()[0] == [c_name2]
 
         # rename the collection and move it to default db
-        error = {ct.err_code: 65535, ct.err_msg: "duplicated new collection name default:collection_1 "
-                                                 "with other collection name or alias"}
-        self.utility_wrap.rename_collection(c_name2, c_name1, "default",
-                                            check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: "duplicated new collection name default:collection_1 with other collection name or alias",
+        }
+        self.utility_wrap.rename_collection(
+            c_name2, c_name1, "default", check_task=CheckTasks.err_res, check_items=error
+        )
 
     def test_rename_collection_in_new_db(self):
         """
@@ -626,7 +657,7 @@ class TestDatabaseOperation(TestcaseBase):
 
 @pytest.mark.skip("removed to test_milvus_client_database.py")
 class TestDatabaseOtherApi(TestcaseBase):
-    """ test other interface that has db_name params"""
+    """test other interface that has db_name params"""
 
     def teardown_method(self, method):
         """
@@ -664,11 +695,16 @@ class TestDatabaseOtherApi(TestcaseBase):
         expected: connect fail
         """
         # connect with invalid db
-        self.connection_wrap.connect(host=host, port=port, db_name=invalid_db_name,
-                                     user=ct.default_user, password=ct.default_password,
-                                     secure=cf.param_info.param_secure,
-                                     check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 1, ct.err_msg: "is illegal"})
+        self.connection_wrap.connect(
+            host=host,
+            port=port,
+            db_name=invalid_db_name,
+            user=ct.default_user,
+            password=ct.default_password,
+            secure=cf.param_info.param_secure,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "is illegal"},
+        )
 
     @pytest.mark.parametrize("invalid_db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_connect_invalid_db_name_2(self, host, port, invalid_db_name):
@@ -676,11 +712,16 @@ class TestDatabaseOtherApi(TestcaseBase):
         error = {ct.err_code: 800, ct.err_msg: "database not found[database=%s]" % invalid_db_name}
         if invalid_db_name == "中文":
             error = {ct.err_code: 1, ct.err_msg: "<metadata was invalid: [('dbname', '中文')"}
-        self.connection_wrap.connect(host=host, port=port, db_name=invalid_db_name,
-                                     user=ct.default_user, password=ct.default_password,
-                                     secure=cf.param_info.param_secure,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+        self.connection_wrap.connect(
+            host=host,
+            port=port,
+            db_name=invalid_db_name,
+            user=ct.default_user,
+            password=ct.default_password,
+            secure=cf.param_info.param_secure,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     def test_connect_not_existed_db(self, host, port):
         """
@@ -694,11 +735,16 @@ class TestDatabaseOtherApi(TestcaseBase):
         """
         # connect with not existed db
         db_name = cf.gen_unique_str(prefix)
-        self.connection_wrap.connect(host=host, port=port, db_name=db_name,
-                                     user=ct.default_user, password=ct.default_password,
-                                     secure=cf.param_info.param_secure,
-                                     check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 2, ct.err_msg: "database not found"})
+        self.connection_wrap.connect(
+            host=host,
+            port=port,
+            db_name=db_name,
+            user=ct.default_user,
+            password=ct.default_password,
+            secure=cf.param_info.param_secure,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 2, ct.err_msg: "database not found"},
+        )
 
     def test_connect_db(self, host, port):
         """
@@ -719,8 +765,14 @@ class TestDatabaseOtherApi(TestcaseBase):
 
         # re-connect with db name
         self.connection_wrap.disconnect(ct.default_alias)
-        self.connection_wrap.connect(host=host, port=port, db_name=db_name, user=ct.default_user,
-                                     password=ct.default_password, secure=cf.param_info.param_secure)
+        self.connection_wrap.connect(
+            host=host,
+            port=port,
+            db_name=db_name,
+            user=ct.default_user,
+            password=ct.default_password,
+            secure=cf.param_info.param_secure,
+        )
 
         # verify connect db_name is the specify db
         collections_db, _ = self.utility_wrap.list_collections()
@@ -728,8 +780,14 @@ class TestDatabaseOtherApi(TestcaseBase):
 
         # verify db's collection not in default db
         self.connection_wrap.disconnect(ct.default_alias)
-        self.connection_wrap.connect(host=host, port=port, db_name=ct.default_db, user=ct.default_user,
-                                     password=ct.default_password, secure=cf.param_info.param_secure)
+        self.connection_wrap.connect(
+            host=host,
+            port=port,
+            db_name=ct.default_db,
+            user=ct.default_user,
+            password=ct.default_password,
+            secure=cf.param_info.param_secure,
+        )
 
         collections_default, _ = self.utility_wrap.list_collections()
         assert collection_w.name not in collections_default
@@ -780,59 +838,79 @@ class TestDatabaseOtherApi(TestcaseBase):
         query_vec = cf.gen_vectors(ct.default_nq, ct.default_dim)
 
         # search with dynamic field expr and from partition
-        self.collection_wrap.search(data=query_vec, anns_field=ct.default_float_vec_field_name,
-                                    param=ct.default_search_params, limit=ct.default_limit,
-                                    expr=f'{ct.default_int64_field_name} < 2800 or {ct.default_int8_field_name} > 500',
-                                    partition_names=[ct.default_partition_name],
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": ct.default_nq,
-                                                 "limit": ct.default_limit})
+        self.collection_wrap.search(
+            data=query_vec,
+            anns_field=ct.default_float_vec_field_name,
+            param=ct.default_search_params,
+            limit=ct.default_limit,
+            expr=f"{ct.default_int64_field_name} < 2800 or {ct.default_int8_field_name} > 500",
+            partition_names=[ct.default_partition_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
 
         # search with output pk + dynamic fields
         ignore_growing_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "ignore_growing": True}
-        search_res, _ = self.collection_wrap.search(data=query_vec, anns_field=ct.default_float_vec_field_name,
-                                                    param=ignore_growing_search_params, limit=ct.default_limit,
-                                                    output_fields=[ct.default_int64_field_name,
-                                                                   ct.default_string_field_name],
-                                                    check_task=CheckTasks.check_search_results,
-                                                    check_items={"nq": ct.default_nq,
-                                                                 "limit": ct.default_limit})
+        search_res, _ = self.collection_wrap.search(
+            data=query_vec,
+            anns_field=ct.default_float_vec_field_name,
+            param=ignore_growing_search_params,
+            limit=ct.default_limit,
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
         assert ct.default_int64_field_name in set(search_res[0][0].entity.fields)
 
         # search with output vector fields and ignore growing
         ignore_growing_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "ignore_growing": False}
-        self.collection_wrap.search(data=query_vec, anns_field=ct.default_float_vec_field_name,
-                                    param=ignore_growing_search_params, limit=ct.default_limit,
-                                    output_fields=[ct.default_int64_field_name,
-                                                   ct.default_float_vec_field_name],
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": ct.default_nq,
-                                                 "limit": ct.default_limit,
-                                                 "output_fields": [ct.default_int64_field_name,
-                                                                   ct.default_float_vec_field_name]})
+        self.collection_wrap.search(
+            data=query_vec,
+            anns_field=ct.default_float_vec_field_name,
+            param=ignore_growing_search_params,
+            limit=ct.default_limit,
+            output_fields=[ct.default_int64_field_name, ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": ct.default_nq,
+                "limit": ct.default_limit,
+                "output_fields": [ct.default_int64_field_name, ct.default_float_vec_field_name],
+            },
+        )
 
         # search with pagination
-        self.collection_wrap.search(data=query_vec, anns_field=ct.default_float_vec_field_name,
-                                    param=ct.default_search_params, limit=ct.default_limit, offset=ct.default_limit,
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": ct.default_nq,
-                                                 "limit": ct.default_limit})
+        self.collection_wrap.search(
+            data=query_vec,
+            anns_field=ct.default_float_vec_field_name,
+            param=ct.default_search_params,
+            limit=ct.default_limit,
+            offset=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
 
         # range search
-        range_search_params = {"metric_type": "COSINE", "params": {"radius": 0.0,
-                                                                   "range_filter": 1000}}
-        self.collection_wrap.search(query_vec, ct.default_float_vec_field_name,
-                                    range_search_params, ct.default_limit,
-                                    expr=None,
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": ct.default_nq,
-                                                 "limit": ct.default_limit})
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": 0.0, "range_filter": 1000}}
+        self.collection_wrap.search(
+            query_vec,
+            ct.default_float_vec_field_name,
+            range_search_params,
+            ct.default_limit,
+            expr=None,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
 
         # search iterator
-        self.collection_wrap.search_iterator(query_vec[:1], ct.default_float_vec_field_name, ct.default_search_params,
-                                             ct.default_limit * 100, partition_names=[partition_name],
-                                             check_task=CheckTasks.check_search_iterator,
-                                             check_items={"limit": ct.default_limit * 100})
+        self.collection_wrap.search_iterator(
+            query_vec[:1],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit * 100,
+            partition_names=[partition_name],
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"limit": ct.default_limit * 100},
+        )
 
     def test_query_db(self):
         """
@@ -853,13 +931,14 @@ class TestDatabaseOtherApi(TestcaseBase):
         _, partition_name = self.prepare_data_for_db_search()
 
         # query from partition
-        query_expr = f'{ct.default_int64_field_name} in [0, {ct.default_nb}]'
+        query_expr = f"{ct.default_int64_field_name} in [0, {ct.default_nb}]"
         res, _ = self.collection_wrap.query(query_expr, partition_names=[partition_name])
         assert len(res) == 1
 
         # query output pk + dynamic fields
-        res_dynamic, _ = self.collection_wrap.query(query_expr, output_fields=[ct.default_int64_field_name,
-                                                                               ct.default_string_field_name])
+        res_dynamic, _ = self.collection_wrap.query(
+            query_expr, output_fields=[ct.default_int64_field_name, ct.default_string_field_name]
+        )
         assert ct.default_int64_field_name in res_dynamic[0].keys()
 
         # query output vector field
@@ -867,12 +946,12 @@ class TestDatabaseOtherApi(TestcaseBase):
         assert set(vec_res[0].keys()) == {ct.default_float_vec_field_name, ct.default_int64_field_name}
 
         #  query with pagination
-        expr = f'1000 <= {ct.default_int64_field_name} < 4000 '
+        expr = f"1000 <= {ct.default_int64_field_name} < 4000 "
         page_res, _ = self.collection_wrap.query(expr, offset=1000, limit=1000)
         assert len(page_res) == 1000
 
         # delte and query
-        del_expr = f'{ct.default_int64_field_name} in [0, {ct.default_nb}]'
+        del_expr = f"{ct.default_int64_field_name} in [0, {ct.default_nb}]"
         self.collection_wrap.delete(del_expr)
         self.collection_wrap.query(del_expr, check_task=CheckTasks.check_query_empty)
 
@@ -888,12 +967,17 @@ class TestDatabaseOtherApi(TestcaseBase):
         # assert set(vec_res[0].keys()) == {ct.default_int64_field_name}
 
         # query iterator
-        self.collection_wrap.query_iterator(expr=f"{ct.default_int64_field_name} <= 3000", batch_size=ct.default_limit * 10,
-                                            partition_names=[partition_name],
-                                            check_task=CheckTasks.check_query_iterator,
-                                            check_items={"count": 1000,
-                                                         "pk_name": self.database_wrap.primary_field.name,
-                                                         "batch_size": ct.default_limit * 10})
+        self.collection_wrap.query_iterator(
+            expr=f"{ct.default_int64_field_name} <= 3000",
+            batch_size=ct.default_limit * 10,
+            partition_names=[partition_name],
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "count": 1000,
+                "pk_name": self.database_wrap.primary_field.name,
+                "batch_size": ct.default_limit * 10,
+            },
+        )
 
     def prepare_data_for_db_search(self):
         """
@@ -914,15 +998,18 @@ class TestDatabaseOtherApi(TestcaseBase):
 
         # create collection and a partition
         partition_name = "p1"
-        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix),
-                                             schema=cf.gen_default_collection_schema(enable_dynamic_field=True))
+        self.collection_wrap.init_collection(
+            name=cf.gen_unique_str(prefix), schema=cf.gen_default_collection_schema(enable_dynamic_field=True)
+        )
         self.partition_wrap.init_partition(self.collection_wrap.collection, partition_name)
 
         # insert data into collection
-        df = pd.DataFrame({
-            ct.default_int64_field_name: pd.Series(data=[i for i in range(ct.default_nb)]),
-            ct.default_float_vec_field_name: cf.gen_vectors(ct.default_nb, ct.default_dim)
-        })
+        df = pd.DataFrame(
+            {
+                ct.default_int64_field_name: pd.Series(data=[i for i in range(ct.default_nb)]),
+                ct.default_float_vec_field_name: cf.gen_vectors(ct.default_nb, ct.default_dim),
+            }
+        )
         self.collection_wrap.insert(df)
         self.collection_wrap.flush()
 

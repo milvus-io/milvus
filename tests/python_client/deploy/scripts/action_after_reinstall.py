@@ -13,7 +13,7 @@ def task_1(data_size, host):
     get_collections(prefix)
     load_and_search(prefix)
     release_collection(prefix)
-    create_collections_and_insert_data(prefix,count=data_size)
+    create_collections_and_insert_data(prefix, count=data_size)
     load_and_search(prefix)
 
 
@@ -33,14 +33,15 @@ def task_2(data_zise, host):
     load_and_search(prefix)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
     import threading
-    parser = argparse.ArgumentParser(description='config for deploy test')
-    parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
-    parser.add_argument('--data_size', type=int, default=3000, help='data size')
+
+    parser = argparse.ArgumentParser(description="config for deploy test")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")
+    parser.add_argument("--data_size", type=int, default=3000, help="data size")
     args = parser.parse_args()
-    host = args.host 
+    host = args.host
     data_size = args.data_size
     logger.info(f"data size: {data_size}")
     task_1(data_size, host)

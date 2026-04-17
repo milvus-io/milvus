@@ -17,10 +17,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -34,7 +34,7 @@ default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
-    """ Test case of data integrity interface """
+    """Test case of data integrity interface"""
 
     @pytest.fixture(scope="function", params=["INVERTED", "BITMAP"])
     def supported_bool_scalar_index(self, request):
@@ -75,19 +75,21 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_flush", [True])
     @pytest.mark.parametrize("is_release", [True])
     @pytest.mark.parametrize("single_data_num", [50])
-    @pytest.mark.parametrize("expr_field", [ct.default_int64_field_name,
-                                            ct.default_string_field_name,
-                                            ct.default_float_array_field_name])
-    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array(self,
-                                                                                            enable_dynamic_field,
-                                                                                            supported_numeric_scalar_index,
-                                                                                            supported_varchar_scalar_index,
-                                                                                            supported_json_path_index,
-                                                                                            supported_array_double_float_scalar_index,
-                                                                                            is_flush,
-                                                                                            is_release,
-                                                                                            single_data_num,
-                                                                                            expr_field):
+    @pytest.mark.parametrize(
+        "expr_field", [ct.default_int64_field_name, ct.default_string_field_name, ct.default_float_array_field_name]
+    )
+    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array(
+        self,
+        enable_dynamic_field,
+        supported_numeric_scalar_index,
+        supported_varchar_scalar_index,
+        supported_json_path_index,
+        supported_array_double_float_scalar_index,
+        is_flush,
+        is_release,
+        single_data_num,
+        expr_field,
+    ):
         """
         target: test query using expression fields with all supported field type after all supported scalar index
                 with all supported basic expressions
@@ -124,22 +126,63 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             schema.add_field(ct.default_double_field_name, DataType.DOUBLE, nullable=True)
             schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, nullable=True)
             schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
-            schema.add_field(ct.default_int8_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT8,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int16_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT16,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int32_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT32,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int64_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT64,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_bool_array_field_name, datatype=DataType.ARRAY, element_type=DataType.BOOL,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_float_array_field_name, datatype=DataType.ARRAY, element_type=DataType.FLOAT,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_double_array_field_name, datatype=DataType.ARRAY, element_type=DataType.DOUBLE,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_string_array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
-                             max_capacity=5, max_length=100, nullable=True)
+            schema.add_field(
+                ct.default_int8_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT8,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int16_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT16,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int32_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT32,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int64_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT64,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_bool_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.BOOL,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_float_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.FLOAT,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_double_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.DOUBLE,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_string_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=5,
+                max_length=100,
+                nullable=True,
+            )
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -148,25 +191,30 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = single_data_num
         for i in range(len(inserted_data_distribution)):
-            rows = [{default_primary_key_field_name: j, default_vector_field_name: vectors[j],
-                     ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
-                     ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
-                     ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
-                     ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
-                     ct.default_int64_field_name: j if (i % 2 == 0) else None,
-                     ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
-                     ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
-                     ct.default_string_field_name: f'{j}' if (i % 2 == 0) else None,
-                     ct.default_json_field_name: inserted_data_distribution[i],
-                     ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
-                     ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
-                     ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
-                     } for j in range(i * nb_single, (i + 1) * nb_single)]
+            rows = [
+                {
+                    default_primary_key_field_name: j,
+                    default_vector_field_name: vectors[j],
+                    ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
+                    ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
+                    ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
+                    ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
+                    ct.default_int64_field_name: j if (i % 2 == 0) else None,
+                    ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_string_field_name: f"{j}" if (i % 2 == 0) else None,
+                    ct.default_json_field_name: inserted_data_distribution[i],
+                    ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
+                    ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
+                    ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_string_array_field_name: [f"{j}", f"{j + 1}"] if (i % 2 == 0) else None,
+                }
+                for j in range(i * nb_single, (i + 1) * nb_single)
+            ]
             assert len(rows) == nb_single
             # log.info(rows)
             self.insert(client, collection_name=collection_name, data=rows)
@@ -181,20 +229,22 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' before scalar index")
-            res = self.query(client, collection_name=collection_name,
-                             filter=express_list[i], output_fields=["count(*)"])[0]
-            count = res[0]['count(*)']
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
+            count = res[0]["count(*)"]
             # log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
-            res = self.query(client, collection_name=collection_name,
-                             filter=express_list[i], output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
             assert count == len(id_list)
             assert count == len(json_list)
-            compare_dict.setdefault(f'{i}', {})
-            compare_dict[f'{i}']["id_list"] = id_list
-            compare_dict[f'{i}']["json_list"] = json_list
+            compare_dict.setdefault(f"{i}", {})
+            compare_dict[f"{i}"]["id_list"] = id_list
+            compare_dict[f"{i}"]["json_list"] = json_list
         # 5. release if specified
         if is_release:
             self.release_collection(client, collection_name)
@@ -215,30 +265,35 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         # index_params.add_index(field_name=ct.default_int32_array_field_name, index_type=supported_array_scalar_index)
         # index_params.add_index(field_name=ct.default_int64_array_field_name, index_type=supported_array_scalar_index)
         # index_params.add_index(field_name=ct.default_bool_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_float_array_field_name,
-                               index_type=supported_array_double_float_scalar_index)
+        index_params.add_index(
+            field_name=ct.default_float_array_field_name, index_type=supported_array_double_float_scalar_index
+        )
         # index_params.add_index(field_name=ct.default_double_array_field_name,
         #                        index_type=supported_array_double_float_scalar_index)
         # index_params.add_index(field_name=ct.default_string_array_field_name, index_type=supported_array_scalar_index)
         json_index_name = "json_index_name"
-        json_path_list = [f"{ct.default_json_field_name}",
-                          f"{ct.default_json_field_name}[0]",
-                          f"{ct.default_json_field_name}[1]",
-                          f"{ct.default_json_field_name}[6]",
-                          f"{ct.default_json_field_name}[10000]",
-                          f"{ct.default_json_field_name}['a']",
-                          f"{ct.default_json_field_name}['a']['b']",
-                          f"{ct.default_json_field_name}['a'][0]",
-                          f"{ct.default_json_field_name}['a'][6]",
-                          f"{ct.default_json_field_name}['a'][0]['b']",
-                          f"{ct.default_json_field_name}['a']['b']['c']",
-                          f"{ct.default_json_field_name}['a']['b'][0]['d']",
-                          f"{ct.default_json_field_name}['a']['c'][0]['d']"]
+        json_path_list = [
+            f"{ct.default_json_field_name}",
+            f"{ct.default_json_field_name}[0]",
+            f"{ct.default_json_field_name}[1]",
+            f"{ct.default_json_field_name}[6]",
+            f"{ct.default_json_field_name}[10000]",
+            f"{ct.default_json_field_name}['a']",
+            f"{ct.default_json_field_name}['a']['b']",
+            f"{ct.default_json_field_name}['a'][0]",
+            f"{ct.default_json_field_name}['a'][6]",
+            f"{ct.default_json_field_name}['a'][0]['b']",
+            f"{ct.default_json_field_name}['a']['b']['c']",
+            f"{ct.default_json_field_name}['a']['b'][0]['d']",
+            f"{ct.default_json_field_name}['a']['c'][0]['d']",
+        ]
         for i in range(len(json_path_list)):
-            index_params.add_index(field_name=ct.default_json_field_name, index_name=json_index_name + f'{i}',
-                                   index_type=supported_json_path_index,
-                                   params={"json_cast_type": "DOUBLE",
-                                           "json_path": json_path_list[i]})
+            index_params.add_index(
+                field_name=ct.default_json_field_name,
+                index_name=json_index_name + f"{i}",
+                index_type=supported_json_path_index,
+                params={"json_cast_type": "DOUBLE", "json_path": json_path_list[i]},
+            )
         # 7. create index
         self.create_index(client, collection_name, index_params)
         # 8. create same twice
@@ -254,11 +309,13 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' after index")
-            count = self.query(client, collection_name=collection_name, filter=express_list[i],
-                               output_fields=["count(*)"])[0]
+            count = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
             # log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
@@ -269,7 +326,7 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             #     log.debug(
             #         f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:")
             #     log.debug(compare_dict[f'{i}']["json_list"])
-            assert json_list == compare_dict[f'{i}']["json_list"]
+            assert json_list == compare_dict[f"{i}"]["json_list"]
             # if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
             #     log.debug(
             #         f"primary key field {default_primary_key_field_name} after indexed under expression '{express_list[i]}' is:")
@@ -277,7 +334,7 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             #     log.debug(
             #         f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:")
             #     log.debug(compare_dict[f'{i}']["id_list"])
-            assert id_list == compare_dict[f'{i}']["id_list"]
+            assert id_list == compare_dict[f"{i}"]["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
         self.drop_collection(client, collection_name)
 
@@ -286,26 +343,42 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_flush", [True, False])
     @pytest.mark.parametrize("is_release", [True])
     @pytest.mark.parametrize("single_data_num", [50])
-    @pytest.mark.parametrize("expr_field", [ct.default_int8_field_name, ct.default_int16_field_name,
-                                            ct.default_int32_field_name, ct.default_int64_field_name,
-                                            ct.default_float_field_name, ct.default_double_field_name,
-                                            ct.default_string_field_name, ct.default_bool_field_name,
-                                            ct.default_int8_array_field_name, ct.default_int16_array_field_name,
-                                            ct.default_int32_array_field_name, ct.default_int64_array_field_name,
-                                            ct.default_bool_array_field_name, ct.default_float_array_field_name,
-                                            ct.default_double_array_field_name, ct.default_string_array_field_name])
-    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_all(self, enable_dynamic_field,
-                                                                                                supported_bool_scalar_index,
-                                                                                                supported_numeric_float_double_index,
-                                                                                                supported_numeric_scalar_index,
-                                                                                                supported_varchar_scalar_index,
-                                                                                                supported_json_path_index,
-                                                                                                supported_array_scalar_index,
-                                                                                                supported_array_double_float_scalar_index,
-                                                                                                is_flush,
-                                                                                                is_release,
-                                                                                                single_data_num,
-                                                                                                expr_field):
+    @pytest.mark.parametrize(
+        "expr_field",
+        [
+            ct.default_int8_field_name,
+            ct.default_int16_field_name,
+            ct.default_int32_field_name,
+            ct.default_int64_field_name,
+            ct.default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_string_field_name,
+            ct.default_bool_field_name,
+            ct.default_int8_array_field_name,
+            ct.default_int16_array_field_name,
+            ct.default_int32_array_field_name,
+            ct.default_int64_array_field_name,
+            ct.default_bool_array_field_name,
+            ct.default_float_array_field_name,
+            ct.default_double_array_field_name,
+            ct.default_string_array_field_name,
+        ],
+    )
+    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_all(
+        self,
+        enable_dynamic_field,
+        supported_bool_scalar_index,
+        supported_numeric_float_double_index,
+        supported_numeric_scalar_index,
+        supported_varchar_scalar_index,
+        supported_json_path_index,
+        supported_array_scalar_index,
+        supported_array_double_float_scalar_index,
+        is_flush,
+        is_release,
+        single_data_num,
+        expr_field,
+    ):
         """
         target: test query using expression fields with all supported field type after all supported scalar index
                 with all supported basic expressions
@@ -342,49 +415,95 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             schema.add_field(ct.default_double_field_name, DataType.DOUBLE, nullable=True)
             schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, nullable=True)
             schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
-            schema.add_field(ct.default_int8_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT8,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int16_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT16,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int32_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT32,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int64_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT64,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_bool_array_field_name, datatype=DataType.ARRAY, element_type=DataType.BOOL,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_float_array_field_name, datatype=DataType.ARRAY, element_type=DataType.FLOAT,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_double_array_field_name, datatype=DataType.ARRAY, element_type=DataType.DOUBLE,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_string_array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
-                             max_capacity=5, max_length=100, nullable=True)
+            schema.add_field(
+                ct.default_int8_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT8,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int16_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT16,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int32_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT32,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int64_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT64,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_bool_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.BOOL,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_float_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.FLOAT,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_double_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.DOUBLE,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_string_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=5,
+                max_length=100,
+                nullable=True,
+            )
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+60, default_dim)
+        vectors = cf.gen_vectors(default_nb + 60, default_dim)
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = single_data_num
         for i in range(len(inserted_data_distribution)):
-            rows = [{default_primary_key_field_name: j, default_vector_field_name: vectors[j],
-                     ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
-                     ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
-                     ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
-                     ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
-                     ct.default_int64_field_name: j if (i % 2 == 0) else None,
-                     ct.default_float_field_name: j*1.0 if (i % 2 == 0) else None,
-                     ct.default_double_field_name: j*1.0 if (i % 2 == 0) else None,
-                     ct.default_string_field_name: f'{j}' if (i % 2 == 0) else None,
-                     ct.default_json_field_name: inserted_data_distribution[i],
-                     ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
-                     ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
-                     ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
-                     } for j in range(i * nb_single, (i + 1) * nb_single)]
+            rows = [
+                {
+                    default_primary_key_field_name: j,
+                    default_vector_field_name: vectors[j],
+                    ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
+                    ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
+                    ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
+                    ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
+                    ct.default_int64_field_name: j if (i % 2 == 0) else None,
+                    ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_string_field_name: f"{j}" if (i % 2 == 0) else None,
+                    ct.default_json_field_name: inserted_data_distribution[i],
+                    ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
+                    ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
+                    ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_string_array_field_name: [f"{j}", f"{j + 1}"] if (i % 2 == 0) else None,
+                }
+                for j in range(i * nb_single, (i + 1) * nb_single)
+            ]
             assert len(rows) == nb_single
             # log.info(rows)
             self.insert(client, collection_name=collection_name, data=rows)
@@ -399,18 +518,22 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' before scalar index")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
-            count = res[0]['count(*)']
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
+            count = res[0]["count(*)"]
             # log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
             assert count == len(id_list)
             assert count == len(json_list)
-            compare_dict.setdefault(f'{i}', {})
-            compare_dict[f'{i}']["id_list"] = id_list
-            compare_dict[f'{i}']["json_list"] = json_list
+            compare_dict.setdefault(f"{i}", {})
+            compare_dict[f"{i}"]["id_list"] = id_list
+            compare_dict[f"{i}"]["json_list"] = json_list
         # 5. release if specified
         if is_release:
             self.release_collection(client, collection_name)
@@ -431,28 +554,36 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_int32_array_field_name, index_type=supported_array_scalar_index)
         index_params.add_index(field_name=ct.default_int64_array_field_name, index_type=supported_array_scalar_index)
         index_params.add_index(field_name=ct.default_bool_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_float_array_field_name, index_type=supported_array_double_float_scalar_index)
-        index_params.add_index(field_name=ct.default_double_array_field_name, index_type=supported_array_double_float_scalar_index)
+        index_params.add_index(
+            field_name=ct.default_float_array_field_name, index_type=supported_array_double_float_scalar_index
+        )
+        index_params.add_index(
+            field_name=ct.default_double_array_field_name, index_type=supported_array_double_float_scalar_index
+        )
         index_params.add_index(field_name=ct.default_string_array_field_name, index_type=supported_array_scalar_index)
         json_index_name = "json_index_name"
-        json_path_list = [f"{ct.default_json_field_name}",
-                          f"{ct.default_json_field_name}[0]",
-                          f"{ct.default_json_field_name}[1]",
-                          f"{ct.default_json_field_name}[6]",
-                          f"{ct.default_json_field_name}[10000]",
-                          f"{ct.default_json_field_name}['a']",
-                          f"{ct.default_json_field_name}['a']['b']",
-                          f"{ct.default_json_field_name}['a'][0]",
-                          f"{ct.default_json_field_name}['a'][6]",
-                          f"{ct.default_json_field_name}['a'][0]['b']",
-                          f"{ct.default_json_field_name}['a']['b']['c']",
-                          f"{ct.default_json_field_name}['a']['b'][0]['d']",
-                          f"{ct.default_json_field_name}['a']['c'][0]['d']"]
+        json_path_list = [
+            f"{ct.default_json_field_name}",
+            f"{ct.default_json_field_name}[0]",
+            f"{ct.default_json_field_name}[1]",
+            f"{ct.default_json_field_name}[6]",
+            f"{ct.default_json_field_name}[10000]",
+            f"{ct.default_json_field_name}['a']",
+            f"{ct.default_json_field_name}['a']['b']",
+            f"{ct.default_json_field_name}['a'][0]",
+            f"{ct.default_json_field_name}['a'][6]",
+            f"{ct.default_json_field_name}['a'][0]['b']",
+            f"{ct.default_json_field_name}['a']['b']['c']",
+            f"{ct.default_json_field_name}['a']['b'][0]['d']",
+            f"{ct.default_json_field_name}['a']['c'][0]['d']",
+        ]
         for i in range(len(json_path_list)):
-            index_params.add_index(field_name=ct.default_json_field_name, index_name=json_index_name + f'{i}',
-                                   index_type=supported_json_path_index,
-                                   params={"json_cast_type": "DOUBLE",
-                                           "json_path": json_path_list[i]})
+            index_params.add_index(
+                field_name=ct.default_json_field_name,
+                index_name=json_index_name + f"{i}",
+                index_type=supported_json_path_index,
+                params={"json_cast_type": "DOUBLE", "json_path": json_path_list[i]},
+            )
         # 7. create index
         self.create_index(client, collection_name, index_params)
         # 8. create same twice
@@ -469,26 +600,36 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' after index")
-            count = self.query(client, collection_name=collection_name, filter=express_list[i],
-                               output_fields=["count(*)"])[0]
+            count = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
             # log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
-            if len(json_list) != len(compare_dict[f'{i}']["json_list"]):
-                log.debug(f"the field {expr_field} value after index {supported_array_scalar_index} under expression '{express_list[i]}' is:")
+            if len(json_list) != len(compare_dict[f"{i}"]["json_list"]):
+                log.debug(
+                    f"the field {expr_field} value after index {supported_array_scalar_index} under expression '{express_list[i]}' is:"
+                )
                 log.debug(json_list)
-                log.debug(f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["json_list"])
-            assert json_list == compare_dict[f'{i}']["json_list"]
-            if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
-                log.debug(f"primary key field {default_primary_key_field_name} after index {supported_array_scalar_index} under expression '{express_list[i]}' is:")
+                log.debug(
+                    f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:"
+                )
+                log.debug(compare_dict[f"{i}"]["json_list"])
+            assert json_list == compare_dict[f"{i}"]["json_list"]
+            if len(id_list) != len(compare_dict[f"{i}"]["id_list"]):
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} after index {supported_array_scalar_index} under expression '{express_list[i]}' is:"
+                )
                 log.debug(id_list)
-                log.debug(f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["id_list"])
-            assert id_list == compare_dict[f'{i}']["id_list"]
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:"
+                )
+                log.debug(compare_dict[f"{i}"]["id_list"])
+            assert id_list == compare_dict[f"{i}"]["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
         self.drop_collection(client, collection_name)
 
@@ -497,18 +638,30 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_flush", [True, False])
     @pytest.mark.parametrize("is_release", [True, False])
     @pytest.mark.parametrize("single_data_num", [50])
-    @pytest.mark.parametrize("expr_field", [ct.default_int8_field_name, ct.default_int16_field_name,
-                                            ct.default_int32_field_name, ct.default_int64_field_name,
-                                            ct.default_float_field_name, ct.default_double_field_name,
-                                            ct.default_string_field_name, ct.default_bool_field_name,
-                                            ct.default_int8_array_field_name, ct.default_int16_array_field_name,
-                                            ct.default_int32_array_field_name,ct.default_int64_array_field_name,
-                                            ct.default_bool_array_field_name, ct.default_float_array_field_name,
-                                            ct.default_double_array_field_name, ct.default_string_array_field_name])
-    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_auto_index(self, enable_dynamic_field,
-                                                                                                       supported_json_path_index,
-                                                                                                       is_flush, is_release,
-                                                                                                       single_data_num, expr_field):
+    @pytest.mark.parametrize(
+        "expr_field",
+        [
+            ct.default_int8_field_name,
+            ct.default_int16_field_name,
+            ct.default_int32_field_name,
+            ct.default_int64_field_name,
+            ct.default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_string_field_name,
+            ct.default_bool_field_name,
+            ct.default_int8_array_field_name,
+            ct.default_int16_array_field_name,
+            ct.default_int32_array_field_name,
+            ct.default_int64_array_field_name,
+            ct.default_bool_array_field_name,
+            ct.default_float_array_field_name,
+            ct.default_double_array_field_name,
+            ct.default_string_array_field_name,
+        ],
+    )
+    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_auto_index(
+        self, enable_dynamic_field, supported_json_path_index, is_flush, is_release, single_data_num, expr_field
+    ):
         """
         target: test query using expression fields with all supported field type after all supported scalar index
                 with all supported basic expressions
@@ -545,49 +698,95 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             schema.add_field(ct.default_double_field_name, DataType.DOUBLE, nullable=True)
             schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, nullable=True)
             schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
-            schema.add_field(ct.default_int8_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT8,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int16_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT16,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int32_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT32,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int64_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT64,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_bool_array_field_name, datatype=DataType.ARRAY, element_type=DataType.BOOL,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_float_array_field_name, datatype=DataType.ARRAY, element_type=DataType.FLOAT,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_double_array_field_name, datatype=DataType.ARRAY, element_type=DataType.DOUBLE,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_string_array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
-                             max_capacity=5, max_length=100, nullable=True)
+            schema.add_field(
+                ct.default_int8_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT8,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int16_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT16,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int32_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT32,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int64_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT64,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_bool_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.BOOL,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_float_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.FLOAT,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_double_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.DOUBLE,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_string_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=5,
+                max_length=100,
+                nullable=True,
+            )
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+60, default_dim)
+        vectors = cf.gen_vectors(default_nb + 60, default_dim)
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = single_data_num
         for i in range(len(inserted_data_distribution)):
-            rows = [{default_primary_key_field_name: j, default_vector_field_name: vectors[j],
-                     ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
-                     ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
-                     ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
-                     ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
-                     ct.default_int64_field_name: j if (i % 2 == 0) else None,
-                     ct.default_float_field_name: j*1.0 if (i % 2 == 0) else None,
-                     ct.default_double_field_name: j*1.0 if (i % 2 == 0) else None,
-                     ct.default_string_field_name: f'{j}' if (i % 2 == 0) else None,
-                     ct.default_json_field_name: inserted_data_distribution[i],
-                     ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
-                     ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
-                     ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
-                     } for j in range(i * nb_single, (i + 1) * nb_single)]
+            rows = [
+                {
+                    default_primary_key_field_name: j,
+                    default_vector_field_name: vectors[j],
+                    ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
+                    ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
+                    ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
+                    ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
+                    ct.default_int64_field_name: j if (i % 2 == 0) else None,
+                    ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_string_field_name: f"{j}" if (i % 2 == 0) else None,
+                    ct.default_json_field_name: inserted_data_distribution[i],
+                    ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
+                    ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
+                    ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_string_array_field_name: [f"{j}", f"{j + 1}"] if (i % 2 == 0) else None,
+                }
+                for j in range(i * nb_single, (i + 1) * nb_single)
+            ]
             assert len(rows) == nb_single
             log.info(rows)
             self.insert(client, collection_name=collection_name, data=rows)
@@ -602,18 +801,22 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' before scalar index is:")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
-            count = res[0]['count(*)']
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
+            count = res[0]["count(*)"]
             log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
             assert count == len(id_list)
             assert count == len(json_list)
-            compare_dict.setdefault(f'{i}', {})
-            compare_dict[f'{i}']["id_list"] = id_list
-            compare_dict[f'{i}']["json_list"] = json_list
+            compare_dict.setdefault(f"{i}", {})
+            compare_dict[f"{i}"]["id_list"] = id_list
+            compare_dict[f"{i}"]["json_list"] = json_list
         # 5. release if specified
         if is_release:
             self.release_collection(client, collection_name)
@@ -638,24 +841,28 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_double_array_field_name, index_type="AUTOINDEX")
         index_params.add_index(field_name=ct.default_string_array_field_name, index_type="AUTOINDEX")
         json_index_name = "json_index_name"
-        json_path_list = [f"{ct.default_json_field_name}",
-                          f"{ct.default_json_field_name}[0]",
-                          f"{ct.default_json_field_name}[1]",
-                          f"{ct.default_json_field_name}[6]",
-                          f"{ct.default_json_field_name}[10000]",
-                          f"{ct.default_json_field_name}['a']",
-                          f"{ct.default_json_field_name}['a']['b']",
-                          f"{ct.default_json_field_name}['a'][0]",
-                          f"{ct.default_json_field_name}['a'][6]",
-                          f"{ct.default_json_field_name}['a'][0]['b']",
-                          f"{ct.default_json_field_name}['a']['b']['c']",
-                          f"{ct.default_json_field_name}['a']['b'][0]['d']",
-                          f"{ct.default_json_field_name}['a']['c'][0]['d']"]
+        json_path_list = [
+            f"{ct.default_json_field_name}",
+            f"{ct.default_json_field_name}[0]",
+            f"{ct.default_json_field_name}[1]",
+            f"{ct.default_json_field_name}[6]",
+            f"{ct.default_json_field_name}[10000]",
+            f"{ct.default_json_field_name}['a']",
+            f"{ct.default_json_field_name}['a']['b']",
+            f"{ct.default_json_field_name}['a'][0]",
+            f"{ct.default_json_field_name}['a'][6]",
+            f"{ct.default_json_field_name}['a'][0]['b']",
+            f"{ct.default_json_field_name}['a']['b']['c']",
+            f"{ct.default_json_field_name}['a']['b'][0]['d']",
+            f"{ct.default_json_field_name}['a']['c'][0]['d']",
+        ]
         for i in range(len(json_path_list)):
-            index_params.add_index(field_name=ct.default_json_field_name, index_name=json_index_name + f'{i}',
-                                   index_type=supported_json_path_index,
-                                   params={"json_cast_type": "DOUBLE",
-                                           "json_path": json_path_list[i]})
+            index_params.add_index(
+                field_name=ct.default_json_field_name,
+                index_name=json_index_name + f"{i}",
+                index_type=supported_json_path_index,
+                params={"json_cast_type": "DOUBLE", "json_path": json_path_list[i]},
+            )
         # 7. create index
         self.create_index(client, collection_name, index_params)
         # 8. create same twice
@@ -672,26 +879,36 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter '{express_list[i]}' after index is:")
-            count = self.query(client, collection_name=collection_name, filter=express_list[i],
-                               output_fields=["count(*)"])[0]
+            count = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
             log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=[f"{expr_field}"])[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"]
+            )[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
-            if len(json_list) != len(compare_dict[f'{i}']["json_list"]):
-                log.debug(f"the field {expr_field} value after index 'AUTOINDEX' under expression '{express_list[i]}' is:")
+            if len(json_list) != len(compare_dict[f"{i}"]["json_list"]):
+                log.debug(
+                    f"the field {expr_field} value after index 'AUTOINDEX' under expression '{express_list[i]}' is:"
+                )
                 log.debug(json_list)
-                log.debug(f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["json_list"])
-            assert json_list == compare_dict[f'{i}']["json_list"]
-            if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
-                log.debug(f"primary key field {default_primary_key_field_name} after index 'AUTOINDEX' under expression '{express_list[i]}' is:")
+                log.debug(
+                    f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:"
+                )
+                log.debug(compare_dict[f"{i}"]["json_list"])
+            assert json_list == compare_dict[f"{i}"]["json_list"]
+            if len(id_list) != len(compare_dict[f"{i}"]["id_list"]):
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} after index 'AUTOINDEX' under expression '{express_list[i]}' is:"
+                )
                 log.debug(id_list)
-                log.debug(f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["id_list"])
-            assert id_list == compare_dict[f'{i}']["id_list"]
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:"
+                )
+                log.debug(compare_dict[f"{i}"]["id_list"])
+            assert id_list == compare_dict[f"{i}"]["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
         self.drop_collection(client, collection_name)
 
@@ -701,19 +918,21 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_release", [True, False])
     @pytest.mark.parametrize("single_data_num", [50])
     @pytest.mark.parametrize("random_filter_field_number", [2, 6, 16])
-    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_multiple_fields(self,
-                                                                                               enable_dynamic_field,
-                                                                                               supported_bool_scalar_index,
-                                                                                               supported_numeric_float_double_index,
-                                                                                               supported_numeric_scalar_index,
-                                                                                               supported_varchar_scalar_index,
-                                                                                               supported_json_path_index,
-                                                                                               supported_array_scalar_index,
-                                                                                               supported_array_double_float_scalar_index,
-                                                                                               is_flush,
-                                                                                               is_release,
-                                                                                               single_data_num,
-                                                                                               random_filter_field_number):
+    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_multiple_fields(
+        self,
+        enable_dynamic_field,
+        supported_bool_scalar_index,
+        supported_numeric_float_double_index,
+        supported_numeric_scalar_index,
+        supported_varchar_scalar_index,
+        supported_json_path_index,
+        supported_array_scalar_index,
+        supported_array_double_float_scalar_index,
+        is_flush,
+        is_release,
+        single_data_num,
+        random_filter_field_number,
+    ):
         """
         target: test query using expression fields with all supported field type after all supported scalar index
                 with all supported basic expressions
@@ -750,22 +969,63 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             schema.add_field(ct.default_double_field_name, DataType.DOUBLE, nullable=True)
             schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=100, nullable=True)
             schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
-            schema.add_field(ct.default_int8_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT8,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int16_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT16,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int32_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT32,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_int64_array_field_name, datatype=DataType.ARRAY, element_type=DataType.INT64,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_bool_array_field_name, datatype=DataType.ARRAY, element_type=DataType.BOOL,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_float_array_field_name, datatype=DataType.ARRAY, element_type=DataType.FLOAT,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_double_array_field_name, datatype=DataType.ARRAY, element_type=DataType.DOUBLE,
-                             max_capacity=5, nullable=True)
-            schema.add_field(ct.default_string_array_field_name, datatype=DataType.ARRAY, element_type=DataType.VARCHAR,
-                             max_capacity=5, max_length=100, nullable=True)
+            schema.add_field(
+                ct.default_int8_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT8,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int16_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT16,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int32_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT32,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_int64_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT64,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_bool_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.BOOL,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_float_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.FLOAT,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_double_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.DOUBLE,
+                max_capacity=5,
+                nullable=True,
+            )
+            schema.add_field(
+                ct.default_string_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=5,
+                max_length=100,
+                nullable=True,
+            )
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -774,25 +1034,30 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = single_data_num
         for i in range(len(inserted_data_distribution)):
-            rows = [{default_primary_key_field_name: j, default_vector_field_name: vectors[j],
-                     ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
-                     ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
-                     ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
-                     ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
-                     ct.default_int64_field_name: j if (i % 2 == 0) else None,
-                     ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
-                     ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
-                     ct.default_string_field_name: f'{j}' if (i % 2 == 0) else None,
-                     ct.default_json_field_name: inserted_data_distribution[i],
-                     ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
-                     ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
-                     ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
-                     ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
-                     ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
-                     } for j in range(i * nb_single, (i + 1) * nb_single)]
+            rows = [
+                {
+                    default_primary_key_field_name: j,
+                    default_vector_field_name: vectors[j],
+                    ct.default_bool_field_name: bool(j) if (i % 2 == 0) else None,
+                    ct.default_int8_field_name: np.int8(j) if (i % 2 == 0) else None,
+                    ct.default_int16_field_name: np.int16(j) if (i % 2 == 0) else None,
+                    ct.default_int32_field_name: np.int32(j) if (i % 2 == 0) else None,
+                    ct.default_int64_field_name: j if (i % 2 == 0) else None,
+                    ct.default_float_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_double_field_name: j * 1.0 if (i % 2 == 0) else None,
+                    ct.default_string_field_name: f"{j}" if (i % 2 == 0) else None,
+                    ct.default_json_field_name: inserted_data_distribution[i],
+                    ct.default_int8_array_field_name: [np.int8(j), np.int8(j)] if (i % 2 == 0) else None,
+                    ct.default_int16_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int32_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_int64_array_field_name: [j, j + 1] if (i % 2 == 0) else None,
+                    ct.default_bool_array_field_name: [bool(j), bool(j + 1)] if (i % 2 == 0) else None,
+                    ct.default_float_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_double_array_field_name: [j * 1.0, (j + 1) * 1.0] if (i % 2 == 0) else None,
+                    ct.default_string_array_field_name: [f"{j}", f"{j + 1}"] if (i % 2 == 0) else None,
+                }
+                for j in range(i * nb_single, (i + 1) * nb_single)
+            ]
             assert len(rows) == nb_single
             self.insert(client, collection_name=collection_name, data=rows)
             log.debug(f"inserted {nb_single} {inserted_data_distribution[i]}")
@@ -805,27 +1070,29 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         for i in range(len(express_list)):
             id_list = []
             log.info(f"query with filter '{express_list[i]}' before scalar index is:")
-            res = \
-            self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
-            count = res[0]['count(*)']
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
+            count = res[0]["count(*)"]
             log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=field_lists)[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=field_lists
+            )[0]
             # compare_dict.setdefault(f'{i}', {})
             one_dict = {}
             # init the compared dict
             for field_name in field_lists:
-                one_dict.setdefault(f'{field_name}', [])
-                compare_dict.setdefault(f'{i}', one_dict)
+                one_dict.setdefault(f"{field_name}", [])
+                compare_dict.setdefault(f"{i}", one_dict)
             # extract and store the id and output_fields value used for compare after index
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 for field_name in field_lists:
-                    compare_dict[f'{i}'][f'{field_name}'].append(single[f"{field_name}"])
+                    compare_dict[f"{i}"][f"{field_name}"].append(single[f"{field_name}"])
             assert count == len(id_list)
             for field_name in field_lists:
-                assert count == len(compare_dict[f'{i}'][f'{field_name}'])
-            compare_dict[f'{i}']['id_list'] = id_list
+                assert count == len(compare_dict[f"{i}"][f"{field_name}"])
+            compare_dict[f"{i}"]["id_list"] = id_list
         # 5. release if specified
         if is_release:
             self.release_collection(client, collection_name)
@@ -846,30 +1113,36 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_int32_array_field_name, index_type=supported_array_scalar_index)
         index_params.add_index(field_name=ct.default_int64_array_field_name, index_type=supported_array_scalar_index)
         index_params.add_index(field_name=ct.default_bool_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_float_array_field_name,
-                               index_type=supported_array_double_float_scalar_index)
-        index_params.add_index(field_name=ct.default_double_array_field_name,
-                               index_type=supported_array_double_float_scalar_index)
+        index_params.add_index(
+            field_name=ct.default_float_array_field_name, index_type=supported_array_double_float_scalar_index
+        )
+        index_params.add_index(
+            field_name=ct.default_double_array_field_name, index_type=supported_array_double_float_scalar_index
+        )
         index_params.add_index(field_name=ct.default_string_array_field_name, index_type=supported_array_scalar_index)
         json_index_name = "json_index_name"
-        json_path_list = [f"{ct.default_json_field_name}",
-                          f"{ct.default_json_field_name}[0]",
-                          f"{ct.default_json_field_name}[1]",
-                          f"{ct.default_json_field_name}[6]",
-                          f"{ct.default_json_field_name}[10000]",
-                          f"{ct.default_json_field_name}['a']",
-                          f"{ct.default_json_field_name}['a']['b']",
-                          f"{ct.default_json_field_name}['a'][0]",
-                          f"{ct.default_json_field_name}['a'][6]",
-                          f"{ct.default_json_field_name}['a'][0]['b']",
-                          f"{ct.default_json_field_name}['a']['b']['c']",
-                          f"{ct.default_json_field_name}['a']['b'][0]['d']",
-                          f"{ct.default_json_field_name}['a']['c'][0]['d']"]
+        json_path_list = [
+            f"{ct.default_json_field_name}",
+            f"{ct.default_json_field_name}[0]",
+            f"{ct.default_json_field_name}[1]",
+            f"{ct.default_json_field_name}[6]",
+            f"{ct.default_json_field_name}[10000]",
+            f"{ct.default_json_field_name}['a']",
+            f"{ct.default_json_field_name}['a']['b']",
+            f"{ct.default_json_field_name}['a'][0]",
+            f"{ct.default_json_field_name}['a'][6]",
+            f"{ct.default_json_field_name}['a'][0]['b']",
+            f"{ct.default_json_field_name}['a']['b']['c']",
+            f"{ct.default_json_field_name}['a']['b'][0]['d']",
+            f"{ct.default_json_field_name}['a']['c'][0]['d']",
+        ]
         for i in range(len(json_path_list)):
-            index_params.add_index(field_name=ct.default_json_field_name, index_name=json_index_name + f'{i}',
-                                   index_type=supported_json_path_index,
-                                   params={"json_cast_type": "DOUBLE",
-                                           "json_path": json_path_list[i]})
+            index_params.add_index(
+                field_name=ct.default_json_field_name,
+                index_name=json_index_name + f"{i}",
+                index_type=supported_json_path_index,
+                params={"json_cast_type": "DOUBLE", "json_path": json_path_list[i]},
+            )
         # 7. create index
         self.create_index(client, collection_name, index_params)
         # # 8. create same twice
@@ -885,26 +1158,36 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         for i in range(len(express_list)):
             id_list = []
             log.info(f"query with filter '{express_list[i]}' after index is:")
-            count = self.query(client, collection_name=collection_name, filter=express_list[i],
-                               output_fields=["count(*)"])[0]
+            count = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"]
+            )[0]
             log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=field_lists)[0]
+            res = self.query(
+                client, collection_name=collection_name, filter=express_list[i], output_fields=field_lists
+            )[0]
             # compare each filtered field before and after index
             for field_name in field_lists:
                 json_list = []
                 for single in res:
                     json_list.append(single[f"{field_name}"])
-                if len(json_list) != len(compare_dict[f'{i}'][f'{field_name}']):
-                    log.debug(f"the field {field_name} value after index under expression '{express_list[i]}' is: {json_list}")
-                    log.debug(f"the field {field_name} value before index to be compared under expression '{express_list[i]}' is: {compare_dict[f'{i}'][f'{field_name}']}")
-                assert json_list == compare_dict[f'{i}'][f'{field_name}']
+                if len(json_list) != len(compare_dict[f"{i}"][f"{field_name}"]):
+                    log.debug(
+                        f"the field {field_name} value after index under expression '{express_list[i]}' is: {json_list}"
+                    )
+                    log.debug(
+                        f"the field {field_name} value before index to be compared under expression '{express_list[i]}' is: {compare_dict[f'{i}'][f'{field_name}']}"
+                    )
+                assert json_list == compare_dict[f"{i}"][f"{field_name}"]
             # compare id before and after index
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
-            if len(id_list) != len(compare_dict[f'{i}']['id_list']):
-                log.debug(f"primary key field {default_primary_key_field_name} after index under expression '{express_list[i]}' is: {id_list}")
-                log.debug(f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is: {compare_dict[f'{i}']['id_list']}")
-            assert id_list == compare_dict[f'{i}']['id_list']
+            if len(id_list) != len(compare_dict[f"{i}"]["id_list"]):
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} after index under expression '{express_list[i]}' is: {id_list}"
+                )
+                log.debug(
+                    f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is: {compare_dict[f'{i}']['id_list']}"
+                )
+            assert id_list == compare_dict[f"{i}"]["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
         self.drop_collection(client, collection_name)

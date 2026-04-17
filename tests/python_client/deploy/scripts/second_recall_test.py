@@ -12,8 +12,7 @@ all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
 
 
 def read_benchmark_hdf5(file_path):
-
-    f = h5py.File(file_path, 'r')
+    f = h5py.File(file_path, "r")
     train = np.array(f["train"])
     test = np.array(f["test"])
     neighbors = np.array(f["neighbors"])
@@ -90,12 +89,12 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
             assert 0.95 <= recall < 1.0, f"recall is {recall}, less than 0.95, greater than or equal to 1.0"
 
 
-
 if __name__ == "__main__":
     import argparse
     import threading
-    parser = argparse.ArgumentParser(description='config for recall test')
-    parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
+
+    parser = argparse.ArgumentParser(description="config for recall test")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")
     args = parser.parse_args()
     host = args.host
     tasks = []

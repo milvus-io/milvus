@@ -6,16 +6,18 @@ from utils.util_log import test_log as log
 from common import common_type as ct
 from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
+
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus import Collection, Partition, ResourceGroupInfo, DataType
 import check.param_check as pc
 import numpy as np
 from ml_dtypes import bfloat16
 
+
 class Error:
     def __init__(self, error):
-        self.code = getattr(error, 'code', -1)
-        self.message = getattr(error, 'message', str(error))
+        self.code = getattr(error, "code", -1)
+        self.message = getattr(error, "message", str(error))
 
     def __str__(self):
         return f"Error(code={self.code}, message={self.message})"
@@ -149,18 +151,21 @@ class ResponseChecker:
             assert error_dict[ct.err_msg] in res.message, (
                 f"Response of API {self.func_name} "
                 f"expect get error message {error_dict[ct.err_code]}, "
-                f"but got {res.code} {res.message}")
+                f"but got {res.code} {res.message}"
+            )
 
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
-            assert False, (f"Response of API expect get error code {error_dict[ct.err_code]} or "
-                           f"error message {error_dict[ct.err_code]}"
-                           f"but success")
+            assert False, (
+                f"Response of API expect get error code {error_dict[ct.err_code]} or "
+                f"error message {error_dict[ct.err_code]}"
+                f"but success"
+            )
         return True
 
     @staticmethod
     def check_value_equal(res, func_name, params):
-        """ check response of connection interface that result is normal """
+        """check response of connection interface that result is normal"""
 
         if func_name == "list_connections":
             if not isinstance(res, list):
@@ -321,7 +326,7 @@ class ResponseChecker:
         for key in check_items.keys():
             for field in res["fields"]:
                 if field["name"] == key:
-                    assert field['params'].items() >= check_items[key].items()
+                    assert field["params"].items() >= check_items[key].items()
         return True
 
     @staticmethod
@@ -417,10 +422,13 @@ class ResponseChecker:
         """
         log.info("search_results_check: checking the searching results")
         enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
-        pk_name = check_items.get("pk_name", ct.default_primary_field_name) if enable_milvus_client_api is False \
-            else check_items.get("pk_name", 'id')
+        pk_name = (
+            check_items.get("pk_name", ct.default_primary_field_name)
+            if enable_milvus_client_api is False
+            else check_items.get("pk_name", "id")
+        )
 
-        if func_name != 'search' and func_name != 'hybrid_search':
+        if func_name != "search" and func_name != "hybrid_search":
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
@@ -436,9 +444,10 @@ class ResponseChecker:
                     original_entities = pandas.DataFrame(original_entities)
                 pc.output_field_value_check(search_res, original_entities, pk_name=pk_name)
         if len(search_res) != check_items["nq"]:
-            log.error("search_results_check: Numbers of query searched(nq) (%d) "
-                      "is not equal with expected (%d)"
-                      % (len(search_res), check_items["nq"]))
+            log.error(
+                "search_results_check: Numbers of query searched(nq) (%d) "
+                "is not equal with expected (%d)" % (len(search_res), check_items["nq"])
+            )
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
@@ -449,15 +458,17 @@ class ResponseChecker:
             if enable_milvus_client_api:
                 for hit in hits:
                     ids.append(hit[pk_name])
-                    distances.append(hit['distance'])
+                    distances.append(hit["distance"])
             else:
                 ids = list(hits.ids)
                 distances = list(hits.distances)
-            if check_items.get("limit", None) is not None \
-                    and ((len(hits) != check_items["limit"]) or (len(set(ids)) != check_items["limit"])):
-                log.error("search_results_check: limit(topK) searched (%d) "
-                          "is not equal with expected (%d)"
-                          % (len(hits), check_items["limit"]))
+            if check_items.get("limit", None) is not None and (
+                (len(hits) != check_items["limit"]) or (len(set(ids)) != check_items["limit"])
+            ):
+                log.error(
+                    "search_results_check: limit(topK) searched (%d) "
+                    "is not equal with expected (%d)" % (len(hits), check_items["limit"])
+                )
                 assert len(hits) == check_items["limit"]
                 assert len(set(ids)) == check_items["limit"]
             if check_items.get("ids", None) is not None:
@@ -467,7 +478,7 @@ class ResponseChecker:
                     assert ids_match
             if check_items.get("metric", None) is not None:
                 # verify the distances are already sorted
-                num_to_check = min(100, len(distances))   # check 100 items if more than that
+                num_to_check = min(100, len(distances))  # check 100 items if more than that
                 if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
                     assert distances[:num_to_check] == sorted(distances[:num_to_check], reverse=True)
                 else:
@@ -479,8 +490,7 @@ class ResponseChecker:
             else:
                 pass  # just check nq and topk, not specific ids need check
 
-        log.info("search_results_check: limit (topK) and "
-                 "ids searched for %d queries are correct" % len(search_res))
+        log.info("search_results_check: limit (topK) and ids searched for %d queries are correct" % len(search_res))
         return True
 
     @staticmethod
@@ -493,7 +503,7 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_iterator_results_check: checking the searching results")
-        if func_name != 'search_iterator':
+        if func_name != "search_iterator":
             log.warning("The function name is {} rather than {}".format(func_name, "search_iterator"))
         search_iterator = search_res
         expected_batch_size = check_items.get("batch_size", None)
@@ -557,7 +567,7 @@ class ResponseChecker:
                             The type of with_vec value is bool, True value means check vector field, False otherwise
         :type check_items: dict
         """
-        if func_name != 'query':
+        if func_name != "query":
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
             raise Exception("The query result to check isn't list type object")
@@ -577,33 +587,41 @@ class ResponseChecker:
         output_fields = check_items.get("output_fields", None)
         if output_fields is not None:
             for row in query_res:
-                assert set(output_fields) == set(row.keys()), \
+                assert set(output_fields) == set(row.keys()), (
                     f"output_fields check failed: expected {output_fields}, got {list(row.keys())}"
+                )
         # pk_name = check_items.get("pk_name", ct.default_primary_field_name)
         if exp_res is not None:
             if with_vec is True:
-                vector_type = check_items.get('vector_type', 'FLOAT_VECTOR')
-                vector_field = check_items.get('vector_field', 'vector')
+                vector_type = check_items.get("vector_type", "FLOAT_VECTOR")
+                vector_field = check_items.get("vector_field", "vector")
                 if vector_type == DataType.FLOAT16_VECTOR:
                     for single_query_result in query_res:
                         if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.float16).tolist()
+                            single_query_result[vector_field] = np.frombuffer(
+                                single_query_result[vector_field][0], dtype=np.float16
+                            ).tolist()
                 if vector_type == DataType.BFLOAT16_VECTOR:
                     for single_query_result in query_res:
                         if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=bfloat16).tolist()
+                            single_query_result[vector_field] = np.frombuffer(
+                                single_query_result[vector_field][0], dtype=bfloat16
+                            ).tolist()
                 if vector_type == DataType.INT8_VECTOR:
                     for single_query_result in query_res:
                         if single_query_result[vector_field]:
-                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
+                            single_query_result[vector_field] = np.frombuffer(
+                                single_query_result[vector_field][0], dtype=np.int8
+                            ).tolist()
             if isinstance(query_res, list):
                 debug_mode = check_items.get("debug_mode", False)
                 if debug_mode is True:
                     assert pc.compare_lists_with_epsilon_ignore_dict_order_deepdiff(a=query_res, b=exp_res)
                 else:
-                    assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res), \
-                        f"there exists different values between query_results and expected_results, " \
+                    assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res), (
+                        f"there exists different values between query_results and expected_results, "
                         f"use debug_mode in check_items to print the difference entity by entity(but it is slow)"
+                    )
             else:
                 log.error(f"Query result {query_res} is not list")
                 return False
@@ -620,7 +638,7 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("query_iterator_results_check: checking the query results")
-        if func_name != 'query_iterator':
+        if func_name != "query_iterator":
             log.warning("The function name is {} rather than {}".format(func_name, "query_iterator"))
         query_iterator = query_res
         pk_list = []
@@ -656,7 +674,7 @@ class ResponseChecker:
         :param func_name: Query API name
         :type func_name: str
         """
-        if func_name != 'query':
+        if func_name != "query":
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
             raise Exception("The query result to check isn't list type object")
@@ -673,7 +691,7 @@ class ResponseChecker:
         :param func_name: Query API name
         :type func_name: str
         """
-        if func_name != 'query':
+        if func_name != "query":
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
             raise Exception("The query result to check isn't list type object")
@@ -681,7 +699,7 @@ class ResponseChecker:
 
     @staticmethod
     def check_distance(distance_res, func_name, check_items):
-        if func_name != 'calc_distance':
+        if func_name != "calc_distance":
             log.warning("The function name is {} rather than {}".format(func_name, "calc_distance"))
         if not isinstance(distance_res, list):
             raise Exception("The distance result to check isn't list type object")
@@ -691,9 +709,7 @@ class ResponseChecker:
         vectors_r = check_items["vectors_r"]
         metric = check_items.get("metric", "L2")
         sqrt = check_items.get("sqrt", False)
-        cf.compare_distance_2d_vector(vectors_l, vectors_r,
-                                      distance_res,
-                                      metric, sqrt)
+        cf.compare_distance_2d_vector(vectors_l, vectors_r, distance_res, metric, sqrt)
 
         return True
 
@@ -712,7 +728,7 @@ class ResponseChecker:
                             plans_num represent the delete compact plans number
         :type: dict
         """
-        to_check_func = 'get_compaction_plans'
+        to_check_func = "get_compaction_plans"
         if func_name != to_check_func:
             log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
         if not isinstance(compaction_plans, CompactionPlans):
@@ -739,7 +755,7 @@ class ResponseChecker:
                             segment_num represent how many segments are expected to be merged, default is 2
         :type: dict
         """
-        to_check_func = 'get_compaction_plans'
+        to_check_func = "get_compaction_plans"
         if func_name != to_check_func:
             log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
         if not isinstance(compaction_plans, CompactionPlans):

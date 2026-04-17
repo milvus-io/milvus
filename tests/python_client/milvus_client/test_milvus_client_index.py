@@ -17,10 +17,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -35,7 +35,7 @@ default_string_array_field_name = ct.default_string_array_field_name
 
 
 class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -70,8 +70,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector")
         # 3. create index
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}"}
-        self.create_index(client, name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -93,8 +92,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector")
         # 3. create index
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
-        self.create_index(client, name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -115,10 +113,13 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default][collection={not_existed_collection_name}]"}
-        self.create_index(client, not_existed_collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 100,
+            ct.err_msg: f"collection not found[database=default][collection={not_existed_collection_name}]",
+        }
+        self.create_index(
+            client, not_existed_collection_name, index_params, check_task=CheckTasks.err_res, check_items=error
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -140,10 +141,11 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type=index)
         # 3. create index
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection=not_existed]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 100,
+            ct.err_msg: f"can't find collection collection not found[database=default][collection=not_existed]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -165,10 +167,11 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", metric_type=metric)
         # 3. create index
-        error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
-                                               f"found[database=default][collection=not_existed]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 100,
+            ct.err_msg: f"can't find collection collection not found[database=default][collection=not_existed]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -183,8 +186,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         error = {ct.err_code: 1100, ct.err_msg: f"vector index cannot be dropped on loaded collection"}
-        self.drop_index(client, collection_name, "vector",
-                        check_task=CheckTasks.err_res, check_items=error)
+        self.drop_index(client, collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -203,8 +205,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2")
         # 3. create another index
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -234,11 +235,12 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
         # 4. create another index
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
-                             f"invalid parameter[expected=valid index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
+            f"invalid parameter[expected=valid index params][actual=invalid index params]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -268,15 +270,16 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
         # 4. create another index
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid "
-                                                f"index type: {not_supported_index}"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid index type: {not_supported_index}",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientIndexValid(TestMilvusClientV2Base):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.fixture(scope="function", params=["COSINE", "L2", "IP"])
     def metric_type(self, request):
@@ -313,27 +316,42 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 4. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 5. load collection
         self.load_collection(client, collection_name)
         # 6. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 7. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -353,8 +371,15 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_index(client, collection_name, "vector")
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 3. prepare index params
         index_params = self.prepare_index_params(client)[0]
@@ -367,19 +392,27 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         # 5. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 4. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -391,9 +424,14 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         expected: index/search/query successfully
         """
         metric_type = "COSINE"
-        numeric_fields = [ct.default_int32_field_name, ct.default_int16_field_name,
-                          ct.default_int8_field_name, default_float_field_name,
-                          ct.default_double_field_name, ct.default_int64_field_name]
+        numeric_fields = [
+            ct.default_int32_field_name,
+            ct.default_int16_field_name,
+            ct.default_int8_field_name,
+            default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_int64_field_name,
+        ]
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -407,10 +445,17 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         if add_field:
-            self.add_collection_field(client, collection_name, field_name="field_int", data_type=DataType.INT32,
-                                      nullable=True)
-            self.add_collection_field(client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
-                                      nullable=True, max_length=64)
+            self.add_collection_field(
+                client, collection_name, field_name="field_int", data_type=DataType.INT32, nullable=True
+            )
+            self.add_collection_field(
+                client,
+                collection_name,
+                field_name="field_varchar",
+                data_type=DataType.VARCHAR,
+                nullable=True,
+                max_length=64,
+            )
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, "vector")
         res = self.list_indexes(client, collection_name)[0]
@@ -418,37 +463,48 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         # 2. prepare index params
         index = "AUTOINDEX"
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_primary_key_field_name,
-                               index_type=ct.numeric_supported_index_types[0], metric_type=metric_type)
+        index_params.add_index(
+            field_name=default_primary_key_field_name,
+            index_type=ct.numeric_supported_index_types[0],
+            metric_type=metric_type,
+        )
         index_params.add_index(field_name=default_vector_field_name, index_type=index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_bool_field_name,
-                               index_type="", metric_type=metric_type)
+        index_params.add_index(field_name=ct.default_bool_field_name, index_type="", metric_type=metric_type)
         if len(numeric_fields) >= len(ct.numeric_supported_index_types):
             k = 0
             for i in range(len(numeric_fields)):
                 if k >= len(ct.numeric_supported_index_types):
                     k = 0
-                index_params.add_index(field_name=numeric_fields[i],
-                                       index_type=ct.numeric_supported_index_types[k], metric_type=metric_type)
+                index_params.add_index(
+                    field_name=numeric_fields[i],
+                    index_type=ct.numeric_supported_index_types[k],
+                    metric_type=metric_type,
+                )
                 k += 1
         else:
             k = 0
             for i in range(len(ct.numeric_supported_index_types)):
                 if k >= len(numeric_fields):
                     k = 0
-                index_params.add_index(field_name=numeric_fields[k],
-                                       index_type=ct.numeric_supported_index_types[i], metric_type=metric_type)
+                index_params.add_index(
+                    field_name=numeric_fields[k],
+                    index_type=ct.numeric_supported_index_types[i],
+                    metric_type=metric_type,
+                )
                 k += 1
 
         for index in ct.varchar_supported_index_types:
-            index_params.add_index(field_name=f"{default_string_field_name}_{index}",
-                                   index_type=index, metric_type=metric_type)
+            index_params.add_index(
+                field_name=f"{default_string_field_name}_{index}", index_type=index, metric_type=metric_type
+            )
 
         if add_field:
-            index_params.add_index(field_name="field_int",
-                                   index_type=ct.numeric_supported_index_types[0], metric_type=metric_type)
-            index_params.add_index(field_name="field_varchar",
-                                   index_type=ct.varchar_supported_index_types[0], metric_type=metric_type)
+            index_params.add_index(
+                field_name="field_int", index_type=ct.numeric_supported_index_types[0], metric_type=metric_type
+            )
+            index_params.add_index(
+                field_name="field_varchar", index_type=ct.varchar_supported_index_types[0], metric_type=metric_type
+            )
         # 3. create index
         self.create_index(client, collection_name, index_params)
         # 4. drop index
@@ -478,31 +534,45 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         if add_field:
             filter_fields.extend(["field_int", "field_varchar"])
         for field_name in filter_fields:
-            self.search(client, collection_name, vectors_to_search,
-                        limit=default_limit,
-                        filter=f"{field_name} is null",
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": len(vectors_to_search),
-                                     "ids": insert_ids,
-                                     "limit": default_limit,
-                                     "pk_name": default_primary_key_field_name})
+            self.search(
+                client,
+                collection_name,
+                vectors_to_search,
+                limit=default_limit,
+                filter=f"{field_name} is null",
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": len(vectors_to_search),
+                    "ids": insert_ids,
+                    "limit": default_limit,
+                    "pk_name": default_primary_key_field_name,
+                },
+            )
         for index in ct.varchar_supported_index_types:
-            self.search(client, collection_name, vectors_to_search,
-                        limit=default_limit,
-                        filter=f"{default_string_field_name}_{index} is not null",
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": len(vectors_to_search),
-                                     "ids": insert_ids,
-                                     "limit": default_limit,
-                                     "pk_name": default_primary_key_field_name})
+            self.search(
+                client,
+                collection_name,
+                vectors_to_search,
+                limit=default_limit,
+                filter=f"{default_string_field_name}_{index} is not null",
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": len(vectors_to_search),
+                    "ids": insert_ids,
+                    "limit": default_limit,
+                    "pk_name": default_primary_key_field_name,
+                },
+            )
         # 9. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -537,28 +607,42 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 4. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 int64_field_name: np.random.randint(0, 99), default_string_field_name: str(np.random.randint(0, 99))}
-                for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                int64_field_name: np.random.randint(0, 99),
+                default_string_field_name: str(np.random.randint(0, 99)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 5. load collection
         self.load_collection(client, collection_name)
         # 6. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 7. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -589,10 +673,18 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         assert res == []
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 int64_field_name: np.random.randint(0, 99), ct.default_int32_field_name: np.int32(i),
-                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: np.int8(i),
-                 default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                int64_field_name: np.random.randint(0, 99),
+                ct.default_int32_field_name: np.int32(i),
+                ct.default_int16_field_name: np.int16(i),
+                ct.default_int8_field_name: np.int8(i),
+                default_string_field_name: str(np.random.randint(0, 99)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 3. prepare index params
         index = "AUTOINDEX"
@@ -610,37 +702,59 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         # 6. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 7. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         # 8. insert more distinct value to the scalar field to make the autoindex change
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 int64_field_name: np.random.randint(0, 99), ct.default_int32_field_name: np.int32(i),
-                 ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: np.int8(i),
-                 default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb, 2 * default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                int64_field_name: np.random.randint(0, 99),
+                ct.default_int32_field_name: np.int32(i),
+                ct.default_int16_field_name: np.int16(i),
+                ct.default_int8_field_name: np.int8(i),
+                default_string_field_name: str(np.random.randint(0, 99)),
+            }
+            for i in range(default_nb, 2 * default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 9. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(2 * default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -668,28 +782,43 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 4. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i),
-                 default_multiple_vector_field_name: list(rng.random((1, default_dim))[0])} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                default_multiple_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 5. load collection
         self.load_collection(client, collection_name)
         # 6. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 7. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -718,32 +847,47 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 5. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 6. load collection
         self.load_collection(client, collection_name)
         # 7. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 8. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )
         self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
     def not_supported_varchar_scalar_index(self, request):
@@ -753,12 +897,23 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
-                                              DataType.INT64.name, DataType.FLOAT.name,
-                                              DataType.ARRAY.name, DataType.FLOAT_VECTOR.name,
-                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
-                                              DataType.BINARY_VECTOR.name,
-                                              DataType.SPARSE_FLOAT_VECTOR.name, DataType.INT8_VECTOR.name])
+    @pytest.fixture(
+        scope="function",
+        params=[
+            DataType.INT8.name,
+            DataType.INT16.name,
+            DataType.INT32.name,
+            DataType.INT64.name,
+            DataType.FLOAT.name,
+            DataType.ARRAY.name,
+            DataType.FLOAT_VECTOR.name,
+            DataType.FLOAT16_VECTOR.name,
+            DataType.BFLOAT16_VECTOR.name,
+            DataType.BINARY_VECTOR.name,
+            DataType.SPARSE_FLOAT_VECTOR.name,
+            DataType.INT8_VECTOR.name,
+        ],
+    )
     def not_supported_json_cast_type(self, request):
         yield request.param
 
@@ -793,21 +948,25 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
-                                                "[missing_param=json_cast_type]: invalid parameter"
-                                                "[expected=valid index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "json index must specify cast type: missing parameter"
+            "[missing_param=json_cast_type]: invalid parameter"
+            "[expected=valid index params][actual=invalid index params]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 4. prepare index params with no json_cast_type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_path": "my_json['a']['b']"})
         # 5. create index
-        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
-                                                "[missing_param=json_cast_type]: invalid parameter"
-                                                "[expected=valid index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "json index must specify cast type: missing parameter"
+            "[missing_param=json_cast_type]: invalid parameter"
+            "[expected=valid index params][actual=invalid index params]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         # 6. prepare index params with no json_path
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
@@ -833,18 +992,23 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name="my_json", index_type=invalid_index_type, params={"json_cast_type": "double",
-                                                                                            "json_path": "my_json['a']['b']"})
+        index_params.add_index(
+            field_name="my_json",
+            index_type=invalid_index_type,
+            params={"json_cast_type": "double", "json_path": "my_json['a']['b']"},
+        )
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index]"
-                                                f"[actual=invalid index type: {invalid_index_type}]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid index type: {invalid_index_type}]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_not_support_index_type(self, enable_dynamic_field,
-                                                                  not_supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_not_support_index_type(
+        self, enable_dynamic_field, not_supported_varchar_scalar_index
+    ):
         """
         target: test json path index with not supported index type
         method: create json path index with not supported index type
@@ -866,8 +1030,11 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid json index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=not_supported_varchar_scalar_index,
-                               params={"json_cast_type": "DOUBLE", "json_path": "my_json['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=not_supported_varchar_scalar_index,
+            params={"json_cast_type": "DOUBLE", "json_path": "my_json['a']['b']"},
+        )
         # 3. create index
         if not_supported_varchar_scalar_index == "TRIE":
             supported_field_type = "varchar"
@@ -879,17 +1046,20 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             supported_field_type = "bool, int, string and array"
             not_supported_varchar_scalar_index = "bitmap index"
             got_json_suffix = ""
-        error = {ct.err_code: 1100, ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
-                                                f"{supported_field_type} field{got_json_suffix}: invalid parameter[expected=valid "
-                                                f"index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
+            f"{supported_field_type} field{got_json_suffix}: invalid parameter[expected=valid "
+            f"index params][actual=invalid index params]",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("invalid_json_cast_type", ["12-s", "12 s", "(mn)", "中文", "%$#", 1, 1.0])
-    def test_milvus_client_json_path_index_invalid_json_cast_type(self, enable_dynamic_field, invalid_json_cast_type,
-                                                                  supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_invalid_json_cast_type(
+        self, enable_dynamic_field, invalid_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with invalid json_cast_type
         method: create json path index with invalid json_cast_type
@@ -911,19 +1081,21 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid json index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": invalid_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": invalid_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    def test_milvus_client_json_path_index_not_supported_json_cast_type(self, enable_dynamic_field,
-                                                                        supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_not_supported_json_cast_type(
+        self, enable_dynamic_field, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with not supported json_cast_type
         method: create json path index with not supported json_cast_type
@@ -946,20 +1118,22 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         for cast_type in ct.not_supported_json_cast_types:
             index_params = self.prepare_index_params(client)[0]
             index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-            index_params.add_index(field_name=json_field_name, index_name="json_index",
-                                   index_type=supported_varchar_scalar_index,
-                                   params={"json_cast_type": cast_type,
-                                           "json_path": f"{json_field_name}['a']['b']"})
+            index_params.add_index(
+                field_name=json_field_name,
+                index_name="json_index",
+                index_type=supported_varchar_scalar_index,
+                params={"json_cast_type": cast_type, "json_path": f"{json_field_name}['a']['b']"},
+            )
             # 3. create index
             error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res, check_items=error)
+            self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [False])
-    @pytest.mark.parametrize("invalid_json_path", [1, 1.0, '/'])
-    def test_milvus_client_json_path_index_invalid_json_path(self, enable_dynamic_field, invalid_json_path,
-                                                             supported_varchar_scalar_index):
+    @pytest.mark.parametrize("invalid_json_path", [1, 1.0, "/"])
+    def test_milvus_client_json_path_index_invalid_json_path(
+        self, enable_dynamic_field, invalid_json_path, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with invalid json_cast_type
         method: create json path index with invalid json_cast_type
@@ -981,13 +1155,15 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid json index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "Double", "json_path": invalid_json_path})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "Double", "json_path": invalid_json_path},
+        )
         # 3. create index
         error = {ct.err_code: 65535, ct.err_msg: f"cannot parse identifier: {invalid_json_path}"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_json_path_index_not_exist_field_non_dynamic(self, supported_varchar_scalar_index):
@@ -1006,11 +1182,20 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"},
+        )
         error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               check_task=CheckTasks.err_res, check_items=error)
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -1037,24 +1222,30 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"},
+        )
         self.create_index(client, collection_name, index_params)
         # 4. prepare another index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"},
+        )
         # 5. create index
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_index_name_same_json_path(self, enable_dynamic_field,
-                                                               supported_varchar_scalar_index):
+    def test_milvus_client_different_index_name_same_json_path(
+        self, enable_dynamic_field, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with different index name but with same json path
         method: create json path index with different index name but with same json path
@@ -1076,26 +1267,33 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index_1",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index_1",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"},
+        )
         self.create_index(client, collection_name, index_params)
         # 4. prepare another index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name, index_name="json_index_2",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name="json_index_2",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"},
+        )
         # 5. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: creating multiple "
-                                                 "indexes on same field is not supported"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported",
+        }
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_json_path_index_same_field_same_index_name(self, enable_dynamic_field,
-                                                                                supported_json_cast_type,
-                                                                                supported_varchar_scalar_index):
+    def test_milvus_client_different_json_path_index_same_field_same_index_name(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test different json path index with same index name at the same time
         method: test different json path index with same index name at the same index_params object
@@ -1116,33 +1314,45 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 3. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
         # 4. create index
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     # @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
     # def not_supported_varchar_scalar_index(self, request):
@@ -1164,8 +1374,9 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_default(self, enable_dynamic_field, supported_json_cast_type,
-                                                   supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_default(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with default parameter
         method: create json path index with default parameter
@@ -1186,113 +1397,186 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
         vectors = cf.gen_vectors(default_nb + 50, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
-                range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb + 10)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: i,
+            }
+            for i in range(default_nb, default_nb + 10)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb + 10, default_nb + 20)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {},
+            }
+            for i in range(default_nb + 10, default_nb + 20)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
-                range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [1, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': 1}, 2, 3]}} for i in
-                range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": 1}, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}} for i in
-                range(default_nb + 30, default_nb + 40)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": None}, 2, 3]},
+            }
+            for i in range(default_nb + 30, default_nb + 40)
+        ]
         self.insert(client, collection_name, rows)
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]"},
+        )
         # 3. create index
         self.create_index(client, collection_name, index_params)
         self.list_indexes(client, collection_name)
         index_name = json_field_name
         if enable_dynamic_field:
             index_name = "$meta/" + json_field_name
-        self.describe_index(client, collection_name, index_name + "/a/b",
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + "/a/b"})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/b",
+            },
+        )
         # 5. create same json index twice
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name + "/a/b",
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + "/a/b"})
-        self.describe_index(client, collection_name, index_name + '/a',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a'})
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
-        self.describe_index(client, collection_name, index_name + '/a/0/b',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a'][0]['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a/0/b'})
-        self.describe_index(client, collection_name, index_name + '/a/0',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a'][0]",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a/0'})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/b",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/0/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a'][0]['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/0/b",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/0",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a'][0]",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/0",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_default_index_name(self, enable_dynamic_field, supported_json_cast_type,
-                                                              supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_default_index_name(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with not supported json_cast_type
         method: create json path index with not supported json_cast_type
@@ -1313,34 +1597,49 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
         # 3. create index
         if enable_dynamic_field:
-            index_name = "$meta/" + json_field_name + '/a/b'
+            index_name = "$meta/" + json_field_name + "/a/b"
         else:
-            index_name = json_field_name + '/a/b'
+            index_name = json_field_name + "/a/b"
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue #40636")
-    def test_milvus_client_json_path_index_on_non_json_field(self, supported_json_cast_type,
-                                                             supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_on_non_json_field(
+        self, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with "json_cast_type" and "json_path" parameters on non json field
         method: create json path index with "json_cast_type" and "json_path" parameters on int64 field
@@ -1365,32 +1664,45 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 3. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=default_string_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{default_string_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=default_string_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{default_string_field_name}['a']['b']"},
+        )
         # 4. create index
         index_name = default_string_field_name
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{default_string_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": default_string_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{default_string_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": default_string_field_name,
+                "index_name": index_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_json_path_index_same_field_different_index_name(self, enable_dynamic_field,
-                                                                                     supported_json_cast_type,
-                                                                                     supported_varchar_scalar_index):
+    def test_milvus_client_different_json_path_index_same_field_different_index_name(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test different json path index with different default index name at the same time
         method: test different json path index with different default index name at the same index_params object
@@ -1411,57 +1723,85 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 2. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name + "1",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + "2",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + "3",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "1",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "2",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "3",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
         # 3. create index
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name + '1',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '1'})
-        self.describe_index(client, collection_name, index_name + '2',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '2'})
-        self.describe_index(client, collection_name, index_name + '3',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '3'})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "1",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "1",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "2",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "2",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "3",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "3",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_diff_index_same_field_diff_index_name_diff_index_params(self, enable_dynamic_field,
-                                                                                   supported_json_cast_type,
-                                                                                   supported_varchar_scalar_index):
+    def test_milvus_client_diff_index_same_field_diff_index_name_diff_index_params(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test different json path index with different default index name at the same time
         method: test different json path index with different default index name at different index_params object
@@ -1483,67 +1823,93 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
         self.create_index(client, collection_name, index_params)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
         self.create_index(client, collection_name, index_params)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
         self.create_index(client, collection_name, index_params)
         # 3. create index
         index_name = f"{json_field_name}/a/b"
         if enable_dynamic_field:
             index_name = "$meta/" + index_name
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": "my_json['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": "my_json['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
         index_name = f"{json_field_name}/a"
         if enable_dynamic_field:
             index_name = "$meta/" + index_name
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": "my_json['a']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": "my_json['a']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
         index_name = f"{json_field_name}"
         if enable_dynamic_field:
             index_name = "$meta/" + index_name
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": "my_json",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name
-                            })
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": "my_json",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_index_same_json_path_diff_field(self, enable_dynamic_field, supported_json_cast_type,
-                                                                supported_varchar_scalar_index):
+    def test_milvus_client_json_index_same_json_path_diff_field(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test different json path index with different default index name at the same time
         method: test different json path index with different default index name at the same index_params object
@@ -1565,50 +1931,71 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert
         vectors = cf.gen_vectors(default_nb, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {'b': i}},
-                 json_field_name + "1": {'a': {'b': i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+                json_field_name + "1": {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
         self.create_index(client, collection_name, index_params)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=json_field_name + "1",
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}1['a']['b']"})
+        index_params.add_index(
+            field_name=json_field_name + "1",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}1['a']['b']"},
+        )
         self.create_index(client, collection_name, index_params)
         # 3. create index
         index_name = f"{json_field_name}/a/b"
         if enable_dynamic_field:
             index_name = "$meta/" + index_name
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
         index_name = f"{json_field_name}1/a/b"
         if enable_dynamic_field:
             index_name = "$meta/" + index_name
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}1['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name + "1",
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}1['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name + "1",
+                "index_name": index_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_before_load(self, enable_dynamic_field, supported_json_cast_type,
-                                                       supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_before_load(
+        self, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index with not supported json_cast_type
         method: create json path index with not supported json_cast_type
@@ -1631,112 +2018,189 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         # 3. insert with different data distribution
         vectors = cf.gen_vectors(default_nb + 50, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
-                range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb + 10)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: i,
+            }
+            for i in range(default_nb, default_nb + 10)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb + 10, default_nb + 20)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {},
+            }
+            for i in range(default_nb + 10, default_nb + 20)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
-                range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [1, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': 1}, 2, 3]}} for i in
-                range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": 1}, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}} for i in
-                range(default_nb + 30, default_nb + 40)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": None}, 2, 3]},
+            }
+            for i in range(default_nb + 30, default_nb + 40)
+        ]
         self.insert(client, collection_name, rows)
         # 4. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + '2',
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + '3',
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]['b']"})
-        index_params.add_index(field_name=json_field_name, index_name=index_name + '4',
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "1",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "2",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "3",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_name=index_name + "4",
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]"},
+        )
         # 5. create index
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
         # 6. create json index on different json path
         self.create_index(client, collection_name, index_params)
         # 7. create same json index twice
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
-        self.describe_index(client, collection_name, index_name + '1',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}['a']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '1'})
-        self.describe_index(client, collection_name, index_name + '2',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '2'})
-        self.describe_index(client, collection_name, index_name + '3',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}['a'][0]['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '3'})
-        self.describe_index(client, collection_name, index_name + '4',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                # "json_cast_type": supported_json_cast_type, # issue 40426
-                                "json_path": f"{json_field_name}['a'][0]",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '4'})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "1",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}['a']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "1",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "2",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "2",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "3",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}['a'][0]['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "3",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "4",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                # "json_cast_type": supported_json_cast_type, # issue 40426
+                "json_path": f"{json_field_name}['a'][0]",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "4",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_json_path_index_after_enable_dynamic_field(self, supported_json_cast_type,
-                                                                      supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_after_enable_dynamic_field(
+        self, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test json path index after enabling dynamic field
         method: create collection, enable dynamic field, create json path index, insert
@@ -1756,104 +2220,178 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         # 2. alter collection dynamic field enable
         self.alter_collection_properties(client, collection_name, {"dynamicfield.enabled": True})
         res = self.describe_collection(client, collection_name)[0]
-        assert res.get('enable_dynamic_field', None) is True
+        assert res.get("enable_dynamic_field", None) is True
         # 3. insert with different data distribution
         vectors = cf.gen_vectors(default_nb + 50, default_dim)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: i} for i in range(default_nb, default_nb + 10)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: i,
+            }
+            for i in range(default_nb, default_nb + 10)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb + 10, default_nb + 20)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {},
+            }
+            for i in range(default_nb + 10, default_nb + 20)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}}
-                for i in range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [1, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': 1}, 2, 3]}}
-                for i in range(default_nb + 20, default_nb + 30)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": 1}, 2, 3]},
+            }
+            for i in range(default_nb + 20, default_nb + 30)
+        ]
         self.insert(client, collection_name, rows)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}}
-                for i in range(default_nb + 30, default_nb + 40)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_string_field_name: str(i),
+                json_field_name: {"a": [{"b": None}, 2, 3]},
+            }
+            for i in range(default_nb + 30, default_nb + 40)
+        ]
         self.insert(client, collection_name, rows)
         # 4. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]"})
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]"},
+        )
         # 5. create index
         self.create_index(client, collection_name, index_params)
         self.list_indexes(client, collection_name)
         index_name = "$meta/" + json_field_name
-        self.describe_index(client, collection_name, index_name + "/a/b",
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + "/a/b"})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/b",
+            },
+        )
         # 6. create same json index twice
         self.create_index(client, collection_name, index_params)
-        self.describe_index(client, collection_name, index_name + "/a/b",
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + "/a/b"})
-        self.describe_index(client, collection_name, index_name + '/a',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a'})
-        self.describe_index(client, collection_name, index_name,
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name})
-        self.describe_index(client, collection_name, index_name + '/a/0/b',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a'][0]['b']",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a/0/b'})
-        self.describe_index(client, collection_name, index_name + '/a/0',
-                            check_task=CheckTasks.check_describe_index_property,
-                            check_items={
-                                "json_cast_type": supported_json_cast_type,
-                                "json_path": f"{json_field_name}['a'][0]",
-                                "index_type": supported_varchar_scalar_index,
-                                "field_name": json_field_name,
-                                "index_name": index_name + '/a/0'})
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/b",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name,
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name,
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/0/b",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a'][0]['b']",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/0/b",
+            },
+        )
+        self.describe_index(
+            client,
+            collection_name,
+            index_name + "/a/0",
+            check_task=CheckTasks.check_describe_index_property,
+            check_items={
+                "json_cast_type": supported_json_cast_type,
+                "json_path": f"{json_field_name}['a'][0]",
+                "index_type": supported_varchar_scalar_index,
+                "field_name": json_field_name,
+                "index_name": index_name + "/a/0",
+            },
+        )

@@ -2,9 +2,9 @@ import requests
 import argparse
 from tenacity import retry, stop_after_attempt
 
+
 @retry(stop=stop_after_attempt(7))
 def get_image_tag_by_short_name(tag, arch):
-
     prefix = tag.split("-")[0]
     url = f"https://harbor.milvus.io/api/v2.0/projects/milvus/repositories/milvus/artifacts?with_tag=true&q=tags%253D~{prefix}-&page_size=100&page=1"
 
@@ -26,6 +26,7 @@ def get_image_tag_by_short_name(tag, arch):
         return tag
     else:
         return tag_candidates[-1]
+
 
 if __name__ == "__main__":
     argparse = argparse.ArgumentParser()

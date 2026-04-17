@@ -17,10 +17,10 @@ default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "id >= 0"
 exp_res = "exp_res"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
+default_search_string_exp = 'varchar >= "0"'
+default_search_mix_exp = 'int64 >= 0 && varchar >= "0"'
 default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
+default_json_search_exp = 'json_field["number"] >= 0'
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
@@ -35,8 +35,9 @@ default_string_array_field_name = ct.default_string_array_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_int32_value = ct.default_int32_value
 
+
 class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -60,13 +61,13 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         method: insert after client is closed
         expected: raise exception
         """
-        client = self._client(alias='my_client')
+        client = self._client(alias="my_client")
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         self.close(client)
 
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
+        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
         self.insert(client, collection_name, data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -83,10 +84,11 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nb)]
         data = [[i for i in range(default_nb)], vectors]
-        error = {ct.err_code: 999,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, please check it."}
-        self.insert(client, collection_name, data,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "The Input data type is inconsistent with defined schema, please check it.",
+        }
+        self.insert(client, collection_name, data, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -99,11 +101,17 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = ""
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
-        self.insert(client, collection_name, rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
@@ -115,12 +123,21 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
-                                                f"collection name must be an underscore or letter: invalid parameter"}
-        self.insert(client, collection_name, rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
+            f"collection name must be an underscore or letter: invalid parameter",
+        }
+        self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_collection_name_over_max_length(self):
@@ -132,11 +149,17 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = "a".join("a" for i in range(256))
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
-        self.insert(client, collection_name, rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_not_exist_collection_name(self):
@@ -148,11 +171,17 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default][collection={collection_name}]"}
-        self.insert(client, collection_name, rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", ["12-s", "中文", "%$#", " ", ""])
@@ -167,10 +196,11 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
-        error = {ct.err_code: 999,
-                 ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'"}
-        self.insert(client, collection_name, data,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'str'",
+        }
+        self.insert(client, collection_name, data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_vector_field_missing(self):
@@ -185,13 +215,16 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i,
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"Insert missed an field `vector` to collection "
-                             f"without set nullable==true or set default_value"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = [
+            {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Insert missed an field `vector` to collection "
+            f"without set nullable==true or set default_value",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_id_field_missing(self):
@@ -206,12 +239,19 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = [
+            {
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_extra_field(self):
@@ -226,12 +266,20 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, enable_dynamic_field=False)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_dim_not_match(self):
@@ -247,11 +295,16 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 65536, ct.err_msg: f"of float data should divide the dim({default_dim})"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_dim_not_match(self):
@@ -276,14 +329,21 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         binary_vectors = cf.gen_binary_vectors(num=default_nb, dim=default_dim + 1)[1]
         rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: str(i),
-             default_binary_vec_field_name: binary_vectors[i]} for i in range(default_nb)]
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                default_binary_vec_field_name: binary_vectors[i],
+            }
+            for i in range(default_nb)
+        ]
 
-        error = {ct.err_code: 65536,
-                 ct.err_msg: f"of field data(binary_vector) is not equal to schema dim ({default_dim})"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 65536,
+            ct.err_msg: f"of field data(binary_vector) is not equal to schema dim ({default_dim})",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_not_matched_data(self):
@@ -299,13 +359,19 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"The Input data type is inconsistent with defined schema, "
-                             f"{{id}} field should be a int64"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+            {
+                default_primary_key_field_name: str(i),
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"The Input data type is inconsistent with defined schema, {{id}} field should be a int64",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", ["12 s", "(mn)", "中文", "%$#", " "])
@@ -321,13 +387,26 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
         if partition_name == " ":
             error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
-        self.insert(client, collection_name, data=rows, partition_name=partition_name,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(
+            client,
+            collection_name,
+            data=rows,
+            partition_name=partition_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_not_exist_partition_name(self):
@@ -342,12 +421,25 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         partition_name = cf.gen_unique_str("partition_not_exist")
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        self.insert(client, collection_name, data=rows, partition_name=partition_name,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(
+            client,
+            collection_name,
+            data=rows,
+            partition_name=partition_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_collection_partition_not_match(self):
@@ -366,11 +458,24 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.create_partition(client, another_collection_name, partition_name)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        self.insert(client, collection_name, data=rows, partition_name=partition_name,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(
+            client,
+            collection_name,
+            data=rows,
+            partition_name=partition_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_ids_binary_invalid(self):
@@ -394,12 +499,20 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         # 2. Generate float vector data (invalid for binary vector collection)
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: i, default_binary_vec_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+            {
+                default_primary_key_field_name: i,
+                default_binary_vec_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         # 3. Verify error on insert
-        error = {ct.err_code: 999,
-                 ct.err_msg: "The Input data type is inconsistent with defined schema, {binary_vector} field should be a binary_vector, but got a {<class 'list'>} instead."}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "The Input data type is inconsistent with defined schema, {binary_vector} field should be a binary_vector, but got a {<class 'list'>} instead.",
+        }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -430,8 +543,14 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 3. Verify error on insert with non-existent partition
         error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        self.insert(client, collection_name, data=rows, partition_name=partition_name, check_task=CheckTasks.err_res,
-                    check_items=error)
+        self.insert(
+            client,
+            collection_name,
+            data=rows,
+            partition_name=partition_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -448,9 +567,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 1. Create schema with INT8 field
         schema = cf.gen_all_datatype_collection_schema(
-            dim=default_dim,
-            enable_dynamic_field=True,
-            enable_struct_array_field=False
+            dim=default_dim, enable_dynamic_field=True, enable_struct_array_field=False
         )
         # Add INT8 field
         schema.add_field(ct.default_int8_field_name, DataType.INT8)
@@ -466,8 +583,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 5. Verify error on insert
         error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int8}) out of range: [-128, 127]"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -484,9 +600,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 1. Create schema with INT16 field
         schema = cf.gen_all_datatype_collection_schema(
-            dim=default_dim,
-            enable_dynamic_field=True,
-            enable_struct_array_field=False
+            dim=default_dim, enable_dynamic_field=True, enable_struct_array_field=False
         )
         # Add INT16 field
         schema.add_field(ct.default_int16_field_name, DataType.INT16)
@@ -502,8 +616,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 5. Verify error on insert
         error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int16}) out of range: [-32768, 32767]"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -520,9 +633,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 1. Create schema with INT32 field
         schema = cf.gen_all_datatype_collection_schema(
-            dim=default_dim,
-            enable_dynamic_field=True,
-            enable_struct_array_field=False
+            dim=default_dim, enable_dynamic_field=True, enable_struct_array_field=False
         )
         # Add INT32 field
         schema.add_field(ct.default_int32_field_name, DataType.INT32)
@@ -538,8 +649,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 5. Verify error on insert
         error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -560,7 +670,9 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         if primary_field == ct.default_int64_field_name:
             schema.add_field(primary_field, DataType.INT64, is_primary=True, auto_id=True)
         else:
-            schema.add_field(primary_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True)
+            schema.add_field(
+                primary_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True
+            )
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         schema.add_field(default_bool_field_name, DataType.BOOL)
@@ -585,21 +697,19 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                 if value_type in (int, bool, float):
                     tmp = rows[dirty_i][field_name]
                     rows[dirty_i][field_name] = "iamstring"
-                    self.insert(client, collection_name, data=rows,
-                                check_task=CheckTasks.err_res, check_items=error)
+                    self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
                     rows[dirty_i][field_name] = tmp
                 elif value_type is str:
                     tmp = rows[dirty_i][field_name]
                     rows[dirty_i][field_name] = random.randint(0, 1000)
-                    self.insert(client, collection_name, data=rows,
-                                check_task=CheckTasks.err_res, check_items=error)
+                    self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
                     rows[dirty_i][field_name] = tmp
                 else:
                     continue
 
         # 5. Verify correct data can be inserted
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         self.drop_collection(client, collection_name)
 
@@ -619,13 +729,19 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 2. Generate row data (150000 rows, which exceeds 64MB RPC limit)
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(nb)
+        ]
 
         # 3. Verify error on insert
         error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -654,13 +770,18 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
 
         # 4. Prepare test data with invalid type for varchar field
-        data = [{default_primary_key_field_name: 1, default_float_field_name: 1.0,
-                 default_string_field_name: default_value, default_vector_field_name: vectors[0]}]
+        data = [
+            {
+                default_primary_key_field_name: 1,
+                default_float_field_name: 1.0,
+                default_string_field_name: default_value,
+                default_vector_field_name: vectors[0],
+            }
+        ]
 
         # 5. Verify error on upsert
         error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        self.upsert(client, collection_name, data=data,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.upsert(client, collection_name, data=data, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -679,31 +800,34 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 2. Generate row data
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         # 3. Test None value in vector field
         rows[0][default_vector_field_name][0] = None
         error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         # 4. Test float('nan') in vector field
-        rows[0][default_vector_field_name][0] = float('nan')
+        rows[0][default_vector_field_name][0] = float("nan")
         error = {ct.err_code: 999, ct.err_msg: "value 'NaN' is not a number or infinity"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         # 5. Test np.NAN in vector field
         rows[0][default_vector_field_name][0] = np.NAN
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         # 6. Test float('inf') in vector field
-        rows[0][default_vector_field_name][0] = float('inf')
+        rows[0][default_vector_field_name][0] = float("inf")
         error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 
@@ -733,18 +857,26 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         sparse_vectors = cf.gen_sparse_vectors(nb, dim=128)
         rows = []
         for i in range(nb - 1):
-            row = {ct.default_int64_field_name: i, ct.default_float_field_name: np.float32(i),
-                   ct.default_string_field_name: str(i), ct.default_sparse_vec_field_name: sparse_vectors[i]}
+            row = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: np.float32(i),
+                ct.default_string_field_name: str(i),
+                ct.default_sparse_vec_field_name: sparse_vectors[i],
+            }
             rows.append(row)
 
         # 4. Add invalid dense vector type as the last row
         invalid_vec = cf.gen_vectors(1, dim=128, vector_data_type=invalid_vector_type)
-        invalid_row = {ct.default_int64_field_name: nb - 1, ct.default_float_field_name: np.float32(nb - 1),
-                       ct.default_string_field_name: str(nb - 1), ct.default_sparse_vec_field_name: invalid_vec[0]}
+        invalid_row = {
+            ct.default_int64_field_name: nb - 1,
+            ct.default_float_field_name: np.float32(nb - 1),
+            ct.default_string_field_name: str(nb - 1),
+            ct.default_sparse_vec_field_name: invalid_vec[0],
+        }
         rows.append(invalid_row)
 
         # 5. Verify error on insert
-        error = {ct.err_code: 1, ct.err_msg: 'invalid input for sparse float vector'}
+        error = {ct.err_code: 1, ct.err_msg: "invalid input for sparse float vector"}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -762,18 +894,16 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         # 1. Create schema with varchar pk (max_length=6) and auto_id=True
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=6,
-                         is_primary=True, auto_id=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=6, is_primary=True, auto_id=True)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
 
         # 2. Create collection
         self.create_collection(client, collection_name, schema=schema)
 
         # 3. Insert 2 rows (no pk field since auto_id=True)
-        rows = [{default_vector_field_name: list(rng.random(default_dim).astype(np.float32))}
-                for _ in range(2)]
+        rows = [{default_vector_field_name: list(rng.random(default_dim).astype(np.float32))} for _ in range(2)]
         res = self.insert(client, collection_name, data=rows)[0]
-        assert res['insert_count'] == 2
+        assert res["insert_count"] == 2
 
         # 4. Create index and load
         index_params = self.prepare_index_params(client)[0]
@@ -790,8 +920,9 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+
 class TestMilvusClientInsertValid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """Test case of search interface"""
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -805,8 +936,10 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
     def nullable(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR,
-                                              DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR])
+    @pytest.fixture(
+        scope="function",
+        params=[DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
+    )
     def vector_type(self, request):
         yield request.param
 
@@ -839,24 +972,36 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # 2. insert
         rows = cf.gen_row_data_by_schema(ct.default_nb, schema=schema)
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. search
         vectors_to_search = cf.gen_vectors(ct.default_nq, dim=dim, vector_data_type=vector_type)
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # 4. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name,
-                                "vector_type": vector_type})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                exp_res: rows,
+                "with_vec": True,
+                "pk_name": default_primary_key_field_name,
+                "vector_type": vector_type,
+            },
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -888,7 +1033,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # Insert binary data
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
 
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -897,19 +1042,27 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # search
         vectors_to_search = [rows[0][default_binary_vec_field_name]]
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": default_nb,
-                                "with_vec": False,
-                                "vector_type": DataType.BINARY_VECTOR})
+        self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": default_nb, "with_vec": False, "vector_type": DataType.BINARY_VECTOR},
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -926,32 +1079,53 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 0},
+        )
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. insert diff fields
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, "new_diff_str_field": str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                "new_diff_str_field": str(i),
+            }
+            for i in range(default_nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -968,17 +1142,23 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # 2. insert
         rows = []
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == 0
+        assert results["insert_count"] == 0
         # 3. search
         rng = np.random.default_rng(seed=19530)
         vectors_to_search = rng.random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": [],
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": 0})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": [],
+                "pk_name": default_primary_key_field_name,
+                "limit": 0,
+            },
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -995,8 +1175,10 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=default_dim)
 
         # Try to insert with none type data
-        error = {ct.err_code: -1,
-                 ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'NoneType'"}
+        error = {
+            ct.err_code: -1,
+            ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'NoneType'",
+        }
         self.insert(client, collection_name, None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1008,7 +1190,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str('partition')
+        partition_name = cf.gen_unique_str("partition")
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create partition
@@ -1016,24 +1198,37 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         partitions = self.list_partitions(client, collection_name)[0]
         assert partition_name in partitions
         index = self.list_indexes(client, collection_name)[0]
-        assert index == ['vector']
+        assert index == ["vector"]
         # load_state = self.get_load_state(collection_name)[0]
         # 3. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "limit": default_limit,
+                "pk_name": default_primary_key_field_name,
+            },
+        )
         # partition_number = self.get_partition_stats(client, collection_name, "_default")[0]
         # assert partition_number == default_nb
         # partition_number = self.get_partition_stats(client, collection_name, partition_name)[0]
@@ -1053,7 +1248,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str('partition')
+        partition_name = cf.gen_unique_str("partition")
 
         # 1. Create binary vector collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -1072,7 +1267,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # 3. Insert binary data into partition
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
-        assert results['insert_count'] == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
 
         # 4. Verify row count
         self.flush(client, collection_name)
@@ -1103,47 +1298,86 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert before add field
         vectors = cf.gen_vectors(default_nb * 2, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         # 3. add new field
-        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
-                                  nullable=True, default_value=default_value, max_length=64)
+        self.add_collection_field(
+            client,
+            collection_name,
+            field_name="field_new",
+            data_type=DataType.VARCHAR,
+            nullable=True,
+            default_value=default_value,
+            max_length=64,
+        )
         vectors_to_search = [vectors[0]]
         insert_ids = [i for i in range(default_nb)]
         # 4. check old dynamic data search is not impacted after add new field
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
         # 5. insert data(old + new field)
-        rows_t = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                  default_float_field_name: i * 1.0, default_string_field_name: str(i),
-                  "field_new": "field_new"} for i in range(default_nb, default_nb * 2)]
+        rows_t = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                "field_new": "field_new",
+            }
+            for i in range(default_nb, default_nb * 2)
+        ]
         results = self.insert(client, collection_name, rows_t)[0]
-        assert results['insert_count'] == default_nb
+        assert results["insert_count"] == default_nb
         insert_ids_after_add_field = [i for i in range(default_nb, default_nb * 2)]
         # 6. search filtered with the new field
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f'field_new=="{default_value}"',
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"field_new=='field_new'",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids_after_add_field,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            filter=f'field_new=="{default_value}"',
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            filter=f"field_new=='field_new'",
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "ids": insert_ids_after_add_field,
+                "pk_name": default_primary_key_field_name,
+                "limit": default_limit,
+            },
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -1166,13 +1400,18 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0,
-                 default_string_field_name: str(i)} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
-        assert sorted(results['ids']) == list(range(nb))
+        assert results["insert_count"] == nb
+        assert sorted(results["ids"]) == list(range(nb))
         # 3. verify num entities
         self.flush(client, collection_name)
         stats = self.get_collection_stats(client, collection_name)[0]
@@ -1210,11 +1449,18 @@ class TestInsertOperation(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         self.close(client)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
-        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(10)
+        ]
+        error = {ct.err_code: 999, ct.err_msg: "should create connection first"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.skip(reason="Covered by test_milvus_client_insert_partition ")
@@ -1228,15 +1474,22 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("partition")
-        
+
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
-        assert results['insert_count'] == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
         self.drop_collection(client, collection_name)
 
     @pytest.mark.skip(reason="Covered by test_milvus_client_insert_not_exist_partition_name ")
@@ -1249,13 +1502,19 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(10)
+        ]
         error = {ct.err_code: 200, ct.err_msg: "partition not found[partition=p]"}
-        self.insert(client, collection_name, rows, partition_name="p", 
-                   check_task=CheckTasks.err_res, check_items=error)
+        self.insert(client, collection_name, rows, partition_name="p", check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1269,18 +1528,25 @@ class TestInsertOperation(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name_1 = cf.gen_unique_str("partition1")
         partition_name_2 = cf.gen_unique_str("partition2")
-        
+
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         result_1 = self.insert(client, collection_name, rows, partition_name=partition_name_1)[0]
         result_2 = self.insert(client, collection_name, rows, partition_name=partition_name_2)[0]
-        assert result_1['insert_count'] == ct.default_nb
-        assert result_2['insert_count'] == ct.default_nb
+        assert result_1["insert_count"] == ct.default_nb
+        assert result_2["insert_count"] == ct.default_nb
 
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -1301,13 +1567,20 @@ class TestInsertOperation(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
-        assert results['insert_count'] == ct.default_nb
-        assert sorted(results['ids']) == list(range(ct.default_nb))
+        assert results["insert_count"] == ct.default_nb
+        assert sorted(results["ids"]) == list(range(ct.default_nb))
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1319,20 +1592,28 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create schema with varchar limit
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=ct.default_dim)
         schema.add_field("small_limit", DataType.VARCHAR, max_length=2)
         schema.add_field("big_limit", DataType.VARCHAR, max_length=65530)
-        
+
         self.create_collection(client, collection_name, dimension=ct.default_dim, schema=schema)
-        
+
         # Insert data exceeding varchar limit
         rows = [
-            {"vector": list(cf.gen_vectors(1, ct.default_dim)[0]), "small_limit": "limit_1___________", "big_limit": "1"},
-            {"vector": list(cf.gen_vectors(1, ct.default_dim)[0]), "small_limit": "limit_2___________", "big_limit": "2"}
+            {
+                "vector": list(cf.gen_vectors(1, ct.default_dim)[0]),
+                "small_limit": "limit_1___________",
+                "big_limit": "1",
+            },
+            {
+                "vector": list(cf.gen_vectors(1, ct.default_dim)[0]),
+                "small_limit": "limit_2___________",
+                "big_limit": "2",
+            },
         ]
         error = {ct.err_code: 999, ct.err_msg: "length of varchar field small_limit exceeds max length"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
@@ -1349,11 +1630,13 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         # Generate data without vector field
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i,
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(10)]
+        rows = [
+            {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
+            for i in range(10)
+        ]
         error = {ct.err_code: 1, ct.err_msg: f"Insert missed an field `vector` to collection"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -1368,17 +1651,23 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
-                               enable_dynamic_field=False)
+        self.create_collection(
+            client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=False
+        )
         # 2. insert with wrong field name
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i,
-                 "wrong_vector": list(rng.random((1, default_dim))[0]),
-                 } for i in range(default_nb)]
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"Attempt to insert an unexpected field `wrong_vector` to collection without enabling dynamic field"}
-        self.insert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                "wrong_vector": list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(default_nb)
+        ]
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"Attempt to insert an unexpected field `wrong_vector` to collection without enabling dynamic field",
+        }
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1391,10 +1680,16 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         # Generate data with wrong vector type (scalar instead of list)
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: 0.0001,
-                 default_float_field_name: 0.0, default_string_field_name: "0"}]
+        rows = [
+            {
+                default_primary_key_field_name: 0,
+                default_vector_field_name: 0.0001,
+                default_float_field_name: 0.0,
+                default_string_field_name: "0",
+            }
+        ]
         error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -1409,15 +1704,22 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         self.insert(client, collection_name, rows)
-        
+
         self.drop_collection(client, collection_name)
         collections = self.list_collections(client)[0]
         assert collection_name not in collections
@@ -1432,21 +1734,28 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
-        
+
         # Create index (note: quick setup collection already has index)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
-        
+
         indexes = self.list_indexes(client, collection_name)[0]
         assert default_vector_field_name in indexes
         self.drop_collection(client, collection_name)
@@ -1473,7 +1782,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         # 2. Insert binary data first
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
 
         self.flush(client, collection_name)
 
@@ -1482,7 +1791,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
 
         # 3. Create index after insert
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT",metric_type="JACCARD")
+        index_params.add_index(ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT", metric_type="JACCARD")
         self.create_index(client, collection_name, index_params)
 
         # 4. Verify index created
@@ -1501,21 +1810,28 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        
+
         # Create index first
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
-        
+
         indexes = self.list_indexes(client, collection_name)[0]
         assert default_vector_field_name in indexes
-        
+
         # Then insert data
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         self.insert(client, collection_name, rows)
-        
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
@@ -1530,26 +1846,26 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create binary vector collection
         schema = self.create_schema(client, enable_dynamic_field=True)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT", metric_type="HAMMING")
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, index_params=index_params)
-        
+
         indexes = self.list_indexes(client, collection_name)[0]
         assert ct.default_binary_vec_field_name in indexes
-        
+
         # Insert binary data
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         self.insert(client, collection_name, rows)
-        
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
@@ -1565,31 +1881,38 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create schema with auto_id=True
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema, 
-                              index_params=index_params, auto_id=True)
-        
+
+        self.create_collection(
+            client, collection_name, dimension=default_dim, schema=schema, index_params=index_params, auto_id=True
+        )
+
         # Insert without primary key (auto_id)
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
-        
+        assert results["insert_count"] == ct.default_nb
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
-        
+
         indexes = self.list_indexes(client, collection_name)[0]
         assert default_vector_field_name in indexes
         self.drop_collection(client, collection_name)
@@ -1603,7 +1926,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create schema with auto_id=True and specific primary field
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
@@ -1614,26 +1937,28 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
-        
+
         # Insert without primary key (auto_id)
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0} for i in range(ct.default_nb)]
+        rows = [
+            {default_vector_field_name: list(rng.random((1, default_dim))[0]), default_float_field_name: i * 1.0}
+            for i in range(ct.default_nb)
+        ]
         if pk_field != ct.default_string_field_name:
             for i, row in enumerate(rows):
                 row[default_string_field_name] = str(i)
-        
+
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
-        assert len(set(results['ids'])) == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
+        assert len(set(results["ids"])) == ct.default_nb
 
         if pk_field == ct.default_int64_field_name:
             assert all(isinstance(i, int) for i in results["ids"])
         else:
             assert all(isinstance(i, str) and i.isdigit() for i in results["ids"])
-        
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
@@ -1649,7 +1974,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 200
-        
+
         # Create schema with auto_id=True and specific primary field
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
@@ -1660,20 +1985,20 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
-        
+
         # Insert twice
         rows = cf.gen_row_data_by_schema(nb, schema=schema, start=0)
-        
+
         results_1 = self.insert(client, collection_name, rows)[0]
-        assert results_1['insert_count'] == nb
+        assert results_1["insert_count"] == nb
 
         results_2 = self.insert(client, collection_name, rows)[0]
-        assert results_2['insert_count'] == nb
+        assert results_2["insert_count"] == nb
 
         # Verify primary keys are unique across two inserts
-        all_ids = list(results_1['ids']) + list(results_2['ids'])
+        all_ids = list(results_1["ids"]) + list(results_2["ids"])
         assert len(set(all_ids)) == nb * 2
 
         self.flush(client, collection_name)
@@ -1716,7 +2041,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
                 row[pk_field] = str(i)
             rows.append(row)
 
-        error = {ct.err_code: 1100, ct.err_msg: 'more fieldData has pass in: invalid parameter'}
+        error = {ct.err_code: 1100, ct.err_msg: "more fieldData has pass in: invalid parameter"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -1741,20 +2066,22 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
-        
+
         # Insert without primary key (auto_id)
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0} for i in range(ct.default_nb)]
+        rows = [
+            {default_vector_field_name: list(rng.random((1, default_dim))[0]), default_float_field_name: i * 1.0}
+            for i in range(ct.default_nb)
+        ]
         if pk_field != ct.default_string_field_name:
             for i, row in enumerate(rows):
                 row[default_string_field_name] = str(i)
-        
+
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
-        
+        assert results["insert_count"] == ct.default_nb
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb
@@ -1769,7 +2096,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create schema with auto_id
         schema = self.create_schema(client, auto_id=auto_id, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
@@ -1780,13 +2107,15 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=auto_id)
-        
+
         # Try to insert with primary key included (should fail)
         df = cf.gen_default_dataframe_data(nb=100, auto_id=auto_id)
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'"}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'",
+        }
         self.insert(client, collection_name, df, check_task=CheckTasks.err_res, check_items=error)
 
         self.flush(client, collection_name)
@@ -1805,7 +2134,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 100
-        
+
         # Create schema with auto_id=True
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
@@ -1816,17 +2145,19 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
-        
+
         # Insert without primary key (auto_id)
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0} for i in range(nb)]
+        rows = [
+            {default_vector_field_name: list(rng.random((1, default_dim))[0]), default_float_field_name: i * 1.0}
+            for i in range(nb)
+        ]
         if pk_field != ct.default_string_field_name:
             for i, row in enumerate(rows):
                 row[default_string_field_name] = str(i)
-        
+
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -1843,15 +2174,22 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 100
-        
+
         self.create_collection(client, collection_name, default_dim, auto_id=False)
-        
+
         # Insert with same primary key values
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: 1,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1864,15 +2202,22 @@ class TestInsertOperation(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 100
-        
+
         self.create_collection(client, collection_name, default_dim, auto_id=False)
-        
+
         # Insert with negative primary key values
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: -i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: -i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(nb)
+        ]
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -1888,26 +2233,38 @@ class TestInsertOperation(TestMilvusClientV2Base):
         expected: verify num entities
         """
         import threading
-        
+
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
+
         thread_num = 4
         threads = []
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(ct.default_nb)
+        ]
 
         def insert(thread_i):
-            log.debug(f'In thread-{thread_i}')
+            log.debug(f"In thread-{thread_i}")
             # Adjust primary keys to be unique per thread
-            thread_rows = [{default_primary_key_field_name: i + thread_i * ct.default_nb,
-                           default_vector_field_name: row[default_vector_field_name],
-                           default_float_field_name: row[default_float_field_name],
-                           default_string_field_name: row[default_string_field_name]} for i, row in enumerate(rows)]
+            thread_rows = [
+                {
+                    default_primary_key_field_name: i + thread_i * ct.default_nb,
+                    default_vector_field_name: row[default_vector_field_name],
+                    default_float_field_name: row[default_float_field_name],
+                    default_string_field_name: row[default_string_field_name],
+                }
+                for i, row in enumerate(rows)
+            ]
             results = self.insert(client, collection_name, thread_rows)[0]
-            assert results['insert_count'] == ct.default_nb
+            assert results["insert_count"] == ct.default_nb
 
         for i in range(thread_num):
             x = threading.Thread(target=insert, args=(i,))
@@ -1915,7 +2272,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             x.start()
         for t in threads:
             t.join()
-        
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == ct.default_nb * thread_num
@@ -1932,17 +2289,23 @@ class TestInsertOperation(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         step = 120
         nb = 12000
-        
+
         self.create_collection(client, collection_name, dim, auto_id=False)
-        
+
         rng = np.random.default_rng(seed=19530)
         start_id = 0
         for _ in range(nb // step):
-            rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_float_field_name: i * 1.0, default_string_field_name: str(i)} 
-                    for i in range(start_id, start_id + step)]
+            rows = [
+                {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: list(rng.random((1, dim))[0]),
+                    default_float_field_name: i * 1.0,
+                    default_string_field_name: str(i),
+                }
+                for i in range(start_id, start_id + step)
+            ]
             results = self.insert(client, collection_name, rows)[0]
-            assert results['insert_count'] == step
+            assert results["insert_count"] == step
             start_id += step
 
         self.flush(client, collection_name)
@@ -1976,7 +2339,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             # Generate data with unique primary keys for each insert
             rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=start_id)
             results = self.insert(client, collection_name, rows)[0]
-            assert results['insert_count'] == ct.default_nb
+            assert results["insert_count"] == ct.default_nb
             start_id += ct.default_nb
 
         # 3. Verify row count
@@ -2008,7 +2371,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
 
         # Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         # Verify num entities
         self.flush(client, collection_name)
@@ -2028,14 +2391,21 @@ class TestInsertOperation(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # nb = 127583 without json field
         nb = 108993
-        
+
         self.create_collection(client, collection_name, default_dim, auto_id=False)
-        
+
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
-        
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == nb
@@ -2053,7 +2423,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Create schema with default value field
         schema = self.create_schema(client, auto_id=auto_id, enable_dynamic_field=False)[0]
         if not auto_id:
@@ -2061,25 +2431,29 @@ class TestInsertOperation(TestMilvusClientV2Base):
         else:
             schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(default_float_field_name, DataType.FLOAT)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, 
-                        default_value="abc", nullable=nullable)
+        schema.add_field(
+            default_string_field_name,
+            DataType.VARCHAR,
+            max_length=ct.default_length,
+            default_value="abc",
+            nullable=nullable,
+        )
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        
+
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=auto_id)
-        
+
         # Insert data with None or omitting the default value field
         rng = np.random.default_rng(seed=19530)
         rows = []
         for i in range(ct.default_nb):
-            row = {default_float_field_name: float(i),
-                   default_vector_field_name: list(rng.random((1, default_dim))[0])}
+            row = {default_float_field_name: float(i), default_vector_field_name: list(rng.random((1, default_dim))[0])}
             if not auto_id:
                 row[default_primary_key_field_name] = i
             if default_value_type == "none":
                 row[default_string_field_name] = None
             # If default_value_type == "empty", we don't include the field at all
             rows.append(row)
-        
+
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -2102,25 +2476,41 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
         schema.add_field(default_int32_field_name, DataType.INT32, default_value=np.int32(1), nullable=True)
         schema.add_field(default_float_field_name, DataType.FLOAT, default_value=np.float32(1.0), nullable=True)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, default_value="abc", max_length=100, nullable=True)
-        schema.add_field('int32_array', datatype=DataType.ARRAY, element_type=DataType.INT32,  max_capacity=20, nullable=True)
-        schema.add_field('float_array', datatype=DataType.ARRAY, element_type=DataType.FLOAT,   max_capacity=20, nullable=True)
-        schema.add_field('string_array', datatype=DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=20, max_length=100, nullable=True)
-        schema.add_field('json', DataType.JSON,  nullable=True)
+        schema.add_field(
+            default_string_field_name, DataType.VARCHAR, default_value="abc", max_length=100, nullable=True
+        )
+        schema.add_field(
+            "int32_array", datatype=DataType.ARRAY, element_type=DataType.INT32, max_capacity=20, nullable=True
+        )
+        schema.add_field(
+            "float_array", datatype=DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=20, nullable=True
+        )
+        schema.add_field(
+            "string_array",
+            datatype=DataType.ARRAY,
+            element_type=DataType.VARCHAR,
+            max_capacity=20,
+            max_length=100,
+            nullable=True,
+        )
+        schema.add_field("json", DataType.JSON, nullable=True)
         schema.add_field(default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        rows = [{
-            default_primary_key_field_name: i,
-            default_int32_field_name: None,
-            default_float_field_name: None,
-            default_string_field_name: None,
-            'int32_array': None,
-            'float_array': None,
-            'string_array': None,
-            'json': None,
-            default_float_vec_field_name: cf.gen_vectors(1, dim=dim)[0]
-        } for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_int32_field_name: None,
+                default_float_field_name: None,
+                default_string_field_name: None,
+                "int32_array": None,
+                "float_array": None,
+                "string_array": None,
+                "json": None,
+                default_float_vec_field_name: cf.gen_vectors(1, dim=dim)[0],
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -2169,8 +2559,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX",
-                               metric_type="IP")
+        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # 2. Build scipy.sparse constructor
@@ -2184,10 +2573,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             indices = sorted(rng.choice(dim, size=nnz, replace=False))
             values = rng.random(nnz).astype(np.float32)
             row_sparse = sparse_cls((values, indices, [0, nnz]), shape=(1, dim))
-            rows.append({
-                ct.default_int64_field_name: i,
-                ct.default_sparse_vec_field_name: row_sparse
-            })
+            rows.append({ct.default_int64_field_name: i, ct.default_sparse_vec_field_name: row_sparse})
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -2197,19 +2583,26 @@ class TestInsertOperation(TestMilvusClientV2Base):
         q_indices = sorted(rng.choice(dim, size=q_nnz, replace=False))
         q_values = rng.random(q_nnz).astype(np.float32)
         query_sparse = sparse_cls((q_values, q_indices, [0, q_nnz]), shape=(1, dim))
-        self.search(client, collection_name, data=[query_sparse],
-                    anns_field=ct.default_sparse_vec_field_name, limit=default_limit,
-                    search_params={"metric_type": "IP"},
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": 1, "limit": default_limit,
-                                 "pk_name": ct.default_int64_field_name})
+        self.search(
+            client,
+            collection_name,
+            data=[query_sparse],
+            anns_field=ct.default_sparse_vec_field_name,
+            limit=default_limit,
+            search_params={"metric_type": "IP"},
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": 1,
+                "limit": default_limit,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )
 
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("sparse_format", ["csc_matrix", "coo_matrix", "dok_matrix",
-                                                "lil_matrix", "coo_array"])
+    @pytest.mark.parametrize("sparse_format", ["csc_matrix", "coo_matrix", "dok_matrix", "lil_matrix", "coo_array"])
     def test_milvus_client_insert_sparse_vector_scipy_to_csr(self, sparse_format):
         """
         target: test insert sparse vectors created in non-csr scipy.sparse formats via .tocsr() conversion
@@ -2228,8 +2621,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX",
-                               metric_type="IP")
+        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # 2. Build scipy.sparse constructor for the non-csr format
@@ -2244,10 +2636,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             indices = sorted(rng.choice(dim, size=nnz, replace=False))
             values = rng.random(nnz).astype(np.float32)
             row_sparse = sparse_cls(sp.csr_matrix((values, indices, [0, nnz]), shape=(1, dim))).tocsr()
-            rows.append({
-                ct.default_int64_field_name: i,
-                ct.default_sparse_vec_field_name: row_sparse
-            })
+            rows.append({ct.default_int64_field_name: i, ct.default_sparse_vec_field_name: row_sparse})
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -2257,22 +2646,30 @@ class TestInsertOperation(TestMilvusClientV2Base):
         q_indices = sorted(rng.choice(dim, size=q_nnz, replace=False))
         q_values = rng.random(q_nnz).astype(np.float32)
         query_sparse = sp.csr_matrix((q_values, q_indices, [0, q_nnz]), shape=(1, dim))
-        self.search(client, collection_name, data=[query_sparse],
-                    anns_field=ct.default_sparse_vec_field_name, limit=default_limit,
-                    search_params={"metric_type": "IP"},
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": 1, "limit": default_limit,
-                                 "pk_name": ct.default_int64_field_name})
+        self.search(
+            client,
+            collection_name,
+            data=[query_sparse],
+            anns_field=ct.default_sparse_vec_field_name,
+            limit=default_limit,
+            search_params={"metric_type": "IP"},
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": 1,
+                "limit": default_limit,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )
 
         self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientInsertString(TestMilvusClientV2Base):
     """
-      ******************************************************************
-      The following cases are used to test insert string
-      ******************************************************************
+    ******************************************************************
+    The following cases are used to test insert string
+    ******************************************************************
     """
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2290,8 +2687,9 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64)
         schema.add_field(default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True,
-                         auto_id=False)
+        schema.add_field(
+            ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=False
+        )
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
 
         # 2. Create collection
@@ -2305,15 +2703,22 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
 
         # 5. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
-        assert results['ids'] == expected_primary_keys
+        assert results["insert_count"] == ct.default_nb
+        assert results["ids"] == expected_primary_keys
 
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1"),
-                                                cf.gen_string_field(name="string_field2"),
-                                                cf.gen_string_field(name="string_field3")]])
+    @pytest.mark.parametrize(
+        "string_fields",
+        [
+            [
+                cf.gen_string_field(name="string_field1"),
+                cf.gen_string_field(name="string_field2"),
+                cf.gen_string_field(name="string_field3"),
+            ]
+        ],
+    )
     def test_milvus_client_insert_multi_string_fields(self, string_fields):
         """
         target: test insert multi string fields
@@ -2349,7 +2754,7 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
 
         # 5. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
 
         # 6. Verify num entities
         self.flush(client, collection_name)
@@ -2384,11 +2789,17 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
         long_string = cf.gen_str_by_length(length=max_length + 1)
 
         # Generate normal data for one row
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: 0.0, default_string_field_name: long_string}]
+        rows = [
+            {
+                default_primary_key_field_name: 0,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: 0.0,
+                default_string_field_name: long_string,
+            }
+        ]
 
         # 3. Verify error on insert
-        error = {ct.err_code: 1100, ct.err_msg: 'length of varchar field varchar exceeds max length'}
+        error = {ct.err_code: 1100, ct.err_msg: "length of varchar field varchar exceeds max length"}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
@@ -2411,16 +2822,19 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
 
         # 2. Generate row data with string field set to empty or space-only string
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-            default_float_field_name: i * 1.0,
-            default_string_field_name: str_field_value  # Empty string or space-only string
-        } for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str_field_value,  # Empty string or space-only string
+            }
+            for i in range(nb)
+        ]
 
         # 3. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         # 4. Verify num entities
         self.flush(client, collection_name)
@@ -2446,8 +2860,9 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64)
         schema.add_field(default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True,
-                         auto_id=False)
+        schema.add_field(
+            ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=False
+        )
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
 
         # 2. Create collection
@@ -2455,16 +2870,19 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
 
         # 3. Generate row data with string field (primary key) set to empty or space-only string
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            ct.default_int64_field_name: i,
-            default_float_field_name: i * 1.0,
-            ct.default_string_field_name: str_field_value,  # Empty string or space-only string as primary key
-            default_vector_field_name: list(rng.random((1, default_dim))[0])
-        } for i in range(nb)]
+        rows = [
+            {
+                ct.default_int64_field_name: i,
+                default_float_field_name: i * 1.0,
+                ct.default_string_field_name: str_field_value,  # Empty string or space-only string as primary key
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(nb)
+        ]
 
         # 4. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         # 5. Verify num entities
         self.flush(client, collection_name)
@@ -2473,29 +2891,46 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+
 class TestMilvusClientInsertArray(TestMilvusClientV2Base):
     """
-      ******************************************************************
-      The following cases are used to test insert array
-      ******************************************************************
+    ******************************************************************
+    The following cases are used to test insert array
+    ******************************************************************
     """
 
-    def gen_array_collection_schema(self, description=ct.default_desc,
-                                      primary_field=ct.default_int64_field_name, auto_id=False,
-                                      dim=ct.default_dim, enable_dynamic_field=False,
-                                      max_capacity=ct.default_max_capacity,
-                                      max_length=100, with_json=False, **kwargs):
+    def gen_array_collection_schema(
+        self,
+        description=ct.default_desc,
+        primary_field=ct.default_int64_field_name,
+        auto_id=False,
+        dim=ct.default_dim,
+        enable_dynamic_field=False,
+        max_capacity=ct.default_max_capacity,
+        max_length=100,
+        with_json=False,
+        **kwargs,
+    ):
         """
         Generate array collection schema.
         """
-        schema = MilvusClient.create_schema(auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description, **kwargs)
+        schema = MilvusClient.create_schema(
+            auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description, **kwargs
+        )
 
         # Add primary key field
         if primary_field == ct.default_int64_field_name:
-            schema.add_field(field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True, auto_id=auto_id)
+            schema.add_field(
+                field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True, auto_id=auto_id
+            )
         elif primary_field == ct.default_string_field_name:
-            schema.add_field(field_name=ct.default_string_field_name, datatype=DataType.VARCHAR,
-                             max_length=ct.default_length, is_primary=True, auto_id=auto_id)
+            schema.add_field(
+                field_name=ct.default_string_field_name,
+                datatype=DataType.VARCHAR,
+                max_length=ct.default_length,
+                is_primary=True,
+                auto_id=auto_id,
+            )
         else:
             log.error("Primary key only support int or varchar")
             assert False
@@ -2509,13 +2944,26 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
                 schema.add_field(field_name=ct.default_json_field_name, datatype=DataType.JSON, nullable=True)
 
             # Add array fields
-            schema.add_field(field_name=ct.default_int32_array_field_name, datatype=DataType.ARRAY,
-                             element_type=DataType.INT32, max_capacity=max_capacity)
-            schema.add_field(field_name=ct.default_float_array_field_name, datatype=DataType.ARRAY,
-                             element_type=DataType.FLOAT, max_capacity=max_capacity)
-            schema.add_field(field_name=ct.default_string_array_field_name, datatype=DataType.ARRAY,
-                             element_type=DataType.VARCHAR, max_capacity=max_capacity, max_length=max_length,
-                             nullable=True)
+            schema.add_field(
+                field_name=ct.default_int32_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.INT32,
+                max_capacity=max_capacity,
+            )
+            schema.add_field(
+                field_name=ct.default_float_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.FLOAT,
+                max_capacity=max_capacity,
+            )
+            schema.add_field(
+                field_name=ct.default_string_array_field_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.VARCHAR,
+                max_capacity=max_capacity,
+                max_length=max_length,
+                nullable=True,
+            )
 
         return schema
 
@@ -2541,7 +2989,7 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
 
         # 4. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == ct.default_nb
+        assert results["insert_count"] == ct.default_nb
 
         # 5. Verify num entities
         self.flush(client, collection_name)
@@ -2576,7 +3024,7 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
 
         # 4. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         # 5. Verify num entities
         self.flush(client, collection_name)
@@ -2614,13 +3062,13 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
                 ct.default_float_vec_field_name: [random.random() for _ in range(default_dim)],
                 ct.default_int32_array_field_name: [np.int32(j) for j in range(arr_len1)],
                 ct.default_float_array_field_name: [np.float32(j) for j in range(arr_len2)],
-                ct.default_string_array_field_name: [str(j) for j in range(array_length)]
+                ct.default_string_array_field_name: [str(j) for j in range(array_length)],
             }
             rows.append(row)
 
         # 4. Insert data
         results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == nb
+        assert results["insert_count"] == nb
 
         # 5. Verify num entities
         self.flush(client, collection_name)

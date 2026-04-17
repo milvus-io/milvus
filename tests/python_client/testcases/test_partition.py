@@ -14,7 +14,7 @@ prefix = "partition_"
 
 
 class TestPartitionParams(TestcaseBase):
-    """ Test case of partition interface in parameters"""
+    """Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_empty_description(self):
@@ -29,12 +29,13 @@ class TestPartitionParams(TestcaseBase):
         # init partition
         partition_name = cf.gen_unique_str(prefix)
         description = ""
-        self.init_partition_wrap(collection_w, partition_name,
-                                 description=description,
-                                 check_task=CheckTasks.check_partition_property,
-                                 check_items={"name": partition_name, "description": description,
-                                              "is_empty": True, "num_entities": 0}
-                                 )
+        self.init_partition_wrap(
+            collection_w,
+            partition_name,
+            description=description,
+            check_task=CheckTasks.check_partition_property,
+            check_items={"name": partition_name, "description": description, "is_empty": True, "num_entities": 0},
+        )
 
         # check that the partition has been created
         assert collection_w.has_partition(partition_name)[0]
@@ -52,12 +53,13 @@ class TestPartitionParams(TestcaseBase):
         # init partition
         partition_name = cf.gen_str_by_length(255)
         description = cf.gen_str_by_length(2048)
-        self.init_partition_wrap(collection_w, partition_name,
-                                 description=description,
-                                 check_task=CheckTasks.check_partition_property,
-                                 check_items={"name": partition_name, "description": description,
-                                              "is_empty": True}
-                                 )
+        self.init_partition_wrap(
+            collection_w,
+            partition_name,
+            description=description,
+            check_task=CheckTasks.check_partition_property,
+            check_items={"name": partition_name, "description": description, "is_empty": True},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_special_chars_description(self):
@@ -72,12 +74,13 @@ class TestPartitionParams(TestcaseBase):
         # create partition
         partition_name = cf.gen_unique_str(prefix)
         description = "！@#￥%……&*（"
-        self.init_partition_wrap(collection_w, partition_name,
-                                 description=description,
-                                 check_task=CheckTasks.check_partition_property,
-                                 check_items={"name": partition_name, "description": description,
-                                              "is_empty": True, "num_entities": 0}
-                                 )
+        self.init_partition_wrap(
+            collection_w,
+            partition_name,
+            description=description,
+            check_task=CheckTasks.check_partition_property,
+            check_items={"name": partition_name, "description": description, "is_empty": True, "num_entities": 0},
+        )
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -89,10 +92,12 @@ class TestPartitionParams(TestcaseBase):
         """
         # create partition with collection is None
         partition_name = cf.gen_unique_str(prefix)
-        self.partition_wrap.init_partition(collection=None, name=partition_name,
-                                           check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 1,
-                                                        ct.err_msg: "Collection must be of type pymilvus.Collection or String"})
+        self.partition_wrap.init_partition(
+            collection=None,
+            name=partition_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "Collection must be of type pymilvus.Collection or String"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="not stable")
@@ -147,11 +152,12 @@ class TestPartitionParams(TestcaseBase):
 
         # create partition
         partition_name = cf.gen_unique_str(prefix)
-        partition_w = self.init_partition_wrap(collection_w, partition_name,
-                                               check_task=CheckTasks.check_partition_property,
-                                               check_items={"name": partition_name,
-                                                            "is_empty": True, "num_entities": 0}
-                                               )
+        partition_w = self.init_partition_wrap(
+            collection_w,
+            partition_name,
+            check_task=CheckTasks.check_partition_property,
+            check_items={"name": partition_name, "is_empty": True, "num_entities": 0},
+        )
 
         # insert data
         partition_w.insert(data)
@@ -165,8 +171,9 @@ class TestPartitionParams(TestcaseBase):
         assert not partition_w.is_empty
         assert partition_w.num_entities == (nums + nums)
 
+
 class TestPartitionOperations(TestcaseBase):
-    """ Test case of partition interface in operations """
+    """Test case of partition interface in operations"""
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sync", [True, False])
@@ -178,4 +185,3 @@ class TestPartitionOperations(TestcaseBase):
         expected: insert successfully
         """
         pass
-

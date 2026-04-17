@@ -22,7 +22,8 @@ import pymilvus
 
 
 class Base:
-    """ Initialize class object """
+    """Initialize class object"""
+
     connection_wrap = None
     collection_wrap = None
     partition_wrap = None
@@ -74,7 +75,11 @@ class Base:
         if cf.param_info.param_token:
             token = cf.param_info.param_token
         else:
-            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}" if cf.param_info.param_user and cf.param_info.param_password else None
+            token = (
+                f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+                if cf.param_info.param_user and cf.param_info.param_password
+                else None
+            )
 
         try:
             """ Drop collection before disconnect """
@@ -104,12 +109,13 @@ class Base:
             for rg_name in self.resource_group_list:
                 if rg_name is not None and rg_name in rgs_list:
                     rg = self.utility_wrap.describe_resource_group(
-                        name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                        name=rg_name, check_task=ct.CheckTasks.check_nothing
+                    )[0]
                     if isinstance(rg, ResourceGroupInfo):
                         if rg.num_available_node > 0:
-                            self.utility_wrap.transfer_node(source=rg_name,
-                                                            target=ct.default_resource_group_name,
-                                                            num_node=rg.num_available_node)
+                            self.utility_wrap.transfer_node(
+                                source=rg_name, target=ct.default_resource_group_name, num_node=rg.num_available_node
+                            )
                         self.utility_wrap.drop_resource_group(rg_name, check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
@@ -140,8 +146,9 @@ class Base:
                 self.connection_wrap.remove_connection(i[0])
 
             # because the connection is in singleton mode, it needs to be restored to the original state after teardown
-            self.connection_wrap.add_connection(default={"host": DefaultConfig.DEFAULT_HOST,
-                                                         "port": DefaultConfig.DEFAULT_PORT})
+            self.connection_wrap.add_connection(
+                default={"host": DefaultConfig.DEFAULT_HOST, "port": DefaultConfig.DEFAULT_PORT}
+            )
         except Exception as e:
             log.debug(str(e))
 
@@ -151,10 +158,11 @@ class TestcaseBase(Base):
     Additional methods;
     Public methods that can be used for test cases.
     """
+
     client = None
 
     def _connect(self, enable_milvus_client_api=False):
-        """ Add a connection and create the connect """
+        """Add a connection and create the connect"""
         if self.skip_connection:
             return None
 
@@ -167,7 +175,11 @@ class TestcaseBase(Base):
         if cf.param_info.param_token:
             token = cf.param_info.param_token
         else:
-            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}" if cf.param_info.param_user and cf.param_info.param_password else None
+            token = (
+                f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+                if cf.param_info.param_user and cf.param_info.param_password
+                else None
+            )
 
         if enable_milvus_client_api:
             self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
@@ -175,13 +187,11 @@ class TestcaseBase(Base):
             self.client = MilvusClient(uri=uri, token=token)
         else:
             if token:
-                res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
-                                                            uri=uri,
-                                                            token=token,
-                                                            secure=cf.param_info.param_secure)
+                res, is_succ = self.connection_wrap.connect(
+                    alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token, secure=cf.param_info.param_secure
+                )
             else:
-                res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
-                                                            uri=uri)
+                res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
             self.client = MilvusClient(uri=uri, token=token)
         server_version = utility.get_server_version()
@@ -194,14 +204,10 @@ class TestcaseBase(Base):
         else:
             uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
 
-        client = MilvusClient(
-            uri = uri,
-            token = cf.param_info.param_token
-        )
+        client = MilvusClient(uri=uri, token=cf.param_info.param_token)
         res = client.run_analyzer(text, analyzer_params, with_detail=True, with_hash=True)
-        tokens = [r['token'] for r in res.tokens]
+        tokens = [r["token"] for r in res.tokens]
         return tokens
-
 
     # def init_async_milvus_client(self):
     #     uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
@@ -213,16 +219,26 @@ class TestcaseBase(Base):
     #     }
     #     self.async_milvus_client_wrap.init_async_client(**kwargs)
 
-    def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,
-                             enable_dynamic_field=False, with_json=True, **kwargs):
+    def init_collection_wrap(
+        self,
+        name=None,
+        schema=None,
+        check_task=None,
+        check_items=None,
+        enable_dynamic_field=False,
+        with_json=True,
+        **kwargs,
+    ):
         name = cf.gen_collection_name_by_testcase_name(2) if name is None else name
-        schema = cf.gen_default_collection_schema(enable_dynamic_field=enable_dynamic_field, with_json=with_json) \
-            if schema is None else schema
+        schema = (
+            cf.gen_default_collection_schema(enable_dynamic_field=enable_dynamic_field, with_json=with_json)
+            if schema is None
+            else schema
+        )
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, check_task=check_task,
-                                     check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
         self.tear_down_collection_names.append(name)
         return collection_w
 
@@ -235,25 +251,36 @@ class TestcaseBase(Base):
         assert collection_w.num_entities == ct.default_nb
         return collection_w, df
 
-    def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
-                            check_task=None, check_items=None, **kwargs):
+    def init_partition_wrap(
+        self, collection_wrap=None, name=None, description=None, check_task=None, check_items=None, **kwargs
+    ):
         name = cf.gen_unique_str("partition_") if name is None else name
         description = cf.gen_unique_str("partition_des_") if description is None else description
         collection_wrap = self.init_collection_wrap() if collection_wrap is None else collection_wrap
         partition_wrap = ApiPartitionWrapper()
-        partition_wrap.init_partition(collection_wrap.collection, name, description,
-                                      check_task=check_task, check_items=check_items,
-                                      **kwargs)
+        partition_wrap.init_partition(
+            collection_wrap.collection, name, description, check_task=check_task, check_items=check_items, **kwargs
+        )
         return partition_wrap
 
-    def insert_data_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
-                            partition_num=0, is_binary=False, is_all_data_type=False,
-                            auto_id=False, dim=ct.default_dim,
-                            primary_field=ct.default_int64_field_name, is_flush=True, name=None,
-                            enable_dynamic_field=False, with_json=True, **kwargs):
-        """
-
-        """
+    def insert_data_general(
+        self,
+        prefix="test",
+        insert_data=False,
+        nb=ct.default_nb,
+        partition_num=0,
+        is_binary=False,
+        is_all_data_type=False,
+        auto_id=False,
+        dim=ct.default_dim,
+        primary_field=ct.default_int64_field_name,
+        is_flush=True,
+        name=None,
+        enable_dynamic_field=False,
+        with_json=True,
+        **kwargs,
+    ):
+        """ """
         self._connect()
         collection_name = cf.gen_unique_str(prefix)
         if name is not None:
@@ -263,38 +290,70 @@ class TestcaseBase(Base):
         insert_ids = []
         time_stamp = 0
         # 1 create collection
-        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field,
-                                                          enable_dynamic_field=enable_dynamic_field,
-                                                          with_json=with_json)
+        default_schema = cf.gen_default_collection_schema(
+            auto_id=auto_id,
+            dim=dim,
+            primary_field=primary_field,
+            enable_dynamic_field=enable_dynamic_field,
+            with_json=with_json,
+        )
         if is_binary:
-            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
-                                                                     primary_field=primary_field)
+            default_schema = cf.gen_default_binary_collection_schema(
+                auto_id=auto_id, dim=dim, primary_field=primary_field
+            )
         if is_all_data_type:
-            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
-                                                                   primary_field=primary_field,
-                                                                   enable_dynamic_field=enable_dynamic_field,
-                                                                   with_json=with_json)
+            default_schema = cf.gen_collection_schema_all_datatype(
+                auto_id=auto_id,
+                dim=dim,
+                primary_field=primary_field,
+                enable_dynamic_field=enable_dynamic_field,
+                with_json=with_json,
+            )
         log.info("insert_data_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         pre_entities = collection_w.num_entities
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim,
-                               enable_dynamic_field=enable_dynamic_field,
-                               with_json=with_json)
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = cf.insert_data(
+                collection_w,
+                nb,
+                is_binary,
+                is_all_data_type,
+                auto_id=auto_id,
+                dim=dim,
+                enable_dynamic_field=enable_dynamic_field,
+                with_json=with_json,
+            )
             if is_flush:
                 collection_w.flush()
                 assert collection_w.num_entities == nb + pre_entities
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
-    def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
-                                partition_num=0, is_binary=False, is_all_data_type=False,
-                                auto_id=False, dim=ct.default_dim, is_index=True,
-                                primary_field=ct.default_int64_field_name, is_flush=True, name=None,
-                                enable_dynamic_field=False, with_json=True, random_primary_key=False,
-                                multiple_dim_array=[], is_partition_key=None, vector_data_type=DataType.FLOAT_VECTOR,
-                                nullable_fields={}, default_value_fields={}, language=None, **kwargs):
+    def init_collection_general(
+        self,
+        prefix="test",
+        insert_data=False,
+        nb=ct.default_nb,
+        partition_num=0,
+        is_binary=False,
+        is_all_data_type=False,
+        auto_id=False,
+        dim=ct.default_dim,
+        is_index=True,
+        primary_field=ct.default_int64_field_name,
+        is_flush=True,
+        name=None,
+        enable_dynamic_field=False,
+        with_json=True,
+        random_primary_key=False,
+        multiple_dim_array=[],
+        is_partition_key=None,
+        vector_data_type=DataType.FLOAT_VECTOR,
+        nullable_fields={},
+        default_value_fields={},
+        language=None,
+        **kwargs,
+    ):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -323,33 +382,47 @@ class TestcaseBase(Base):
         insert_ids = []
         time_stamp = 0
         # 1 create collection
-        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field,
-                                                          enable_dynamic_field=enable_dynamic_field,
-                                                          with_json=with_json, multiple_dim_array=multiple_dim_array,
-                                                          is_partition_key=is_partition_key,
-                                                          vector_data_type=vector_data_type,
-                                                          nullable_fields=nullable_fields,
-                                                          default_value_fields=default_value_fields)
+        default_schema = cf.gen_default_collection_schema(
+            auto_id=auto_id,
+            dim=dim,
+            primary_field=primary_field,
+            enable_dynamic_field=enable_dynamic_field,
+            with_json=with_json,
+            multiple_dim_array=multiple_dim_array,
+            is_partition_key=is_partition_key,
+            vector_data_type=vector_data_type,
+            nullable_fields=nullable_fields,
+            default_value_fields=default_value_fields,
+        )
         if is_binary:
-            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
-                                                                     primary_field=primary_field,
-                                                                     nullable_fields=nullable_fields,
-                                                                     default_value_fields=default_value_fields)
+            default_schema = cf.gen_default_binary_collection_schema(
+                auto_id=auto_id,
+                dim=dim,
+                primary_field=primary_field,
+                nullable_fields=nullable_fields,
+                default_value_fields=default_value_fields,
+            )
         if vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-            default_schema = cf.gen_default_sparse_schema(auto_id=auto_id, primary_field=primary_field,
-                                                          enable_dynamic_field=enable_dynamic_field,
-                                                          with_json=with_json,
-                                                          multiple_dim_array=multiple_dim_array,
-                                                          nullable_fields=nullable_fields,
-                                                          default_value_fields=default_value_fields)
+            default_schema = cf.gen_default_sparse_schema(
+                auto_id=auto_id,
+                primary_field=primary_field,
+                enable_dynamic_field=enable_dynamic_field,
+                with_json=with_json,
+                multiple_dim_array=multiple_dim_array,
+                nullable_fields=nullable_fields,
+                default_value_fields=default_value_fields,
+            )
         if is_all_data_type:
-            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
-                                                                   primary_field=primary_field,
-                                                                   enable_dynamic_field=enable_dynamic_field,
-                                                                   with_json=with_json,
-                                                                   multiple_dim_array=multiple_dim_array,
-                                                                   nullable_fields=nullable_fields,
-                                                                   default_value_fields=default_value_fields)
+            default_schema = cf.gen_collection_schema_all_datatype(
+                auto_id=auto_id,
+                dim=dim,
+                primary_field=primary_field,
+                enable_dynamic_field=enable_dynamic_field,
+                with_json=with_json,
+                multiple_dim_array=multiple_dim_array,
+                nullable_fields=nullable_fields,
+                default_value_fields=default_value_fields,
+            )
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
@@ -358,12 +431,22 @@ class TestcaseBase(Base):
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id,
-                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json,
-                               random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
-                               primary_field=primary_field, vector_data_type=vector_data_type,
-                               nullable_fields=nullable_fields, language=language)
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = cf.insert_data(
+                collection_w,
+                nb,
+                is_binary,
+                is_all_data_type,
+                auto_id=auto_id,
+                dim=dim,
+                enable_dynamic_field=enable_dynamic_field,
+                with_json=with_json,
+                random_primary_key=random_primary_key,
+                multiple_dim_array=multiple_dim_array,
+                primary_field=primary_field,
+                vector_data_type=vector_data_type,
+                nullable_fields=nullable_fields,
+                language=language,
+            )
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
@@ -391,7 +474,7 @@ class TestcaseBase(Base):
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
-    def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
+    def insert_entities_into_two_partitions_in_half(self, half, prefix="query"):
         """
         insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
         :param half: half of nb
@@ -413,8 +496,9 @@ class TestcaseBase(Base):
         collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default
 
-    def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
-                                                   is_dup=True):
+    def collection_insert_multi_segments_one_shard(
+        self, collection_prefix, num_of_segment=2, nb_of_segment=1, is_dup=True
+    ):
         """
         init collection with one shard, insert data into two segments on one shard (they can be merged)
         :param collection_prefix: collection name prefix
@@ -437,9 +521,9 @@ class TestcaseBase(Base):
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
         utility_w = ApiUtilityWrapper()
-        res, check_result = utility_w.create_resource_group(name=name, using=using, timeout=timeout,
-                                                            check_task=check_task,
-                                                            check_items=check_items, **kwargs)
+        res, check_result = utility_w.create_resource_group(
+            name=name, using=using, timeout=timeout, check_task=check_task, check_items=check_items, **kwargs
+        )
         if res is None and check_result:
             self.resource_group_list.append(name)
         return res, check_result
@@ -470,8 +554,9 @@ class TestcaseBase(Base):
         self.utility_wrap.create_role()
 
         # grant privilege to the role
-        self.utility_wrap.role_grant(object=privilege_object, object_name=object_name, privilege=privilege,
-                                     db_name=db_name)
+        self.utility_wrap.role_grant(
+            object=privilege_object, object_name=object_name, privilege=privilege, db_name=db_name
+        )
 
         # bind the role to the user
         self.utility_wrap.role_add_user(tmp_user)
@@ -485,8 +570,9 @@ class TestcaseBase(Base):
         log.info(f"[TestcaseBase] Build all indexes done: {list(index_params.keys())}")
         return collection_obj
 
-    def drop_multi_index(self, index_names: List[str], collection_obj: ApiCollectionWrapper = None,
-                         check_task=None, check_items=None):
+    def drop_multi_index(
+        self, index_names: List[str], collection_obj: ApiCollectionWrapper = None, check_task=None, check_items=None
+    ):
         collection_obj = collection_obj or self.collection_wrap
         for n in index_names:
             collection_obj.drop_index(index_name=n, check_task=check_task, check_items=check_items)
@@ -503,8 +589,16 @@ class TestcaseBase(Base):
 
     @property
     def all_scalar_fields(self):
-        dtypes = [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.VARCHAR, DataType.BOOL,
-                  DataType.FLOAT, DataType.DOUBLE]
+        dtypes = [
+            DataType.INT8,
+            DataType.INT16,
+            DataType.INT32,
+            DataType.INT64,
+            DataType.VARCHAR,
+            DataType.BOOL,
+            DataType.FLOAT,
+            DataType.DOUBLE,
+        ]
         dtype_names = [f"{n.name}" for n in dtypes] + [f"ARRAY_{n.name}" for n in dtypes] + [DataType.JSON.name]
         return dtype_names
 

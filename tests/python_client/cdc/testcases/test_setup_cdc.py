@@ -41,10 +41,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -52,10 +49,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -87,9 +81,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_sync():
             return downstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_sync, 30, f"collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_sync, 30, f"collection {test_collection_name} sync")
 
         # Cleanup
         self.cleanup_collection(upstream_client, test_collection_name)
@@ -113,10 +105,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -124,10 +113,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -148,10 +134,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -159,10 +142,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -191,9 +171,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_switched_sync():
             return upstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_switched_sync, 30, f"switched collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_switched_sync, 30, f"switched collection {test_collection_name} sync")
 
         # Cleanup
         self.cleanup_collection(downstream_client, test_collection_name)
@@ -341,10 +319,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -352,10 +327,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -380,9 +352,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_initial_sync():
             return downstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_initial_sync, 30, f"initial collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_initial_sync, 30, f"initial collection {test_collection_name} sync")
 
         # Now clear the configuration (empty topology)
         empty_upstream_config = {
@@ -390,10 +360,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 }
             ],
             "cross_cluster_topology": [],
@@ -406,10 +373,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 }
             ],
             "cross_cluster_topology": [],

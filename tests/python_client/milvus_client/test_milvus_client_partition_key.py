@@ -11,7 +11,7 @@ default_dim = ct.default_dim
 
 
 class TestPartitionKeyParams(TestMilvusClientV2Base):
-    """ Test case of partition key params """
+    """Test case of partition key params"""
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -25,10 +25,19 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         client = self._client()
         schema = self.create_schema(client, auto_id=True)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
-        self.add_field(schema, ct.default_int64_field_name, DataType.INT64,
-                       is_partition_key=(par_key_field == ct.default_int64_field_name))
-        self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
-                       is_partition_key=(par_key_field == ct.default_string_field_name))
+        self.add_field(
+            schema,
+            ct.default_int64_field_name,
+            DataType.INT64,
+            is_partition_key=(par_key_field == ct.default_int64_field_name),
+        )
+        self.add_field(
+            schema,
+            ct.default_string_field_name,
+            DataType.VARCHAR,
+            max_length=ct.default_length,
+            is_partition_key=(par_key_field == ct.default_string_field_name),
+        )
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema)
@@ -41,19 +50,26 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         entities_per_parkey = 10
         for _ in range(entities_per_parkey):
             float_vec_values = gen_vectors(nb, ct.default_dim)
-            data = [{
-                ct.default_int64_field_name: i,
-                ct.default_string_field_name: string_prefix + str(i),
-                ct.default_float_vec_field_name: float_vec_values[i]
-            } for i in range(nb)]
+            data = [
+                {
+                    ct.default_int64_field_name: i,
+                    ct.default_string_field_name: string_prefix + str(i),
+                    ct.default_float_vec_field_name: float_vec_values[i],
+                }
+                for i in range(nb)
+            ]
             self.insert(client, c_name, data)
 
         # flush
         self.flush(client, c_name)
         # build index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8",
-                               metric_type="COSINE", params={"nlist": 128})
+        index_params.add_index(
+            field_name=ct.default_float_vec_field_name,
+            index_type="IVF_SQ8",
+            metric_type="COSINE",
+            params={"nlist": 128},
+        )
         self.create_index(client, c_name, index_params)
         # load
         self.load_collection(client, c_name)
@@ -61,46 +77,81 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         nq = 10
         search_vectors = gen_vectors(nq, ct.default_dim)
         # search with mixed filtered
-        res1 = self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                           search_params=ct.default_search_params, limit=entities_per_parkey,
-                           filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
-                           output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"nq": nq, "limit": entities_per_parkey})[0]
+        res1 = self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": entities_per_parkey},
+        )[0]
         # search with partition key filter only or with non partition key
-        res2 = self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                           search_params=ct.default_search_params, limit=entities_per_parkey,
-                           filter=f'{ct.default_int64_field_name} in [1,3,5]',
-                           output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"nq": nq, "limit": entities_per_parkey})[0]
+        res2 = self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f"{ct.default_int64_field_name} in [1,3,5]",
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": entities_per_parkey},
+        )[0]
         # search with partition key filter only or with non partition key
-        res3 = self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                           search_params=ct.default_search_params, limit=entities_per_parkey,
-                           filter=f'{ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
-                           output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"nq": nq, "limit": entities_per_parkey})[0]
+        res3 = self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f'{ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": entities_per_parkey},
+        )[0]
         # assert the results persist
         for i in range(nq):
             assert res1[i].ids == res2[i].ids == res3[i].ids
 
         # search with 'or' to verify no partition key optimization local with or binary expr
-        query_res1 = self.query(client, c_name,
-                                filter=f'{ct.default_string_field_name} == "{string_prefix}5" || {ct.default_int64_field_name} in [2,4,6]',
-                                output_fields=['count(*)'])[0]
-        query_res2 = self.query(client, c_name,
-                                filter=f'{ct.default_string_field_name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"] || {ct.default_int64_field_name}==5',
-                                output_fields=['count(*)'])[0]
-        query_res3 = self.query(client, c_name,
-                                filter=f'{ct.default_int64_field_name}==5 or {ct.default_string_field_name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"]',
-                                output_fields=['count(*)'])[0]
-        query_res4 = self.query(client, c_name,
-                                filter=f'{ct.default_int64_field_name} in [2,4,6] || {ct.default_string_field_name} == "{string_prefix}5"',
-                                output_fields=['count(*)'])[0]
+        query_res1 = self.query(
+            client,
+            c_name,
+            filter=f'{ct.default_string_field_name} == "{string_prefix}5" || {ct.default_int64_field_name} in [2,4,6]',
+            output_fields=["count(*)"],
+        )[0]
+        query_res2 = self.query(
+            client,
+            c_name,
+            filter=f'{ct.default_string_field_name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"] || {ct.default_int64_field_name}==5',
+            output_fields=["count(*)"],
+        )[0]
+        query_res3 = self.query(
+            client,
+            c_name,
+            filter=f'{ct.default_int64_field_name}==5 or {ct.default_string_field_name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"]',
+            output_fields=["count(*)"],
+        )[0]
+        query_res4 = self.query(
+            client,
+            c_name,
+            filter=f'{ct.default_int64_field_name} in [2,4,6] || {ct.default_string_field_name} == "{string_prefix}5"',
+            output_fields=["count(*)"],
+        )[0]
         # assert the results persist
-        assert query_res1[0].get('count(*)') == query_res2[0].get('count(*)') \
-               == query_res3[0].get('count(*)') == query_res4[0].get('count(*)') == 40
+        assert (
+            query_res1[0].get("count(*)")
+            == query_res2[0].get("count(*)")
+            == query_res3[0].get("count(*)")
+            == query_res4[0].get("count(*)")
+            == 40
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -130,20 +181,24 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         entities_per_parkey = 20
         for n in range(entities_per_parkey):
             float_vec_values = gen_vectors(nb, ct.default_dim)
-            data = [{
-                "pk": str(n * nb + i),
-                ct.default_int64_field_name: i,
-                ct.default_string_field_name: string_prefix + str(i),
-                ct.default_float_vec_field_name: float_vec_values[i]
-            } for i in range(nb)]
+            data = [
+                {
+                    "pk": str(n * nb + i),
+                    ct.default_int64_field_name: i,
+                    ct.default_string_field_name: string_prefix + str(i),
+                    ct.default_float_vec_field_name: float_vec_values[i],
+                }
+                for i in range(nb)
+            ]
             self.insert(client, c_name, data)
 
         # flush
         self.flush(client, c_name)
         # build index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT",
-                               metric_type="COSINE", params={})
+        index_params.add_index(
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE", params={}
+        )
         if index_on_par_key_field:
             index_params.add_index(field_name=par_key_field)
         self.create_index(client, c_name, index_params)
@@ -153,12 +208,18 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         nq = 10
         search_vectors = gen_vectors(nq, ct.default_dim)
         # search with mixed filtered
-        self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                    search_params=ct.default_search_params, limit=entities_per_parkey,
-                    filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
-                    output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": nq, "limit": entities_per_parkey})
+        self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": entities_per_parkey},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_key_off_in_field_but_enable_in_schema(self):
@@ -168,8 +229,7 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
         2. verify the collection created successfully and partition key is enabled
         """
         client = self._client()
-        schema = self.create_schema(client, auto_id=True,
-                                    partition_key_field=ct.default_int64_field_name)[0]
+        schema = self.create_schema(client, auto_id=True, partition_key_field=ct.default_int64_field_name)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64, is_partition_key=False)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
@@ -187,7 +247,7 @@ class TestPartitionKeyParams(TestMilvusClientV2Base):
 
 
 class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
-    """ Test case of partition key invalid params """
+    """Test case of partition key invalid params"""
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_max_partitions(self):
@@ -204,8 +264,9 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         schema = self.create_schema(client, auto_id=True)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
-        self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
-                       is_partition_key=True)
+        self.add_field(
+            schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_partition_key=True
+        )
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema, num_partitions=max_partition)
@@ -217,11 +278,14 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         string_prefix = cf.gen_str_by_length(length=6)
         for _ in range(5):
             float_vec_values = gen_vectors(nb, ct.default_dim)
-            data = [{
-                ct.default_int64_field_name: i,
-                ct.default_string_field_name: string_prefix + str(i),
-                ct.default_float_vec_field_name: float_vec_values[i]
-            } for i in range(nb)]
+            data = [
+                {
+                    ct.default_int64_field_name: i,
+                    ct.default_string_field_name: string_prefix + str(i),
+                    ct.default_float_vec_field_name: float_vec_values[i],
+                }
+                for i in range(nb)
+            ]
             self.insert(client, c_name, data)
 
         # drop collection
@@ -231,9 +295,14 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         num_partitions = max_partition + 1
         err_msg = f"partition number ({num_partitions}) exceeds max configuration ({max_partition})"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema, num_partitions=num_partitions,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 1100, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            num_partitions=num_partitions,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_min_partitions(self):
@@ -262,12 +331,15 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         string_prefix = cf.gen_str_by_length(length=6)
         for n in range(5):
             float_vec_values = gen_vectors(nb, ct.default_dim)
-            data = [{
-                "pk": str(n * nb + i),
-                ct.default_int64_field_name: i,
-                ct.default_string_field_name: string_prefix + str(i),
-                ct.default_float_vec_field_name: float_vec_values[i]
-            } for i in range(nb)]
+            data = [
+                {
+                    "pk": str(n * nb + i),
+                    ct.default_int64_field_name: i,
+                    ct.default_string_field_name: string_prefix + str(i),
+                    ct.default_float_vec_field_name: float_vec_values[i],
+                }
+                for i in range(nb)
+            ]
             self.insert(client, c_name, data)
             self.flush(client, c_name)
 
@@ -277,12 +349,22 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         # create a collection with min partitions - 1
         err_msg = "The specified num_partitions should be greater than or equal to 1"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema, num_partitions=min_partition - 1,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
-        self.create_collection(client, c_name, schema=schema, num_partitions=min_partition - 3,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            num_partitions=min_partition - 1,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            num_partitions=min_partition - 3,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_par_key", [None, "", "invalid", 0.1, [], {}, ()])
@@ -295,10 +377,14 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         client = self._client()
         schema = self.create_schema(client, auto_id=True)[0]
         err_msg = "Param is_partition_key must be bool type"
-        self.add_field(schema, ct.default_int64_field_name, DataType.INT64,
-                       is_partition_key=is_par_key,
-                       check_task=CheckTasks.err_res,
-                       check_items={"err_code": 2, "err_msg": err_msg})
+        self.add_field(
+            schema,
+            ct.default_int64_field_name,
+            DataType.INT64,
+            is_partition_key=is_par_key,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("num_partitions", [True, False, "", "invalid", 0.1, [], {}, ()])
@@ -316,9 +402,14 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "invalid num_partitions type"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema, num_partitions=num_partitions,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            num_partitions=num_partitions,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_partition_key_on_multi_fields(self):
@@ -333,34 +424,45 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         schema = self.create_schema(client, auto_id=True)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64, is_partition_key=True)
-        self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
-                       is_partition_key=True)
+        self.add_field(
+            schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_partition_key=True
+        )
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "Expected only one partition key field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # sub-case 2: partition_key_field passed as list in create_schema
         err_msg = "Param partition_key_field must be str type"
-        self.create_schema(client, auto_id=True,
-                           partition_key_field=[ct.default_int64_field_name, ct.default_string_field_name],
-                           check_task=CheckTasks.err_res,
-                           check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_schema(
+            client,
+            auto_id=True,
+            partition_key_field=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # sub-case 3: one defined in field schema, one defined in create_schema
-        schema = self.create_schema(client, auto_id=True,
-                                    partition_key_field=ct.default_string_field_name)[0]
+        schema = self.create_schema(client, auto_id=True, partition_key_field=ct.default_string_field_name)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64, is_partition_key=True)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "Expected only one partition key field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("is_int64_primary", [True, False])
@@ -377,16 +479,21 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         if is_int64_primary:
             self.add_field(schema, "pk", DataType.INT64, is_primary=True, is_partition_key=True)
         else:
-            self.add_field(schema, "pk", DataType.VARCHAR, max_length=ct.default_length,
-                           is_primary=True, is_partition_key=True)
+            self.add_field(
+                schema, "pk", DataType.VARCHAR, max_length=ct.default_length, is_primary=True, is_partition_key=True
+            )
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "the partition key field must not be primary field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # sub-case 2: partition key set on primary field via create_schema partition_key_field
         schema = self.create_schema(client, auto_id=False, partition_key_field="pk")[0]
@@ -399,9 +506,13 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "the partition key field must not be primary field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_and_off(self):
@@ -413,35 +524,52 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         client = self._client()
 
         # sub-case 1: int64 field is_partition_key=True, schema partition_key_field=vector field
-        schema = self.create_schema(client, auto_id=True,
-                                    partition_key_field=ct.default_float_vec_field_name)[0]
+        schema = self.create_schema(client, auto_id=True, partition_key_field=ct.default_float_vec_field_name)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64, is_partition_key=True)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "Expected only one partition key field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # sub-case 2: string1 is_partition_key=True, schema partition_key_field=string2
-        schema = self.create_schema(client, auto_id=True,
-                                    partition_key_field="string2")[0]
+        schema = self.create_schema(client, auto_id=True, partition_key_field="string2")[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, "string1", DataType.VARCHAR, max_length=ct.default_length, is_partition_key=True)
         self.add_field(schema, "string2", DataType.VARCHAR, max_length=ct.default_length)
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "Expected only one partition key field"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("field_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.FLOAT,
-                                            DataType.DOUBLE, DataType.BOOL, DataType.INT8,
-                                            DataType.INT16, DataType.INT32, DataType.JSON])
+    @pytest.mark.parametrize(
+        "field_type",
+        [
+            DataType.FLOAT_VECTOR,
+            DataType.BINARY_VECTOR,
+            DataType.FLOAT,
+            DataType.DOUBLE,
+            DataType.BOOL,
+            DataType.INT8,
+            DataType.INT16,
+            DataType.INT32,
+            DataType.JSON,
+        ],
+    )
     def test_partition_key_on_invalid_type_fields(self, field_type):
         """
         Method：
@@ -461,16 +589,26 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         if field_type == DataType.BINARY_VECTOR:
-            self.add_field(schema, ct.default_binary_vec_field_name, DataType.BINARY_VECTOR,
-                           dim=default_dim, is_partition_key=True)
+            self.add_field(
+                schema, ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim, is_partition_key=True
+            )
         else:
-            self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim,
-                           is_partition_key=(field_type == DataType.FLOAT_VECTOR))
+            self.add_field(
+                schema,
+                ct.default_float_vec_field_name,
+                DataType.FLOAT_VECTOR,
+                dim=default_dim,
+                is_partition_key=(field_type == DataType.FLOAT_VECTOR),
+            )
         err_msg = "Partition key field type must be DataType.INT64 or DataType.VARCHAR"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_key_on_not_existed_fields(self):
@@ -480,17 +618,20 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         2. verify the error raised
         """
         client = self._client()
-        schema = self.create_schema(client, auto_id=True,
-                                    partition_key_field="non_existing_field")[0]
+        schema = self.create_schema(client, auto_id=True, partition_key_field="non_existing_field")[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "the specified partition key field {non_existing_field} not exist"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_key_on_empty_and_num_partitions_set(self):
@@ -509,9 +650,13 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "the specified partition key field {} not exist"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # sub-case 2: no partition key but num_partitions set → server error
         schema = self.create_schema(client, auto_id=True)[0]
@@ -521,13 +666,18 @@ class TestPartitionKeyInvalidParams(TestMilvusClientV2Base):
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         err_msg = "num_partitions should only be specified with partition key field enabled"
         c_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, c_name, schema=schema, num_partitions=200,
-                               check_task=CheckTasks.err_res,
-                               check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_collection(
+            client,
+            c_name,
+            schema=schema,
+            num_partitions=200,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
 
 class TestPartitionKeyInsertInvalid(TestMilvusClientV2Base):
-    """ Test case of partition key insert invalid data """
+    """Test case of partition key insert invalid data"""
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_data", [99, True, None, [], {}, ()])
@@ -539,8 +689,7 @@ class TestPartitionKeyInsertInvalid(TestMilvusClientV2Base):
         3. verify the error raised
         """
         client = self._client()
-        schema = self.create_schema(client, auto_id=False,
-                                    partition_key_field=ct.default_string_field_name)[0]
+        schema = self.create_schema(client, auto_id=False, partition_key_field=ct.default_string_field_name)[0]
         self.add_field(schema, "pk", DataType.VARCHAR, max_length=ct.default_length, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
         self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
@@ -552,12 +701,15 @@ class TestPartitionKeyInsertInvalid(TestMilvusClientV2Base):
         nb = 10
         string_prefix = cf.gen_str_by_length(length=6)
         float_vec_values = gen_vectors(nb, ct.default_dim)
-        data = [{
-            "pk": str(i),
-            ct.default_int64_field_name: i,
-            ct.default_string_field_name: string_prefix + str(i),
-            ct.default_float_vec_field_name: float_vec_values[i]
-        } for i in range(nb)]
+        data = [
+            {
+                "pk": str(i),
+                ct.default_int64_field_name: i,
+                ct.default_string_field_name: string_prefix + str(i),
+                ct.default_float_vec_field_name: float_vec_values[i],
+            }
+            for i in range(nb)
+        ]
         data[1][ct.default_string_field_name] = invalid_data  # inject invalid data
 
         if invalid_data is None:
@@ -568,13 +720,13 @@ class TestPartitionKeyInsertInvalid(TestMilvusClientV2Base):
             # non-string types trigger DataNotMatchException in row-based insert
             err_msg = "The Input data type is inconsistent with defined schema"
             err_code = 1
-        self.insert(client, c_name, data,
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": err_code, "err_msg": err_msg})
+        self.insert(
+            client, c_name, data, check_task=CheckTasks.err_res, check_items={"err_code": err_code, "err_msg": err_msg}
+        )
 
 
 class TestPartitionApiForbidden(TestMilvusClientV2Base):
-    """ Test case of partition api forbidden when partition key is on """
+    """Test case of partition api forbidden when partition key is on"""
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_partition(self):
@@ -593,8 +745,9 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         schema = self.create_schema(client, auto_id=True)[0]
         self.add_field(schema, "pk", DataType.INT64, is_primary=True)
         self.add_field(schema, ct.default_int64_field_name, DataType.INT64)
-        self.add_field(schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
-                       is_partition_key=True)
+        self.add_field(
+            schema, ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_partition_key=True
+        )
         self.add_field(schema, ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         c_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, c_name, schema=schema)
@@ -602,9 +755,13 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         # create partition → error
         err_msg = "disable create partition if partition key mode is used"
         partition_name = cf.gen_unique_str("partition")
-        self.create_partition(client, c_name, partition_name,
-                              check_task=CheckTasks.err_res,
-                              check_items={"err_code": 2, "err_msg": err_msg})
+        self.create_partition(
+            client,
+            c_name,
+            partition_name,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # list/has partition → allowed
         partitions = self.list_partitions(client, c_name)[0]
@@ -617,53 +774,81 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
         entities_per_parkey = 10
         for _ in range(entities_per_parkey):
             float_vec_values = gen_vectors(nb, ct.default_dim)
-            data = [{
-                ct.default_int64_field_name: i,
-                ct.default_string_field_name: string_prefix + str(i),
-                ct.default_float_vec_field_name: float_vec_values[i]
-            } for i in range(nb)]
+            data = [
+                {
+                    ct.default_int64_field_name: i,
+                    ct.default_string_field_name: string_prefix + str(i),
+                    ct.default_float_vec_field_name: float_vec_values[i],
+                }
+                for i in range(nb)
+            ]
             self.insert(client, c_name, data)
 
         # insert with partition_name → error
         err_msg = "not support manually specifying the partition names if partition key mode is used"
-        self.insert(client, c_name, data, partition_name=partitions[0],
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+        self.insert(
+            client,
+            c_name,
+            data,
+            partition_name=partitions[0],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # load partitions → error
         err_msg = "disable load partitions if partition key mode is used"
-        self.load_partitions(client, c_name, [partitions[0]],
-                             check_task=CheckTasks.err_res,
-                             check_items={"err_code": 2, "err_msg": err_msg})
+        self.load_partitions(
+            client,
+            c_name,
+            [partitions[0]],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # flush + index + load collection → allowed
         self.flush(client, c_name)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8",
-                               metric_type="COSINE", params={"nlist": 128})
+        index_params.add_index(
+            field_name=ct.default_float_vec_field_name,
+            index_type="IVF_SQ8",
+            metric_type="COSINE",
+            params={"nlist": 128},
+        )
         self.create_index(client, c_name, index_params)
         self.load_collection(client, c_name)
 
         # search without partition_names → allowed
         nq = 10
         search_vectors = gen_vectors(nq, ct.default_dim)
-        res1 = self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                           search_params=ct.default_search_params, limit=entities_per_parkey,
-                           filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
-                           output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                           check_task=CheckTasks.check_search_results,
-                           check_items={"nq": nq, "limit": ct.default_limit})[0]
+        res1 = self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f'{ct.default_int64_field_name} in [1,3,5] && {ct.default_string_field_name} in ["{string_prefix}1","{string_prefix}3","{string_prefix}5"]',
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": nq, "limit": ct.default_limit},
+        )[0]
         pks = res1[0].ids[:3]
 
         # search with partition_names → error
         err_msg = "not support manually specifying the partition names if partition key mode is used"
-        self.search(client, c_name, data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                    search_params=ct.default_search_params, limit=entities_per_parkey,
-                    filter=f'{ct.default_int64_field_name} in [1,3,5]',
-                    output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
-                    partition_names=[partitions[0]],
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+        self.search(
+            client,
+            c_name,
+            data=search_vectors,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=ct.default_search_params,
+            limit=entities_per_parkey,
+            filter=f"{ct.default_int64_field_name} in [1,3,5]",
+            output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
+            partition_names=[partitions[0]],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # get_load_state with partition → allowed (v1: loading_progress/wait_for_loading_complete)
         load_state = self.get_load_state(client, c_name, partition_name=partitions[0])[0]
@@ -678,23 +863,41 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
 
         # delete with partition_name → error
         err_msg = "not support manually specifying the partition names if partition key mode is used"
-        self.delete(client, c_name, filter=f'pk in {pks}', partition_name=partitions[0],
-                    check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2, "err_msg": err_msg})
+        self.delete(
+            client,
+            c_name,
+            filter=f"pk in {pks}",
+            partition_name=partitions[0],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # query with partition_names → error
-        self.query(client, c_name, filter=f'pk in {pks}', partition_names=[partitions[0]],
-                   check_task=CheckTasks.err_res,
-                   check_items={"err_code": 2, "err_msg": err_msg})
+        self.query(
+            client,
+            c_name,
+            filter=f"pk in {pks}",
+            partition_names=[partitions[0]],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # release partitions → error
         err_msg = "disable release partitions if partition key mode is used"
-        self.release_partitions(client, c_name, [partitions[0]],
-                                check_task=CheckTasks.err_res,
-                                check_items={"err_code": 2, "err_msg": err_msg})
+        self.release_partitions(
+            client,
+            c_name,
+            [partitions[0]],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )
 
         # drop partition → error
         err_msg = "disable drop partition if partition key mode is used"
-        self.drop_partition(client, c_name, partitions[0],
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 2, "err_msg": err_msg})
+        self.drop_partition(
+            client,
+            c_name,
+            partitions[0],
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 2, "err_msg": err_msg},
+        )

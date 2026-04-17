@@ -9,7 +9,14 @@ import datetime
 from pymilvus import connections
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
-from chaos.checker import Op, CollectionCreateChecker, InsertFlushChecker, IndexCreateChecker, SearchChecker, QueryChecker
+from chaos.checker import (
+    Op,
+    CollectionCreateChecker,
+    InsertFlushChecker,
+    IndexCreateChecker,
+    SearchChecker,
+    QueryChecker,
+)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
@@ -24,24 +31,25 @@ from utils.util_k8s import get_querynode_id_pod_pairs
 def apply_memory_stress(chaos_yaml):
     chaos_config = gen_experiment_config(chaos_yaml)
     log.debug(chaos_config)
-    chaos_res = CusResource(kind=chaos_config['kind'],
-                            group=constants.CHAOS_GROUP,
-                            version=constants.CHAOS_VERSION,
-                            namespace=constants.CHAOS_NAMESPACE)
+    chaos_res = CusResource(
+        kind=chaos_config["kind"],
+        group=constants.CHAOS_GROUP,
+        version=constants.CHAOS_VERSION,
+        namespace=constants.CHAOS_NAMESPACE,
+    )
     chaos_res.create(chaos_config)
     log.debug("chaos injected")
 
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestChaosData:
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port):
         connections.add_connection(default={"host": host, "port": port})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
+    @pytest.mark.parametrize("chaos_yaml", get_chaos_yamls())
     def test_chaos_memory_stress_querynode(self, connection, chaos_yaml):
         """
         target: explore query node behavior after memory stress chaos injected and recovered
@@ -53,7 +61,7 @@ class TestChaosData:
         expected: 1.If memory is insufficient, querynode is OOMKilled and available after restart
                   2.If memory is sufficient, succ rate of query and search both are 1.0
         """
-        c_name = 'chaos_memory_nx6DNW4q'
+        c_name = "chaos_memory_nx6DNW4q"
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(c_name)
         log.debug(collection_w.schema)
@@ -62,15 +70,17 @@ class TestChaosData:
         # apply memory stress chaos
         chaos_config = gen_experiment_config(chaos_yaml)
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug("chaos injected")
-        duration = chaos_config.get('spec').get('duration')
-        duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
-        meta_name = chaos_config.get('metadata').get('name')
+        duration = chaos_config.get("spec").get("duration")
+        duration = duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "*1+") + "+0"
+        meta_name = chaos_config.get("metadata").get("name")
         # wait memory stress
         sleep(constants.WAIT_PER_OP * 2)
 
@@ -81,13 +91,16 @@ class TestChaosData:
                 collection_w.release()
                 collection_w.load()
 
-                term_expr = f'{ct.default_int64_field_name} in {[random.randint(0, 100)]}'
+                term_expr = f"{ct.default_int64_field_name} in {[random.randint(0, 100)]}"
                 query_res, _ = collection_w.query(term_expr)
                 assert len(query_res) == 1
 
-                search_res, _ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
-                                                    ct.default_float_vec_field_name,
-                                                    ct.default_search_params, ct.default_limit)
+                search_res, _ = collection_w.search(
+                    cf.gen_vectors(1, ct.default_dim),
+                    ct.default_float_vec_field_name,
+                    ct.default_search_params,
+                    ct.default_limit,
+                )
                 log.debug(search_res[0].ids)
                 assert len(search_res[0].ids) == ct.default_limit
 
@@ -98,7 +111,7 @@ class TestChaosData:
             chaos_res.delete(meta_name)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
+    @pytest.mark.parametrize("chaos_yaml", get_chaos_yamls())
     def test_chaos_memory_stress_datanode(self, chaos_yaml):
         """
         target: test inject memory stress into dataNode
@@ -111,39 +124,40 @@ class TestChaosData:
         # init collection and insert 250 nb
         nb = 25000
         dim = 512
-        c_name = cf.gen_unique_str('chaos_memory')
+        c_name = cf.gen_unique_str("chaos_memory")
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=c_name,
-                                     schema=cf.gen_default_collection_schema(dim=dim))
+        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(dim=dim))
         for i in range(10):
             t0 = datetime.datetime.now()
             df = cf.gen_default_dataframe_data(nb=nb, dim=dim)
             res = collection_w.insert(df)[0]
             assert res.insert_count == nb
-            log.info(f'After {i + 1} insert, num_entities: {collection_w.num_entities}')
+            log.info(f"After {i + 1} insert, num_entities: {collection_w.num_entities}")
             tt = datetime.datetime.now() - t0
             log.info(f"{i} insert and flush data cost: {tt}")
 
         # inject memory stress
         chaos_config = gen_experiment_config(chaos_yaml)
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug("chaos injected")
 
         # Continue to insert data
         collection_w.insert(df)
-        log.info(f'Total num entities: {collection_w.num_entities}')
+        log.info(f"Total num entities: {collection_w.num_entities}")
 
         # delete chaos
-        meta_name = chaos_config.get('metadata', None).get('name', None)
+        meta_name = chaos_config.get("metadata", None).get("name", None)
         chaos_res.delete(metadata_name=meta_name)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
+    @pytest.mark.parametrize("chaos_yaml", get_chaos_yamls())
     def test_chaos_memory_stress_indexnode(self, connection, chaos_yaml):
         """
         target: test inject memory stress into indexnode
@@ -157,12 +171,11 @@ class TestChaosData:
         nb = 256000  # vector size: 512*4*nb about 512Mi and create index need 2.8Gi memory
         dim = 512
         # c_name = cf.gen_unique_str('chaos_memory')
-        c_name = 'chaos_memory_gKs8aSUu'
+        c_name = "chaos_memory_gKs8aSUu"
         index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
 
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=c_name,
-                                     schema=cf.gen_default_collection_schema(dim=dim), shards_num=1)
+        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(dim=dim), shards_num=1)
 
         # insert 256000 512 dim entities, size 512Mi
         for i in range(2):
@@ -178,7 +191,7 @@ class TestChaosData:
         t0_flush = datetime.datetime.now()
         assert collection_w.num_entities == nb
         tt_flush = datetime.datetime.now() - t0_flush
-        log.info(f'flush {nb * 10} entities cost: {tt_flush}')
+        log.info(f"flush {nb * 10} entities cost: {tt_flush}")
 
         log.info(collection_w.indexes[0].params)
         if collection_w.has_index()[0]:
@@ -187,24 +200,25 @@ class TestChaosData:
         # indexNode start build index, inject chaos memory stress
         chaos_config = gen_experiment_config(chaos_yaml)
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug("inject chaos")
 
         # create index
         t0_index = datetime.datetime.now()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=index_params)
+        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name, index_params=index_params)
         tt_index = datetime.datetime.now() - t0_index
 
         log.info(f"create index cost: {tt_index}")
         log.info(collection_w.indexes[0].params)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize('chaos_yaml', cc.get_chaos_yamls())
+    @pytest.mark.parametrize("chaos_yaml", cc.get_chaos_yamls())
     def test_chaos_memory_stress_etcd(self, chaos_yaml):
         """
         target: test inject memory stress into all etcd pods
@@ -220,7 +234,7 @@ class TestChaosData:
             Op.flush: InsertFlushChecker(flush=True),
             Op.index: IndexCreateChecker(),
             Op.search: SearchChecker(),
-            Op.query: QueryChecker()
+            Op.query: QueryChecker(),
         }
         # start thread keep running milvus op
         start_monitor_threads(mic_checkers)
@@ -228,20 +242,22 @@ class TestChaosData:
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
         # duration = chaos_config["spec"]["duration"]
-        meta_name = chaos_config.get('metadata').get('name')
-        duration = chaos_config.get('spec').get('duration')
+        meta_name = chaos_config.get("metadata").get("name")
+        duration = chaos_config.get("spec").get("duration")
 
         # apply chaos object
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.info("Chaos injected")
 
         # convert string duration time to an int number in seconds
         if isinstance(duration, str):
-            duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
+            duration = duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "*1+") + "+0"
         else:
             log.error("Duration must be string type")
 
@@ -252,7 +268,7 @@ class TestChaosData:
 
         # output milvus op succ rate
         for k, ch in mic_checkers.items():
-            log.debug(f'Succ rate of {k.value}: {ch.succ_rate()}')
+            log.debug(f"Succ rate of {k.value}: {ch.succ_rate()}")
             assert ch.succ_rate() == 1.0
 
 
@@ -263,12 +279,11 @@ class TestMemoryStressReplica:
 
     @pytest.fixture(scope="function", autouse=True)
     def prepare_collection(self, host, port):
-        """ dim 128, 1000,000 entities loaded needed memory 3-5 Gi"""
+        """dim 128, 1000,000 entities loaded needed memory 3-5 Gi"""
         connections.connect("default", host=host, port=19530)
         collection_w = ApiCollectionWrapper()
         c_name = "stress_replicas_2"
-        collection_w.init_collection(name=c_name,
-                                     schema=cf.gen_default_collection_schema(dim=self.dim))
+        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(dim=self.dim))
 
         # insert 10 sealed segments
         for i in range(20):
@@ -276,7 +291,7 @@ class TestMemoryStressReplica:
             df = cf.gen_default_dataframe_data(nb=nb, dim=dim)
             res = collection_w.insert(df)[0]
             assert res.insert_count == nb
-            log.info(f'After {i + 1} insert, num_entities: {collection_w.num_entities}')
+            log.info(f"After {i + 1} insert, num_entities: {collection_w.num_entities}")
             tt = datetime.datetime.now() - t0
             log.info(f"{i} insert and flush data cost: {tt}")
 
@@ -298,9 +313,13 @@ class TestMemoryStressReplica:
         # collection_w.load(replica_number=2, timeout=60, check_task=CheckTasks.err_res, check_items=err)
         collection_w.load(replica_number=5)
         utility_w.loading_progress(collection_w.name)
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=60)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=60,
+        )
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16965")
     @pytest.mark.parametrize("mode", ["one", "all", "fixed"])
@@ -317,14 +336,16 @@ class TestMemoryStressReplica:
 
         # # apply memory stress chaos
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_querynode_memory_stress.yaml")
-        chaos_config['spec']['mode'] = mode
-        chaos_config['spec']['duration'] = '3m'
-        chaos_config['spec']['stressors']['memory']['size'] = '3Gi'
+        chaos_config["spec"]["mode"] = mode
+        chaos_config["spec"]["duration"] = "3m"
+        chaos_config["spec"]["stressors"]["memory"]["size"] = "3Gi"
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug("chaos injected")
         sleep(20)
@@ -334,9 +355,13 @@ class TestMemoryStressReplica:
             utility_w.loading_progress(collection_w.name)
             replicas, _ = collection_w.get_replicas()
             log.debug(replicas)
-            search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                                ct.default_float_vec_field_name, ct.default_search_params,
-                                                ct.default_limit, timeout=120)
+            search_res, _ = collection_w.search(
+                cf.gen_vectors(1, dim=self.dim),
+                ct.default_float_vec_field_name,
+                ct.default_search_params,
+                ct.default_limit,
+                timeout=120,
+            )
             assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
             collection_w.release()
 
@@ -345,7 +370,7 @@ class TestMemoryStressReplica:
 
         finally:
             # delete chaos
-            meta_name = chaos_config.get('metadata', None).get('name', None)
+            meta_name = chaos_config.get("metadata", None).get("name", None)
             chaos_res.delete(metadata_name=meta_name)
             log.debug("Test finished")
 
@@ -364,13 +389,15 @@ class TestMemoryStressReplica:
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_querynode_memory_stress.yaml")
 
         # Update config
-        chaos_config['spec']['mode'] = mode
-        chaos_config['spec']['stressors']['memory']['size'] = '5Gi'
+        chaos_config["spec"]["mode"] = mode
+        chaos_config["spec"]["stressors"]["memory"]["size"] = "5Gi"
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         # chaos_start = time.time()
         log.debug("chaos injected")
@@ -386,7 +413,7 @@ class TestMemoryStressReplica:
             collection_w.query("int64 in [0]", check_task=CheckTasks.err_res, check_items=err)
 
             # delete chaos
-            meta_name = chaos_config.get('metadata', None).get('name', None)
+            meta_name = chaos_config.get("metadata", None).get("name", None)
             chaos_res.delete(metadata_name=meta_name)
             sleep(10)
 
@@ -419,14 +446,16 @@ class TestMemoryStressReplica:
         utility_w = ApiUtilityWrapper()
 
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_querynode_memory_stress.yaml")
-        chaos_config['spec']['mode'] = mode
-        chaos_config['spec']['duration'] = '3m'
-        chaos_config['spec']['stressors']['memory']['size'] = '6Gi'
+        chaos_config["spec"]["mode"] = mode
+        chaos_config["spec"]["duration"] = "3m"
+        chaos_config["spec"]["stressors"]["memory"]["size"] = "6Gi"
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
 
         chaos_res.create(chaos_config)
         log.debug("chaos injected")
@@ -434,22 +463,30 @@ class TestMemoryStressReplica:
 
         utility_w.wait_for_loading_complete(collection_w.name)
         progress, _ = utility_w.loading_progress(collection_w.name)
-        assert progress["loading_progress"] == '100%'
+        assert progress["loading_progress"] == "100%"
 
         sleep(180)
-        chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
+        chaos_res.delete(metadata_name=chaos_config.get("metadata", None).get("name", None))
 
         # TODO search failed
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=120)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=120,
+        )
         assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
 
         collection_w.release()
         collection_w.load(replica_number=2)
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=120)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=120,
+        )
         assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
 
 
@@ -460,12 +497,11 @@ class TestMemoryStressReplicaLoadBalance:
 
     @pytest.fixture(scope="function", autouse=True)
     def prepare_collection(self, host, port):
-        """ dim 128, 1000,000 entities loaded needed memory 3-5 Gi"""
+        """dim 128, 1000,000 entities loaded needed memory 3-5 Gi"""
         connections.connect("default", host=host, port=19530)
         collection_w = ApiCollectionWrapper()
         c_name = "stress_replicas_2"
-        collection_w.init_collection(name=c_name,
-                                     schema=cf.gen_default_collection_schema(dim=self.dim))
+        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(dim=self.dim))
 
         # insert 10 sealed segments
         for i in range(20):
@@ -473,7 +509,7 @@ class TestMemoryStressReplicaLoadBalance:
             df = cf.gen_default_dataframe_data(nb=self.nb, dim=self.dim)
             res = collection_w.insert(df)[0]
             assert res.insert_count == self.nb
-            log.info(f'After {i + 1} insert, num_entities: {collection_w.num_entities}')
+            log.info(f"After {i + 1} insert, num_entities: {collection_w.num_entities}")
             tt = datetime.datetime.now() - t0
             log.info(f"{i} insert and flush data cost: {tt}")
 
@@ -514,20 +550,22 @@ class TestMemoryStressReplicaLoadBalance:
 
         # apply memory stress
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_replicas_memory_stress_pods.yaml")
-        chaos_config['spec']['selector']['pods']['chaos-testing'] = [chaos_querynode_pod]
+        chaos_config["spec"]["selector"]["pods"]["chaos-testing"] = [chaos_querynode_pod]
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug(f"Apply memory stress on querynode {chaos_querynode_id}, pod {chaos_querynode_pod}")
 
-        duration = chaos_config.get('spec').get('duration')
-        duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
+        duration = chaos_config.get("spec").get("duration")
+        duration = duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "*1+") + "+0"
         sleep(eval(duration))
 
-        chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
+        chaos_res.delete(metadata_name=chaos_config.get("metadata", None).get("name", None))
 
         # Verify auto load loadbalance
         seg_info_after, _ = utility_w.get_query_segment_info(collection_w.name)
@@ -537,9 +575,13 @@ class TestMemoryStressReplicaLoadBalance:
         log.debug(seg_distribution_after[chaos_querynode_id]["sealed"])
 
         assert segments_num_after < segments_num_before
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=120)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=120,
+        )
         assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16965")
@@ -571,20 +613,22 @@ class TestMemoryStressReplicaLoadBalance:
 
         # apply memory stress
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_replicas_memory_stress_pods.yaml")
-        chaos_config['spec']['selector']['pods']['chaos-testing'] = group_nodes_pod
+        chaos_config["spec"]["selector"]["pods"]["chaos-testing"] = group_nodes_pod
         log.debug(chaos_config)
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
         log.debug(f"Apply memory stress on querynode {group_nodes}, pod {group_nodes_pod}")
 
-        duration = chaos_config.get('spec').get('duration')
-        duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
+        duration = chaos_config.get("spec").get("duration")
+        duration = duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "*1+") + "+0"
         sleep(eval(duration))
 
-        chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
+        chaos_res.delete(metadata_name=chaos_config.get("metadata", None).get("name", None))
 
         # Verify auto load loadbalance
         seg_info_after, _ = utility_w.get_query_segment_info(collection_w.name)
@@ -593,9 +637,13 @@ class TestMemoryStressReplicaLoadBalance:
         for node_id in group_nodes:
             assert len(seg_distribution_before[node_id]) == len(seg_distribution_after[node_id])
 
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=120)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=120,
+        )
         assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16995")
@@ -622,27 +670,33 @@ class TestMemoryStressReplicaLoadBalance:
         chaos_config = gen_experiment_config("./chaos_objects/memory_stress/chaos_querynode_memory_stress.yaml")
 
         # Update config
-        chaos_config['spec']['mode'] = "one"
-        chaos_config['spec']['stressors']['memory']['size'] = '6Gi'
-        chaos_config['spec']['duration'] = "1m"
+        chaos_config["spec"]["mode"] = "one"
+        chaos_config["spec"]["stressors"]["memory"]["size"] = "6Gi"
+        chaos_config["spec"]["duration"] = "1m"
         log.debug(chaos_config)
-        duration = chaos_config.get('spec').get('duration')
-        duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
-        chaos_res = CusResource(kind=chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
+        duration = chaos_config.get("spec").get("duration")
+        duration = duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "*1+") + "+0"
+        chaos_res = CusResource(
+            kind=chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
         chaos_res.create(chaos_config)
 
         sleep(eval(duration))
-        chaos_res.delete(metadata_name=chaos_config.get('metadata', None).get('name', None))
+        chaos_res.delete(metadata_name=chaos_config.get("metadata", None).get("name", None))
 
         # release and load again
         collection_w.release()
         collection_w.load(replica_number=2)
         progress, _ = utility_w.loading_progress(collection_w.name)
         assert progress["loading_progress"] == "100%"
-        search_res, _ = collection_w.search(cf.gen_vectors(1, dim=self.dim),
-                                            ct.default_float_vec_field_name, ct.default_search_params,
-                                            ct.default_limit, timeout=120)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(1, dim=self.dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            timeout=120,
+        )
         assert 1 == len(search_res) and ct.default_limit == len(search_res[0])

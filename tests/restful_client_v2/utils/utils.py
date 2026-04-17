@@ -21,19 +21,9 @@ fake.seed_instance(19530)
 rng = np.random.default_rng()
 
 
-en_vocabularies_distribution = {
-    "hello": 0.01,
-    "milvus": 0.01,
-    "vector": 0.01,
-    "database": 0.01
-}
+en_vocabularies_distribution = {"hello": 0.01, "milvus": 0.01, "vector": 0.01, "database": 0.01}
 
-zh_vocabularies_distribution = {
-    "你好": 0.01,
-    "向量": 0.01,
-    "数据": 0.01,
-    "库": 0.01
-}
+zh_vocabularies_distribution = {"你好": 0.01, "向量": 0.01, "数据": 0.01, "库": 0.01}
 
 
 def patch_faker_text(fake_instance, vocabularies_distribution):
@@ -56,7 +46,7 @@ def patch_faker_text(fake_instance, vocabularies_distribution):
     def new_text(*args, **kwargs):
         sentences = []
         # Split original text into sentences
-        original_sentences = original_text(*args,**kwargs).split('.')
+        original_sentences = original_text(*args, **kwargs).split(".")
         original_sentences = [s.strip() for s in original_sentences if s.strip()]
 
         for base_sentence in original_sentences:
@@ -70,13 +60,13 @@ def patch_faker_text(fake_instance, vocabularies_distribution):
                     words.insert(insert_pos, word)
 
             # Reconstruct the sentence
-            base_sentence = ' '.join(words)
+            base_sentence = " ".join(words)
 
             # Ensure proper capitalization
             base_sentence = base_sentence[0].upper() + base_sentence[1:]
             sentences.append(base_sentence)
 
-        return '. '.join(sentences) + '.'
+        return ". ".join(sentences) + "."
 
     # Replace the original text method with our custom one
     fake_instance.text = new_text
@@ -121,12 +111,13 @@ def analyze_documents(texts, language="en"):
 
 def random_string(length=8):
     letters = string.ascii_letters
-    return ''.join(random.choice(letters) for _ in range(length))
+    return "".join(random.choice(letters) for _ in range(length))
 
 
 def gen_collection_name(prefix="test_collection", length=8):
-    name = f'{prefix}_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f") + random_string(length=length)
+    name = f"{prefix}_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f") + random_string(length=length)
     return name
+
 
 def admin_password():
     return "Milvus"
@@ -149,15 +140,12 @@ def wait_cluster_be_ready(cluster_id, client, timeout=120):
     t0 = time.time()
     while True and time.time() - t0 < timeout:
         rsp = client.cluster_describe(cluster_id)
-        if rsp['code'] == 200:
-            if rsp['data']['status'] == "RUNNING":
+        if rsp["code"] == 200:
+            if rsp["data"]["status"] == "RUNNING":
                 return time.time() - t0
         time.sleep(1)
         logger.debug("wait cluster to be ready, cost time: %s" % (time.time() - t0))
     return -1
-
-
-
 
 
 def gen_data_by_type(field):
@@ -205,13 +193,15 @@ def get_random_json_data(uid=None):
     # gen random dict data
     if uid is None:
         uid = 0
-    data = {"uid": uid,  "name": fake.name(), "address": fake.address(), "text": fake.text(), "email": fake.email(),
-            "phone_number": fake.phone_number(),
-            "json": {
-                "name": fake.name(),
-                "address": fake.address()
-                }
-            }
+    data = {
+        "uid": uid,
+        "name": fake.name(),
+        "address": fake.address(),
+        "text": fake.text(),
+        "email": fake.email(),
+        "phone_number": fake.phone_number(),
+        "json": {"name": fake.name(), "address": fake.address()},
+    }
     for i in range(random.randint(1, 10)):
         data["key" + str(random.randint(1, 100_000))] = "value" + str(random.randint(1, 100_000))
     return data
@@ -223,19 +213,24 @@ def get_data_by_payload(payload, nb=3000):
     pk_field = payload.get("primaryField", "id")
     data = []
     if nb == 1:
-        data = [{
-            pk_field: int(time.time()*10000),
-            vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
-            **get_random_json_data()
-
-        }]
+        data = [
+            {
+                pk_field: int(time.time() * 10000),
+                vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
+                **get_random_json_data(),
+            }
+        ]
     else:
         for i in range(nb):
-            data.append({
-                pk_field: int(time.time()*10000),
-                vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
-                **get_random_json_data(uid=i)
-            })
+            data.append(
+                {
+                    pk_field: int(time.time() * 10000),
+                    vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[
+                        0
+                    ].tolist(),
+                    **get_random_json_data(uid=i),
+                }
+            )
     return data
 
 
@@ -302,19 +297,16 @@ def gen_bf16_vectors(num, dim):
     return raw_vectors, bf16_vectors
 
 
-def gen_vector(datatype="FloatVector", dim=128, binary_data=False, sparse_format='dok'):
+def gen_vector(datatype="FloatVector", dim=128, binary_data=False, sparse_format="dok"):
     value = None
     if datatype == "FloatVector":
         return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
     if datatype == "SparseFloatVector":
-        if sparse_format == 'dok':
+        if sparse_format == "dok":
             return {d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))}
-        elif sparse_format == 'coo':
+        elif sparse_format == "coo":
             data = {d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))}
-            coo_data = {
-                "indices": list(data.keys()),
-                "values": list(data.values())
-            }
+            coo_data = {"indices": list(data.keys()), "values": list(data.values())}
             return coo_data
         else:
             raise Exception(f"unsupported sparse format: {sparse_format}")
@@ -361,18 +353,15 @@ def l2_distance(u, v):
 
 
 def get_sorted_distance(train_emb, test_emb, metric_type):
-    milvus_sklearn_metric_map = {
-        "L2": l2_distance,
-        "COSINE": cosine_distance,
-        "IP": ip_distance
-    }
+    milvus_sklearn_metric_map = {"L2": l2_distance, "COSINE": cosine_distance, "IP": ip_distance}
     distance = pairwise_distances(train_emb, Y=test_emb, metric=milvus_sklearn_metric_map[metric_type], n_jobs=-1)
-    distance = np.array(distance.T, order='C', dtype=np.float32)
+    distance = np.array(distance.T, order="C", dtype=np.float32)
     distance_sorted = np.sort(distance, axis=1).tolist()
     return distance_sorted
 
 
 # ============= Geometry Utils =============
+
 
 def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count: int = 10) -> list:
     """
@@ -389,7 +378,9 @@ def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count:
     if wkt_type == "POINT":
         points = []
         for _ in range(count):
-            wkt_string = f"POINT ({random.uniform(bounds[0], bounds[1]):.2f} {random.uniform(bounds[2], bounds[3]):.2f})"
+            wkt_string = (
+                f"POINT ({random.uniform(bounds[0], bounds[1]):.2f} {random.uniform(bounds[2], bounds[3]):.2f})"
+            )
             points.append(wkt_string)
         return points
 
@@ -486,7 +477,9 @@ def generate_wkt_by_type(wkt_type: str, bounds: tuple = (0, 100, 0, 100), count:
                 else:  # POLYGON
                     x, y = random.uniform(bounds[0], bounds[1] - 20), random.uniform(bounds[2], bounds[3] - 20)
                     size = random.uniform(5, 20)
-                    geoms.append(f"POLYGON(({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))")
+                    geoms.append(
+                        f"POLYGON(({x:.2f} {y:.2f}, {x + size:.2f} {y:.2f}, {x + size:.2f} {y + size:.2f}, {x:.2f} {y + size:.2f}, {x:.2f} {y:.2f}))"
+                    )
 
             wkt_string = f"GEOMETRYCOLLECTION({', '.join(geoms)})"
             collections.append(wkt_string)
@@ -610,7 +603,7 @@ def generate_spatial_query_data_for_function(spatial_func, base_data, geo_field_
                     all_coords.append(((min_x + max_x) / 2, (min_y + max_y) / 2))
 
         if all_coords and len(all_coords) >= 5:
-            target_coords = all_coords[:min(10, len(all_coords))]
+            target_coords = all_coords[: min(10, len(all_coords))]
             center_x = sum(coord[0] for coord in target_coords) / len(target_coords)
             center_y = sum(coord[1] for coord in target_coords) / len(target_coords)
             size = 40
@@ -628,12 +621,14 @@ def generate_spatial_query_data_for_function(spatial_func, base_data, geo_field_
                     points.append((x, y))
 
         if len(points) >= 3:
-            target_points = points[:min(10, len(points))]
+            target_points = points[: min(10, len(points))]
             min_x = min(p[0] for p in target_points) - 5
             max_x = max(p[0] for p in target_points) + 5
             min_y = min(p[1] for p in target_points) - 5
             max_y = max(p[1] for p in target_points) + 5
-            query_geom = f"POLYGON (({min_x} {min_y}, {max_x} {min_y}, {max_x} {max_y}, {min_x} {max_y}, {min_x} {min_y}))"
+            query_geom = (
+                f"POLYGON (({min_x} {min_y}, {max_x} {min_y}, {max_x} {max_y}, {min_x} {max_y}, {min_x} {min_y}))"
+            )
         else:
             query_geom = "POLYGON ((25 25, 75 25, 75 75, 25 75, 25 25))"
 

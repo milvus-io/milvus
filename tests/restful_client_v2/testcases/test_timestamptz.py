@@ -62,10 +62,25 @@ class TestTimestamptz(TestBase):
         now_utc = datetime.now(timezone.utc)
         one_hour_ago = now_utc - timedelta(hours=1)
         rows = [
-            {"id": 1, "time": now_utc.isoformat(), "color": "red_9392", "vector": [random.random() for _ in range(dim)]},
-            {"id": 3, "time": one_hour_ago.isoformat(), "color": "pink_9298", "vector": [random.random() for _ in range(dim)]},
+            {
+                "id": 1,
+                "time": now_utc.isoformat(),
+                "color": "red_9392",
+                "vector": [random.random() for _ in range(dim)],
+            },
+            {
+                "id": 3,
+                "time": one_hour_ago.isoformat(),
+                "color": "pink_9298",
+                "vector": [random.random() for _ in range(dim)],
+            },
             {"id": 4, "color": "green_0004", "vector": [random.random() for _ in range(dim)]},  # default timestamptz
-            {"id": 504, "time": one_hour_ago.isoformat(), "color": "blue_0000", "vector": [random.random() for _ in range(dim)]},
+            {
+                "id": 504,
+                "time": one_hour_ago.isoformat(),
+                "color": "blue_0000",
+                "vector": [random.random() for _ in range(dim)],
+            },
         ]
         insert_payload = {"collectionName": name, "data": rows}
         insert_rsp = self.vector_client.vector_insert(insert_payload)
@@ -103,4 +118,3 @@ class TestTimestamptz(TestBase):
         assert result[1]["color"] == "red_9392"
         assert result[3]["color"] == "pink_9298"
         assert result[4]["color"] == "green_0004"
-

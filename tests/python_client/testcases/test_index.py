@@ -15,7 +15,13 @@ from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import IndexErrorMessage as iem
 from common.common_params import (
-    IndexName, FieldParams, IndexPrams, DefaultVectorIndexParams, DefaultScalarIndexParams, MetricType, AlterIndexParams
+    IndexName,
+    FieldParams,
+    IndexPrams,
+    DefaultVectorIndexParams,
+    DefaultScalarIndexParams,
+    MetricType,
+    AlterIndexParams,
 )
 
 from utils.util_pymilvus import *
@@ -57,7 +63,7 @@ default_nb = ct.default_nb
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestIndexParams(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection", [None, "coll"])
@@ -68,8 +74,13 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        self.index_wrap.init_index(collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType})
+        self.index_wrap.init_index(
+            collection,
+            default_field_name,
+            default_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -82,10 +93,13 @@ class TestIndexParams(TestcaseBase):
 
         collection_w = self.init_collection_wrap(name=collection_name)
         fieldname = "non_existing"
-        self.index_wrap.init_index(collection_w.collection, fieldname, default_index_params,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 65535,
-                                                ct.err_msg: f"cannot create index on non-exist field: {fieldname}"})
+        self.index_wrap.init_index(
+            collection_w.collection,
+            fieldname,
+            default_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {fieldname}"},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index_type", ["non_exiting_type", 100])
@@ -99,9 +113,13 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = index_type
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1100, ct.err_msg: "invalid parameter["})
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid parameter["},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -114,9 +132,13 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = "IVFFFFFFF"
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 999, ct.err_msg: ""})
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: ""},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_params_invalid(self, get_invalid_index_params):
@@ -128,9 +150,13 @@ class TestIndexParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = get_invalid_index_params
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: ""})
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: ""},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_name", ["_1ndeX", "In_t0"])
@@ -160,13 +186,17 @@ class TestIndexParams(TestcaseBase):
         """
         self._connect()
         collection_w = self.init_collection_wrap()
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
-                                   index_name=index_name)
-        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name, default_index_params,
-                                   index_name=index_name,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: "invalid parameter"})
+        self.index_wrap.init_index(
+            collection_w.collection, default_field_name, default_index_params, index_name=index_name
+        )
+        self.index_wrap.init_index(
+            collection_w.collection,
+            ct.default_int64_field_name,
+            default_index_params,
+            index_name=index_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "invalid parameter"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     # @pytest.mark.xfail(reason="issue 19181")
@@ -180,16 +210,19 @@ class TestIndexParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
-                                   index_name=get_invalid_index_name,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: "Invalid index name"})
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            default_index_params,
+            index_name=get_invalid_index_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "Invalid index name"},
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestIndexOperation(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_create_with_different_indexes(self):
@@ -201,10 +234,14 @@ class TestIndexOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one "
-                                                 "distinct index is allowed per field"}
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_ivf_flat_index,
-                                   check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            default_ivf_flat_index,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         assert len(collection_w.indexes) == 1
         assert collection_w.indexes[0].params["index_type"] == default_index_params["index_type"]
@@ -233,10 +270,13 @@ class TestIndexOperation(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, True, nb=200, is_index=False)[0]
         collection_w.create_index(ct.default_int64_field_name, {})
-        collection_w.load(check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: "there is no vector index on field: [float_vector], "
-                                                   "please create index firstly"})
+        collection_w.load(
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 65535,
+                ct.err_msg: "there is no vector index on field: [float_vector], please create index firstly",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_index_create_on_array_field(self):
@@ -317,9 +357,14 @@ class TestIndexOperation(TestcaseBase):
 
         # create index with the same index name and different index params
         error = {ct.err_code: 999, ct.err_msg: "at most one distinct index is allowed per field"}
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params2, index_name=index_name,
-                                   check_task=CheckTasks.err_res,
-                                   check_items=error)
+        self.index_wrap.init_index(
+            collection_w.collection,
+            default_field_name,
+            index_params2,
+            index_name=index_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         # create index with the same index name and same index params
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
 
@@ -338,7 +383,8 @@ class TestIndexOperation(TestcaseBase):
         str_field = cf.gen_string_field(name="str_field")
         str_field2 = cf.gen_string_field(name="str_field2")
         schema, _ = self.collection_schema_wrap.init_collection_schema(
-            [id_field, vec_field, vec_field2, str_field, str_field2])
+            [id_field, vec_field, vec_field2, str_field, str_field2]
+        )
         collection_w = self.init_collection_wrap(schema=schema)
         vec_index = ct.default_index
         vec_index_name = "my_index"
@@ -346,21 +392,21 @@ class TestIndexOperation(TestcaseBase):
         # create same index name on different vector fields
         error = {ct.err_code: 999, ct.err_msg: "at most one distinct index is allowed per field"}
         collection_w.create_index(vec_field.name, vec_index, index_name=vec_index_name)
-        collection_w.create_index(vec_field2.name, vec_index, index_name=vec_index_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error)
+        collection_w.create_index(
+            vec_field2.name, vec_index, index_name=vec_index_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
         # create same index name on different scalar fields
-        collection_w.create_index(str_field.name, index_name=vec_index_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error)
+        collection_w.create_index(
+            str_field.name, index_name=vec_index_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
         # create same salar index nae on different scalar fields
         index_name = "scalar_index"
         collection_w.create_index(str_field.name, index_name=index_name)
-        collection_w.create_index(str_field2.name, index_name=index_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error)
+        collection_w.create_index(
+            str_field2.name, index_name=index_name, check_task=CheckTasks.err_res, check_items=error
+        )
         all_indexes = collection_w.indexes
         assert len(all_indexes) == 2
         assert all_indexes[0].index_name != all_indexes[1].index_name
@@ -397,7 +443,7 @@ class TestIndexOperation(TestcaseBase):
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestIndexAdvanced(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_index_drop_multi_collections(self):
@@ -425,6 +471,7 @@ class TestNewIndexBase(TestcaseBase):
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index_type", ct.all_index_types[0:8])
     def test_create_index_default(self, index_type):
@@ -439,8 +486,9 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.insert(data=data)
         params = cf.get_index_params_params(index_type)
         index_params = {"index_type": index_type, "metric_type": "L2", "params": params}
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=index_params,
-                                  index_name=ct.default_index_name)
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params=index_params, index_name=ct.default_index_name
+        )
         assert len(collection_w.indexes) == 1
         collection_w.drop_index(index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 0
@@ -456,12 +504,13 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        collection_w.create_index(ct.default_int8_field_name, default_index_params,
-                                  index_name=ct.default_index_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 65535,
-                                               ct.err_msg: "cannot create index on non-exist field: int8"}
-                                  )
+        collection_w.create_index(
+            ct.default_int8_field_name,
+            default_index_params,
+            index_name=ct.default_index_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "cannot create index on non-exist field: int8"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_partition(self):
@@ -510,9 +559,12 @@ class TestNewIndexBase(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 999, ct.err_msg: "should create connection first"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            ct.default_index,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: "should create connection first"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_search_with_query_vectors(self):
@@ -529,9 +581,9 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp)
+        collection_w.search(
+            vectors[:default_nq], default_search_field, default_search_params, default_limit, default_search_exp
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_multithread(self):
@@ -585,10 +637,16 @@ class TestNewIndexBase(TestcaseBase):
         data = cf.gen_default_list_data(default_nb)
         collection_w.insert(data=data)
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="a")
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="b",
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 999,
-                                               ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            default_index_params,
+            index_name="b",
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 999,
+                ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_repeatedly_new(self):
@@ -601,8 +659,10 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index_prams = [default_ivf_flat_index,
-                       {"metric_type": "L2", "index_type": "IVF_SQ8", "params": {"nlist": 1024}}]
+        index_prams = [
+            default_ivf_flat_index,
+            {"metric_type": "L2", "index_type": "IVF_SQ8", "params": {"nlist": 1024}},
+        ]
         for index in index_prams:
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
@@ -671,9 +731,9 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, default_ip_index_params)
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_ip_params, default_limit,
-                            default_search_exp)
+        collection_w.search(
+            vectors[:default_nq], default_search_field, default_search_ip_params, default_limit, default_search_exp
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread_ip(self):
@@ -742,8 +802,10 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index_prams = [default_ip_index_params,
-                       {"metric_type": "IP", "index_type": "IVF_SQ8", "params": {"nlist": 1024}}]
+        index_prams = [
+            default_ip_index_params,
+            {"metric_type": "IP", "index_type": "IVF_SQ8", "params": {"nlist": 1024}},
+        ]
         for index in index_prams:
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
@@ -756,6 +818,7 @@ class TestNewIndexBase(TestcaseBase):
          The following cases are used to test `drop_index` function
        ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_repeatedly(self):
         """
@@ -767,8 +830,7 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         params = cf.get_index_params_params("HNSW")
         index_params = {"index_type": "HNSW", "metric_type": "L2", "params": params}
-        collection_w.create_index(ct.default_float_vec_field_name, index_params,
-                                  index_name=ct.default_index_name)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params, index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 1
         collection_w.drop_index(index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 0
@@ -785,11 +847,15 @@ class TestNewIndexBase(TestcaseBase):
 
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name)
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
         self.connection_wrap.remove_connection(ct.default_alias)
-        collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 999, ct.err_msg: "should create connection first."})
+        collection_w.drop_index(
+            index_name=ct.default_index_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: "should create connection first."},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly(self):
@@ -803,8 +869,7 @@ class TestNewIndexBase(TestcaseBase):
         params = cf.get_index_params_params("HNSW")
         index_params = {"index_type": "HNSW", "metric_type": "L2", "params": params}
         for i in range(4):
-            collection_w.create_index(ct.default_float_vec_field_name, index_params,
-                                      index_name=ct.default_index_name)
+            collection_w.create_index(ct.default_float_vec_field_name, index_params, index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 1
             collection_w.drop_index(index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 0
@@ -867,29 +932,33 @@ class TestNewIndexBase(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
+        collection_w.alter_index(ct.default_index_name, {"mmap.enabled": True})
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
         collection_w.load()
         collection_w.release()
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': False})
+        collection_w.alter_index(ct.default_index_name, {"mmap.enabled": False})
         collection_w.load()
-        assert collection_w.index()[0].params["mmap.enabled"] == 'False'
+        assert collection_w.index()[0].params["mmap.enabled"] == "False"
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp)
+        collection_w.search(
+            vectors[:default_nq], default_search_field, default_search_params, default_limit, default_search_exp
+        )
         collection_w.release()
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        collection_w.alter_index(ct.default_index_name, {"mmap.enabled": True})
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
         collection_w.load()
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
+        collection_w.search(
+            vectors[:default_nq],
+            default_search_field,
+            default_search_params,
+            default_limit,
+            default_search_exp,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": default_nq, "limit": default_limit},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[:7])
@@ -904,18 +973,21 @@ class TestNewIndexBase(TestcaseBase):
         params = cf.get_index_params_params(index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index(field_name, default_index, index_name=f"mmap_index_{index}")
-        collection_w.alter_index(f"mmap_index_{index}", {'mmap.enabled': True})
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        collection_w.alter_index(f"mmap_index_{index}", {"mmap.enabled": True})
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
         collection_w.drop_index(index_name=f"mmap_index_{index}")
         collection_w.create_index(field_name, default_index, index_name=f"index_{index}")
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
+        collection_w.search(
+            vectors[:default_nq],
+            default_search_field,
+            default_search_params,
+            default_limit,
+            default_search_exp,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": default_nq, "limit": default_limit},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rebuild_mmap_index(self):
@@ -927,47 +999,53 @@ class TestNewIndexBase(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_general(c_name, insert_data=True, is_index=False)[0]
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
+        collection_w.set_properties({"mmap.enabled": True})
         pro = collection_w.describe()[0].get("properties")
-        assert pro["mmap.enabled"] == 'True'
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True})
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        assert pro["mmap.enabled"] == "True"
+        collection_w.alter_index(ct.default_index_name, {"mmap.enabled": True})
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
         collection_w.insert(cf.gen_default_list_data())
         collection_w.flush()
 
         # check if mmap works after rebuild index
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
 
         collection_w.load()
         collection_w.release()
 
         # check if mmap works after reloading and rebuilding index.
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
+        assert collection_w.index()[0].params["mmap.enabled"] == "True"
         pro = collection_w.describe()[0].get("properties")
-        assert pro["mmap.enabled"] == 'True'
+        assert pro["mmap.enabled"] == "True"
 
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
+        collection_w.search(
+            vectors[:default_nq],
+            default_search_field,
+            default_search_params,
+            default_limit,
+            default_search_exp,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": default_nq, "limit": default_limit},
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestNewIndexBinary(TestcaseBase):
     """
-        ******************************************************************
-          The following cases are used to test `create_index` function
-        ******************************************************************
+    ******************************************************************
+      The following cases are used to test `create_index` function
+    ******************************************************************
     """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -996,8 +1074,9 @@ class TestNewIndexBinary(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data()
         ins_res, _ = partition_w.insert(df)
         assert len(ins_res.primary_keys) == len(df)
-        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,
-                                  index_name=binary_field_name)
+        collection_w.create_index(
+            default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name
+        )
         assert collection_w.has_index(index_name=binary_field_name)[0] is True
         assert len(collection_w.indexes) == 1
 
@@ -1012,13 +1091,14 @@ class TestNewIndexBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         df, _ = cf.gen_default_binary_dataframe_data()
         collection_w.insert(data=df)
-        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,
-                                  index_name=binary_field_name)
+        collection_w.create_index(
+            default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name
+        )
         collection_w.load()
         _, vectors = cf.gen_binary_vectors(default_nq, default_dim)
-        collection_w.search(vectors[:default_nq], binary_field_name,
-                            default_search_binary_params, default_limit,
-                            default_search_exp)
+        collection_w.search(
+            vectors[:default_nq], binary_field_name, default_search_binary_params, default_limit, default_search_exp
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_invalid_metric_type_binary(self):
@@ -1029,11 +1109,14 @@ class TestNewIndexBinary(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
-        binary_index_params = {'index_type': 'BIN_IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 64}}
-        collection_w.create_index(default_binary_vec_field_name, binary_index_params,
-                                  index_name=binary_field_name, check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 999,
-                                               ct.err_msg: "binary vector index does not support metric type: L2"})
+        binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(
+            default_binary_vec_field_name,
+            binary_index_params,
+            index_name=binary_field_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: "binary vector index does not support metric type: L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE", "JACCARD", "HAMMING"])
@@ -1045,14 +1128,14 @@ class TestNewIndexBinary(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
-        binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
+        binary_index_params = {"index_type": "HNSW", "M": "18", "efConstruction": "240", "metric_type": metric_type}
         if metric_type in ["JACCARD", "HAMMING"]:
             collection_w.create_index(default_binary_vec_field_name, binary_index_params)
         else:
             error = {ct.err_code: 999, ct.err_msg: f"binary vector index does not support metric type: {metric_type}"}
-            collection_w.create_index(default_binary_vec_field_name, binary_index_params,
-                                      check_task=CheckTasks.err_res,
-                                      check_items=error)
+            collection_w.create_index(
+                default_binary_vec_field_name, binary_index_params, check_task=CheckTasks.err_res, check_items=error
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ct.binary_metrics)
@@ -1084,8 +1167,9 @@ class TestNewIndexBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         df, _ = cf.gen_default_binary_dataframe_data()
         collection_w.insert(data=df)
-        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,
-                                  index_name=binary_field_name)
+        collection_w.create_index(
+            default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name
+        )
         assert len(collection_w.indexes) == 1
         collection_w.drop_index(index_name=binary_field_name)
         assert len(collection_w.indexes) == 0
@@ -1106,8 +1190,9 @@ class TestNewIndexBinary(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data()
         ins_res, _ = partition_w.insert(df)
         assert len(ins_res.primary_keys) == len(df)
-        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,
-                                  index_name=binary_field_name)
+        collection_w.create_index(
+            default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name
+        )
         assert collection_w.has_index(index_name=binary_field_name)[0] is True
         assert len(collection_w.indexes) == 1
         collection_w.drop_index(index_name=binary_field_name)
@@ -1147,8 +1232,13 @@ class TestIndexInvalid(TestcaseBase):
         """
         collection_w = self.init_collection_wrap()
         error = {ct.err_code: 999, ct.err_msg: f"Invalid index name: {invalid_index_name}"}
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name=invalid_index_name,
-                                  check_task=CheckTasks.err_res, check_items=error)
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            default_index_params,
+            index_name=invalid_index_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # drop index with an invalid index name
         collection_w.drop_index(index_name=invalid_index_name)
@@ -1164,12 +1254,13 @@ class TestIndexInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, nb=100, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
-        collection_w.drop_index(check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 1100,
-                                             ct.err_msg: "vector index cannot be dropped on loaded collection"})
+        collection_w.drop_index(
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "vector index cannot be dropped on loaded collection"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("n_trees", [-1, 1025, 'a'])
+    @pytest.mark.parametrize("n_trees", [-1, 1025, "a"])
     def test_annoy_index_with_invalid_params(self, n_trees):
         """
         target: test create index with invalid params
@@ -1179,11 +1270,12 @@ class TestIndexInvalid(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, True, nb=100, is_index=False)[0]
         index_annoy = {"index_type": "ANNOY", "params": {"n_trees": n_trees}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", index_annoy,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 1100,
-                                               "err_msg": "invalid index type: ANNOY"})
-
+        collection_w.create_index(
+            "float_vector",
+            index_annoy,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100, "err_msg": "invalid index type: ANNOY"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_vector_field(self, scalar_index, vector_data_type):
@@ -1192,13 +1284,16 @@ class TestIndexInvalid(TestcaseBase):
         method: 1.create collection, and create index
         expected: Raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, nb=100,
-                                                    is_index=False, vector_data_type=vector_data_type)[0]
+        collection_w = self.init_collection_general(
+            prefix, True, nb=100, is_index=False, vector_data_type=vector_data_type
+        )[0]
         scalar_index_params = {"index_type": scalar_index}
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: f"invalid index params"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            index_params=scalar_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: f"invalid index params"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_binary_vector_field(self, scalar_index):
@@ -1209,10 +1304,12 @@ class TestIndexInvalid(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         scalar_index_params = {"index_type": scalar_index}
-        collection_w.create_index(ct.default_binary_vec_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "metric type not set for vector index"})
+        collection_w.create_index(
+            ct.default_binary_vec_field_name,
+            index_params=scalar_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "metric type not set for vector index"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_on_json_field(self, vector_data_type):
@@ -1222,7 +1319,11 @@ class TestIndexInvalid(TestcaseBase):
         expected: success
         """
         collection_w = self.init_collection_general(prefix, is_index=False, vector_data_type=vector_data_type)[0]
-        scalar_index_params = {"index_type": "INVERTED", "json_cast_type": "double", "json_path": ct.default_json_field_name+"['a']"}
+        scalar_index_params = {
+            "index_type": "INVERTED",
+            "json_cast_type": "double",
+            "json_path": ct.default_json_field_name + "['a']",
+        }
         collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1251,10 +1352,13 @@ class TestIndexInvalid(TestcaseBase):
         # 2. create index
         scalar_index_params = {"index_type": "INVERTED"}
         collection_w.create_index(ct.default_float_field_name, index_params=scalar_index_params)
-        collection_w.load(check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: "there is no vector index on field: [float_vector], "
-                                                   "please create index firstly"})
+        collection_w.load(
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 65535,
+                ct.err_msg: "there is no vector index on field: [float_vector], please create index firstly",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("scalar_index", ["STL_SORT", "INVERTED"])
@@ -1273,11 +1377,15 @@ class TestIndexInvalid(TestcaseBase):
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
         collection_w.create_index(ct.default_float_vec_field_name, flat_index)
-        collection_w.load(check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: f"there is no vector index on field: "
-                                                   f"[{vector_name_list[0]} {vector_name_list[1]}], "
-                                                   f"please create index firstly"})
+        collection_w.load(
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 65535,
+                ct.err_msg: f"there is no vector index on field: "
+                f"[{vector_name_list[0]} {vector_name_list[1]}], "
+                f"please create index firstly",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_set_non_exist_index_mmap(self):
@@ -1289,12 +1397,15 @@ class TestIndexInvalid(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
-                                  index_name=ct.default_index_name)
-        collection_w.alter_index("random_index_345", {'mmap.enabled': True},
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 65535,
-                                              ct.err_msg: f"index not found"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name=ct.default_index_name
+        )
+        collection_w.alter_index(
+            "random_index_345",
+            {"mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: f"index not found"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_mmap_index(self):
@@ -1308,13 +1419,16 @@ class TestIndexInvalid(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
-                                  index_name=ct.default_index_name)
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name=ct.default_index_name
+        )
         collection_w.load()
-        collection_w.alter_index(binary_field_name, {'mmap.enabled': True},
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 104,
-                                              ct.err_msg: f"can't alter index on loaded collection"})
+        collection_w.alter_index(
+            binary_field_name,
+            {"mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 104, ct.err_msg: f"can't alter index on loaded collection"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_turning_on_mmap_for_scalar_index(self):
@@ -1332,10 +1446,12 @@ class TestIndexInvalid(TestcaseBase):
             scalar_index_params = {"index_type": f"{scalar_index[i]}"}
             collection_w.create_index(scalar_fields[i], index_params=scalar_index_params, index_name=index_name)
             assert collection_w.has_index(index_name=index_name)[0] is True
-            collection_w.alter_index(index_name, {'mmap.enabled': True},
-                                     check_task=CheckTasks.err_res,
-                                     check_items={ct.err_code: 65535,
-                                                  ct.err_msg: f"index type {scalar_index[i]} does not support mmap"})
+            collection_w.alter_index(
+                index_name,
+                {"mmap.enabled": True},
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 65535, ct.err_msg: f"index type {scalar_index[i]} does not support mmap"},
+            )
             collection_w.drop_index(index_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1348,28 +1464,39 @@ class TestIndexInvalid(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': "error_value"},
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 65535,
-                                              ct.err_msg: f"invalid mmap.enabled value"})
-        collection_w.alter_index(ct.default_index_name, {"error_param_key": 123},
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 1100,
-                                              ct.err_msg: "error_param_key is not a configable index property:"})
-        collection_w.alter_index(ct.default_index_name, ["error_param_type"],
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 1,
-                                              ct.err_msg: f"Unexpected error"})
-        collection_w.alter_index(ct.default_index_name, None,
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 1,
-                                              ct.err_msg: "properties should not be None"})
-        collection_w.alter_index(ct.default_index_name, 1000,
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 1,
-                                              ct.err_msg: f"<'int' object has no attribute 'items'"})
+        collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name
+        )
+        collection_w.alter_index(
+            ct.default_index_name,
+            {"mmap.enabled": "error_value"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: f"invalid mmap.enabled value"},
+        )
+        collection_w.alter_index(
+            ct.default_index_name,
+            {"error_param_key": 123},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "error_param_key is not a configable index property:"},
+        )
+        collection_w.alter_index(
+            ct.default_index_name,
+            ["error_param_type"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: f"Unexpected error"},
+        )
+        collection_w.alter_index(
+            ct.default_index_name,
+            None,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "properties should not be None"},
+        )
+        collection_w.alter_index(
+            ct.default_index_name,
+            1000,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: f"<'int' object has no attribute 'items'"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
@@ -1388,9 +1515,13 @@ class TestIndexInvalid(TestcaseBase):
         param = cf.get_index_params_params(index)
         params = {"index_type": index, "metric_type": metric_type, "params": param}
         error = {ct.err_code: 65535, ct.err_msg: "only IP&BM25 is the supported metric type for sparse index"}
-        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
-                                              check_task=CheckTasks.err_res,
-                                              check_items=error)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection,
+            ct.default_sparse_vec_field_name,
+            params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
@@ -1407,11 +1538,17 @@ class TestIndexInvalid(TestcaseBase):
         data = cf.gen_default_list_sparse_data()
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": ratio}}
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"Out of range in json: param 'drop_ratio_build' ({ratio*1.0}) should be in range [0.000000, 1.000000)"}
-        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
-                                              check_task=CheckTasks.err_res,
-                                              check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"Out of range in json: param 'drop_ratio_build' ({ratio * 1.0}) should be in range [0.000000, 1.000000)",
+        }
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection,
+            ct.default_sparse_vec_field_name,
+            params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
@@ -1428,12 +1565,18 @@ class TestIndexInvalid(TestcaseBase):
         data = cf.gen_default_list_sparse_data()
         collection_w.insert(data=data)
         params = {"index_type": index, "metric_type": "IP", "params": {"inverted_index_algo": inverted_index_algo}}
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
-                             f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]"}
-        index, _ = self.index_wrap.init_index(collection_w.collection, ct.default_sparse_vec_field_name, params,
-                                              check_task=CheckTasks.err_res,
-                                              check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"sparse inverted index algo {inverted_index_algo} not found or not supported, "
+            f"supported: [TAAT_NAIVE DAAT_WAND DAAT_MAXSCORE]",
+        }
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection,
+            ct.default_sparse_vec_field_name,
+            params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -1462,8 +1605,9 @@ class TestNewIndexAsync(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                           index_name=ct.default_index_name, _async=_async)
+        res, _ = collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name, _async=_async
+        )
         if _async:
             res.done()
             assert len(collection_w.indexes) == 1
@@ -1480,8 +1624,9 @@ class TestNewIndexAsync(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                           index_name=ct.default_index_name, _async=_async)
+        res, _ = collection_w.create_index(
+            ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name, _async=_async
+        )
 
         # load and search
         if _async:
@@ -1489,8 +1634,9 @@ class TestNewIndexAsync(TestcaseBase):
             assert len(collection_w.indexes) == 1
         collection_w.load()
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
-        search_res, _ = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            vectors_s[: ct.default_nq], ct.default_float_vec_field_name, ct.default_search_params, ct.default_limit
+        )
         assert len(search_res) == ct.default_nq
         assert len(search_res[0]) == ct.default_limit
 
@@ -1513,9 +1659,13 @@ class TestNewIndexAsync(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                           index_name=ct.default_index_name, _async=True,
-                                           _callback=self.call_back())
+        res, _ = collection_w.create_index(
+            ct.default_float_vec_field_name,
+            default_index_params,
+            index_name=ct.default_index_name,
+            _async=True,
+            _callback=self.call_back(),
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -1538,8 +1688,9 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
-                                              default_string_index_params)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_string_field_name, default_string_index_params
+        )
         cf.assert_equal_index(index, collection_w.indexes[0])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1554,11 +1705,13 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
-                                              default_string_index_params)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_string_field_name, default_string_index_params
+        )
         cf.assert_equal_index(index, collection_w.indexes[0])
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
-                                  index_name="vector_flat")
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name="vector_flat"
+        )
         collection_w.load()
         assert collection_w.num_entities == default_nb
 
@@ -1574,10 +1727,12 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
-                                  index_name="vector_flat")
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
-                                              default_string_index_params)
+        collection_w.create_index(
+            ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name="vector_flat"
+        )
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_string_field_name, default_string_index_params
+        )
         collection_w.load()
         cf.assert_equal_index(index, collection_w.indexes[0])
         assert collection_w.num_entities == default_nb
@@ -1596,8 +1751,9 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
-                                              default_string_index_params)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_string_field_name, default_string_index_params
+        )
         cf.assert_equal_index(index, collection_w.indexes[0])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1631,10 +1787,13 @@ class TestIndexString(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
-        collection_w.create_index(default_float_vec_field_name, default_index_params,
-                                  index_name=index_name2,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+        collection_w.create_index(
+            default_float_vec_field_name,
+            default_index_params,
+            index_name=index_name2,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_different_index_fields(self):
@@ -1686,8 +1845,9 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
-                                              default_string_index_params)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_string_field_name, default_string_index_params
+        )
         cf.assert_equal_index(index, collection_w.indexes[0])
         self.index_wrap.drop()
         assert len(collection_w.indexes) == 0
@@ -1759,18 +1919,22 @@ class TestIndexDiskann(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         assert collection_w.num_entities == default_nb
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_float_vec_field_name,
-                                              ct.default_diskann_index)
+        index, _ = self.index_wrap.init_index(
+            collection_w.collection, default_float_vec_field_name, ct.default_diskann_index
+        )
         log.info(self.index_wrap.params)
         cf.assert_equal_index(index, collection_w.indexes[0])
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                            ct.default_diskann_search_params, default_limit,
-                                            default_search_exp,
-                                            check_task=CheckTasks.check_search_results,
-                                            check_items={"nq": default_nq,
-                                                         "limit": default_limit})
+        search_res, _ = collection_w.search(
+            vectors[:default_nq],
+            default_search_field,
+            ct.default_diskann_search_params,
+            default_limit,
+            default_search_exp,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": default_nq, "limit": default_limit},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [ct.min_dim, ct.max_dim])
@@ -1799,21 +1963,28 @@ class TestIndexDiskann(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         assert collection_w.num_entities == default_nb
-        res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
-                                           index_name=ct.default_index_name, _async=_async,
-                                           _callback=self.call_back())
+        res, _ = collection_w.create_index(
+            ct.default_float_vec_field_name,
+            ct.default_diskann_index,
+            index_name=ct.default_index_name,
+            _async=_async,
+            _callback=self.call_back(),
+        )
 
         if _async:
             res.done()
             assert len(collection_w.indexes) == 1
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                            ct.default_diskann_search_params, default_limit,
-                                            default_search_exp,
-                                            check_task=CheckTasks.check_search_results,
-                                            check_items={"nq": default_nq,
-                                                         "limit": default_limit})
+        search_res, _ = collection_w.search(
+            vectors[:default_nq],
+            default_search_field,
+            ct.default_diskann_search_params,
+            default_limit,
+            default_search_exp,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": default_nq, "limit": default_limit},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_drop_with_async(self, _async):
@@ -1827,8 +1998,9 @@ class TestIndexDiskann(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         assert collection_w.num_entities == default_nb
-        res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
-                                           index_name=ct.default_index_name, _async=_async)
+        res, _ = collection_w.create_index(
+            ct.default_float_vec_field_name, ct.default_diskann_index, index_name=ct.default_index_name, _async=_async
+        )
         if _async:
             res.done()
             assert len(collection_w.indexes) == 1
@@ -1853,8 +2025,7 @@ class TestIndexDiskann(TestcaseBase):
         df = cf.gen_default_list_data(ct.default_nb)
         ins_res, _ = partition_w.insert(df)
         assert len(ins_res.primary_keys) == ct.default_nb
-        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
-                                  index_name=field_name)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name=field_name)
         collection_w.load()
         assert collection_w.has_index(index_name=field_name)[0] is True
         assert len(collection_w.indexes) == 1
@@ -1959,10 +2130,13 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         df, _ = cf.gen_default_binary_dataframe_data()
         collection_w.insert(data=df)
-        collection_w.create_index(default_binary_vec_field_name, ct.default_diskann_index, index_name=binary_field_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "binary vector index does not support metric type: COSINE"})
+        collection_w.create_index(
+            default_binary_vec_field_name,
+            ct.default_diskann_index,
+            index_name=binary_field_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "binary vector index does not support metric type: COSINE"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_multithread(self):
@@ -1978,7 +2152,6 @@ class TestIndexDiskann(TestcaseBase):
         assert collection_w.num_entities == default_nb
 
         def build(collection_w):
-
             collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
 
         threads_num = 10
@@ -2001,21 +2174,24 @@ class TestIndexDiskann(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
-        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
-                                  index_name=ct.default_index_name)
-        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.create_index(
+            default_float_vec_field_name, ct.default_diskann_index, index_name=ct.default_index_name
+        )
+        collection_w.set_properties({"mmap.enabled": True})
         desc, _ = collection_w.describe()
         pro = desc.get("properties")
-        assert pro["mmap.enabled"] == 'True'
-        collection_w.alter_index(ct.default_index_name, {'mmap.enabled': True},
-                                 check_task=CheckTasks.err_res,
-                                 check_items={ct.err_code: 104,
-                                              ct.err_msg: f"index type DISKANN does not support mmap"})
+        assert pro["mmap.enabled"] == "True"
+        collection_w.alter_index(
+            ct.default_index_name,
+            {"mmap.enabled": True},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 104, ct.err_msg: f"index type DISKANN does not support mmap"},
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestAutoIndex(TestcaseBase):
-    """ Test case of Auto index """
+    """Test case of Auto index"""
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_autoindex_with_no_params(self):
@@ -2043,7 +2219,7 @@ class TestAutoIndex(TestcaseBase):
         log.info(collection_w.index()[0].params)
         expect_autoindex_params = copy.copy(default_autoindex_params)
         if index_params.get("index_type"):
-            if index_params["index_type"] != 'AUTOINDEX':
+            if index_params["index_type"] != "AUTOINDEX":
                 expect_autoindex_params = index_params
         if index_params.get("metric_type"):
             expect_autoindex_params["metric_type"] = index_params["metric_type"]
@@ -2058,11 +2234,12 @@ class TestAutoIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"metric_type": "L2", "nlist": "1024", "M": "100"}
-        collection_w.create_index(field_name, index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 1,
-                                               "err_msg": "only metric type can be "
-                                                          "passed when use AutoIndex"})
+        collection_w.create_index(
+            field_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1, "err_msg": "only metric type can be passed when use AutoIndex"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_binary_vectors(self):
@@ -2073,7 +2250,7 @@ class TestAutoIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
         collection_w.create_index(binary_field_name, {})
-        assert collection_w.index()[0].params == {'index_type': 'AUTOINDEX', 'metric_type': 'HAMMING'}
+        assert collection_w.index()[0].params == {"index_type": "AUTOINDEX", "metric_type": "HAMMING"}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_autoindex_on_all_vector_type(self):
@@ -2082,27 +2259,33 @@ class TestAutoIndex(TestcaseBase):
         method: create index on all vector type
         expected: raise exception
         """
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float16_vec_field("fp16"),
-                  cf.gen_bfloat16_vec_field("bf16"), cf.gen_sparse_vec_field("sparse")]
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float16_vec_field("fp16"),
+            cf.gen_bfloat16_vec_field("bf16"),
+            cf.gen_sparse_vec_field("sparse"),
+        ]
         schema = cf.gen_collection_schema(fields=fields)
         collection_w = self.init_collection_wrap(schema=schema)
 
         collection_w.create_index("fp16", index_name="fp16")
-        assert all(item in default_autoindex_params.items() for item in
-                   collection_w.index()[0].params.items())
+        assert all(item in default_autoindex_params.items() for item in collection_w.index()[0].params.items())
 
         collection_w.create_index("bf16", index_name="bf16")
-        assert all(item in default_autoindex_params.items() for item in
-                   collection_w.index(index_name="bf16")[0].params.items())
+        assert all(
+            item in default_autoindex_params.items() for item in collection_w.index(index_name="bf16")[0].params.items()
+        )
 
         collection_w.create_index("sparse", index_name="sparse")
-        assert all(item in default_sparse_autoindex_params.items() for item in
-                   collection_w.index(index_name="sparse")[0].params.items())
+        assert all(
+            item in default_sparse_autoindex_params.items()
+            for item in collection_w.index(index_name="sparse")[0].params.items()
+        )
 
 
 @pytest.mark.tags(CaseLabel.GPU)
 class TestScaNNIndex(TestcaseBase):
-    """ Test case of Auto index """
+    """Test case of Auto index"""
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scann_index(self):
@@ -2112,8 +2295,7 @@ class TestScaNNIndex(TestcaseBase):
         expected: create successfully
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
-        index_params = {"index_type": "SCANN", "metric_type": "L2",
-                        "params": {"nlist": 1024, "with_raw_data": True}}
+        index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024, "with_raw_data": True}}
         collection_w.create_index(default_field_name, index_params)
         assert collection_w.has_index()[0] is True
 
@@ -2127,9 +2309,11 @@ class TestScaNNIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": nlist}}
-        error = {ct.err_code: 999, ct.err_msg: f"Out of range in json: param 'nlist' ({nlist}) should be in range [1, 65536]"}
-        collection_w.create_index(default_field_name, index_params,
-                                  check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"Out of range in json: param 'nlist' ({nlist}) should be in range [1, 65536]",
+        }
+        collection_w.create_index(default_field_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dim", [3, 127])
@@ -2141,11 +2325,12 @@ class TestScaNNIndex(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False, dim=dim)[0]
         index_params = {"index_type": "SCANN", "metric_type": "L2", "params": {"nlist": 1024}}
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"The dimension of a vector (dim) should be a multiple of sub_dim. "
-                             f"Dimension:{dim}, sub_dim:2: invalid parameter"}
-        collection_w.create_index(default_field_name, index_params,
-                                  check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"The dimension of a vector (dim) should be a multiple of sub_dim. "
+            f"Dimension:{dim}, sub_dim:2: invalid parameter",
+        }
+        collection_w.create_index(default_field_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
 
 @pytest.mark.tags(CaseLabel.GPU)
@@ -2163,10 +2348,19 @@ class TestInvertedIndexValid(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("scalar_field_name", [ct.default_int8_field_name, ct.default_int16_field_name,
-                                                   ct.default_int32_field_name, ct.default_int64_field_name,
-                                                   ct.default_float_field_name, ct.default_double_field_name,
-                                                   ct.default_string_field_name, ct.default_bool_field_name])
+    @pytest.mark.parametrize(
+        "scalar_field_name",
+        [
+            ct.default_int8_field_name,
+            ct.default_int16_field_name,
+            ct.default_int32_field_name,
+            ct.default_int64_field_name,
+            ct.default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_string_field_name,
+            ct.default_bool_field_name,
+        ],
+    )
     def test_create_inverted_index_on_all_supported_scalar_field(self, scalar_field_name):
         """
         target: test create scalar index all supported scalar field
@@ -2187,7 +2381,7 @@ class TestInvertedIndexValid(TestcaseBase):
         while True:
             time.sleep(1)
             res, _ = self.utility_wrap.index_building_progress(collection_w.name, index_name)
-            if 0 < res['indexed_rows'] <= default_nb:
+            if 0 < res["indexed_rows"] <= default_nb:
                 break
             if time.time() - start > 5:
                 raise MilvusException(1, f"Index build completed in more than 5s")
@@ -2217,10 +2411,16 @@ class TestInvertedIndexValid(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
         scalar_index_params = {"index_type": "INVERTED"}
-        scalar_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
-                         ct.default_int32_field_name, ct.default_int64_field_name,
-                         ct.default_float_field_name, ct.default_double_field_name,
-                         ct.default_string_field_name, ct.default_bool_field_name]
+        scalar_fields = [
+            ct.default_int8_field_name,
+            ct.default_int16_field_name,
+            ct.default_int32_field_name,
+            ct.default_int64_field_name,
+            ct.default_float_field_name,
+            ct.default_double_field_name,
+            ct.default_string_field_name,
+            ct.default_bool_field_name,
+        ]
         for i in range(len(scalar_fields)):
             index_name = f"scalar_index_name_{i}"
             collection_w.create_index(scalar_fields[i], index_params=scalar_index_params, index_name=index_name)
@@ -2235,8 +2435,7 @@ class TestInvertedIndexValid(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False, is_all_data_type=True)[0]
         scalar_index = ["Trie", "STL_SORT", "INVERTED"]
-        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name,
-                         ct.default_int32_field_name]
+        scalar_fields = [ct.default_string_field_name, ct.default_int16_field_name, ct.default_int32_field_name]
         for i in range(len(scalar_fields)):
             index_name = f"scalar_index_name_{i}"
             scalar_index_params = {"index_type": f"{scalar_index[i]}"}
@@ -2247,8 +2446,9 @@ class TestInvertedIndexValid(TestcaseBase):
     def test_binary_arith_expr_on_inverted_index(self):
         prefix = "test_binary_arith_expr_on_inverted_index"
         nb = 5000
-        collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_index=True,
-                                                                         is_all_data_type=True)
+        collection_w, _, _, insert_ids, _ = self.init_collection_general(
+            prefix, insert_data=True, is_index=True, is_all_data_type=True
+        )
         index_name = "test_binary_arith_expr_on_inverted_index"
         scalar_index_params = {"index_type": "INVERTED"}
         collection_w.release()
@@ -2296,14 +2496,18 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-                auto_id=auto_id
-            )
+                auto_id=auto_id,
+            ),
         )
 
         # build `BITMAP` index on primary key field
         self.collection_wrap.create_index(
-            field_name=primary_field, index_params={"index_type": IndexName.BITMAP}, index_name=primary_field,
-            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapOnPK})
+            field_name=primary_field,
+            index_params={"index_type": IndexName.BITMAP},
+            index_name=primary_field,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapOnPK},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_bitmap_on_not_supported_fields(self, request):
@@ -2325,8 +2529,8 @@ class TestBitmapIndex(TestcaseBase):
             name=collection_name,
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.SPARSE_FLOAT_VECTOR.name, *self.bitmap_not_support_dtype_names],
-                field_params={primary_field: FieldParams(is_primary=True).to_dict}
-            )
+                field_params={primary_field: FieldParams(is_primary=True).to_dict},
+            ),
         )
 
         # build `BITMAP` index on sparse vector field
@@ -2334,18 +2538,23 @@ class TestBitmapIndex(TestcaseBase):
             iem.VectorMetricTypeExist: IndexPrams(index_type=IndexName.BITMAP),
             iem.SparseFloatVectorMetricType: IndexPrams(index_type=IndexName.BITMAP, metric_type=MetricType.L2),
             iem.CheckVectorIndex.format("SparseFloatVector", IndexName.BITMAP): IndexPrams(
-                index_type=IndexName.BITMAP, metric_type=MetricType.IP)
+                index_type=IndexName.BITMAP, metric_type=MetricType.IP
+            ),
         }.items():
             self.collection_wrap.create_index(
-                field_name=DataType.SPARSE_FLOAT_VECTOR.name, index_params=index_params.to_dict,
-                check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: msg}
+                field_name=DataType.SPARSE_FLOAT_VECTOR.name,
+                index_params=index_params.to_dict,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: msg},
             )
 
         # build `BITMAP` index on not supported scalar fields
         for _field_name in self.bitmap_not_support_dtype_names:
             self.collection_wrap.create_index(
-                field_name=_field_name, index_params=IndexPrams(index_type=IndexName.BITMAP).to_dict,
-                check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapIndex}
+                field_name=_field_name,
+                index_params=IndexPrams(index_type=IndexName.BITMAP).to_dict,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: iem.CheckBitmapIndex},
             )
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2375,14 +2584,14 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-                auto_id=auto_id
-            )
+                auto_id=auto_id,
+            ),
         )
 
         # build `BITMAP` index on empty collection
         index_params = {
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2407,10 +2616,15 @@ class TestBitmapIndex(TestcaseBase):
         self.build_multi_index(index_params=index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index_obj, field_name", [(DefaultScalarIndexParams.Default, 'INT64_hybrid_index'),
-                                                       (DefaultScalarIndexParams.INVERTED, 'INT64_inverted'),
-                                                       (DefaultScalarIndexParams.STL_SORT, 'INT64_stl_sort'),
-                                                       (DefaultScalarIndexParams.Trie, 'VARCHAR_trie')])
+    @pytest.mark.parametrize(
+        "index_obj, field_name",
+        [
+            (DefaultScalarIndexParams.Default, "INT64_hybrid_index"),
+            (DefaultScalarIndexParams.INVERTED, "INT64_inverted"),
+            (DefaultScalarIndexParams.STL_SORT, "INT64_stl_sort"),
+            (DefaultScalarIndexParams.Trie, "VARCHAR_trie"),
+        ],
+    )
     def test_bitmap_offset_cache_on_not_bitmap_fields(self, request, index_obj, field_name):
         """
         target:
@@ -2422,7 +2636,7 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index raises expected error
         """
         # init params
-        collection_name, primary_field = f"{request.function.__name__}_{field_name}", 'INT64_pk'
+        collection_name, primary_field = f"{request.function.__name__}_{field_name}", "INT64_pk"
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -2430,21 +2644,20 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, field_name],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build scalar index on empty collection
-        index_params = {
-            **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
-            **index_obj(field_name)
-        }
+        index_params = {**DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name), **index_obj(field_name)}
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
 
         # enable offset cache and raises error
         self.collection_wrap.alter_index(
-            index_name=field_name, extra_params=AlterIndexParams.index_offset_cache(),
-            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
+            index_name=field_name,
+            extra_params=AlterIndexParams.index_offset_cache(),
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2459,7 +2672,7 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index raises expected error
         """
         # init params
-        collection_name, primary_field = f"{request.function.__name__}", 'INT64_pk'
+        collection_name, primary_field = f"{request.function.__name__}", "INT64_pk"
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -2467,7 +2680,7 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build index on empty collection
@@ -2477,8 +2690,10 @@ class TestBitmapIndex(TestcaseBase):
 
         # enable offset cache and raises error
         self.collection_wrap.alter_index(
-            index_name=DataType.FLOAT_VECTOR.name, extra_params=AlterIndexParams.index_offset_cache(),
-            check_task=CheckTasks.err_res, check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache}
+            index_name=DataType.FLOAT_VECTOR.name,
+            extra_params=AlterIndexParams.index_offset_cache(),
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: iem.InvalidOffsetCache},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2496,7 +2711,7 @@ class TestBitmapIndex(TestcaseBase):
             1. alter index raises expected error after loading collection
         """
         # init params
-        collection_name, primary_field = f"{request.function.__name__}", 'INT64_pk'
+        collection_name, primary_field = f"{request.function.__name__}", "INT64_pk"
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -2504,13 +2719,13 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build scalar index on empty collection
         index_params = {
             **DefaultVectorIndexParams.HNSW(DataType.FLOAT_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2524,8 +2739,11 @@ class TestBitmapIndex(TestcaseBase):
         # enable offset cache on loaded collection
         for n in self.bitmap_support_dtype_names:
             self.collection_wrap.alter_index(
-                index_name=n, extra_params=AlterIndexParams.index_offset_cache(),
-                check_task=CheckTasks.err_res, check_items={ct.err_code: 104, ct.err_msg: iem.AlterOnLoadedCollection})
+                index_name=n,
+                extra_params=AlterIndexParams.index_offset_cache(),
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 104, ct.err_msg: iem.AlterOnLoadedCollection},
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -2553,14 +2771,14 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT16_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-                auto_id=auto_id
-            )
+                auto_id=auto_id,
+            ),
         )
 
         # build `BITMAP` index on empty collection
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT16_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2569,8 +2787,9 @@ class TestBitmapIndex(TestcaseBase):
         self.collection_wrap.load()
 
         # prepare 3k data (> 1024 triggering index building)
-        self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb),
-                                    check_task=CheckTasks.check_insert_result)
+        self.collection_wrap.insert(
+            data=cf.gen_values(self.collection_wrap.schema, nb=nb), check_task=CheckTasks.check_insert_result
+        )
 
         # check no indexed segments
         res, _ = self.utility_wrap.get_query_segment_info(collection_name=collection_name)
@@ -2613,9 +2832,9 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.BFLOAT16_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-                auto_id=auto_id
+                auto_id=auto_id,
             ),
-            shards_num=shards_num
+            shards_num=shards_num,
         )
 
         # prepare data (> 1024 triggering index building)
@@ -2623,7 +2842,7 @@ class TestBitmapIndex(TestcaseBase):
         default_values = {} if auto_id else {primary_field: [eval(f"{pk_type}({n})") for n in range(nb)]}
         self.collection_wrap.insert(
             data=cf.gen_values(self.collection_wrap.schema, nb=nb, default_values=default_values),
-            check_task=CheckTasks.check_insert_result
+            check_task=CheckTasks.check_insert_result,
         )
 
         # flush collection, segment sealed
@@ -2632,7 +2851,7 @@ class TestBitmapIndex(TestcaseBase):
         # build `BITMAP` index
         index_params = {
             **DefaultVectorIndexParams.DISKANN(DataType.BFLOAT16_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2677,15 +2896,16 @@ class TestBitmapIndex(TestcaseBase):
                 fields=[primary_field, DataType.BINARY_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
             ),
-            shards_num=shards_num
+            shards_num=shards_num,
         )
 
         # prepare data (> 1024 triggering index building)
         pk_key = str(shards_num) if primary_field.startswith(DataType.VARCHAR.name.lower()) else shards_num
         self.collection_wrap.insert(
-            data=cf.gen_values(self.collection_wrap.schema, nb=nb,
-                               default_values={primary_field: [pk_key for _ in range(nb)]}),
-            check_task=CheckTasks.check_insert_result
+            data=cf.gen_values(
+                self.collection_wrap.schema, nb=nb, default_values={primary_field: [pk_key for _ in range(nb)]}
+            ),
+            check_task=CheckTasks.check_insert_result,
         )
 
         # flush collection, segment sealed
@@ -2694,7 +2914,7 @@ class TestBitmapIndex(TestcaseBase):
         # build `BITMAP` index
         index_params = {
             **DefaultVectorIndexParams.BIN_IVF_FLAT(DataType.BINARY_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2740,15 +2960,18 @@ class TestBitmapIndex(TestcaseBase):
                 fields=[primary_field, DataType.BINARY_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
             ),
-            shards_num=shards_num
+            shards_num=shards_num,
         )
 
         # prepare data (> 1024 triggering index building)
         pk_type = "str" if primary_field.startswith(DataType.VARCHAR.name.lower()) else "int"
         self.collection_wrap.insert(
-            data=cf.gen_values(self.collection_wrap.schema, nb=nb,
-                               default_values={primary_field: [eval(f"{pk_type}({n})") for n in range(nb)]}),
-            check_task=CheckTasks.check_insert_result
+            data=cf.gen_values(
+                self.collection_wrap.schema,
+                nb=nb,
+                default_values={primary_field: [eval(f"{pk_type}({n})") for n in range(nb)]},
+            ),
+            check_task=CheckTasks.check_insert_result,
         )
 
         # flush collection, segment sealed
@@ -2757,7 +2980,7 @@ class TestBitmapIndex(TestcaseBase):
         # build `BITMAP` index on empty collection
         index_params = {
             **DefaultVectorIndexParams.BIN_IVF_FLAT(DataType.BINARY_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2781,10 +3004,15 @@ class TestBitmapIndex(TestcaseBase):
         assert sum(counts) == nb, f"`{collection_name}` Segment row count:{sum(counts)} != insert:{nb}"
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("extra_params, name", [(AlterIndexParams.index_offset_cache(), 'offset_cache_true'),
-                                                    (AlterIndexParams.index_offset_cache(False), 'offset_cache_false'),
-                                                    (AlterIndexParams.index_mmap(), 'mmap_true'),
-                                                    (AlterIndexParams.index_mmap(False), 'mmap_false')])
+    @pytest.mark.parametrize(
+        "extra_params, name",
+        [
+            (AlterIndexParams.index_offset_cache(), "offset_cache_true"),
+            (AlterIndexParams.index_offset_cache(False), "offset_cache_false"),
+            (AlterIndexParams.index_mmap(), "mmap_true"),
+            (AlterIndexParams.index_mmap(False), "mmap_false"),
+        ],
+    )
     def test_bitmap_alter_index(self, request, extra_params, name):
         """
         target:
@@ -2813,13 +3041,13 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build `BITMAP` index on empty collection
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2829,8 +3057,9 @@ class TestBitmapIndex(TestcaseBase):
             self.collection_wrap.alter_index(index_name=index_name, extra_params=extra_params)
 
         # prepare data (> 1024 triggering index building)
-        self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb),
-                                    check_task=CheckTasks.check_insert_result)
+        self.collection_wrap.insert(
+            data=cf.gen_values(self.collection_wrap.schema, nb=nb), check_task=CheckTasks.check_insert_result
+        )
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -2838,14 +3067,17 @@ class TestBitmapIndex(TestcaseBase):
         # rebuild `BITMAP` index
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
 
         # check alter index
-        scalar_indexes = [{i.field_name: i.params} for i in self.collection_wrap.indexes if
-                          i.field_name in self.bitmap_support_dtype_names]
+        scalar_indexes = [
+            {i.field_name: i.params}
+            for i in self.collection_wrap.indexes
+            if i.field_name in self.bitmap_support_dtype_names
+        ]
         msg = f"Scalar indexes: {scalar_indexes}, expected all to contain {extra_params}"
         assert len([i for i in scalar_indexes for v in i.values() if not cf.check_key_exist(extra_params, v)]) == 0, msg
 
@@ -2873,13 +3105,13 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build `BITMAP` index on empty collection
         index_params = {
             **DefaultVectorIndexParams.IVF_SQ8(DataType.FLOAT_VECTOR.name),
-            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names)
+            **DefaultScalarIndexParams.list_bitmap(self.bitmap_support_dtype_names),
         }
         self.build_multi_index(index_params=index_params)
         assert sorted([n.field_name for n in self.collection_wrap.indexes]) == sorted(index_params.keys())
@@ -2887,8 +3119,11 @@ class TestBitmapIndex(TestcaseBase):
         # alter `bitmap_cardinality_limit` failed
         for index_name in self.bitmap_support_dtype_names:
             self.collection_wrap.alter_index(
-                index_name=index_name, extra_params={"bitmap_cardinality_limit": 10}, check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1100, ct.err_msg: iem.NotConfigable.format("bitmap_cardinality_limit")})
+                index_name=index_name,
+                extra_params={"bitmap_cardinality_limit": 10},
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: iem.NotConfigable.format("bitmap_cardinality_limit")},
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [-10, 0, 1001])
@@ -2913,15 +3148,19 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, DataType.INT64.name],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # build scalar index and check failed
         self.collection_wrap.create_index(
-            field_name=DataType.INT64.name, index_name=DataType.INT64.name,
-            index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit})
-        assert self.collection_wrap.index()[0].params == {'bitmap_cardinality_limit': str(bitmap_cardinality_limit),
-                                                          'index_type': IndexName.AUTOINDEX}
+            field_name=DataType.INT64.name,
+            index_name=DataType.INT64.name,
+            index_params={"index_type": IndexName.AUTOINDEX, "bitmap_cardinality_limit": bitmap_cardinality_limit},
+        )
+        assert self.collection_wrap.index()[0].params == {
+            "bitmap_cardinality_limit": str(bitmap_cardinality_limit),
+            "index_type": IndexName.AUTOINDEX,
+        }
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_params, name", [({"index_type": IndexName.AUTOINDEX}, "AUTOINDEX"), ({}, "None")])
@@ -2948,26 +3187,35 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         for scalar_field in self.bitmap_support_dtype_names:
             # build scalar index
-            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
-                                              index_params={**index_params, "bitmap_cardinality_limit": 200})
+            self.collection_wrap.create_index(
+                field_name=scalar_field,
+                index_name=scalar_field,
+                index_params={**index_params, "bitmap_cardinality_limit": 200},
+            )
 
             # build scalar index with different `bitmap_cardinality_limit`
-            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
-                                              index_params={**index_params, "bitmap_cardinality_limit": 300},
-                                              check_task=CheckTasks.err_res,
-                                              check_items={ct.err_code: 65535, ct.err_msg: iem.OneIndexPerField})
+            self.collection_wrap.create_index(
+                field_name=scalar_field,
+                index_name=scalar_field,
+                index_params={**index_params, "bitmap_cardinality_limit": 300},
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 65535, ct.err_msg: iem.OneIndexPerField},
+            )
 
         self.drop_multi_index(self.bitmap_support_dtype_names)
 
         # re-build scalar index
         for scalar_field in self.bitmap_support_dtype_names:
-            self.collection_wrap.create_index(field_name=scalar_field, index_name=scalar_field,
-                                              index_params={**index_params, "bitmap_cardinality_limit": 300})
+            self.collection_wrap.create_index(
+                field_name=scalar_field,
+                index_name=scalar_field,
+                index_params={**index_params, "bitmap_cardinality_limit": 300},
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bitmap_cardinality_limit", [1, 100, 1000])
@@ -3000,12 +3248,13 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # prepare data (> 1024 triggering index building)
-        self.collection_wrap.insert(data=cf.gen_values(self.collection_wrap.schema, nb=nb),
-                                    check_task=CheckTasks.check_insert_result)
+        self.collection_wrap.insert(
+            data=cf.gen_values(self.collection_wrap.schema, nb=nb), check_task=CheckTasks.check_insert_result
+        )
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -3016,17 +3265,24 @@ class TestBitmapIndex(TestcaseBase):
         # build scalar index
         for scalar_field in self.bitmap_support_dtype_names:
             self.collection_wrap.create_index(
-                field_name=scalar_field, index_name=scalar_field,
-                index_params={**index_params, "bitmap_cardinality_limit": bitmap_cardinality_limit})
+                field_name=scalar_field,
+                index_name=scalar_field,
+                index_params={**index_params, "bitmap_cardinality_limit": bitmap_cardinality_limit},
+            )
 
         # load collection
         self.collection_wrap.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("config, cardinality_data_range, name",
-                             [({"bitmap_cardinality_limit": 1000}, (-128, 127), 1000),
-                              ({"bitmap_cardinality_limit": 100}, (-128, 127), 100),
-                              ({}, (1, 100), "None_100"), ({}, (1, 99), "None_99")])
+    @pytest.mark.parametrize(
+        "config, cardinality_data_range, name",
+        [
+            ({"bitmap_cardinality_limit": 1000}, (-128, 127), 1000),
+            ({"bitmap_cardinality_limit": 100}, (-128, 127), 100),
+            ({}, (1, 100), "None_100"),
+            ({}, (1, 99), "None_99"),
+        ],
+    )
     def test_bitmap_cardinality_limit_low_data(self, request, config, name, cardinality_data_range):
         """
         target:
@@ -3054,27 +3310,33 @@ class TestBitmapIndex(TestcaseBase):
             schema=cf.set_collection_schema(
                 fields=[primary_field, DataType.FLOAT_VECTOR.name, *self.bitmap_support_dtype_names],
                 field_params={primary_field: FieldParams(is_primary=True).to_dict},
-            )
+            ),
         )
 
         # prepare data (> 1024 triggering index building)
         low_cardinality = [random.randint(*cardinality_data_range) for _ in range(nb)]
         self.collection_wrap.insert(
             data=cf.gen_values(
-                self.collection_wrap.schema, nb=nb,
+                self.collection_wrap.schema,
+                nb=nb,
                 default_values={
                     # set all INT values
-                    **{k.name: low_cardinality for k in
-                       [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]},
+                    **{
+                        k.name: low_cardinality for k in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]
+                    },
                     # set VARCHAR value
                     DataType.VARCHAR.name: [str(i) for i in low_cardinality],
                     # set all ARRAY + INT values
-                    **{f"{DataType.ARRAY.name}_{k.name}": [[i] for i in low_cardinality] for k in
-                       [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]},
+                    **{
+                        f"{DataType.ARRAY.name}_{k.name}": [[i] for i in low_cardinality]
+                        for k in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]
+                    },
                     # set ARRAY + VARCHAR values
                     f"{DataType.ARRAY.name}_{DataType.VARCHAR.name}": [[str(i)] for i in low_cardinality],
-                }),
-            check_task=CheckTasks.check_insert_result)
+                },
+            ),
+            check_task=CheckTasks.check_insert_result,
+        )
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -3085,8 +3347,10 @@ class TestBitmapIndex(TestcaseBase):
         # build scalar index
         for scalar_field in self.bitmap_support_dtype_names:
             self.collection_wrap.create_index(
-                field_name=scalar_field, index_name=scalar_field,
-                index_params={"index_type": IndexName.AUTOINDEX, **config})
+                field_name=scalar_field,
+                index_name=scalar_field,
+                index_params={"index_type": IndexName.AUTOINDEX, **config},
+            )
 
         # load collection
         self.collection_wrap.load()

@@ -35,23 +35,24 @@ class TestQueryIterator(TestcaseBase):
         # 1. initialize with data
         nb = 4000
         batch_size = 200
-        collection_w, _, _, insert_ids, _ = \
-            self.init_collection_general(prefix, True, is_index=False, nb=nb, is_flush=True,
-                                         auto_id=False, primary_field=primary_field)
+        collection_w, _, _, insert_ids, _ = self.init_collection_general(
+            prefix, True, is_index=False, nb=nb, is_flush=True, auto_id=False, primary_field=primary_field
+        )
         collection_w.create_index(ct.default_float_vec_field_name, {"metric_type": "L2"})
         collection_w.load()
         # 2. query iterator
         expr = "float >= 0"
-        collection_w.query_iterator(batch_size, expr=expr,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": batch_size})
+        collection_w.query_iterator(
+            batch_size,
+            expr=expr,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={"count": nb, "pk_name": collection_w.primary_field.name, "batch_size": batch_size},
+        )
         # 3. query iterator with checkpoint file
         iterator_cp_file = f"/tmp/it_{collection_w.name}_cp"
         iterator = collection_w.query_iterator(batch_size, expr=expr, iterator_cp_file=iterator_cp_file)[0]
         iter_times = 0
-        first_iter_times = nb // batch_size // 2      # only iterate half of the data for the 1st time
+        first_iter_times = nb // batch_size // 2  # only iterate half of the data for the 1st time
         pk_list1 = []
         while iter_times < first_iter_times:
             iter_times += 1
@@ -66,7 +67,7 @@ class TestQueryIterator(TestcaseBase):
         assert file_exist is True, "The checkpoint file exists without iterator close"
 
         # 4. try to delete and insert some entities before calling a new query iterator
-        delete_ids = random.sample(insert_ids[:nb//2], 101) + random.sample(insert_ids[nb//2:], 101)
+        delete_ids = random.sample(insert_ids[: nb // 2], 101) + random.sample(insert_ids[nb // 2 :], 101)
         del_res, _ = collection_w.delete(expr=f"{primary_field} in {delete_ids}")
         assert del_res.delete_count == len(delete_ids)
 
@@ -76,9 +77,12 @@ class TestQueryIterator(TestcaseBase):
             collection_w.flush()
 
         # 5. call a new query iterator with the same checkpoint file to continue the first iterator
-        iterator2 = collection_w.query_iterator(batch_size*2, expr=expr,
-                                                output_fields=[primary_field, ct.default_float_field_name],
-                                                iterator_cp_file=iterator_cp_file)[0]
+        iterator2 = collection_w.query_iterator(
+            batch_size * 2,
+            expr=expr,
+            output_fields=[primary_field, ct.default_float_field_name],
+            iterator_cp_file=iterator_cp_file,
+        )[0]
         while True:
             res = iterator2.next()
             if len(res) == 0:
@@ -102,10 +106,14 @@ class TestQueryIterator(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. query iterator
-        collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": ct.default_batch_size})
+        collection_w.query_iterator(
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "count": ct.default_nb,
+                "pk_name": collection_w.primary_field.name,
+                "batch_size": ct.default_batch_size,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [500, 1000, 1777])
@@ -123,11 +131,17 @@ class TestQueryIterator(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(batch_size, expr=expr, offset=offset,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb - offset,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": batch_size})
+        collection_w.query_iterator(
+            batch_size,
+            expr=expr,
+            offset=offset,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "count": ct.default_nb - offset,
+                "pk_name": collection_w.primary_field.name,
+                "batch_size": batch_size,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
@@ -140,16 +154,16 @@ class TestQueryIterator(TestcaseBase):
         """
         # 1. initialize with data
         batch_size = 400
-        collection_w = self.init_collection_general(prefix, True,
-                                                    vector_data_type=vector_data_type)[0]
+        collection_w = self.init_collection_general(prefix, True, vector_data_type=vector_data_type)[0]
         # 2. query iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(batch_size, expr=expr,
-                                    output_fields=[ct.default_float_vec_field_name],
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": batch_size})
+        collection_w.query_iterator(
+            batch_size,
+            expr=expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_iterator,
+            check_items={"count": ct.default_nb, "pk_name": collection_w.primary_field.name, "batch_size": batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("batch_size", [10, 777, 2000])
@@ -167,11 +181,17 @@ class TestQueryIterator(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         expr = "int64 >= 0"
-        collection_w.query_iterator(batch_size=batch_size, expr=expr, offset=offset,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": ct.default_nb - offset,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": batch_size})
+        collection_w.query_iterator(
+            batch_size=batch_size,
+            expr=expr,
+            offset=offset,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "count": ct.default_nb - offset,
+                "pk_name": collection_w.primary_field.name,
+                "batch_size": batch_size,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 10, 1000])
@@ -187,11 +207,17 @@ class TestQueryIterator(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. query iterator
         Count = limit if limit + offset <= ct.default_nb else ct.default_nb - offset
-        collection_w.query_iterator(limit=limit, expr="", offset=offset,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": max(Count, 0),
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": ct.default_batch_size})
+        collection_w.query_iterator(
+            limit=limit,
+            expr="",
+            offset=offset,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "count": max(Count, 0),
+                "pk_name": collection_w.primary_field.name,
+                "batch_size": ct.default_batch_size,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_iterator_invalid_batch_size(self):
@@ -225,7 +251,7 @@ class TestQueryIterator(TestcaseBase):
 
         # 1. call a new query iterator and iterator for some times
         iterator_cp_file = f"/tmp/it_{collection_w.name}_cp"
-        iterator = collection_w.query_iterator(batch_size=batch_size//2, iterator_cp_file=iterator_cp_file)[0]
+        iterator = collection_w.query_iterator(batch_size=batch_size // 2, iterator_cp_file=iterator_cp_file)[0]
         iter_times = 0
         first_iter_times = ct.default_nb // batch_size // 2 // 2  # only iterate half of the data for the 1st time
         while iter_times < first_iter_times:
@@ -237,12 +263,16 @@ class TestQueryIterator(TestcaseBase):
                 break
 
         # 2. call a new query iterator to get all the results of the collection
-        collection_w.query_iterator(batch_size=batch_size,
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"batch_size": batch_size,
-                                                 "count": ct.default_nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "exp_ids": insert_ids})
+        collection_w.query_iterator(
+            batch_size=batch_size,
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "batch_size": batch_size,
+                "count": ct.default_nb,
+                "pk_name": collection_w.primary_field.name,
+                "exp_ids": insert_ids,
+            },
+        )
         file_exist = os.path.isfile(iterator_cp_file)
         assert file_exist is True, "The checkpoint exists if not iterator.close()"
         iterator.close()
@@ -263,19 +293,32 @@ class TestQueryIterator(TestcaseBase):
 
         # 2. query with empty expr and check the result
         exp_ids = sorted(insert_ids)
-        collection_w.query_iterator(batch_size, output_fields=[ct.default_string_field_name],
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"batch_size": batch_size,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "count": ct.default_nb, "exp_ids": exp_ids})
+        collection_w.query_iterator(
+            batch_size,
+            output_fields=[ct.default_string_field_name],
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "batch_size": batch_size,
+                "pk_name": collection_w.primary_field.name,
+                "count": ct.default_nb,
+                "exp_ids": exp_ids,
+            },
+        )
 
         # 3. query with pagination
         exp_ids = sorted(insert_ids)[offset:]
-        collection_w.query_iterator(batch_size, offset=offset, output_fields=[ct.default_string_field_name],
-                                    check_task=CheckTasks.check_query_iterator,
-                                    check_items={"batch_size": batch_size,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "count": ct.default_nb - offset, "exp_ids": exp_ids})
+        collection_w.query_iterator(
+            batch_size,
+            offset=offset,
+            output_fields=[ct.default_string_field_name],
+            check_task=CheckTasks.check_query_iterator,
+            check_items={
+                "batch_size": batch_size,
+                "pk_name": collection_w.primary_field.name,
+                "count": ct.default_nb - offset,
+                "exp_ids": exp_ids,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_string_field_name, ct.default_int64_field_name])
@@ -289,8 +332,9 @@ class TestQueryIterator(TestcaseBase):
         """
         # 1. initialize with data
         nb = 3000
-        collection_w = self.init_collection_general(prefix, insert_data=False, is_index=False,
-                                                    auto_id=False, primary_field=primary_field)[0]
+        collection_w = self.init_collection_general(
+            prefix, insert_data=False, is_index=False, auto_id=False, primary_field=primary_field
+        )[0]
         # insert entities with duplicate pk
         data = cf.gen_default_list_data(nb=nb)
         for _ in range(3):
@@ -298,15 +342,18 @@ class TestQueryIterator(TestcaseBase):
         collection_w.flush()
         # create index
         index_type = "HNSW"
-        index_params = {"index_type": index_type, "metric_type": ct.default_L0_metric,
-                        "params": cf.get_index_params_params(index_type)}
+        index_params = {
+            "index_type": index_type,
+            "metric_type": ct.default_L0_metric,
+            "params": cf.get_index_params_params(index_type),
+        }
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         collection_w.load()
         # 2. query iterator
-        collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
-                                    check_items={"count": nb,
-                                                 "pk_name": collection_w.primary_field.name,
-                                                 "batch_size": ct.default_batch_size})
+        collection_w.query_iterator(
+            check_task=CheckTasks.check_query_iterator,
+            check_items={"count": nb, "pk_name": collection_w.primary_field.name, "batch_size": ct.default_batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue #37109, need debug due to the resolution of the issue")

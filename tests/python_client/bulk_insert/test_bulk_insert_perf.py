@@ -6,7 +6,7 @@ from pathlib import Path
 from time import sleep
 from minio import Minio
 from pymilvus import connections
-from chaos.checker import (BulkInsertChecker, Op)
+from chaos.checker import BulkInsertChecker, Op
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 from utils.util_k8s import get_milvus_deploy_tool, get_pod_ip_name_pairs, get_milvus_instance_name
@@ -23,25 +23,28 @@ def assert_statistic(checkers, expectations={}):
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
-        if expectations.get(k, '') == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+        if expectations.get(k, "") == constants.FAIL:
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate < 0.49 or total < 2,
+                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
         else:
-            log.info(
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 and total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate > 0.90 and total > 2,
+                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
 
 
 def get_querynode_info(release_name):
     querynode_id_pod_pair = {}
     querynode_ip_pod_pair = get_pod_ip_name_pairs(
-        "chaos-testing", f"app.kubernetes.io/instance={release_name}, component=querynode")
+        "chaos-testing", f"app.kubernetes.io/instance={release_name}, component=querynode"
+    )
     ms = MilvusSys()
     for node in ms.query_nodes:
-        ip = node["infos"]['hardware_infos']["ip"].split(":")[0]
+        ip = node["infos"]["hardware_infos"]["ip"].split(":")[0]
         querynode_id_pod_pair[node["identifier"]] = querynode_ip_pod_pair[ip]
     return querynode_id_pod_pair
 
@@ -53,22 +56,21 @@ class TestChaosBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestChaos(TestChaosBase):
-
     def teardown_method(self):
         sleep(10)
-        log.info(f'Alive threads: {threading.enumerate()}')
+        log.info(f"Alive threads: {threading.enumerate()}")
 
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, milvus_ns):
         connections.add_connection(default={"host": host, "port": port})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -76,7 +78,7 @@ class TestChaos(TestChaosBase):
         self.host = host
         self.port = port
         self.instance_name = instance_name
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
@@ -85,7 +87,11 @@ class TestChaos(TestChaosBase):
         log.info("init health checkers")
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         checkers = {
-            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False, dim=dim,),
+            Op.bulk_insert: BulkInsertChecker(
+                collection_name=c_name,
+                use_one_collection=False,
+                dim=dim,
+            ),
         }
         self.health_checkers = checkers
 
@@ -106,8 +112,9 @@ class TestChaos(TestChaosBase):
         minio_endpoint = f"{minio_ip}:{minio_port}"
         bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         schema = cf.gen_bulk_insert_collection_schema(dim=dim, with_varchar_field=with_varchar_field)
-        data = cf.gen_default_list_data_for_bulk_insert(nb=nb, varchar_len=varchar_len,
-                                                        with_varchar_field=with_varchar_field)
+        data = cf.gen_default_list_data_for_bulk_insert(
+            nb=nb, varchar_len=varchar_len, with_varchar_field=with_varchar_field
+        )
         data_dir = "/tmp/bulk_insert_data"
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         files = []
@@ -129,8 +136,10 @@ class TestChaos(TestChaosBase):
     def test_bulk_insert_perf(self, file_type, nb, dim, varchar_len, with_varchar_field):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
-        log.info(f"file_type: {file_type}, nb: {nb}, dim: {dim}, varchar_len: {varchar_len}, with_varchar_field: {with_varchar_field}")
+        log.info(connections.get_connection_addr("default"))
+        log.info(
+            f"file_type: {file_type}, nb: {nb}, dim: {dim}, varchar_len: {varchar_len}, with_varchar_field: {with_varchar_field}"
+        )
         self.init_health_checkers(dim=int(dim))
         nb = int(nb)
         if str(with_varchar_field) in ["true", "True"]:
@@ -139,7 +148,9 @@ class TestChaos(TestChaosBase):
             with_varchar_field = False
         varchar_len = int(varchar_len)
 
-        self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim), varchar_len=varchar_len, with_varchar_field=with_varchar_field)
+        self.prepare_bulk_insert(
+            file_type=file_type, nb=nb, dim=int(dim), varchar_len=varchar_len, with_varchar_field=with_varchar_field
+        )
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s
         while self.health_checkers[Op.bulk_insert].total() <= 10:

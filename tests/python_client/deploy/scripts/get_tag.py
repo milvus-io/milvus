@@ -12,7 +12,7 @@ def get_tag(url):
     response = requests.request("GET", url, headers=headers, data=payload)
 
     res = response.json()["results"]
-    sorted_r = sorted(res, key=lambda k: k['last_updated'])
+    sorted_r = sorted(res, key=lambda k: k["last_updated"])
     tags = [r["name"] for r in sorted_r]
     return tags
 

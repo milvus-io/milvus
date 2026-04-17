@@ -87,7 +87,7 @@ def entity_suffix(rows):
 
 def gen_float_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+    vectors = preprocessing.normalize(vectors, axis=1, norm="l2")
     return vectors.tolist()
 
 
@@ -190,13 +190,13 @@ def gen_bf16_vectors(num, dim, for_json=False):
     return raw_vectors, bf16_vectors
 
 
-def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
-                            rows, dim, start_uid=0, err_type="", enable_dynamic_field=False,  **kwargs):
-
+def gen_row_based_json_file(
+    row_file, str_pk, data_fields, float_vect, rows, dim, start_uid=0, err_type="", enable_dynamic_field=False, **kwargs
+):
     if err_type == DataErrorType.str_on_int_pk:
         str_pk = True
     if err_type in [DataErrorType.one_entity_wrong_dim, DataErrorType.str_on_vector_field]:
-        wrong_dim = dim + 8     # add 8 to compatible with binary vectors
+        wrong_dim = dim + 8  # add 8 to compatible with binary vectors
         wrong_row = kwargs.get("wrong_position", start_uid)
 
     with open(row_file, "w") as f:
@@ -210,7 +210,7 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 f.write("\n")
 
             # scalar fields
-            f.write('{')
+            f.write("{")
             for j in range(len(data_fields)):
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
@@ -220,66 +220,79 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                         # f.write('"uid":"' + str(gen_unique_str()) + '"')
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
-                            f.write('"uid":' + str(i + start_uid + random.random()) + '')
+                            f.write('"uid":' + str(i + start_uid + random.random()) + "")
                         else:
-                            f.write('"uid":' + str(i + start_uid) + '')
+                            f.write('"uid":' + str(i + start_uid) + "")
                 if data_field == DataField.int_field:
                     if DataField.pk_field in data_fields:
                         # if not auto_id, use the same value as pk to check the query results later
-                        f.write('"int_scalar":' + str(i + start_uid) + '')
+                        f.write('"int_scalar":' + str(i + start_uid) + "")
                     else:
-                        line = '"int_scalar":' + str(random.randint(-999999, 9999999)) + ''
+                        line = '"int_scalar":' + str(random.randint(-999999, 9999999)) + ""
                         f.write(line)
                 if data_field == DataField.float_field:
                     if err_type == DataErrorType.int_on_float_scalar:
-                        f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + '')
+                        f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + "")
                     elif err_type == DataErrorType.str_on_float_scalar:
                         f.write('"float_scalar":"' + str(gen_unique_str()) + '"')
                     else:
-                        line = '"float_scalar":' + str(random.random()) + ''
+                        line = '"float_scalar":' + str(random.random()) + ""
                         f.write(line)
                 if data_field == DataField.double_field:
                     if err_type == DataErrorType.int_on_float_scalar:
-                        f.write('"double_scalar":' + str(random.randint(-999999, 9999999)) + '')
+                        f.write('"double_scalar":' + str(random.randint(-999999, 9999999)) + "")
                     elif err_type == DataErrorType.str_on_float_scalar:
                         f.write('"double_scalar":"' + str(gen_unique_str()) + '"')
                     else:
-                        line = '"double_scalar":' + str(random.random()) + ''
+                        line = '"double_scalar":' + str(random.random()) + ""
                         f.write(line)
                 if data_field == DataField.string_field:
                     f.write('"string_scalar":"' + str(gen_unique_str()) + '"')
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
-                        f.write('"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + '')
+                        f.write(
+                            '"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + ""
+                        )
                     else:
-                        f.write('"bool_scalar":' + str(random.choice(["true", "false"])) + '')
+                        f.write('"bool_scalar":' + str(random.choice(["true", "false"])) + "")
                 if data_field == DataField.json_field:
                     data = {
                         gen_unique_str(): random.randint(-999999, 9999999),
                     }
-                    f.write('"json":' + json.dumps(data) + '')
+                    f.write('"json":' + json.dumps(data) + "")
                 if data_field == DataField.array_bool_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_bool":[]')
                     elif err_type == DataErrorType.mismatch_type_array_field:
                         f.write('"array_bool": "mistype"')
                     else:
-
-                        f.write('"array_bool":[' + str(random.choice(["true", "false"])) + ',' + str(random.choice(["true", "false"])) + ']')
+                        f.write(
+                            '"array_bool":['
+                            + str(random.choice(["true", "false"]))
+                            + ","
+                            + str(random.choice(["true", "false"]))
+                            + "]"
+                        )
                 if data_field == DataField.array_int_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_int":[]')
                     elif err_type == DataErrorType.mismatch_type_array_field:
                         f.write('"array_int": "mistype"')
                     else:
-                        f.write('"array_int":[' + str(random.randint(-999999, 9999999)) + ',' + str(random.randint(-999999, 9999999)) + ']')
+                        f.write(
+                            '"array_int":['
+                            + str(random.randint(-999999, 9999999))
+                            + ","
+                            + str(random.randint(-999999, 9999999))
+                            + "]"
+                        )
                 if data_field == DataField.array_float_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_float":[]')
                     elif err_type == DataErrorType.mismatch_type_array_field:
                         f.write('"array_float": "mistype"')
                     else:
-                        f.write('"array_float":[' + str(random.random()) + ',' + str(random.random()) + ']')
+                        f.write('"array_float":[' + str(random.random()) + "," + str(random.random()) + "]")
                 if data_field == DataField.array_string_field:
                     if err_type == DataErrorType.empty_array_field:
                         f.write('"array_string":[]')
@@ -291,22 +304,26 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 if data_field == DataField.vec_field:
                     # vector field
                     if err_type == DataErrorType.one_entity_wrong_dim and i == wrong_row:
-                        vectors = gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim//8))
+                        vectors = (
+                            gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim // 8))
+                        )
                     elif err_type == DataErrorType.str_on_vector_field and i == wrong_row:
-                        vectors = gen_str_invalid_vectors(1, dim) if float_vect else gen_str_invalid_vectors(1, dim//8)
+                        vectors = (
+                            gen_str_invalid_vectors(1, dim) if float_vect else gen_str_invalid_vectors(1, dim // 8)
+                        )
                     else:
-                        vectors = gen_float_vectors(1, dim) if float_vect else gen_binary_vectors(1, (dim//8))
-                    line = '"vectors":' + ",".join(str(x).replace("'", '"') for x in vectors) + ''
+                        vectors = gen_float_vectors(1, dim) if float_vect else gen_binary_vectors(1, (dim // 8))
+                    line = '"vectors":' + ",".join(str(x).replace("'", '"') for x in vectors) + ""
                     f.write(line)
                 # not write common for the last field
                 if j != len(data_fields) - 1:
-                    f.write(',')
+                    f.write(",")
             if enable_dynamic_field:
-                d = {str(i+start_uid): i+start_uid, "name": fake.name(), "address": fake.address()}
+                d = {str(i + start_uid): i + start_uid, "name": fake.name(), "address": fake.address()}
                 d_str = json.dumps(d)
-                d_str = d_str[1:-1] # remove {}
+                d_str = d_str[1:-1]  # remove {}
                 f.write("," + d_str)
-            f.write('}')
+            f.write("}")
         f.write("\n")
         f.write("]")
         f.write("\n")
@@ -314,8 +331,7 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
         f.write("\n")
 
 
-def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
-                              rows, dim, start_uid=0, err_type="", **kwargs):
+def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect, rows, dim, start_uid=0, err_type="", **kwargs):
     if err_type == DataErrorType.str_on_int_pk:
         str_pk = True
 
@@ -328,12 +344,15 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
                     if str_pk:
-                        f.write('"uid":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + ']')
+                        f.write('"uid":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + "]")
                         f.write("\n")
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
-                            f.write('"uid":[' + ",".join(
-                                str(i + random.random()) for i in range(start_uid, start_uid + rows)) + "]")
+                            f.write(
+                                '"uid":['
+                                + ",".join(str(i + random.random()) for i in range(start_uid, start_uid + rows))
+                                + "]"
+                            )
                         else:
                             f.write('"uid":[' + ",".join(str(i) for i in range(start_uid, start_uid + rows)) + "]")
                         f.write("\n")
@@ -342,31 +361,42 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                         # if not auto_id, use the same value as pk to check the query results later
                         f.write('"int_scalar":[' + ",".join(str(i) for i in range(start_uid, start_uid + rows)) + "]")
                     else:
-                        f.write('"int_scalar":[' + ",".join(str(
-                            random.randint(-999999, 9999999)) for i in range(rows)) + "]")
+                        f.write(
+                            '"int_scalar":['
+                            + ",".join(str(random.randint(-999999, 9999999)) for i in range(rows))
+                            + "]"
+                        )
                     f.write("\n")
                 if data_field == DataField.float_field:
                     if err_type == DataErrorType.int_on_float_scalar:
-                        f.write('"float_scalar":[' + ",".join(
-                            str(random.randint(-999999, 9999999)) for i in range(rows)) + "]")
+                        f.write(
+                            '"float_scalar":['
+                            + ",".join(str(random.randint(-999999, 9999999)) for i in range(rows))
+                            + "]"
+                        )
                     elif err_type == DataErrorType.str_on_float_scalar:
-                        f.write('"float_scalar":["' + ',"'.join(str(
-                            gen_unique_str()) + '"' for i in range(rows)) + ']')
+                        f.write('"float_scalar":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + "]")
                     else:
-                        f.write('"float_scalar":[' + ",".join(
-                            str(random.random()) for i in range(rows)) + "]")
+                        f.write('"float_scalar":[' + ",".join(str(random.random()) for i in range(rows)) + "]")
                     f.write("\n")
                 if data_field == DataField.string_field:
-                    f.write('"string_scalar":["' + ',"'.join(str(
-                        gen_unique_str()) + '"' for i in range(rows)) + ']')
+                    f.write('"string_scalar":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + "]")
                     f.write("\n")
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
-                        f.write('"bool_scalar":[' + ",".join(
-                            str(random.choice(["True", "False", "TRUE", "FALSE", "1", "0"])) for i in range(rows)) + "]")
+                        f.write(
+                            '"bool_scalar":['
+                            + ",".join(
+                                str(random.choice(["True", "False", "TRUE", "FALSE", "1", "0"])) for i in range(rows)
+                            )
+                            + "]"
+                        )
                     else:
-                        f.write('"bool_scalar":[' + ",".join(
-                            str(random.choice(["true", "false"])) for i in range(rows)) + "]")
+                        f.write(
+                            '"bool_scalar":['
+                            + ",".join(str(random.choice(["true", "false"])) for i in range(rows))
+                            + "]"
+                        )
                     f.write("\n")
                 if data_field == DataField.vec_field:
                     # vector columns
@@ -376,33 +406,47 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                         if wrong_row <= 0:
                             vectors1 = []
                         else:
-                            vectors1 = gen_float_vectors(wrong_row, dim) if float_vect else \
-                                gen_binary_vectors(wrong_row, (dim//8))
-                        if wrong_row >= rows -1:
+                            vectors1 = (
+                                gen_float_vectors(wrong_row, dim)
+                                if float_vect
+                                else gen_binary_vectors(wrong_row, (dim // 8))
+                            )
+                        if wrong_row >= rows - 1:
                             vectors2 = []
                         else:
-                            vectors2 = gen_float_vectors(rows-wrong_row-1, dim) if float_vect else\
-                                gen_binary_vectors(rows-wrong_row-1, (dim//8))
-                        vectors_wrong_dim = gen_float_vectors(1, wrong_dim) if float_vect else \
-                            gen_binary_vectors(1, (wrong_dim//8))
+                            vectors2 = (
+                                gen_float_vectors(rows - wrong_row - 1, dim)
+                                if float_vect
+                                else gen_binary_vectors(rows - wrong_row - 1, (dim // 8))
+                            )
+                        vectors_wrong_dim = (
+                            gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim // 8))
+                        )
                         vectors = vectors1 + vectors_wrong_dim + vectors2
                     elif err_type == DataErrorType.str_on_vector_field:
                         wrong_row = kwargs.get("wrong_position", 0)
                         if wrong_row <= 0:
                             vectors1 = []
                         else:
-                            vectors1 = gen_float_vectors(wrong_row, dim) if float_vect else \
-                                gen_binary_vectors(wrong_row, (dim//8))
+                            vectors1 = (
+                                gen_float_vectors(wrong_row, dim)
+                                if float_vect
+                                else gen_binary_vectors(wrong_row, (dim // 8))
+                            )
                         if wrong_row >= rows - 1:
                             vectors2 = []
                         else:
-                            vectors2 = gen_float_vectors(rows - wrong_row - 1, dim) if float_vect else \
-                                gen_binary_vectors(rows - wrong_row - 1, (dim // 8))
-                        invalid_str_vectors = gen_str_invalid_vectors(1, dim) if float_vect else \
-                            gen_str_invalid_vectors(1, (dim // 8))
+                            vectors2 = (
+                                gen_float_vectors(rows - wrong_row - 1, dim)
+                                if float_vect
+                                else gen_binary_vectors(rows - wrong_row - 1, (dim // 8))
+                            )
+                        invalid_str_vectors = (
+                            gen_str_invalid_vectors(1, dim) if float_vect else gen_str_invalid_vectors(1, (dim // 8))
+                        )
                         vectors = vectors1 + invalid_str_vectors + vectors2
                     else:
-                        vectors = gen_float_vectors(rows, dim) if float_vect else gen_binary_vectors(rows, (dim//8))
+                        vectors = gen_float_vectors(rows, dim) if float_vect else gen_binary_vectors(rows, (dim // 8))
                     f.write('"vectors":[' + ",".join(str(x).replace("'", '"') for x in vectors) + "]")
                     f.write("\n")
                 if j != len(data_fields) - 1:
@@ -413,7 +457,7 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
 
 def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, vector_type="float32", force=False):
     file_name = f"{data_field}.npy"
-    file = f'{dir}/{file_name}'
+    file = f"{dir}/{file_name}"
 
     if not os.path.exists(file) or force:
         # vector columns
@@ -447,7 +491,7 @@ def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False, **kwar
         # non vector columns
         data = []
         if rows > 0:
-            data = [gen_unique_str(str(i)) for i in range(start, rows+start)]
+            data = [gen_unique_str(str(i)) for i in range(start, rows + start)]
         arr = np.array(data)
         # print(f"file_name: {file_name} data type: {arr.dtype}")
         if shuffle_pk:
@@ -464,9 +508,9 @@ def gen_text_in_numpy_file(dir, data_field, rows, start=0, force=False, nullable
         # non vector columns
         data = []
         if rows > 0:
-            data = [fake.text() + " milvus " for i in range(start, rows+start)]
+            data = [fake.text() + " milvus " for i in range(start, rows + start)]
             if nullable:
-                data = [None if random.random() < 0.5 else fake.text() + " milvus "  for _ in range(rows)]
+                data = [None if random.random() < 0.5 else fake.text() + " milvus " for _ in range(rows)]
         arr = np.array(data)
         # print(f"file_name: {file_name} data type: {arr.dtype}")
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
@@ -481,7 +525,10 @@ def gen_dynamic_field_in_numpy_file(dir, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
+            data = [
+                json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i})
+                for i in range(start, rows + start)
+            ]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -495,7 +542,7 @@ def gen_bool_in_numpy_file(dir, data_field, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [random.choice([True, False]) for i in range(start, rows+start)]
+            data = [random.choice([True, False]) for i in range(start, rows + start)]
         arr = np.array(data)
         # print(f"file_name: {file_name} data type: {arr.dtype}")
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
@@ -509,7 +556,10 @@ def gen_json_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         data = []
         if rows > 0:
-            data = [json.dumps({"name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
+            data = [
+                json.dumps({"name": fake.name(), "address": fake.address(), "number": i})
+                for i in range(start, rows + start)
+            ]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -572,22 +622,20 @@ def gen_sparse_vectors(rows, sparse_format="dok", empty_percentage=10):
     # another option is coo, coordinate List
 
     rng = np.random.default_rng()
-    vectors = [{
-        d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))
-    } for _ in range(rows)]
+    vectors = [{d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))} for _ in range(rows)]
     if empty_percentage > 0:
         empty_nb = int(rows * empty_percentage / 100)
         empty_ids = random.sample(range(rows), empty_nb)
         for i in empty_ids:
             vectors[i] = {}
     if sparse_format == "coo":
-        vectors = [
-            {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
-        ]
+        vectors = [{"indices": list(x.keys()), "values": list(x.values())} for x in vectors]
     return vectors
 
 
-def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128, array_length=None, sparse_format="dok", **kwargs):
+def gen_data_by_data_field(
+    data_field, rows, start=0, float_vector=True, dim=128, array_length=None, sparse_format="dok", **kwargs
+):
     if array_length is None:
         array_length = random.randint(0, 10)
     schema = kwargs.get("schema", None)
@@ -649,7 +697,7 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             if not nullable:
                 data = [fake.text() + " milvus " for i in range(start, rows + start)]
             else:
-                data = [None if random.random() < 0.5 else  fake.text() + " milvus " for _ in range(start, rows + start)]
+                data = [None if random.random() < 0.5 else fake.text() + " milvus " for _ in range(start, rows + start)]
         elif data_field == DataField.bool_field:
             if not nullable:
                 data = [random.choice([True, False]) for i in range(start, rows + start)]
@@ -657,43 +705,64 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.json_field:
             if not nullable:
-                data = pd.Series([json.dumps({
-                    gen_unique_str(): random.randint(-999999, 9999999),
-                    "name": fake.name(),
-                    "address": fake.address(),
-                    "number": i
-                }) for i in range(start, rows + start)], dtype=np.dtype("str"))
+                data = pd.Series(
+                    [
+                        json.dumps(
+                            {
+                                gen_unique_str(): random.randint(-999999, 9999999),
+                                "name": fake.name(),
+                                "address": fake.address(),
+                                "number": i,
+                            }
+                        )
+                        for i in range(start, rows + start)
+                    ],
+                    dtype=np.dtype("str"),
+                )
             else:
-                data = pd.Series([json.dumps({
-                    gen_unique_str(): None}) for _ in range(start, rows + start)])
-                data =[json.dumps({gen_unique_str():None}) for _ in range(start, rows + start)]
+                data = pd.Series([json.dumps({gen_unique_str(): None}) for _ in range(start, rows + start)])
+                data = [json.dumps({gen_unique_str(): None}) for _ in range(start, rows + start)]
         elif data_field == DataField.array_bool_field:
             if not nullable:
                 data = pd.Series(
-                    [np.array([random.choice([True, False]) for _ in range(array_length)], dtype=np.dtype("bool"))
-                     for i in range(start, rows + start)])
+                    [
+                        np.array([random.choice([True, False]) for _ in range(array_length)], dtype=np.dtype("bool"))
+                        for i in range(start, rows + start)
+                    ]
+                )
             else:
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.array_int_field:
             if not nullable:
                 data = pd.Series(
-                    [np.array([random.randint(-999999, 9999999) for _ in range(array_length)], dtype=np.dtype("int64"))
-                     for i in range(start, rows + start)])
+                    [
+                        np.array(
+                            [random.randint(-999999, 9999999) for _ in range(array_length)], dtype=np.dtype("int64")
+                        )
+                        for i in range(start, rows + start)
+                    ]
+                )
             else:
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.array_float_field:
             if not nullable:
                 data = pd.Series(
-                    [np.array([random.random() for _ in range(array_length)], dtype=np.dtype("float32"))
-                     for i in range(start, rows + start)])
+                    [
+                        np.array([random.random() for _ in range(array_length)], dtype=np.dtype("float32"))
+                        for i in range(start, rows + start)
+                    ]
+                )
             else:
                 data = [None for _ in range(start, rows + start)]
 
         elif data_field == DataField.array_string_field:
             if not nullable:
                 data = pd.Series(
-                    [np.array([gen_unique_str(str(i)) for _ in range(array_length)], dtype=np.dtype("str"))
-                     for i in range(start, rows + start)])
+                    [
+                        np.array([gen_unique_str(str(i)) for _ in range(array_length)], dtype=np.dtype("str"))
+                        for i in range(start, rows + start)
+                    ]
+                )
             else:
                 data = [None for _ in range(start, rows + start)]
         elif data_field == DataField.geo_field:
@@ -713,8 +782,7 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
     return data
 
 
-def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
-                  float_vector, data_fields, file_num, file_type, err_type):
+def gen_file_name(is_row_based, rows, dim, auto_id, str_pk, float_vector, data_fields, file_num, file_type, err_type):
     row_suffix = entity_suffix(rows)
     field_suffix = ""
     if len(data_fields) > 3:
@@ -746,9 +814,21 @@ def gen_subfolder(root, dim, rows, file_num):
     return subfolder
 
 
-def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
-                   float_vector, data_fields, file_nums, multi_folder,
-                   file_type, err_type, force, **kwargs):
+def gen_json_files(
+    is_row_based,
+    rows,
+    dim,
+    auto_id,
+    str_pk,
+    float_vector,
+    data_fields,
+    file_nums,
+    multi_folder,
+    file_type,
+    err_type,
+    force,
+    **kwargs,
+):
     # gen json files
     files = []
     start_uid = 0
@@ -756,22 +836,47 @@ def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
     if (not auto_id) and (DataField.pk_field not in data_fields):
         data_fields.append(DataField.pk_field)
     for i in range(file_nums):
-        file_name = gen_file_name(is_row_based=is_row_based, rows=rows, dim=dim,
-                                  auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
-                                  data_fields=data_fields, file_num=i, file_type=file_type, err_type=err_type)
+        file_name = gen_file_name(
+            is_row_based=is_row_based,
+            rows=rows,
+            dim=dim,
+            auto_id=auto_id,
+            str_pk=str_pk,
+            float_vector=float_vector,
+            data_fields=data_fields,
+            file_num=i,
+            file_type=file_type,
+            err_type=err_type,
+        )
         file = f"{data_source}/{file_name}"
         if multi_folder:
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
             file = f"{data_source}/{subfolder}/{file_name}"
         if not os.path.exists(file) or force:
             if is_row_based:
-                gen_row_based_json_file(row_file=file, str_pk=str_pk, float_vect=float_vector,
-                                        data_fields=data_fields, rows=rows, dim=dim,
-                                        start_uid=start_uid, err_type=err_type, **kwargs)
+                gen_row_based_json_file(
+                    row_file=file,
+                    str_pk=str_pk,
+                    float_vect=float_vector,
+                    data_fields=data_fields,
+                    rows=rows,
+                    dim=dim,
+                    start_uid=start_uid,
+                    err_type=err_type,
+                    **kwargs,
+                )
             else:
-                gen_column_base_json_file(col_file=file, str_pk=str_pk, float_vect=float_vector,
-                                          data_fields=data_fields, rows=rows, dim=dim,
-                                          start_uid=start_uid, err_type=err_type, **kwargs)
+                gen_column_base_json_file(
+                    col_file=file,
+                    str_pk=str_pk,
+                    float_vect=float_vector,
+                    data_fields=data_fields,
+                    rows=rows,
+                    dim=dim,
+                    start_uid=start_uid,
+                    err_type=err_type,
+                    **kwargs,
+                )
             start_uid += rows
         if multi_folder:
             files.append(f"{subfolder}/{file_name}")
@@ -780,7 +885,9 @@ def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
     return files
 
 
-def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, dim=128, array_length=None, enable_dynamic_field=False, **kwargs):
+def gen_dict_data_by_data_field(
+    data_fields, rows, start=0, float_vector=True, dim=128, array_length=None, enable_dynamic_field=False, **kwargs
+):
     schema = kwargs.get("schema", None)
     shuffle = kwargs.get("shuffle", False)
     schema = schema.to_dict() if schema is not None else None
@@ -820,7 +927,7 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = random.random()
             elif data_field == DataField.pk_field:
                 if not nullable:
-                    d[data_field] = r+start
+                    d[data_field] = r + start
             elif data_field == DataField.int_field:
                 if not nullable:
                     d[data_field] = random.randint(-999999, 9999999)
@@ -832,7 +939,7 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = fake.text() + " milvus "
                 else:
                     if random.random() < 0.5:
-                         d[data_field] = None
+                        d[data_field] = None
                     else:
                         d[data_field] = fake.text() + " milvus "
             elif data_field == DataField.bool_field:
@@ -840,8 +947,12 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = random.choice([True, False])
             elif data_field == DataField.json_field:
                 if not nullable:
-                    d[data_field] = {str(r+start): r+start, "name": fake.name(),
-                                     "address": fake.address(), "number": r+start}
+                    d[data_field] = {
+                        str(r + start): r + start,
+                        "name": fake.name(),
+                        "address": fake.address(),
+                        "number": r + start,
+                    }
                 else:
                     d[data_field] = {str(r + start): None}
             elif data_field == DataField.array_bool_field:
@@ -882,7 +993,7 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
             else:
                 raise Exception("unsupported field name")
         if enable_dynamic_field:
-            d[str(r+start)] = r+start
+            d[str(r + start)] = r + start
             d["name"] = fake.name()
             d["address"] = fake.address()
         data.append(d)
@@ -892,8 +1003,18 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
     return data
 
 
-def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_length=None, file_size=None,
-                       err_type="", enable_dynamic_field=False, **kwargs):
+def gen_new_json_files(
+    float_vector,
+    rows,
+    dim,
+    data_fields,
+    file_nums=1,
+    array_length=None,
+    file_size=None,
+    err_type="",
+    enable_dynamic_field=False,
+    **kwargs,
+):
     schema = kwargs.get("schema", None)
     dir_prefix = f"json-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{dir_prefix}"
@@ -911,35 +1032,56 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-{str(uuid.uuid4())}.json"
         file = f"{data_source_new}/{file_name}"
         Path(file).parent.mkdir(parents=True, exist_ok=True)
-        data = gen_dict_data_by_data_field(data_fields=data_fields, rows=rows, start=start_uid,
-                                           float_vector=float_vector, dim=dim, array_length=array_length,
-                                           enable_dynamic_field=enable_dynamic_field, **kwargs)
+        data = gen_dict_data_by_data_field(
+            data_fields=data_fields,
+            rows=rows,
+            start=start_uid,
+            float_vector=float_vector,
+            dim=dim,
+            array_length=array_length,
+            enable_dynamic_field=enable_dynamic_field,
+            **kwargs,
+        )
         # log.info(f"data: {data}")
         with open(file, "w") as f:
             json.dump(data, f)
         # get the file size
         if file_size is not None:
             batch_file_size = os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size/1024/1024} MB")
+            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size / 1024 / 1024} MB")
             # calculate the rows to be generated
-            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_batch = int(file_size * 1024 * 1024 * 1024 / batch_file_size)
             total_rows = total_batch * rows
             log.info(f"total_rows: {total_rows}")
             all_data = []
             for _ in range(total_batch):
                 all_data += data
-            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{str(uuid.uuid4())}.json"
+            file_name = (
+                f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{str(uuid.uuid4())}.json"
+            )
             with open(f"{data_source_new}/{file_name}", "w") as f:
                 json.dump(all_data, f)
             batch_file_size = os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size/1024/1024/1024} GB")
+            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size / 1024 / 1024 / 1024} GB")
         files.append(file_name)
         start_uid += rows
     files = [f"{dir_prefix}/{f}" for f in files]
     return files
 
 
-def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, err_type="", force=False, enable_dynamic_field=False, include_meta=True, **kwargs):
+def gen_npy_files(
+    float_vector,
+    rows,
+    dim,
+    data_fields,
+    file_size=None,
+    file_nums=1,
+    err_type="",
+    force=False,
+    enable_dynamic_field=False,
+    include_meta=True,
+    **kwargs,
+):
     # gen numpy files
     schema = kwargs.get("schema", None)
     schema = schema.to_dict() if schema is not None else None
@@ -979,21 +1121,40 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                     float_vector = True
                     vector_type = "fp16"
 
-                file_name = gen_vectors_in_numpy_file(dir=data_source_new, data_field=data_field, float_vector=float_vector,
-                                                      vector_type=vector_type, rows=rows, dim=dim, force=force)
+                file_name = gen_vectors_in_numpy_file(
+                    dir=data_source_new,
+                    data_field=data_field,
+                    float_vector=float_vector,
+                    vector_type=vector_type,
+                    rows=rows,
+                    dim=dim,
+                    force=force,
+                )
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
-                file_name = gen_string_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force, shuffle_pk=shuffle_pk)
+                file_name = gen_string_in_numpy_file(
+                    dir=data_source_new, data_field=data_field, rows=rows, force=force, shuffle_pk=shuffle_pk
+                )
             elif data_field == DataField.text_field:
-                file_name = gen_text_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force, nullable=nullable)
+                file_name = gen_text_in_numpy_file(
+                    dir=data_source_new, data_field=data_field, rows=rows, force=force, nullable=nullable
+                )
             elif data_field == DataField.bool_field:
                 file_name = gen_bool_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.json_field:
                 file_name = gen_json_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.geo_field:
-                file_name = gen_geometry_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
+                file_name = gen_geometry_in_numpy_file(
+                    dir=data_source_new, data_field=data_field, rows=rows, force=force
+                )
             else:
-                file_name = gen_int_or_float_in_numpy_file(dir=data_source_new, data_field=data_field,
-                                                           rows=rows, force=force, nullable=nullable, shuffle_pk=shuffle_pk)
+                file_name = gen_int_or_float_in_numpy_file(
+                    dir=data_source_new,
+                    data_field=data_field,
+                    rows=rows,
+                    force=force,
+                    nullable=nullable,
+                    shuffle_pk=shuffle_pk,
+                )
             files.append(file_name)
         if enable_dynamic_field and include_meta:
             file_name = gen_dynamic_field_in_numpy_file(dir=data_source_new, rows=rows, force=force)
@@ -1002,9 +1163,9 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
             batch_file_size = 0
             for file_name in files:
                 batch_file_size += os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {rows} for {files}: {batch_file_size/1024/1024} MB")
+            log.info(f"file_size with rows {rows} for {files}: {batch_file_size / 1024 / 1024} MB")
             # calculate the rows to be generated
-            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_batch = int(file_size * 1024 * 1024 * 1024 / batch_file_size)
             total_rows = total_batch * rows
             new_files = []
             for f in files:
@@ -1018,7 +1179,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
             batch_file_size = 0
             for file_name in files:
                 batch_file_size += os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {total_rows} for {files}: {batch_file_size/1024/1024/1024} GB")
+            log.info(f"file_size with rows {total_rows} for {files}: {batch_file_size / 1024 / 1024 / 1024} GB")
 
     else:
         for i in range(file_nums):
@@ -1026,9 +1187,13 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
             dir = f"{data_source_new}/{subfolder}"
             for data_field in data_fields:
                 if DataField.vec_field in data_field:
-                    file_name = gen_vectors_in_numpy_file(dir=dir, data_field=data_field, float_vector=float_vector, rows=rows, dim=dim, force=force)
+                    file_name = gen_vectors_in_numpy_file(
+                        dir=dir, data_field=data_field, float_vector=float_vector, rows=rows, dim=dim, force=force
+                    )
                 else:
-                    file_name = gen_int_or_float_in_numpy_file(dir=dir, data_field=data_field, rows=rows, start=start_uid, force=force)
+                    file_name = gen_int_or_float_in_numpy_file(
+                        dir=dir, data_field=data_field, rows=rows, start=start_uid, force=force
+                    )
                 files.append(f"{subfolder}/{file_name}")
             if enable_dynamic_field:
                 file_name = gen_dynamic_field_in_numpy_file(dir=dir, rows=rows, start=start_uid, force=force)
@@ -1041,13 +1206,31 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
 def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     data = []
     if rows > 0:
-        data = pd.Series([json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)], dtype=np.dtype("str"))
+        data = pd.Series(
+            [
+                json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i})
+                for i in range(start, rows + start)
+            ],
+            dtype=np.dtype("str"),
+        )
     return data
 
 
-def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_group_size=None, file_nums=1,
-                      array_length=None, err_type="", enable_dynamic_field=False, include_meta=True,
-                      sparse_format="doc", **kwargs):
+def gen_parquet_files(
+    float_vector,
+    rows,
+    dim,
+    data_fields,
+    file_size=None,
+    row_group_size=None,
+    file_nums=1,
+    array_length=None,
+    err_type="",
+    enable_dynamic_field=False,
+    include_meta=True,
+    sparse_format="doc",
+    **kwargs,
+):
     schema = kwargs.get("schema", None)
     u_id = f"parquet-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{u_id}"
@@ -1069,9 +1252,16 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
     if file_nums == 1:
         all_field_data = {}
         for data_field in data_fields:
-            data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
-                                          float_vector=float_vector, dim=dim, array_length=array_length,
-                                          sparse_format=sparse_format, **kwargs)
+            data = gen_data_by_data_field(
+                data_field=data_field,
+                rows=rows,
+                start=0,
+                float_vector=float_vector,
+                dim=dim,
+                array_length=array_length,
+                sparse_format=sparse_format,
+                **kwargs,
+            )
             all_field_data[data_field] = data
         if enable_dynamic_field and include_meta:
             all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
@@ -1079,52 +1269,70 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
         log.info(f"df: \n{df}")
         file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{str(uuid.uuid4())}.parquet"
         if row_group_size is not None:
-            df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+            df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow", row_group_size=row_group_size)
         else:
-            df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow')
+            df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow")
         # get the file size
         if file_size is not None:
             batch_file_size = os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size/1024/1024} MB")
+            log.info(f"file_size with rows {rows} for {file_name}: {batch_file_size / 1024 / 1024} MB")
             # calculate the rows to be generated
-            total_batch = int(file_size*1024*1024*1024/batch_file_size)
+            total_batch = int(file_size * 1024 * 1024 * 1024 / batch_file_size)
             total_rows = total_batch * rows
             all_df = pd.concat([df for _ in range(total_batch)], axis=0, ignore_index=True)
             file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{str(uuid.uuid4())}.parquet"
             log.info(f"all df: \n {all_df}")
             if row_group_size is not None:
-                all_df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+                all_df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow", row_group_size=row_group_size)
             else:
-                all_df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow')
+                all_df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow")
             batch_file_size = os.path.getsize(f"{data_source_new}/{file_name}")
-            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size/1024/1024} MB")
+            log.info(f"file_size with rows {total_rows} for {file_name}: {batch_file_size / 1024 / 1024} MB")
         files.append(file_name)
     else:
         for i in range(file_nums):
             all_field_data = {}
             for data_field in data_fields:
-                data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
-                                              float_vector=float_vector, dim=dim, array_length=array_length)
+                data = gen_data_by_data_field(
+                    data_field=data_field,
+                    rows=rows,
+                    start=0,
+                    float_vector=float_vector,
+                    dim=dim,
+                    array_length=array_length,
+                )
                 all_field_data[data_field] = data
             if enable_dynamic_field:
                 all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
             df = pd.DataFrame(all_field_data)
             file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-error-{err_type}-{str(uuid.uuid4())}.parquet"
             if row_group_size is not None:
-                df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
+                df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow", row_group_size=row_group_size)
             else:
-                df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow')
+                df.to_parquet(f"{data_source_new}/{file_name}", engine="pyarrow")
             files.append(file_name)
             start_uid += rows
     files = [f"{u_id}/{f}" for f in files]
     return files
 
 
-def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket",
-                                   is_row_based=True, rows=100, dim=128,
-                                   auto_id=True, str_pk=False, float_vector=True,
-                                   data_fields=[], file_nums=1, multi_folder=False,
-                                   file_type=".json", err_type="", force=False, **kwargs):
+def prepare_bulk_insert_json_files(
+    minio_endpoint="",
+    bucket_name="milvus-bucket",
+    is_row_based=True,
+    rows=100,
+    dim=128,
+    auto_id=True,
+    str_pk=False,
+    float_vector=True,
+    data_fields=[],
+    file_nums=1,
+    multi_folder=False,
+    file_type=".json",
+    err_type="",
+    force=False,
+    **kwargs,
+):
     """
     Generate files based on the params in json format and copy them to minio
 
@@ -1184,29 +1392,71 @@ def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket
     log.info(f"data_fields: {data_fields}")
     log.info(f"data_fields_c: {data_fields_c}")
 
-    files = gen_json_files(is_row_based=is_row_based, rows=rows, dim=dim,
-                           auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
-                           data_fields=data_fields_c, file_nums=file_nums, multi_folder=multi_folder,
-                           file_type=file_type, err_type=err_type, force=force, **kwargs)
+    files = gen_json_files(
+        is_row_based=is_row_based,
+        rows=rows,
+        dim=dim,
+        auto_id=auto_id,
+        str_pk=str_pk,
+        float_vector=float_vector,
+        data_fields=data_fields_c,
+        file_nums=file_nums,
+        multi_folder=multi_folder,
+        file_type=file_type,
+        err_type=err_type,
+        force=force,
+        **kwargs,
+    )
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_insert_new_json_files(minio_endpoint="", bucket_name="milvus-bucket",
-                                    rows=100, dim=128, float_vector=True, file_size=None,
-                                    data_fields=[], file_nums=1, enable_dynamic_field=False,
-                                    err_type="", force=False, **kwargs):
-
+def prepare_bulk_insert_new_json_files(
+    minio_endpoint="",
+    bucket_name="milvus-bucket",
+    rows=100,
+    dim=128,
+    float_vector=True,
+    file_size=None,
+    data_fields=[],
+    file_nums=1,
+    enable_dynamic_field=False,
+    err_type="",
+    force=False,
+    **kwargs,
+):
     log.info(f"data_fields: {data_fields}")
-    files = gen_new_json_files(float_vector=float_vector, rows=rows, dim=dim,  data_fields=data_fields, file_nums=file_nums, file_size=file_size, err_type=err_type, enable_dynamic_field=enable_dynamic_field, **kwargs)
+    files = gen_new_json_files(
+        float_vector=float_vector,
+        rows=rows,
+        dim=dim,
+        data_fields=data_fields,
+        file_nums=file_nums,
+        file_size=file_size,
+        err_type=err_type,
+        enable_dynamic_field=enable_dynamic_field,
+        **kwargs,
+    )
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, enable_dynamic_field=False, file_size=None,
-                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False, include_meta=True, **kwargs):
+def prepare_bulk_insert_numpy_files(
+    minio_endpoint="",
+    bucket_name="milvus-bucket",
+    rows=100,
+    dim=128,
+    enable_dynamic_field=False,
+    file_size=None,
+    data_fields=[DataField.vec_field],
+    float_vector=True,
+    file_nums=1,
+    force=False,
+    include_meta=True,
+    **kwargs,
+):
     """
     Generate column based files based on params in numpy format and copy them to the minio
     Note: each field in data_fields would be generated one numpy file.
@@ -1236,18 +1486,40 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     Return: List
         File name list or file name with sub-folder list
     """
-    files = gen_npy_files(rows=rows, dim=dim, float_vector=float_vector, file_size=file_size,
-                          data_fields=data_fields, enable_dynamic_field=enable_dynamic_field,
-                          file_nums=file_nums, force=force, include_meta=include_meta, **kwargs)
+    files = gen_npy_files(
+        rows=rows,
+        dim=dim,
+        float_vector=float_vector,
+        file_size=file_size,
+        data_fields=data_fields,
+        enable_dynamic_field=enable_dynamic_field,
+        file_nums=file_nums,
+        force=force,
+        include_meta=include_meta,
+        **kwargs,
+    )
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None,
-                                      file_size=None, row_group_size=None, enable_dynamic_field=False,
-                                      data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False,
-                                      include_meta=True, sparse_format="doc", **kwargs):
+def prepare_bulk_insert_parquet_files(
+    minio_endpoint="",
+    bucket_name="milvus-bucket",
+    rows=100,
+    dim=128,
+    array_length=None,
+    file_size=None,
+    row_group_size=None,
+    enable_dynamic_field=False,
+    data_fields=[DataField.vec_field],
+    float_vector=True,
+    file_nums=1,
+    force=False,
+    include_meta=True,
+    sparse_format="doc",
+    **kwargs,
+):
     """
     Generate column based files based on params in parquet format and copy them to the minio
     Note: each field in data_fields would be generated one parquet file.
@@ -1277,9 +1549,20 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
     Return: List
         File name list or file name with sub-folder list
     """
-    files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector, enable_dynamic_field=enable_dynamic_field,
-                              data_fields=data_fields, array_length=array_length, file_size=file_size, row_group_size=row_group_size,
-                              file_nums=file_nums, include_meta=include_meta, sparse_format=sparse_format, **kwargs)
+    files = gen_parquet_files(
+        rows=rows,
+        dim=dim,
+        float_vector=float_vector,
+        enable_dynamic_field=enable_dynamic_field,
+        data_fields=data_fields,
+        array_length=array_length,
+        file_size=file_size,
+        row_group_size=row_group_size,
+        file_nums=file_nums,
+        include_meta=include_meta,
+        sparse_format=sparse_format,
+        **kwargs,
+    )
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
@@ -1308,8 +1591,8 @@ def gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid):
                 if data_field == DataField.bool_field:
                     f.write(str(random.choice(["true", "false"])))
                 if data_field == DataField.vec_field:
-                    vectors = gen_float_vectors(1, dim) if float_vector else gen_binary_vectors(1, dim//8)
-                    f.write('"' + ','.join(str(x) for x in vectors) + '"')
+                    vectors = gen_float_vectors(1, dim) if float_vector else gen_binary_vectors(1, dim // 8)
+                    f.write('"' + ",".join(str(x) for x in vectors) + '"')
                 if j != len(data_fields) - 1:
                     f.write(",")
             f.write("\n")
@@ -1321,7 +1604,18 @@ def gen_csv_files(rows, dim, auto_id, float_vector, data_fields, file_nums, forc
     if (not auto_id) and (DataField.pk_field not in data_fields):
         data_fields.append(DataField.pk_field)
     for i in range(file_nums):
-        file_name = gen_file_name(is_row_based=True, rows=rows, dim=dim, auto_id=auto_id, float_vector=float_vector, data_fields=data_fields, file_num=i, file_type=".csv", str_pk=False, err_type="")
+        file_name = gen_file_name(
+            is_row_based=True,
+            rows=rows,
+            dim=dim,
+            auto_id=auto_id,
+            float_vector=float_vector,
+            data_fields=data_fields,
+            file_num=i,
+            file_type=".csv",
+            str_pk=False,
+            err_type="",
+        )
         file = f"{data_source}/{file_name}"
         if not os.path.exists(file) or force:
             gen_csv_file(file, float_vector, data_fields, rows, dim, start_uid)
@@ -1330,7 +1624,17 @@ def gen_csv_files(rows, dim, auto_id, float_vector, data_fields, file_nums, forc
     return files
 
 
-def prepare_bulk_insert_csv_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, auto_id=True, float_vector=True, data_fields=[], file_nums=1, force=False):
+def prepare_bulk_insert_csv_files(
+    minio_endpoint="",
+    bucket_name="milvus-bucket",
+    rows=100,
+    dim=128,
+    auto_id=True,
+    float_vector=True,
+    data_fields=[],
+    file_nums=1,
+    force=False,
+):
     """
     Generate row based files based on params in csv format and copy them to minio
 
@@ -1366,6 +1670,14 @@ def prepare_bulk_insert_csv_files(minio_endpoint="", bucket_name="milvus-bucket"
     data_fields_c = copy.deepcopy(data_fields)
     log.info(f"data_fields: {data_fields}")
     log.info(f"data_fields_c: {data_fields_c}")
-    files = gen_csv_files(rows=rows, dim=dim, auto_id=auto_id, float_vector=float_vector, data_fields=data_fields_c, file_nums=file_nums, force=force)
+    files = gen_csv_files(
+        rows=rows,
+        dim=dim,
+        auto_id=auto_id,
+        float_vector=float_vector,
+        data_fields=data_fields_c,
+        file_nums=file_nums,
+        force=force,
+    )
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files

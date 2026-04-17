@@ -14,7 +14,7 @@ from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, 
 from pymilvus.orm.types import CONSISTENCY_STRONG
 
 # Register the log filter plugin
-pytest_plugins = ['plugin.log_filter']
+pytest_plugins = ["plugin.log_filter"]
 
 timeout = 60
 dimension = 128
@@ -33,36 +33,54 @@ def pytest_addoption(parser):
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
-    parser.addoption('--dry_run', action='store_true', default=False, help="")
-    parser.addoption('--database_name', action='store', default="default", help="name of database")
-    parser.addoption('--partition_name', action='store', default="partition_name", help="name of partition")
-    parser.addoption('--connect_name', action='store', default="connect_name", help="name of connect")
-    parser.addoption('--descriptions', action='store', default="partition_des", help="descriptions of partition")
-    parser.addoption('--collection_name', action='store', default="collection_name", help="name of collection")
-    parser.addoption('--search_vectors', action='store', default="search_vectors", help="vectors of search")
-    parser.addoption('--index_param', action='store', default="index_param", help="index_param of index")
-    parser.addoption('--data', action='store', default="data", help="data of request")
-    parser.addoption('--clean_log', action='store_true', default=True, help="clean log before testing (default: True)")
-    parser.addoption('--schema', action='store', default="schema", help="schema of test interface")
-    parser.addoption('--err_msg', action='store', default="err_msg", help="error message of test")
-    parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
-    parser.addoption('--check_content', action='store', default="check_content", help="content of check")
-    parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
-    parser.addoption('--replica_num', action='store', default=ct.default_replica_num, help="memory replica number")
-    parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
-    parser.addoption('--minio_bucket', action='store', default="milvus-bucket", help="minio bucket name")
-    parser.addoption('--uri', action='store', default="", help="uri for milvus client")
-    parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
+    parser.addoption("--dry_run", action="store_true", default=False, help="")
+    parser.addoption("--database_name", action="store", default="default", help="name of database")
+    parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")
+    parser.addoption("--connect_name", action="store", default="connect_name", help="name of connect")
+    parser.addoption("--descriptions", action="store", default="partition_des", help="descriptions of partition")
+    parser.addoption("--collection_name", action="store", default="collection_name", help="name of collection")
+    parser.addoption("--search_vectors", action="store", default="search_vectors", help="vectors of search")
+    parser.addoption("--index_param", action="store", default="index_param", help="index_param of index")
+    parser.addoption("--data", action="store", default="data", help="data of request")
+    parser.addoption("--clean_log", action="store_true", default=True, help="clean log before testing (default: True)")
+    parser.addoption("--schema", action="store", default="schema", help="schema of test interface")
+    parser.addoption("--err_msg", action="store", default="err_msg", help="error message of test")
+    parser.addoption("--term_expr", action="store", default="term_expr", help="expr of query quest")
+    parser.addoption("--check_content", action="store", default="check_content", help="content of check")
+    parser.addoption("--field_name", action="store", default="field_name", help="field_name of index")
+    parser.addoption("--replica_num", action="store", default=ct.default_replica_num, help="memory replica number")
+    parser.addoption("--minio_host", action="store", default="localhost", help="minio service's ip")
+    parser.addoption("--minio_bucket", action="store", default="milvus-bucket", help="minio bucket name")
+    parser.addoption("--uri", action="store", default="", help="uri for milvus client")
+    parser.addoption("--token", action="store", default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
-    parser.addoption('--data_size', type=int, action='store', default=3000, help="data size for deploy test")
+    parser.addoption("--data_size", type=int, action="store", default=3000, help="data size for deploy test")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei embedding endpoint")
+    parser.addoption(
+        "--tei_endpoint",
+        action="store",
+        default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80",
+        help="tei embedding endpoint",
+    )
 
-    parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei rerank endpoint")
-    parser.addoption("--vllm_reranker_endpoint", action="store", default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80", help="vllm rerank endpoint")
+    parser.addoption(
+        "--tei_reranker_endpoint",
+        action="store",
+        default="http://text-rerank-service.milvus-ci.svc.cluster.local:80",
+        help="tei rerank endpoint",
+    )
+    parser.addoption(
+        "--vllm_reranker_endpoint",
+        action="store",
+        default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80",
+        help="vllm rerank endpoint",
+    )
     # L3 test options for alter function tests
-    parser.addoption("--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests")
+    parser.addoption(
+        "--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests"
+    )
+
 
 @pytest.fixture
 def host(request):
@@ -200,6 +218,7 @@ def field_name(request):
 def minio_host(request):
     return request.config.getoption("--minio_host")
 
+
 @pytest.fixture
 def minio_bucket(request):
     return request.config.getoption("--minio_bucket")
@@ -219,9 +238,11 @@ def token(request):
 def request_duration(request):
     return request.config.getoption("--request_duration")
 
+
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
 
 @pytest.fixture
 def tei_endpoint_2(request):
@@ -230,28 +251,33 @@ def tei_endpoint_2(request):
         pytest.skip("tei_endpoint_2 not configured")
     return endpoint
 
+
 @pytest.fixture
 def tei_reranker_endpoint(request):
     return request.config.getoption("--tei_reranker_endpoint")
+
 
 @pytest.fixture
 def vllm_reranker_endpoint(request):
     return request.config.getoption("--vllm_reranker_endpoint")
 
+
 @pytest.fixture
 def data_size(request):
     return request.config.getoption("--data_size")
 
+
 @pytest.fixture
 def is_check(request):
     return request.config.getoption("--is_check")
+
 
 """ fixture func """
 
 
 @pytest.fixture(scope="session", autouse=True)
 def initialize_env(request):
-    """ clean log before testing """
+    """clean log before testing"""
     host = request.config.getoption("--host")
     port = request.config.getoption("--port")
     handler = request.config.getoption("--handler")
@@ -277,8 +303,12 @@ def initialize_env(request):
 
 
 # TODO: construct invalid index params for all index types
-@pytest.fixture(params=[{"metric_type": "L3", "index_type": "IVF_FLAT"},
-                        {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}}])
+@pytest.fixture(
+    params=[
+        {"metric_type": "L3", "index_type": "IVF_FLAT"},
+        {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}},
+    ]
+)
 def get_invalid_index_params(request):
     yield request.param
 
@@ -290,9 +320,7 @@ def get_invalid_vector_dict(request):
 
 def pytest_configure(config):
     # register an additional marker
-    config.addinivalue_line(
-        "markers", "tag(name): mark test to run only matching the tag"
-    )
+    config.addinivalue_line("markers", "tag(name): mark test to run only matching the tag")
 
 
 def pytest_runtest_setup(item):
@@ -307,7 +335,7 @@ def pytest_runtest_setup(item):
 
 
 def pytest_runtestloop(session):
-    if session.config.getoption('--dry_run'):
+    if session.config.getoption("--dry_run"):
         total_num = 0
         file_num = 0
         tags_num = 0
@@ -332,7 +360,7 @@ def check_server_connection(request):
     port = request.config.getoption("--port")
 
     connected = True
-    if host and (host not in ['localhost', '127.0.0.1']):
+    if host and (host not in ["localhost", "127.0.0.1"]):
         try:
             socket.getaddrinfo(host, port, 0, 0, socket.IPPROTO_TCP)
         except Exception as e:
@@ -438,7 +466,7 @@ def milvus(request):
 def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    log.debug(f'collection_name: {collection_name}')
+    log.debug(f"collection_name: {collection_name}")
     try:
         default_fields = gen_default_fields()
         connect.create_collection(collection_name, default_fields, consistency_level=CONSISTENCY_STRONG)
@@ -459,7 +487,7 @@ def collection(request, connect):
 def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    log.debug(f'id_collection_name: {collection_name}')
+    log.debug(f"id_collection_name: {collection_name}")
     try:
         fields = gen_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
@@ -513,6 +541,7 @@ def binary_id_collection(request, connect):
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
+
 
 # for test exit in the future
 # @pytest.hookimpl(hookwrapper=True, tryfirst=True)

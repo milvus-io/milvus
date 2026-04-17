@@ -6,14 +6,14 @@ from utils.util_log import test_log as log
 from utils.util_k8s import get_pod_ip_name_pairs
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
-template_yaml = os.path.join(os.path.dirname(__file__), 'template/default.yaml')
-MILVUS_GRP = 'milvus.io'
+template_yaml = os.path.join(os.path.dirname(__file__), "template/default.yaml")
+MILVUS_GRP = "milvus.io"
 # MILVUS_VER = 'v1alpha1'
-MILVUS_VER = 'v1beta1'
+MILVUS_VER = "v1beta1"
 # MILVUS_PLURAL = 'milvusclusters'
-MILVUS_PLURAL = 'milvuses'
+MILVUS_PLURAL = "milvuses"
 # MILVUS_KIND = 'MilvusCluster'
-MILVUS_KIND = 'Milvus'
+MILVUS_KIND = "Milvus"
 
 
 class MilvusOperator(object):
@@ -37,10 +37,10 @@ class MilvusOperator(object):
 
         if template is None:
             # d_configs = benedict()
-            log.debug(f'template yaml {template_yaml}')
+            log.debug(f"template yaml {template_yaml}")
             d_configs = benedict.from_yaml(template_yaml)
-            d_configs['apiVersion'] = f'{MILVUS_GRP}/{MILVUS_VER}'
-            d_configs['kind'] = MILVUS_KIND
+            d_configs["apiVersion"] = f"{MILVUS_GRP}/{MILVUS_VER}"
+            d_configs["kind"] = MILVUS_KIND
         else:
             d_configs = benedict.from_yaml(template)
 
@@ -60,14 +60,13 @@ class MilvusOperator(object):
         """
         new_configs = self._update_configs(configs, template)
         log.debug(new_configs)
-        namespace = new_configs['metadata'].get('namespace', 'default')
+        namespace = new_configs["metadata"].get("namespace", "default")
         # apply custom resource object to deploy milvus
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
-        log.info(f'install milvus with configs: {json.dumps(new_configs, indent=4)}')
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
+        log.info(f"install milvus with configs: {json.dumps(new_configs, indent=4)}")
         return cus_res.create(new_configs)
 
-    def uninstall(self, release_name, namespace='default', delete_depends=True, delete_pvc=True):
+    def uninstall(self, release_name, namespace="default", delete_depends=True, delete_pvc=True):
         """
         Method: delete custom resource object to uninstall milvus
         Params:
@@ -76,26 +75,29 @@ class MilvusOperator(object):
             delete_depends: whether to delete the dependent etcd, pulsar and minio services. default: True
             delete_pvc: whether to delete the data persistent pvc volumes. default: True
         """
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         del_configs = {}
         if delete_depends:
-            del_configs = {'spec.dependencies.etcd.inCluster.deletionPolicy': 'Delete',
-                           'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
-                           'spec.dependencies.kafka.inCluster.deletionPolicy': 'Delete',
-                           'spec.dependencies.storage.inCluster.deletionPolicy': 'Delete'
-                           }
+            del_configs = {
+                "spec.dependencies.etcd.inCluster.deletionPolicy": "Delete",
+                "spec.dependencies.pulsar.inCluster.deletionPolicy": "Delete",
+                "spec.dependencies.kafka.inCluster.deletionPolicy": "Delete",
+                "spec.dependencies.storage.inCluster.deletionPolicy": "Delete",
+            }
         if delete_pvc:
-            del_configs.update({'spec.dependencies.etcd.inCluster.pvcDeletion': True,
-                                'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
-                                'spec.dependencies.kafka.inCluster.pvcDeletion': True,
-                                'spec.dependencies.storage.inCluster.pvcDeletion': True
-                                })
+            del_configs.update(
+                {
+                    "spec.dependencies.etcd.inCluster.pvcDeletion": True,
+                    "spec.dependencies.pulsar.inCluster.pvcDeletion": True,
+                    "spec.dependencies.kafka.inCluster.pvcDeletion": True,
+                    "spec.dependencies.storage.inCluster.pvcDeletion": True,
+                }
+            )
         if delete_depends or delete_pvc:
             self.upgrade(release_name, del_configs, namespace=namespace)
         cus_res.delete(release_name)
 
-    def upgrade(self, release_name, configs, namespace='default'):
+    def upgrade(self, release_name, configs, namespace="default"):
         """
         Method: patch custom resource object to upgrade milvus
         Params:
@@ -112,29 +114,29 @@ class MilvusOperator(object):
         for key in configs.keys():
             d_configs[key] = configs[key]
 
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         log.debug(f"upgrade milvus with configs: {d_configs}")
         cus_res.patch(release_name, d_configs)
         self.wait_for_healthy(release_name, namespace=namespace)
 
-    def rolling_update(self, release_name, new_image_name, namespace='default'):
+    def rolling_update(self, release_name, new_image_name, namespace="default"):
         """
         Method: patch custom resource object to rolling update milvus
         Params:
             release_name: release name of milvus
             namespace: namespace that the milvus is running in
         """
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
-        rolling_configs = {'spec.components.enableRollingUpdate': True,
-                           'spec.components.imageUpdateMode': "rollingUpgrade",
-                           'spec.components.image': new_image_name}
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
+        rolling_configs = {
+            "spec.components.enableRollingUpdate": True,
+            "spec.components.imageUpdateMode": "rollingUpgrade",
+            "spec.components.image": new_image_name,
+        }
         log.debug(f"rolling update milvus with configs: {rolling_configs}")
         cus_res.patch(release_name, rolling_configs)
         self.wait_for_healthy(release_name, namespace=namespace)
 
-    def scale(self, release_name, component, replicas, namespace='default'):
+    def scale(self, release_name, component, replicas, namespace="default"):
         """
         Method: scale milvus components by replicas
         Params:
@@ -143,15 +145,14 @@ class MilvusOperator(object):
             component: the component to scale, e.g: dataNode, queryNode, indexNode, proxy
             namespace: namespace that the milvus is running in
         """
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
-        component = component.replace('node', 'Node')
-        scale_configs = {f'spec.components.{component}.replicas': replicas}
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
+        component = component.replace("node", "Node")
+        scale_configs = {f"spec.components.{component}.replicas": replicas}
         log.info(f"scale milvus with configs: {scale_configs}")
         self.upgrade(release_name, scale_configs, namespace=namespace)
         self.wait_for_healthy(release_name, namespace=namespace)
 
-    def wait_for_healthy(self, release_name, namespace='default', timeout=600):
+    def wait_for_healthy(self, release_name, namespace="default", timeout=600):
         """
         Method: wait a milvus instance until healthy or timeout
         Params:
@@ -159,16 +160,15 @@ class MilvusOperator(object):
             namespace: namespace that the milvus is running in
             timeout: default: 600 seconds
         """
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         starttime = time.time()
         log.info(f"start to check healthy: {starttime}")
         while time.time() < starttime + timeout:
             time.sleep(10)
             res_object = cus_res.get(release_name)
-            mic_status = res_object.get('status', None)
+            mic_status = res_object.get("status", None)
             if mic_status is not None:
-                if 'Healthy' == mic_status.get('status'):
+                if "Healthy" == mic_status.get("status"):
                     log.info(f"milvus healthy in {time.time() - starttime} seconds")
                     return True
                 else:
@@ -176,31 +176,29 @@ class MilvusOperator(object):
         log.info(f"end to check healthy until timeout {timeout}")
         return False
 
-    def endpoint(self, release_name, namespace='default'):
+    def endpoint(self, release_name, namespace="default"):
         """
         Method: get Milvus endpoint by name and namespace
         Return: a string type endpoint. e.g: host:port
         """
         endpoint = None
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         res_object = cus_res.get(release_name)
-        if res_object.get('status', None) is not None:
-            endpoint = res_object['status']['endpoint']
+        if res_object.get("status", None) is not None:
+            endpoint = res_object["status"]["endpoint"]
 
         return endpoint
 
-    def etcd_endpoints(self, release_name, namespace='default'):
+    def etcd_endpoints(self, release_name, namespace="default"):
         """
         Method: get etcd endpoints by name and namespace
         Return: a string type etcd endpoints. e.g: host:port
         """
         etcd_endpoints = None
-        cus_res = CusResource(kind=self.plural, group=self.group,
-                              version=self.version, namespace=namespace)
+        cus_res = CusResource(kind=self.plural, group=self.group, version=self.version, namespace=namespace)
         res_object = cus_res.get(release_name)
         try:
-            etcd_endpoints = res_object['spec']['dependencies']['etcd']['endpoints']
+            etcd_endpoints = res_object["spec"]["dependencies"]["etcd"]["endpoints"]
         except KeyError:
             log.info("etcd endpoints not found")
         # get pod ip by pod name
@@ -209,4 +207,3 @@ class MilvusOperator(object):
         if res:
             etcd_endpoints = [f"{pod_ip}:2379" for pod_ip in res.keys()]
         return etcd_endpoints[0]
-

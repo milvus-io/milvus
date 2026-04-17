@@ -8,4 +8,3 @@ def pytest_addoption(parser):
 @pytest.fixture
 def image_tag(request):
     return request.config.getoption("--image_tag")
-

@@ -14,8 +14,16 @@ class ApiCollectionSchemaWrapper:
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([CollectionSchema, fields, description], **kwargs)
         self.collection_schema = response if is_succ else None
-        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ=is_succ, fields=fields,
-                                       description=description, **kwargs).run()
+        check_result = ResponseChecker(
+            response,
+            func_name,
+            check_task,
+            check_items,
+            is_succ=is_succ,
+            fields=fields,
+            description=description,
+            **kwargs,
+        ).run()
         return response, check_result
 
     @property
@@ -53,8 +61,9 @@ class ApiCollectionSchemaWrapper:
     def add_field(self, field_name, datatype, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([self.collection_schema.add_field, field_name, datatype], **kwargs)
-        check_result = ResponseChecker(response, func_name, check_task, check_items,
-                                       field_name=field_name, datatype=datatype, **kwargs).run()
+        check_result = ResponseChecker(
+            response, func_name, check_task, check_items, field_name=field_name, datatype=datatype, **kwargs
+        ).run()
         return response, check_result
 
 
@@ -66,8 +75,17 @@ class ApiFieldSchemaWrapper:
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([FieldSchema, name, dtype, description], **kwargs)
         self.field_schema = response if is_succ else None
-        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, name=name, dtype=dtype,
-                                       description=description, **kwargs).run()
+        check_result = ResponseChecker(
+            response,
+            func_name,
+            check_task,
+            check_items,
+            is_succ,
+            name=name,
+            dtype=dtype,
+            description=description,
+            **kwargs,
+        ).run()
         return response, check_result
 
     @property

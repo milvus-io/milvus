@@ -1,8 +1,5 @@
 import pytest
-from pymilvus import (
-    DataType,
-    Function, FunctionType, FunctionScore
-)
+from pymilvus import DataType, Function, FunctionType, FunctionScore
 
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
@@ -56,9 +53,7 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.vector_field_name,
-                               metric_type="COSINE",
-                               index_type="AUTOINDEX")
+        index_params.add_index(field_name=self.vector_field_name, metric_type="COSINE", index_type="AUTOINDEX")
         self.create_index(client, self.collection_name, index_params=index_params)
 
         # Load collection
@@ -103,15 +98,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -128,15 +127,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -149,22 +152,24 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(default_nq, self.dim)
-        boost_fn1 = self._make_boost_function(
-            name="boost1", weight="2.0", filter_expr=f"{self.int64_field_name} > 0")
-        boost_fn2 = self._make_boost_function(
-            name="boost2", weight="0.5", filter_expr=f"{self.int64_field_name} <= 0")
+        boost_fn1 = self._make_boost_function(name="boost1", weight="2.0", filter_expr=f"{self.int64_field_name} > 0")
+        boost_fn2 = self._make_boost_function(name="boost2", weight="0.5", filter_expr=f"{self.int64_field_name} <= 0")
         fs = self._make_function_score([boost_fn1, boost_fn2])
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -181,15 +186,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn, params={"boost_mode": "sum"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -206,15 +215,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -227,22 +240,24 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         """
         client = self._client()
         vectors = cf.gen_vectors(default_nq, self.dim)
-        boost_fn1 = self._make_boost_function(
-            name="boost1", weight="1.5", filter_expr=f"{self.int64_field_name} > 0")
-        boost_fn2 = self._make_boost_function(
-            name="boost2", weight="0.8", filter_expr=f"{self.float_field_name} > 0")
+        boost_fn1 = self._make_boost_function(name="boost1", weight="1.5", filter_expr=f"{self.int64_field_name} > 0")
+        boost_fn2 = self._make_boost_function(name="boost2", weight="0.8", filter_expr=f"{self.float_field_name} > 0")
         fs = self._make_function_score([boost_fn1, boost_fn2], params={"function_mode": "sum"})
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -260,16 +275,20 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         search_filter = f"{self.int64_field_name} >= 0"
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             filter=search_filter,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -287,16 +306,20 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         output_fields = [self.int64_field_name, self.float_field_name, self.varchar_field_name]
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             output_fields=output_fields,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": default_limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
         # Verify output fields are present in the entity sub-dict
@@ -320,15 +343,19 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         res, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=limit,
             ranker=fs,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": limit,
-                         "pk_name": self.pk_field_name}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": default_nq,
+                "limit": limit,
+                "pk_name": self.pk_field_name,
+            },
         )
         assert len(res) == default_nq
 
@@ -344,7 +371,9 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
 
         # Search without ranker
         res_no_ranker, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
         )
@@ -353,7 +382,9 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         boost_fn = self._make_boost_function(weight="10.0")
         fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
         res_with_ranker, _ = self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
@@ -362,8 +393,9 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         # Verify scores are different (boost should affect scores)
         scores_no_ranker = [hit["distance"] for hit in res_no_ranker[0]]
         scores_with_ranker = [hit["distance"] for hit in res_with_ranker[0]]
-        assert scores_no_ranker != scores_with_ranker, \
+        assert scores_no_ranker != scores_with_ranker, (
             "Boost ranker should change scores compared to search without ranker"
+        )
 
     # ==================== Negative Tests ====================
 
@@ -380,13 +412,14 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "invalid parameter"}
+            check_items={"err_code": 1100, "err_msg": "invalid parameter"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -408,13 +441,14 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "must set weight params"}
+            check_items={"err_code": 1100, "err_msg": "must set weight params"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -430,14 +464,15 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             group_by_field=self.int64_field_name,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "segment scorer with group_by"}
+            check_items={"err_code": 1100, "err_msg": "segment scorer with group_by"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -453,11 +488,12 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
         fs = self._make_function_score(boost_fn)
 
         self.search(
-            client, self.collection_name, vectors,
+            client,
+            self.collection_name,
+            vectors,
             anns_field=self.vector_field_name,
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "parse expr failed"}
+            check_items={"err_code": 1100, "err_msg": "parse expr failed"},
         )

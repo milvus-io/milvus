@@ -40,6 +40,7 @@ fake = Faker()
 
 
 from common.common_params import Expr, DefaultIndexSearchParams
+
 """" Methods of processing data """
 
 
@@ -55,34 +56,80 @@ class NullValue:
     Arithmetic propagates NULL. Python's OR short-circuit handles cases like
     ``int64 == 0 or float == 100`` correctly when float is NULL.
     """
+
     def __eq__(self, other):
         if isinstance(other, NullValue):
             return False
         return False
 
-    def __ne__(self, other): return False
-    def __lt__(self, other): return False
-    def __le__(self, other): return False
-    def __gt__(self, other): return False
-    def __ge__(self, other): return False
-    def __add__(self, other): return self
-    def __radd__(self, other): return self
-    def __sub__(self, other): return self
-    def __rsub__(self, other): return self
-    def __mul__(self, other): return self
-    def __rmul__(self, other): return self
-    def __truediv__(self, other): return self
-    def __rtruediv__(self, other): return self
-    def __mod__(self, other): return self
-    def __rmod__(self, other): return self
-    def __pow__(self, other): return self
-    def __rpow__(self, other): return self
-    def __neg__(self): return self
-    def __pos__(self): return self
-    def __abs__(self): return self
-    def __hash__(self): return id(self)
-    def __bool__(self): return False
-    def __repr__(self): return "NULL"
+    def __ne__(self, other):
+        return False
+
+    def __lt__(self, other):
+        return False
+
+    def __le__(self, other):
+        return False
+
+    def __gt__(self, other):
+        return False
+
+    def __ge__(self, other):
+        return False
+
+    def __add__(self, other):
+        return self
+
+    def __radd__(self, other):
+        return self
+
+    def __sub__(self, other):
+        return self
+
+    def __rsub__(self, other):
+        return self
+
+    def __mul__(self, other):
+        return self
+
+    def __rmul__(self, other):
+        return self
+
+    def __truediv__(self, other):
+        return self
+
+    def __rtruediv__(self, other):
+        return self
+
+    def __mod__(self, other):
+        return self
+
+    def __rmod__(self, other):
+        return self
+
+    def __pow__(self, other):
+        return self
+
+    def __rpow__(self, other):
+        return self
+
+    def __neg__(self):
+        return self
+
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        return self
+
+    def __hash__(self):
+        return id(self)
+
+    def __bool__(self):
+        return False
+
+    def __repr__(self):
+        return "NULL"
 
 
 SQL_NULL = NullValue()
@@ -128,19 +175,9 @@ class ParamInfo:
 
 param_info = ParamInfo()
 
-en_vocabularies_distribution = {
-    "hello": 0.01,
-    "milvus": 0.01,
-    "vector": 0.01,
-    "database": 0.01
-}
+en_vocabularies_distribution = {"hello": 0.01, "milvus": 0.01, "vector": 0.01, "database": 0.01}
 
-zh_vocabularies_distribution = {
-    "你好": 0.01,
-    "向量": 0.01,
-    "数据": 0.01,
-    "库": 0.01
-}
+zh_vocabularies_distribution = {"你好": 0.01, "向量": 0.01, "数据": 0.01, "库": 0.01}
 
 
 def patch_faker_text(fake_instance, vocabularies_distribution):
@@ -165,7 +202,7 @@ def patch_faker_text(fake_instance, vocabularies_distribution):
     def new_text(nb_sentences=100, *args, **kwargs):
         sentences = []
         # Split original text into sentences
-        original_sentences = original_text(nb_sentences).split('.')
+        original_sentences = original_text(nb_sentences).split(".")
         original_sentences = [s.strip() for s in original_sentences if s.strip()]
 
         for base_sentence in original_sentences:
@@ -179,13 +216,13 @@ def patch_faker_text(fake_instance, vocabularies_distribution):
                     words.insert(insert_pos, word)
 
             # Reconstruct the sentence
-            base_sentence = ' '.join(words)
+            base_sentence = " ".join(words)
 
             # Ensure proper capitalization
             base_sentence = base_sentence[0].upper() + base_sentence[1:]
             sentences.append(base_sentence)
 
-        return '. '.join(sentences) + '.'
+        return ". ".join(sentences) + "."
 
     # Replace the original text method with our custom one
     fake_instance.text = new_text
@@ -202,7 +239,7 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     def remove_punctuation(text):
         text = text.strip()
         text = text.replace("\n", " ")
-        return re.sub(r'[^\w\s]', ' ', text)
+        return re.sub(r"[^\w\s]", " ", text)
 
     # Tokenize the corpus
     def jieba_split(text):
@@ -213,17 +250,13 @@ def get_bm25_ground_truth(corpus, queries, top_k=100, language="en"):
     stemmer = None
     if language in ["zh", "cn", "chinese"]:
         splitter = jieba_split
-        tokenizer = Tokenizer(
-            stemmer=stemmer, splitter=splitter, stopwords=stopwords
-        )
+        tokenizer = Tokenizer(stemmer=stemmer, splitter=splitter, stopwords=stopwords)
     else:
-        tokenizer = Tokenizer(
-            stemmer=stemmer, stopwords=stopwords
-        )
+        tokenizer = Tokenizer(stemmer=stemmer, stopwords=stopwords)
     corpus_tokens = tokenizer.tokenize(corpus, return_as="tuple")
     retriever = bm25s.BM25()
     retriever.index(corpus_tokens)
-    query_tokens = tokenizer.tokenize(queries,return_as="tuple")
+    query_tokens = tokenizer.tokenize(queries, return_as="tuple")
     results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=top_k)
     return results, scores
 
@@ -232,7 +265,7 @@ def custom_tokenizer(language="en"):
     def remove_punctuation(text):
         text = text.strip()
         text = text.replace("\n", " ")
-        return re.sub(r'[^\w\s]', ' ', text)
+        return re.sub(r"[^\w\s]", " ", text)
 
     # Tokenize the corpus
     def jieba_split(text):
@@ -247,14 +280,10 @@ def custom_tokenizer(language="en"):
     stemmer = None
     if language in ["zh", "cn", "chinese"]:
         splitter = jieba_split
-        tokenizer = Tokenizer(
-            stemmer=stemmer, splitter=splitter, stopwords=stopwords
-        )
+        tokenizer = Tokenizer(stemmer=stemmer, splitter=splitter, stopwords=stopwords)
     else:
         splitter = blank_space_split
-        tokenizer = Tokenizer(
-            stemmer=stemmer, splitter= splitter, stopwords=stopwords
-        )
+        tokenizer = Tokenizer(stemmer=stemmer, splitter=splitter, stopwords=stopwords)
     return tokenizer
 
 
@@ -269,19 +298,14 @@ def manual_check_text_match(df, word, col):
 
 
 def get_top_english_tokens(counter, n=10):
-    english_pattern = re.compile(r'^[a-zA-Z]+$')
+    english_pattern = re.compile(r"^[a-zA-Z]+$")
 
-    english_tokens = {
-        word: freq
-        for word, freq in counter.items()
-        if english_pattern.match(str(word))
-    }
+    english_tokens = {word: freq for word, freq in counter.items() if english_pattern.match(str(word))}
     english_counter = Counter(english_tokens)
     return english_counter.most_common(n)
 
 
 def analyze_documents(texts, language="en"):
-
     tokenizer = custom_tokenizer(language)
     new_texts = []
     for text in texts:
@@ -305,7 +329,7 @@ def analyze_documents(texts, language="en"):
     # if language in ["zh", "cn", "chinese"], remove the long words
     # this is a trick to make the text match test case verification simple, because the long word can be still split
     if language in ["zh", "cn", "chinese"]:
-        word_freq = Counter({word: count for word, count in word_freq.items() if 1< len(word) <= 3})
+        word_freq = Counter({word: count for word, count in word_freq.items() if 1 < len(word) <= 3})
     log.debug(f"word freq {word_freq.most_common(10)}")
     return word_freq
 
@@ -316,14 +340,11 @@ def analyze_documents_with_analyzer_params(texts, analyzer_params):
     else:
         uri = "http://" + param_info.param_host + ":" + str(param_info.param_port)
 
-    client = MilvusClient(
-        uri=uri,
-        token=param_info.param_token
-    )
+    client = MilvusClient(uri=uri, token=param_info.param_token)
     freq = Counter()
     res = client.run_analyzer(texts, analyzer_params, with_detail=True, with_hash=True)
     for r in res:
-        freq.update(t['token'] for t in r.tokens)
+        freq.update(t["token"] for t in r.tokens)
     log.info(f"word freq {freq.most_common(10)}")
     return freq
 
@@ -358,6 +379,7 @@ def generate_pandas_text_match_result(expr, df):
         key = expr["field"]
         value = expr["value"]
         return lambda row: value in row[key]
+
     if "not" in expr:
         key = expr["not"]["field"]
     else:
@@ -375,12 +397,12 @@ def generate_text_match_expr(query_dict):
     """
 
     def process_node(node):
-        if isinstance(node, dict) and 'field' in node and 'value' in node:
+        if isinstance(node, dict) and "field" in node and "value" in node:
             return f"TEXT_MATCH({node['field']}, '{node['value']}')"
-        elif isinstance(node, dict) and 'not' in node:
+        elif isinstance(node, dict) and "not" in node:
             return f"not {process_node(node['not'])}"
         elif isinstance(node, list):
-            return ' '.join(process_node(item) for item in node)
+            return " ".join(process_node(item) for item in node)
         elif isinstance(node, str):
             return node
         else:
@@ -392,9 +414,9 @@ def generate_text_match_expr(query_dict):
 def generate_pandas_query_string(query):
     def process_node(node):
         if isinstance(node, dict):
-            if 'field' in node and 'value' in node:
+            if "field" in node and "value" in node:
                 return f"('{node['value']}' in row['{node['field']}'])"
-            elif 'not' in node:
+            elif "not" in node:
                 return f"not {process_node(node['not'])}"
         elif isinstance(node, str):
             return node
@@ -402,7 +424,7 @@ def generate_pandas_query_string(query):
             raise ValueError(f"Invalid node type: {type(node)}")
 
     parts = [process_node(item) for item in query]
-    expression = ' '.join(parts).replace('and', 'and').replace('or', 'or')
+    expression = " ".join(parts).replace("and", "and").replace("or", "or")
     log.info(f"Generated pandas query: {expression}")
     return lambda row: eval(expression)
 
@@ -464,8 +486,7 @@ def generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=3, p_n
 
     # Filter words based on min_freq
     filtered_dict = {
-        field: [word for word, freq in words.items() if freq >= min_freq]
-        for field, words in freq_dict.items()
+        field: [word for word, freq in words.items() if freq >= min_freq] for field, words in freq_dict.items()
     }
 
     # Remove empty fields
@@ -487,7 +508,7 @@ def generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=3, p_n
             if query and _ < max_terms - 1:
                 query.append(random.choice(["and", "or"]))
             # Remove the used word to avoid repetition
-            used_word = term['value'] if isinstance(term, dict) and 'value' in term else term['not']['value']
+            used_word = term["value"] if isinstance(term, dict) and "value" in term else term["not"]["value"]
             filtered_dict[field].remove(used_word)
             if not filtered_dict[field]:
                 del filtered_dict[field]
@@ -496,10 +517,11 @@ def generate_random_query_from_freq_dict(freq_dict, min_freq=1, max_terms=3, p_n
 
 def generate_array_dataset(size, array_length, hit_probabilities, target_values):
     dataset = []
-    target_array_length = target_values.get('array_length_field', None)
-    target_array_access = target_values.get('array_access', None)
+    target_array_length = target_values.get("array_length_field", None)
+    target_array_access = target_values.get("array_access", None)
     all_target_values = set(
-        val for sublist in target_values.values() for val in (sublist if isinstance(sublist, list) else [sublist]))
+        val for sublist in target_values.values() for val in (sublist if isinstance(sublist, list) else [sublist])
+    )
     for i in range(size):
         entry = {"id": i}
 
@@ -510,21 +532,21 @@ def generate_array_dataset(size, array_length, hit_probabilities, target_values)
 
             # Ensure the array meets the condition based on its probability
             if random.random() < hit_probabilities[condition]:
-                if condition == 'contains':
+                if condition == "contains":
                     if target_values[condition] not in array:
                         array[random.randint(0, array_length - 1)] = target_values[condition]
-                elif condition == 'contains_any':
+                elif condition == "contains_any":
                     if not any(val in array for val in target_values[condition]):
                         array[random.randint(0, array_length - 1)] = random.choice(target_values[condition])
-                elif condition == 'contains_all':
+                elif condition == "contains_all":
                     indices = random.sample(range(array_length), len(target_values[condition]))
                     for idx, val in zip(indices, target_values[condition]):
                         array[idx] = val
-                elif condition == 'equals':
+                elif condition == "equals":
                     array = target_values[condition][:]
-                elif condition == 'array_length_field':
+                elif condition == "array_length_field":
                     array = [random.randint(0, 10) for _ in range(target_array_length)]
-                elif condition == 'array_access':
+                elif condition == "array_access":
                     array = [random.randint(0, 10) for _ in range(random.randint(10, 20))]
                     array[target_array_access[0]] = target_array_access[1]
                 else:
@@ -543,22 +565,22 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
 
     # Probabilities that an array hits the target condition
     hit_probabilities = {
-        'contains': hit_rate,
-        'contains_any': hit_rate,
-        'contains_all': hit_rate,
-        'equals': hit_rate,
-        'array_length_field': hit_rate,
-        'array_access': hit_rate
+        "contains": hit_rate,
+        "contains_any": hit_rate,
+        "contains_all": hit_rate,
+        "equals": hit_rate,
+        "array_length_field": hit_rate,
+        "array_access": hit_rate,
     }
 
     # Target values for each condition
     target_values = {
-        'contains': 42,
-        'contains_any': [21, 37, 42],
-        'contains_all': [15, 30],
-        'equals': [1,2,3,4,5],
-        'array_length_field': 5, # array length == 5
-        'array_access': [0, 5] # index=0, and value == 5
+        "contains": 42,
+        "contains_any": [21, 37, 42],
+        "contains_all": [15, 30],
+        "equals": [1, 2, 3, 4, 5],
+        "array_length_field": 5,  # array length == 5
+        "array_access": [0, 5],  # index=0, and value == 5
     }
 
     # Generate dataset
@@ -571,22 +593,23 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
         "equals": pd.Series([x["equals"] for x in dataset]),
         "array_length_field": pd.Series([x["array_length_field"] for x in dataset]),
         "array_access": pd.Series([x["array_access"] for x in dataset]),
-        "emb": pd.Series([np.array([random.random() for j in range(dim)], dtype=np.dtype("float32")) for _ in
-                          range(size)])
+        "emb": pd.Series(
+            [np.array([random.random() for j in range(dim)], dtype=np.dtype("float32")) for _ in range(size)]
+        ),
     }
     # Define testing conditions
-    contains_value = target_values['contains']
-    contains_any_values = target_values['contains_any']
-    contains_all_values = target_values['contains_all']
-    equals_array = target_values['equals']
+    contains_value = target_values["contains"]
+    contains_any_values = target_values["contains_any"]
+    contains_all_values = target_values["contains_all"]
+    equals_array = target_values["equals"]
 
     # Perform tests
     contains_result = [d for d in dataset if contains_value in d["contains"]]
     contains_any_result = [d for d in dataset if any(val in d["contains_any"] for val in contains_any_values)]
     contains_all_result = [d for d in dataset if all(val in d["contains_all"] for val in contains_all_values)]
     equals_result = [d for d in dataset if d["equals"] == equals_array]
-    array_length_result = [d for d in dataset if len(d["array_length_field"]) == target_values['array_length_field']]
-    array_access_result = [d for d in dataset if d["array_access"][0] == target_values['array_access'][1]]
+    array_length_result = [d for d in dataset if len(d["array_length_field"]) == target_values["array_length_field"]]
+    array_access_result = [d for d in dataset if d["array_access"][0] == target_values["array_access"][1]]
     # Calculate and log.info proportions
     contains_ratio = len(contains_result) / size
     contains_any_ratio = len(contains_any_result) / size
@@ -610,9 +633,11 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
         "contains_all": [r["id"] for r in contains_all_result],
         "equals": [r["id"] for r in equals_result],
         "array_length": [r["id"] for r in array_length_result],
-        "array_access": [r["id"] for r in array_access_result]
+        "array_access": [r["id"] for r in array_access_result],
     }
-    target_id_list = [target_id[key] for key in ["contains", "contains_any", "contains_all", "equals", "array_length", "array_access"]]
+    target_id_list = [
+        target_id[key] for key in ["contains", "contains_any", "contains_all", "equals", "array_length", "array_access"]
+    ]
 
     filters = [
         "array_contains(contains, 42)",
@@ -620,8 +645,7 @@ def prepare_array_test_data(data_size, hit_rate=0.005, dim=128):
         "array_contains_all(contains_all, [15, 30])",
         "equals == [1,2,3,4,5]",
         "array_length(array_length_field) == 5",
-        "array_access[0] == 5"
-
+        "array_access[0] == 5",
     ]
     query_expr = []
     for i in range(len(filters)):
@@ -642,8 +666,9 @@ def gen_str_by_length(length=8, letters_only=False, contain_numbers=False):
     if letters_only:
         return "".join(random.choice(string.ascii_letters) for _ in range(length))
     if contain_numbers:
-        return "".join(random.choice(string.ascii_letters) for _ in range(length-1)) + \
-            "".join(random.choice(string.digits))
+        return "".join(random.choice(string.ascii_letters) for _ in range(length - 1)) + "".join(
+            random.choice(string.digits)
+        )
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
@@ -660,7 +685,7 @@ def generate_random_sentence(language):
         "Japanese": "ja_JP",
         "Korean": "ko_KR",
         "Arabic": "ar_SA",
-        "Hindi": "hi_IN"
+        "Hindi": "hi_IN",
     }
     lang_code = language_map.get(language, "en_US")
     faker = Faker(lang_code)
@@ -671,11 +696,12 @@ def gen_digits_by_length(length=8):
     return "".join(random.choice(string.digits) for _ in range(length))
 
 
-def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False,
-                     nullable=False, skip_wrapper=False, **kwargs):
+def gen_scalar_field(
+    field_type, name=None, description=ct.default_desc, is_primary=False, nullable=False, skip_wrapper=False, **kwargs
+):
     """
     Generate a field schema based on the field type.
-    
+
     Args:
         field_type: DataType enum value (e.g., DataType.BOOL, DataType.VARCHAR, etc.)
         name: Field name (uses default if None)
@@ -685,43 +711,33 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
         skip_wrapper: whether to call FieldSchemaWrapper, in gen_row_data case,
                       it logs too much if calling the wrapper
         **kwargs: Additional parameters like max_length, max_capacity, etc.
-    
+
     Returns:
         Field schema object
     """
     # Set default names based on field type
     if name is None:
         name = ct.default_field_name_map.get(field_type, "default_field")
-    
+
     # Set default parameters for specific field types
-    if field_type == DataType.VARCHAR and 'max_length' not in kwargs:
-        kwargs['max_length'] = ct.default_length
+    if field_type == DataType.VARCHAR and "max_length" not in kwargs:
+        kwargs["max_length"] = ct.default_length
     elif field_type == DataType.ARRAY:
-        if 'element_type' not in kwargs:
-            kwargs['element_type'] = DataType.INT64
-        if 'max_capacity' not in kwargs:
-            kwargs['max_capacity'] = ct.default_max_capacity
+        if "element_type" not in kwargs:
+            kwargs["element_type"] = DataType.INT64
+        if "max_capacity" not in kwargs:
+            kwargs["max_capacity"] = ct.default_max_capacity
     if is_primary is True:
         nullable = False
 
     if skip_wrapper is True:
         field = FieldSchema(
-            name=name,
-            dtype=field_type,
-            description=description,
-            is_primary=is_primary,
-            nullable=nullable,
-            **kwargs
+            name=name, dtype=field_type, description=description, is_primary=is_primary, nullable=nullable, **kwargs
         )
         return field
     else:
         field, _ = ApiFieldSchemaWrapper().init_field_schema(
-            name=name,
-            dtype=field_type,
-            description=description,
-            is_primary=is_primary,
-            nullable=nullable,
-            **kwargs
+            name=name, dtype=field_type, description=description, is_primary=is_primary, nullable=nullable, **kwargs
         )
         return field
 
@@ -731,29 +747,54 @@ def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc,
     return gen_scalar_field(DataType.BOOL, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
-def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False,
-                     max_length=ct.default_length, **kwargs):
-    return gen_scalar_field(DataType.VARCHAR, name=name, description=description, is_primary=is_primary, 
-                    max_length=max_length, **kwargs)
+def gen_string_field(
+    name=ct.default_string_field_name,
+    description=ct.default_desc,
+    is_primary=False,
+    max_length=ct.default_length,
+    **kwargs,
+):
+    return gen_scalar_field(
+        DataType.VARCHAR, name=name, description=description, is_primary=is_primary, max_length=max_length, **kwargs
+    )
 
 
 def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.JSON, name=name, description=description, is_primary=is_primary, **kwargs)
 
+
 def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
+
 
 def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
-def gen_timestamptz_field(name=ct.default_timestamptz_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+
+def gen_timestamptz_field(
+    name=ct.default_timestamptz_field_name, description=ct.default_desc, is_primary=False, **kwargs
+):
     return gen_scalar_field(DataType.TIMESTAMPTZ, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
-def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
-                    description=ct.default_desc, is_primary=False, **kwargs):
-    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary,
-                    element_type=element_type, max_capacity=max_capacity, **kwargs)
+def gen_array_field(
+    name=ct.default_array_field_name,
+    element_type=DataType.INT64,
+    max_capacity=ct.default_max_capacity,
+    description=ct.default_desc,
+    is_primary=False,
+    **kwargs,
+):
+    return gen_scalar_field(
+        DataType.ARRAY,
+        name=name,
+        description=description,
+        is_primary=is_primary,
+        element_type=element_type,
+        max_capacity=max_capacity,
+        **kwargs,
+    )
+
 
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.INT8, name=name, description=description, is_primary=is_primary, **kwargs)
@@ -779,88 +820,121 @@ def gen_double_field(name=ct.default_double_field_name, is_primary=False, descri
     return gen_scalar_field(DataType.DOUBLE, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
-def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                        description=ct.default_desc, vector_data_type=DataType.FLOAT_VECTOR, **kwargs):
-
+def gen_float_vec_field(
+    name=ct.default_float_vec_field_name,
+    is_primary=False,
+    dim=ct.default_dim,
+    description=ct.default_desc,
+    vector_data_type=DataType.FLOAT_VECTOR,
+    **kwargs,
+):
     if vector_data_type != DataType.SPARSE_FLOAT_VECTOR:
-        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=vector_data_type,
-                                                                       description=description, dim=dim,
-                                                                       is_primary=is_primary, **kwargs)
+        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+            name=name, dtype=vector_data_type, description=description, dim=dim, is_primary=is_primary, **kwargs
+        )
     else:
-         # no dim for sparse vector
-        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
-                                                                       description=description,
-                                                                       is_primary=is_primary, **kwargs)
+        # no dim for sparse vector
+        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+            name=name, dtype=DataType.SPARSE_FLOAT_VECTOR, description=description, is_primary=is_primary, **kwargs
+        )
 
     return float_vec_field
 
 
-
-def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
-                         description=ct.default_desc, **kwargs):
-    binary_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BINARY_VECTOR,
-                                                                    description=description, dim=dim,
-                                                                    is_primary=is_primary, **kwargs)
+def gen_binary_vec_field(
+    name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim, description=ct.default_desc, **kwargs
+):
+    binary_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, dtype=DataType.BINARY_VECTOR, description=description, dim=dim, is_primary=is_primary, **kwargs
+    )
     return binary_vec_field
 
 
-def gen_float16_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                          description=ct.default_desc, **kwargs):
-    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT16_VECTOR,
-                                                                   description=description, dim=dim,
-                                                                   is_primary=is_primary, **kwargs)
+def gen_float16_vec_field(
+    name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim, description=ct.default_desc, **kwargs
+):
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, dtype=DataType.FLOAT16_VECTOR, description=description, dim=dim, is_primary=is_primary, **kwargs
+    )
     return float_vec_field
 
 
-def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                           description=ct.default_desc, **kwargs):
-    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BFLOAT16_VECTOR,
-                                                                   description=description, dim=dim,
-                                                                   is_primary=is_primary, **kwargs)
+def gen_bfloat16_vec_field(
+    name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim, description=ct.default_desc, **kwargs
+):
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, dtype=DataType.BFLOAT16_VECTOR, description=description, dim=dim, is_primary=is_primary, **kwargs
+    )
     return float_vec_field
 
-def gen_int8_vec_field(name=ct.default_int8_vec_field_name, is_primary=False, dim=ct.default_dim,
-                           description=ct.default_desc, **kwargs):
-    int8_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8_VECTOR,
-                                                                   description=description, dim=dim,
-                                                                   is_primary=is_primary, **kwargs)
+
+def gen_int8_vec_field(
+    name=ct.default_int8_vec_field_name, is_primary=False, dim=ct.default_dim, description=ct.default_desc, **kwargs
+):
+    int8_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, dtype=DataType.INT8_VECTOR, description=description, dim=dim, is_primary=is_primary, **kwargs
+    )
     return int8_vec_field
 
-def gen_sparse_vec_field(name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs):
-    sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
-                                                                    description=description,
-                                                                    is_primary=is_primary, **kwargs)
+
+def gen_sparse_vec_field(
+    name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs
+):
+    sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, dtype=DataType.SPARSE_FLOAT_VECTOR, description=description, is_primary=is_primary, **kwargs
+    )
     return sparse_vec_field
 
 
-def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
-                                  multiple_dim_array=[], is_partition_key=None, vector_data_type=DataType.FLOAT_VECTOR,
-                                  nullable_fields={}, default_value_fields={}, **kwargs):
+def gen_default_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    dim=ct.default_dim,
+    enable_dynamic_field=False,
+    with_json=True,
+    multiple_dim_array=[],
+    is_partition_key=None,
+    vector_data_type=DataType.FLOAT_VECTOR,
+    nullable_fields={},
+    default_value_fields={},
+    **kwargs,
+):
     # gen primary key field
     if default_value_fields.get(ct.default_int64_field_name) is None:
-        int64_field = gen_int64_field(is_partition_key=(is_partition_key == ct.default_int64_field_name),
-                                      nullable=(ct.default_int64_field_name in nullable_fields))
+        int64_field = gen_int64_field(
+            is_partition_key=(is_partition_key == ct.default_int64_field_name),
+            nullable=(ct.default_int64_field_name in nullable_fields),
+        )
     else:
-        int64_field = gen_int64_field(is_partition_key=(is_partition_key == ct.default_int64_field_name),
-                                      nullable=(ct.default_int64_field_name in nullable_fields),
-                                      default_value=default_value_fields.get(ct.default_int64_field_name))
+        int64_field = gen_int64_field(
+            is_partition_key=(is_partition_key == ct.default_int64_field_name),
+            nullable=(ct.default_int64_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_int64_field_name),
+        )
     if default_value_fields.get(ct.default_string_field_name) is None:
-        string_field = gen_string_field(is_partition_key=(is_partition_key == ct.default_string_field_name),
-                                        nullable=(ct.default_string_field_name in nullable_fields))
+        string_field = gen_string_field(
+            is_partition_key=(is_partition_key == ct.default_string_field_name),
+            nullable=(ct.default_string_field_name in nullable_fields),
+        )
     else:
-        string_field = gen_string_field(is_partition_key=(is_partition_key == ct.default_string_field_name),
-                                        nullable=(ct.default_string_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_string_field_name))
+        string_field = gen_string_field(
+            is_partition_key=(is_partition_key == ct.default_string_field_name),
+            nullable=(ct.default_string_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_string_field_name),
+        )
     # gen vector field
     if default_value_fields.get(ct.default_float_vec_field_name) is None:
-        float_vector_field = gen_float_vec_field(dim=dim, vector_data_type=vector_data_type,
-                                                 nullable=(ct.default_float_vec_field_name in nullable_fields))
+        float_vector_field = gen_float_vec_field(
+            dim=dim, vector_data_type=vector_data_type, nullable=(ct.default_float_vec_field_name in nullable_fields)
+        )
     else:
-        float_vector_field = gen_float_vec_field(dim=dim, vector_data_type=vector_data_type,
-                                                 nullable=(ct.default_float_vec_field_name in nullable_fields),
-                                                 default_value=default_value_fields.get(
-                                                     ct.default_float_vec_field_name))
+        float_vector_field = gen_float_vec_field(
+            dim=dim,
+            vector_data_type=vector_data_type,
+            nullable=(ct.default_float_vec_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_float_vec_field_name),
+        )
     if primary_field is ct.default_int64_field_name:
         fields = [int64_field]
     elif primary_field is ct.default_string_field_name:
@@ -874,13 +948,17 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
         if default_value_fields.get(ct.default_float_field_name) is None:
             float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields))
         else:
-            float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_float_field_name))
+            float_field = gen_float_field(
+                nullable=(ct.default_float_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_float_field_name),
+            )
         if default_value_fields.get(ct.default_json_field_name) is None:
             json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields))
         else:
-            json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_json_field_name))
+            json_field = gen_json_field(
+                nullable=(ct.default_json_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_json_field_name),
+            )
         fields = [int64_field, float_field, string_field, json_field, float_vector_field]
         if with_json is False:
             fields.remove(json_field)
@@ -888,46 +966,75 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
     if len(multiple_dim_array) != 0:
         for other_dim in multiple_dim_array:
             name_prefix = "multiple_vector"
-            fields.append(gen_float_vec_field(gen_unique_str(name_prefix), dim=other_dim,
-                                              vector_data_type=vector_data_type))
+            fields.append(
+                gen_float_vec_field(gen_unique_str(name_prefix), dim=other_dim, vector_data_type=vector_data_type)
+            )
 
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields,
+        description=description,
+        primary_field=primary_field,
+        auto_id=auto_id,
+        enable_dynamic_field=enable_dynamic_field,
+        **kwargs,
+    )
     return schema
 
 
-def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, nullable=True,
-                                       enable_struct_array_field=True, **kwargs):
+def gen_all_datatype_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    dim=ct.default_dim,
+    enable_dynamic_field=True,
+    nullable=True,
+    enable_struct_array_field=True,
+    **kwargs,
+):
     analyzer_params = {
         "tokenizer": "standard",
     }
 
     # Create schema using MilvusClient
     schema = MilvusClient.create_schema(
-        auto_id=auto_id,
-        enable_dynamic_field=enable_dynamic_field,
-        description=description,
-        **kwargs
+        auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description, **kwargs
     )
 
     # Add all fields using schema.add_field()
     schema.add_field(primary_field, DataType.INT64, is_primary=True)
     schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=nullable)
-    schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_max_length, nullable=nullable)
-    schema.add_field("document", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable)
-    schema.add_field("text", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True,
-                    analyzer_params=analyzer_params, nullable=True)
+    schema.add_field(
+        ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_max_length, nullable=nullable
+    )
+    schema.add_field(
+        "document", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable
+    )
+    schema.add_field(
+        "text",
+        DataType.VARCHAR,
+        max_length=2000,
+        enable_analyzer=True,
+        enable_match=True,
+        analyzer_params=analyzer_params,
+        nullable=True,
+    )
     schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
     schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
     schema.add_field(ct.default_timestamptz_field_name, DataType.TIMESTAMPTZ, nullable=nullable)
     schema.add_field("array_int", DataType.ARRAY, element_type=DataType.INT64, max_capacity=ct.default_max_capacity)
     schema.add_field("array_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
-    schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
+    schema.add_field(
+        "array_varchar",
+        DataType.ARRAY,
+        element_type=DataType.VARCHAR,
+        max_length=200,
+        max_capacity=ct.default_max_capacity,
+    )
     schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
     schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
-    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False)  # function output field cannot be nullable
+    schema.add_field(
+        "text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False
+    )  # function output field cannot be nullable
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
 
     # Add struct array field
@@ -936,8 +1043,13 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         struct_schema.add_field("name", DataType.VARCHAR, max_length=200)
         struct_schema.add_field("age", DataType.INT64)
         struct_schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("array_struct", datatype=DataType.ARRAY, element_type=DataType.STRUCT,
-                        struct_schema=struct_schema, max_capacity=10)
+        schema.add_field(
+            "array_struct",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
 
     # Add BM25 function
     bm25_function = Function(
@@ -965,9 +1077,17 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     return schema
 
 
-def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False,
-                                dim=ct.default_dim, enable_dynamic_field=False, max_capacity=ct.default_max_capacity,
-                                max_length=100, with_json=False, **kwargs):
+def gen_array_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    dim=ct.default_dim,
+    enable_dynamic_field=False,
+    max_capacity=ct.default_max_capacity,
+    max_length=100,
+    with_json=False,
+    **kwargs,
+):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
             fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
@@ -977,24 +1097,47 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
             log.error("Primary key only support int or varchar")
             assert False
     else:
-        fields = [gen_int64_field(), gen_float_vec_field(dim=dim), gen_json_field(nullable=True),
-                  gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32,
-                                  max_capacity=max_capacity),
-                  gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT,
-                                  max_capacity=max_capacity),
-                  gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR,
-                                  max_capacity=max_capacity, max_length=max_length, nullable=True)]
+        fields = [
+            gen_int64_field(),
+            gen_float_vec_field(dim=dim),
+            gen_json_field(nullable=True),
+            gen_array_field(
+                name=ct.default_int32_array_field_name, element_type=DataType.INT32, max_capacity=max_capacity
+            ),
+            gen_array_field(
+                name=ct.default_float_array_field_name, element_type=DataType.FLOAT, max_capacity=max_capacity
+            ),
+            gen_array_field(
+                name=ct.default_string_array_field_name,
+                element_type=DataType.VARCHAR,
+                max_capacity=max_capacity,
+                max_length=max_length,
+                nullable=True,
+            ),
+        ]
         if with_json is False:
             fields.remove(gen_json_field(nullable=True))
 
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields,
+        description=description,
+        primary_field=primary_field,
+        auto_id=auto_id,
+        enable_dynamic_field=enable_dynamic_field,
+        **kwargs,
+    )
     return schema
 
 
-def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, with_varchar_field=True,
-                                      auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
+def gen_bulk_insert_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    with_varchar_field=True,
+    auto_id=False,
+    dim=ct.default_dim,
+    enable_dynamic_field=False,
+    with_json=False,
+):
     if enable_dynamic_field:
         if primary_field is ct.default_int64_field_name:
             fields = [gen_int64_field(), gen_float_vec_field(dim=dim)]
@@ -1004,58 +1147,94 @@ def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field
             log.error("Primary key only support int or varchar")
             assert False
     else:
-        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(),
-                  gen_float_vec_field(dim=dim)]
+        fields = [
+            gen_int64_field(),
+            gen_float_field(),
+            gen_string_field(),
+            gen_json_field(),
+            gen_float_vec_field(dim=dim),
+        ]
         if with_json is False:
             fields.remove(gen_json_field())
         if with_varchar_field is False:
             fields.remove(gen_string_field())
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields,
+        description=description,
+        primary_field=primary_field,
+        auto_id=auto_id,
+        enable_dynamic_field=enable_dynamic_field,
+    )
     return schema
 
 
-def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, is_binary=False, dim=ct.default_dim, **kwargs):
+def gen_general_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    is_binary=False,
+    dim=ct.default_dim,
+    **kwargs,
+):
     if is_binary:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_binary_vec_field(dim=dim)]
     else:
         fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return schema
 
 
-def gen_string_pk_default_collection_schema(description=ct.default_desc, primary_field=ct.default_string_field_name,
-                                            auto_id=False, dim=ct.default_dim, **kwargs):
+def gen_string_pk_default_collection_schema(
+    description=ct.default_desc, primary_field=ct.default_string_field_name, auto_id=False, dim=ct.default_dim, **kwargs
+):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return schema
 
 
-def gen_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim, **kwargs):
+def gen_json_default_collection_schema(
+    description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False, dim=ct.default_dim, **kwargs
+):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(), gen_float_vec_field(dim=dim)]
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return schema
 
 
-def gen_multiple_json_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                                auto_id=False, dim=ct.default_dim, **kwargs):
-    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_json_field(name="json1"),
-              gen_json_field(name="json2"), gen_float_vec_field(dim=dim)]
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id, **kwargs)
+def gen_multiple_json_default_collection_schema(
+    description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False, dim=ct.default_dim, **kwargs
+):
+    fields = [
+        gen_int64_field(),
+        gen_float_field(),
+        gen_string_field(),
+        gen_json_field(name="json1"),
+        gen_json_field(name="json2"),
+        gen_float_vec_field(dim=dim),
+    ]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return schema
 
 
-def gen_collection_schema_all_datatype(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
-                                       multiple_dim_array=[], nullable_fields={}, default_value_fields={},
-                                       **kwargs):
+def gen_collection_schema_all_datatype(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    dim=ct.default_dim,
+    enable_dynamic_field=False,
+    with_json=True,
+    multiple_dim_array=[],
+    nullable_fields={},
+    default_value_fields={},
+    **kwargs,
+):
     # gen primary key field
     if default_value_fields.get(ct.default_int64_field_name) is None:
         int64_field = gen_int64_field()
@@ -1068,45 +1247,70 @@ def gen_collection_schema_all_datatype(description=ct.default_desc, primary_fiel
         if default_value_fields.get(ct.default_int32_field_name) is None:
             int32_field = gen_int32_field(nullable=(ct.default_int32_field_name in nullable_fields))
         else:
-            int32_field = gen_int32_field(nullable=(ct.default_int32_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_int32_field_name))
+            int32_field = gen_int32_field(
+                nullable=(ct.default_int32_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_int32_field_name),
+            )
         if default_value_fields.get(ct.default_int16_field_name) is None:
             int16_field = gen_int16_field(nullable=(ct.default_int16_field_name in nullable_fields))
         else:
-            int16_field = gen_int16_field(nullable=(ct.default_int16_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_int16_field_name))
+            int16_field = gen_int16_field(
+                nullable=(ct.default_int16_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_int16_field_name),
+            )
         if default_value_fields.get(ct.default_int8_field_name) is None:
             int8_field = gen_int8_field(nullable=(ct.default_int8_field_name in nullable_fields))
         else:
-            int8_field = gen_int8_field(nullable=(ct.default_int8_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_int8_field_name))
+            int8_field = gen_int8_field(
+                nullable=(ct.default_int8_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_int8_field_name),
+            )
         if default_value_fields.get(ct.default_bool_field_name) is None:
             bool_field = gen_bool_field(nullable=(ct.default_bool_field_name in nullable_fields))
         else:
-            bool_field = gen_bool_field(nullable=(ct.default_bool_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_bool_field_name))
+            bool_field = gen_bool_field(
+                nullable=(ct.default_bool_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_bool_field_name),
+            )
         if default_value_fields.get(ct.default_float_field_name) is None:
             float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields))
         else:
-            float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields),
-                                          default_value=default_value_fields.get(ct.default_float_field_name))
+            float_field = gen_float_field(
+                nullable=(ct.default_float_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_float_field_name),
+            )
         if default_value_fields.get(ct.default_double_field_name) is None:
             double_field = gen_double_field(nullable=(ct.default_double_field_name in nullable_fields))
         else:
-            double_field = gen_double_field(nullable=(ct.default_double_field_name in nullable_fields),
-                                           default_value=default_value_fields.get(ct.default_double_field_name))
+            double_field = gen_double_field(
+                nullable=(ct.default_double_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_double_field_name),
+            )
         if default_value_fields.get(ct.default_string_field_name) is None:
             string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields))
         else:
-            string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields),
-                                            default_value=default_value_fields.get(ct.default_string_field_name))
+            string_field = gen_string_field(
+                nullable=(ct.default_string_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_string_field_name),
+            )
         if default_value_fields.get(ct.default_json_field_name) is None:
             json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields))
         else:
-            json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_json_field_name))
-        fields = [int64_field, int32_field, int16_field, int8_field, bool_field,
-                  float_field, double_field, string_field, json_field]
+            json_field = gen_json_field(
+                nullable=(ct.default_json_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_json_field_name),
+            )
+        fields = [
+            int64_field,
+            int32_field,
+            int16_field,
+            int8_field,
+            bool_field,
+            float_field,
+            double_field,
+            string_field,
+            json_field,
+        ]
         if with_json is False:
             fields.remove(json_field)
 
@@ -1115,107 +1319,154 @@ def gen_collection_schema_all_datatype(description=ct.default_desc, primary_fiel
         if default_value_fields.get(ct.default_float_vec_field_name) is None:
             float_vector_field = gen_float_vec_field(dim=dim)
         else:
-            float_vector_field = gen_float_vec_field(dim=dim,
-                                                     default_value=default_value_fields.get(ct.default_float_vec_field_name))
+            float_vector_field = gen_float_vec_field(
+                dim=dim, default_value=default_value_fields.get(ct.default_float_vec_field_name)
+            )
         fields.append(float_vector_field)
     else:
         multiple_dim_array.insert(0, dim)
         for i in range(len(multiple_dim_array)):
-            if ct.append_vector_type[i%3] != DataType.SPARSE_FLOAT_VECTOR:
-                if default_value_fields.get(ct.append_vector_type[i%3]) is None:
-                    vector_field = gen_float_vec_field(name=f"multiple_vector_{ct.append_vector_type[i%3].name}",
-                                                       dim=multiple_dim_array[i],
-                                                       vector_data_type=ct.append_vector_type[i%3])
+            if ct.append_vector_type[i % 3] != DataType.SPARSE_FLOAT_VECTOR:
+                if default_value_fields.get(ct.append_vector_type[i % 3]) is None:
+                    vector_field = gen_float_vec_field(
+                        name=f"multiple_vector_{ct.append_vector_type[i % 3].name}",
+                        dim=multiple_dim_array[i],
+                        vector_data_type=ct.append_vector_type[i % 3],
+                    )
                 else:
-                    vector_field = gen_float_vec_field(name=f"multiple_vector_{ct.append_vector_type[i%3].name}",
-                                                       dim=multiple_dim_array[i],
-                                                       vector_data_type=ct.append_vector_type[i%3],
-                                                       default_value=default_value_fields.get(ct.append_vector_type[i%3].name))
+                    vector_field = gen_float_vec_field(
+                        name=f"multiple_vector_{ct.append_vector_type[i % 3].name}",
+                        dim=multiple_dim_array[i],
+                        vector_data_type=ct.append_vector_type[i % 3],
+                        default_value=default_value_fields.get(ct.append_vector_type[i % 3].name),
+                    )
                 fields.append(vector_field)
             else:
                 # The field of a sparse vector cannot be dimensioned
                 if default_value_fields.get(ct.default_sparse_vec_field_name) is None:
-                    sparse_vector_field = gen_sparse_vec_field(name=f"multiple_vector_{DataType.SPARSE_FLOAT_VECTOR.name}",
-                                                              vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
+                    sparse_vector_field = gen_sparse_vec_field(
+                        name=f"multiple_vector_{DataType.SPARSE_FLOAT_VECTOR.name}",
+                        vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
+                    )
                 else:
-                    sparse_vector_field = gen_sparse_vec_field(name=f"multiple_vector_{DataType.SPARSE_FLOAT_VECTOR.name}",
-                                                              vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
-                                                              default_value=default_value_fields.get(ct.default_sparse_vec_field_name))
+                    sparse_vector_field = gen_sparse_vec_field(
+                        name=f"multiple_vector_{DataType.SPARSE_FLOAT_VECTOR.name}",
+                        vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
+                        default_value=default_value_fields.get(ct.default_sparse_vec_field_name),
+                    )
                 fields.append(sparse_vector_field)
 
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields,
+        description=description,
+        primary_field=primary_field,
+        auto_id=auto_id,
+        enable_dynamic_field=enable_dynamic_field,
+        **kwargs,
+    )
     return schema
 
 
 def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False, **kwargs):
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
-                                                                    description=description, auto_id=auto_id, **kwargs)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, primary_field=primary_field, description=description, auto_id=auto_id, **kwargs
+    )
     return schema
 
 
-def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                         auto_id=False, dim=ct.default_dim, nullable_fields={}, default_value_fields={},
-                                         **kwargs):
+def gen_default_binary_collection_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    dim=ct.default_dim,
+    nullable_fields={},
+    default_value_fields={},
+    **kwargs,
+):
     if default_value_fields.get(ct.default_int64_field_name) is None:
         int64_field = gen_int64_field(nullable=(ct.default_int64_field_name in nullable_fields))
     else:
-        int64_field = gen_int64_field(nullable=(ct.default_int64_field_name in nullable_fields),
-                                      default_value=default_value_fields.get(ct.default_int64_field_name))
+        int64_field = gen_int64_field(
+            nullable=(ct.default_int64_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_int64_field_name),
+        )
     if default_value_fields.get(ct.default_float_field_name) is None:
         float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields))
     else:
-        float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields),
-                                      default_value=default_value_fields.get(ct.default_float_field_name))
+        float_field = gen_float_field(
+            nullable=(ct.default_float_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_float_field_name),
+        )
     if default_value_fields.get(ct.default_string_field_name) is None:
         string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields))
     else:
-        string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_string_field_name))
+        string_field = gen_string_field(
+            nullable=(ct.default_string_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_string_field_name),
+        )
     if default_value_fields.get(ct.default_binary_vec_field_name) is None:
         binary_vec_field = gen_binary_vec_field(dim=dim, nullable=(ct.default_binary_vec_field_name in nullable_fields))
     else:
-        binary_vec_field = gen_binary_vec_field(dim=dim, nullable=(ct.default_binary_vec_field_name in nullable_fields),
-                                                default_value=default_value_fields.get(ct.default_binary_vec_field_name))
+        binary_vec_field = gen_binary_vec_field(
+            dim=dim,
+            nullable=(ct.default_binary_vec_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_binary_vec_field_name),
+        )
     fields = [int64_field, float_field, string_field, binary_vec_field]
-    binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                           primary_field=primary_field,
-                                                                           auto_id=auto_id, **kwargs)
+    binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return binary_schema
 
 
-def gen_default_sparse_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                              auto_id=False, with_json=False, multiple_dim_array=[], nullable_fields={},
-                              default_value_fields={}, **kwargs):
+def gen_default_sparse_schema(
+    description=ct.default_desc,
+    primary_field=ct.default_int64_field_name,
+    auto_id=False,
+    with_json=False,
+    multiple_dim_array=[],
+    nullable_fields={},
+    default_value_fields={},
+    **kwargs,
+):
     if default_value_fields.get(ct.default_int64_field_name) is None:
         int64_field = gen_int64_field(nullable=(ct.default_int64_field_name in nullable_fields))
     else:
-        int64_field = gen_int64_field(nullable=(ct.default_int64_field_name in nullable_fields),
-                                      default_value=default_value_fields.get(ct.default_int64_field_name))
+        int64_field = gen_int64_field(
+            nullable=(ct.default_int64_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_int64_field_name),
+        )
     if default_value_fields.get(ct.default_float_field_name) is None:
         float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields))
     else:
-        float_field = gen_float_field(nullable=(ct.default_float_field_name in nullable_fields),
-                                      default_value=default_value_fields.get(ct.default_float_field_name))
+        float_field = gen_float_field(
+            nullable=(ct.default_float_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_float_field_name),
+        )
     if default_value_fields.get(ct.default_string_field_name) is None:
         string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields))
     else:
-        string_field = gen_string_field(nullable=(ct.default_string_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_string_field_name))
+        string_field = gen_string_field(
+            nullable=(ct.default_string_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_string_field_name),
+        )
     if default_value_fields.get(ct.default_sparse_vec_field_name) is None:
         sparse_vec_field = gen_sparse_vec_field(nullable=(ct.default_sparse_vec_field_name in nullable_fields))
     else:
-        sparse_vec_field = gen_sparse_vec_field(nullable=(ct.default_sparse_vec_field_name in nullable_fields),
-                                                default_value=default_value_fields.get(ct.default_sparse_vec_field_name))
+        sparse_vec_field = gen_sparse_vec_field(
+            nullable=(ct.default_sparse_vec_field_name in nullable_fields),
+            default_value=default_value_fields.get(ct.default_sparse_vec_field_name),
+        )
     fields = [int64_field, float_field, string_field, sparse_vec_field]
 
     if with_json:
         if default_value_fields.get(ct.default_json_field_name) is None:
             json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields))
         else:
-            json_field = gen_json_field(nullable=(ct.default_json_field_name in nullable_fields),
-                                        default_value=default_value_fields.get(ct.default_json_field_name))
+            json_field = gen_json_field(
+                nullable=(ct.default_json_field_name in nullable_fields),
+                default_value=default_value_fields.get(ct.default_json_field_name),
+            )
         fields.insert(-1, json_field)
 
     if len(multiple_dim_array) != 0:
@@ -1223,9 +1474,9 @@ def gen_default_sparse_schema(description=ct.default_desc, primary_field=ct.defa
             vec_name = ct.default_sparse_vec_field_name + "_" + str(i)
             vec_field = gen_sparse_vec_field(name=vec_name)
             fields.append(vec_field)
-    sparse_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                           primary_field=primary_field,
-                                                                           auto_id=auto_id, **kwargs)
+    sparse_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=description, primary_field=primary_field, auto_id=auto_id, **kwargs
+    )
     return sparse_schema
 
 
@@ -1233,8 +1484,9 @@ def gen_schema_multi_vector_fields(vec_fields):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field()]
     fields.extend(vec_fields)
     primary_field = ct.default_int64_field_name
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
-                                                                    primary_field=primary_field, auto_id=False)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=ct.default_desc, primary_field=primary_field, auto_id=False
+    )
     return schema
 
 
@@ -1242,9 +1494,11 @@ def gen_schema_multi_string_fields(string_fields):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field()]
     fields.extend(string_fields)
     primary_field = ct.default_int64_field_name
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
-                                                                    primary_field=primary_field, auto_id=False)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(
+        fields=fields, description=ct.default_desc, primary_field=primary_field, auto_id=False
+    )
     return schema
+
 
 def gen_string(nb):
     string_values = [str(random.random()) for _ in range(nb)]
@@ -1262,10 +1516,20 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                               random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
-                               vector_data_type=DataType.FLOAT_VECTOR, auto_id=False,
-                               primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
+def gen_default_dataframe_data(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    random_primary_key=False,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    vector_data_type=DataType.FLOAT_VECTOR,
+    auto_id=False,
+    primary_field=ct.default_int64_field_name,
+    nullable_fields={},
+    language=None,
+):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -1274,9 +1538,9 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
     float_data = [np.float32(i) for i in range(start, start + nb)]
     float_values = pd.Series(data=float_data, dtype="float32")
     if ct.default_float_field_name in nullable_fields:
-        null_number = int(nb*nullable_fields[ct.default_float_field_name])
+        null_number = int(nb * nullable_fields[ct.default_float_field_name])
         null_data = [None for _ in range(null_number)]
-        float_data = float_data[:nb-null_number] + null_data
+        float_data = float_data[: nb - null_number] + null_data
         log.debug(float_data)
         float_values = pd.Series(data=float_data, dtype=object)
 
@@ -1285,25 +1549,27 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
         string_data = [generate_random_sentence(language) for _ in range(nb)]
     string_values = pd.Series(data=string_data, dtype="string")
     if ct.default_string_field_name in nullable_fields:
-        null_number = int(nb*nullable_fields[ct.default_string_field_name])
+        null_number = int(nb * nullable_fields[ct.default_string_field_name])
         null_data = [None for _ in range(null_number)]
-        string_data = string_data[:nb-null_number] + null_data
+        string_data = string_data[: nb - null_number] + null_data
         string_values = pd.Series(data=string_data, dtype=object)
 
-    json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
+    json_values = [{"number": i, "float": i * 1.0} for i in range(start, start + nb)]
     if ct.default_json_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_json_field_name])
         null_data = [{"number": None, "float": None} for _ in range(null_number)]
-        json_values = json_values[:nb-null_number] + null_data
+        json_values = json_values[: nb - null_number] + null_data
 
     float_vec_values = gen_vectors(nb, dim, vector_data_type=vector_data_type)
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
-        ct.default_json_field_name: json_values,
-        ct.default_float_vec_field_name: float_vec_values
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values,
+        }
+    )
 
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
@@ -1314,8 +1580,10 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
             df.drop(ct.default_string_field_name, axis=1, inplace=True)
     if len(multiple_dim_array) != 0:
         if len(multiple_vector_field_name) != len(multiple_dim_array):
-            log.error("multiple vector feature is enabled, please input the vector field name list "
-                      "not including the default vector field")
+            log.error(
+                "multiple vector feature is enabled, please input the vector field name list "
+                "not including the default vector field"
+            )
             assert len(multiple_vector_field_name) == len(multiple_dim_array)
         for i in range(len(multiple_dim_array)):
             new_float_vec_values = gen_vectors(nb, multiple_dim_array[i], vector_data_type=vector_data_type)
@@ -1324,10 +1592,20 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
     return df
 
 
-def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                          random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
-                          vector_data_type=DataType.FLOAT_VECTOR, auto_id=False,
-                          primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
+def gen_default_list_data(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    random_primary_key=False,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    vector_data_type=DataType.FLOAT_VECTOR,
+    auto_id=False,
+    primary_field=ct.default_int64_field_name,
+    nullable_fields={},
+    language=None,
+):
     insert_list = []
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
@@ -1338,7 +1616,7 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     if ct.default_float_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_float_field_name])
         null_data = [None for _ in range(null_number)]
-        float_data = float_data[:nb - null_number] + null_data
+        float_data = float_data[: nb - null_number] + null_data
         float_values = pd.Series(data=float_data, dtype=object)
     string_data = [str(i) for i in range(start, start + nb)]
     if language:
@@ -1347,13 +1625,13 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
         null_data = [None for _ in range(null_number)]
-        string_data = string_data[:nb - null_number] + null_data
+        string_data = string_data[: nb - null_number] + null_data
         string_values = pd.Series(data=string_data, dtype=object)
-    json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
+    json_values = [{"number": i, "float": i * 1.0} for i in range(start, start + nb)]
     if ct.default_json_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_json_field_name])
         null_data = [{"number": None, "float": None} for _ in range(null_number)]
-        json_values = json_values[:nb-null_number] + null_data
+        json_values = json_values[: nb - null_number] + null_data
     float_vec_values = gen_vectors(nb, dim, vector_data_type=vector_data_type)
     insert_list = [int_values, float_values, string_values]
 
@@ -1379,17 +1657,28 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return insert_list
 
 
-def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True, multiple_dim_array=[],
-                          multiple_vector_field_name=[], vector_data_type=DataType.FLOAT_VECTOR, auto_id=False,
-                          primary_field = ct.default_int64_field_name, nullable_fields={}, language=None):
+def gen_default_rows_data(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    vector_data_type=DataType.FLOAT_VECTOR,
+    auto_id=False,
+    primary_field=ct.default_int64_field_name,
+    nullable_fields={},
+    language=None,
+):
     array = []
     for i in range(start, start + nb):
-        dict = {ct.default_int64_field_name: i,
-                ct.default_float_field_name: i*1.0,
-                ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "float": i*1.0},
-                ct.default_float_vec_field_name: gen_vectors(1, dim, vector_data_type=vector_data_type)[0]
-                }
+        dict = {
+            ct.default_int64_field_name: i,
+            ct.default_float_field_name: i * 1.0,
+            ct.default_string_field_name: str(i),
+            ct.default_json_field_name: {"number": i, "float": i * 1.0},
+            ct.default_float_vec_field_name: gen_vectors(1, dim, vector_data_type=vector_data_type)[0],
+        }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
         if language:
@@ -1402,10 +1691,11 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
         array.append(dict)
         if len(multiple_dim_array) != 0:
             for i in range(len(multiple_dim_array)):
-                dict[multiple_vector_field_name[i]] = gen_vectors(1, multiple_dim_array[i],
-                                                                  vector_data_type=vector_data_type)[0]
+                dict[multiple_vector_field_name[i]] = gen_vectors(
+                    1, multiple_dim_array[i], vector_data_type=vector_data_type
+                )[0]
     if ct.default_int64_field_name in nullable_fields:
-        null_number = int(nb*nullable_fields[ct.default_int64_field_name])
+        null_number = int(nb * nullable_fields[ct.default_int64_field_name])
         for single_dict in array[-null_number:]:
             single_dict[ct.default_int64_field_name] = None
     if ct.default_float_field_name in nullable_fields:
@@ -1432,23 +1722,52 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     Note: String values should be passed as json.dumps(str) to ensure they are treated as strings,
           not as serialized JSON results.
     """
-    if json_type == "json_embedded_object":                 # a json object with an embedd json object
-        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
-                             "float": i*1.0}, "str": str(i), "array": [i for i in range(i, i + 10)], "bool": bool(i)}
-                for i in range(start, start + nb)]
-    if json_type == "json_objects_array":                   # a json-objects array with 2 json objects
-        return [[{"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)},
-                 {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)}
-                 ] for i in range(start, start + nb)]
-    if json_type == "json_array":                           # single array as json value
+    if json_type == "json_embedded_object":  # a json object with an embedd json object
+        return [
+            {
+                json_type: {
+                    "number": i,
+                    "level2": {
+                        "level2_number": i,
+                        "level2_float": i * 1.0,
+                        "level2_str": str(i),
+                        "level2_array": [i for i in range(i, i + 10)],
+                    },
+                    "float": i * 1.0,
+                },
+                "str": str(i),
+                "array": [i for i in range(i, i + 10)],
+                "bool": bool(i),
+            }
+            for i in range(start, start + nb)
+        ]
+    if json_type == "json_objects_array":  # a json-objects array with 2 json objects
+        return [
+            [
+                {
+                    "number": i,
+                    "level2": {"level2_number": i, "level2_float": i * 1.0, "level2_str": str(i)},
+                    "float": i * 1.0,
+                    "str": str(i),
+                },
+                {
+                    "number": i,
+                    "level2": {"level2_number": i, "level2_float": i * 1.0, "level2_str": str(i)},
+                    "float": i * 1.0,
+                    "str": str(i),
+                },
+            ]
+            for i in range(start, start + nb)
+        ]
+    if json_type == "json_array":  # single array as json value
         return [[i for i in range(j, j + 10)] for j in range(start, start + nb)]
-    if json_type == "json_int":                             # single int as json value
+    if json_type == "json_int":  # single int as json value
         return [i for i in range(start, start + nb)]
-    if json_type == "json_float":                           # single float as json value
-        return [i*1.0 for i in range(start, start + nb)]
-    if json_type == "json_string":                          # single string as json value
+    if json_type == "json_float":  # single float as json value
+        return [i * 1.0 for i in range(start, start + nb)]
+    if json_type == "json_string":  # single string as json value
         return [json.dumps(str(i)) for i in range(start, start + nb)]
-    if json_type == "json_bool":                            # single bool as json value
+    if json_type == "json_bool":  # single bool as json value
         return [bool(i) for i in range(start, start + nb)]
     else:
         return []
@@ -1460,18 +1779,27 @@ def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, s
     string_values = pd.Series(data=[str(i + size) for i in range(start, start + nb)], dtype="string")
     json_values = [{"number": i, "string": str(i)} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim)
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
-        ct.default_json_field_name: json_values,
-        ct.default_float_vec_field_name: float_vec_values
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_json_field_name: json_values,
+            ct.default_float_vec_field_name: float_vec_values,
+        }
+    )
     return df, float_values
 
 
-def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
-                             array_length=ct.default_max_capacity, with_json=False, random_primary_key=False):
+def gen_array_dataframe_data(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    auto_id=False,
+    array_length=ct.default_max_capacity,
+    with_json=False,
+    random_primary_key=False,
+):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -1480,17 +1808,21 @@ def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto
     json_values = [{"number": i, "float": i * 1.0} for i in range(start, start + nb)]
 
     int32_values = pd.Series(data=[[np.int32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
-    float_values = pd.Series(data=[[np.float32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
+    float_values = pd.Series(
+        data=[[np.float32(j) for j in range(i, i + array_length)] for i in range(start, start + nb)]
+    )
     string_values = pd.Series(data=[[str(j) for j in range(i, i + array_length)] for i in range(start, start + nb)])
 
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_vec_field_name: float_vec_values,
-        ct.default_json_field_name: json_values,
-        ct.default_int32_array_field_name: int32_values,
-        ct.default_float_array_field_name: float_values,
-        ct.default_string_array_field_name: string_values,
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_vec_field_name: float_vec_values,
+            ct.default_json_field_name: json_values,
+            ct.default_int32_array_field_name: int32_values,
+            ct.default_float_array_field_name: float_values,
+            ct.default_string_array_field_name: string_values,
+        }
+    )
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
     if auto_id:
@@ -1509,14 +1841,16 @@ def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     int_values = pd.Series(data=[i for i in range(0, nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
-        ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim)
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim),
+        }
+    )
     for field in vec_fields:
-        dim = field.params['dim']
+        dim = field.params["dim"]
         if field.dtype == DataType.FLOAT_VECTOR:
             vec_values = gen_vectors(nb, dim)
         elif field.dtype == DataType.BINARY_VECTOR:
@@ -1535,12 +1869,14 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     int_values = pd.Series(data=[i for i in range(0, nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
-        ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim)
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim),
+        }
+    )
     for field in string_fields:
         if field.dtype == DataType.VARCHAR:
             string_values = gen_string(nb)
@@ -1548,9 +1884,17 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     return df
 
 
-def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                                auto_id=False, random_primary_key=False, multiple_dim_array=[],
-                                multiple_vector_field_name=[], primary_field=ct.default_int64_field_name):
+def gen_dataframe_all_data_type(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    auto_id=False,
+    random_primary_key=False,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    primary_field=ct.default_int64_field_name,
+):
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -1562,26 +1906,30 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
-    json_values = [{"number": i, "string": str(i), "bool": bool(i),
-                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
+    json_values = [
+        {"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(i, i + ct.default_json_list_length)]}
+        for i in range(start, start + nb)
+    ]
     float_vec_values = gen_vectors(nb, dim)
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int64_values,
-        ct.default_int32_field_name: int32_values,
-        ct.default_int16_field_name: int16_values,
-        ct.default_int8_field_name: int8_values,
-        ct.default_bool_field_name: bool_values,
-        ct.default_float_field_name: float_values,
-        ct.default_double_field_name: double_values,
-        ct.default_string_field_name: string_values,
-        ct.default_json_field_name: json_values
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int64_values,
+            ct.default_int32_field_name: int32_values,
+            ct.default_int16_field_name: int16_values,
+            ct.default_int8_field_name: int8_values,
+            ct.default_bool_field_name: bool_values,
+            ct.default_float_field_name: float_values,
+            ct.default_double_field_name: double_values,
+            ct.default_string_field_name: string_values,
+            ct.default_json_field_name: json_values,
+        }
+    )
 
     if len(multiple_dim_array) == 0:
         df[ct.default_float_vec_field_name] = float_vec_values
     else:
         for i in range(len(multiple_dim_array)):
-            df[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i], ct.append_vector_type[i%3])
+            df[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i], ct.append_vector_type[i % 3])
 
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
@@ -1595,10 +1943,19 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     return df
 
 
-def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                                   auto_id=False, random_primary_key=False, multiple_dim_array=[],
-                                   multiple_vector_field_name=[], primary_field=ct.default_int64_field_name,
-                                   nullable_fields={}, language=None):
+def gen_general_list_all_data_type(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    auto_id=False,
+    random_primary_key=False,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    primary_field=ct.default_int64_field_name,
+    nullable_fields={},
+    language=None,
+):
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -1608,7 +1965,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_int32_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int32_field_name])
         null_data = [None for _ in range(null_number)]
-        int32_data = int32_data[:nb - null_number] + null_data
+        int32_data = int32_data[: nb - null_number] + null_data
         int32_values = pd.Series(data=int32_data, dtype=object)
 
     int16_data = [np.int16(i) for i in range(start, start + nb)]
@@ -1616,7 +1973,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_int16_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int16_field_name])
         null_data = [None for _ in range(null_number)]
-        int16_data = int16_data[:nb - null_number] + null_data
+        int16_data = int16_data[: nb - null_number] + null_data
         int16_values = pd.Series(data=int16_data, dtype=object)
 
     int8_data = [np.int8(i) for i in range(start, start + nb)]
@@ -1624,7 +1981,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_int8_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int8_field_name])
         null_data = [None for _ in range(null_number)]
-        int8_data = int8_data[:nb - null_number] + null_data
+        int8_data = int8_data[: nb - null_number] + null_data
         int8_values = pd.Series(data=int8_data, dtype=object)
 
     bool_data = [np.bool_(i) for i in range(start, start + nb)]
@@ -1632,7 +1989,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_bool_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_bool_field_name])
         null_data = [None for _ in range(null_number)]
-        bool_data = bool_data[:nb - null_number] + null_data
+        bool_data = bool_data[: nb - null_number] + null_data
         bool_values = pd.Series(data=bool_data, dtype="bool")
 
     float_data = [np.float32(i) for i in range(start, start + nb)]
@@ -1640,7 +1997,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_float_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_float_field_name])
         null_data = [None for _ in range(null_number)]
-        float_data = float_data[:nb - null_number] + null_data
+        float_data = float_data[: nb - null_number] + null_data
         float_values = pd.Series(data=float_data, dtype=object)
 
     double_data = [np.double(i) for i in range(start, start + nb)]
@@ -1648,7 +2005,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_double_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_double_field_name])
         null_data = [None for _ in range(null_number)]
-        double_data = double_data[:nb - null_number] + null_data
+        double_data = double_data[: nb - null_number] + null_data
         double_values = pd.Series(data=double_data, dtype=object)
 
     string_data = [str(i) for i in range(start, start + nb)]
@@ -1658,25 +2015,43 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
         null_data = [None for _ in range(null_number)]
-        string_data = string_data[:nb - null_number] + null_data
+        string_data = string_data[: nb - null_number] + null_data
         string_values = pd.Series(data=string_data, dtype=object)
 
-    json_values = [{"number": i, "string": str(i), "bool": bool(i),
-                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(start, start + nb)]
+    json_values = [
+        {"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(i, i + ct.default_json_list_length)]}
+        for i in range(start, start + nb)
+    ]
     if ct.default_json_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_json_field_name])
-        null_data = [{"number": None, "string": None, "bool": None,
-                    "list": [None for _ in range(i, i + ct.default_json_list_length)]} for i in range(null_number)]
-        json_values = json_values[:nb - null_number] + null_data
+        null_data = [
+            {
+                "number": None,
+                "string": None,
+                "bool": None,
+                "list": [None for _ in range(i, i + ct.default_json_list_length)],
+            }
+            for i in range(null_number)
+        ]
+        json_values = json_values[: nb - null_number] + null_data
     float_vec_values = gen_vectors(nb, dim)
-    insert_list = [int64_values, int32_values, int16_values, int8_values, bool_values, float_values, double_values,
-                   string_values, json_values]
+    insert_list = [
+        int64_values,
+        int32_values,
+        int16_values,
+        int8_values,
+        bool_values,
+        float_values,
+        double_values,
+        string_values,
+        json_values,
+    ]
 
     if len(multiple_dim_array) == 0:
         insert_list.append(float_vec_values)
     else:
         for i in range(len(multiple_dim_array)):
-            insert_list.append(gen_vectors(nb, multiple_dim_array[i], ct.append_vector_type[i%3]))
+            insert_list.append(gen_vectors(nb, multiple_dim_array[i], ct.append_vector_type[i % 3]))
 
     if with_json is False:
         # index = insert_list.index(json_values)
@@ -1692,22 +2067,36 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
     return insert_list
 
 
-def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
-                                        multiple_dim_array=[], multiple_vector_field_name=[], partition_id=0,
-                                        auto_id=False, primary_field=ct.default_int64_field_name, language=None):
+def gen_default_rows_data_all_data_type(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    with_json=True,
+    multiple_dim_array=[],
+    multiple_vector_field_name=[],
+    partition_id=0,
+    auto_id=False,
+    primary_field=ct.default_int64_field_name,
+    language=None,
+):
     array = []
     for i in range(start, start + nb):
-        dict = {ct.default_int64_field_name: i,
-                ct.default_int32_field_name: i,
-                ct.default_int16_field_name: i,
-                ct.default_int8_field_name: int(np.int8(i)),
-                ct.default_bool_field_name: bool(i),
-                ct.default_float_field_name: i*1.0,
-                ct.default_double_field_name: i * 1.0,
-                ct.default_string_field_name: str(i),
-                ct.default_json_field_name: {"number": i, "string": str(i), "bool": bool(i),
-                                             "list": [j for j in range(i, i + ct.default_json_list_length)]}
-                }
+        dict = {
+            ct.default_int64_field_name: i,
+            ct.default_int32_field_name: i,
+            ct.default_int16_field_name: i,
+            ct.default_int8_field_name: int(np.int8(i)),
+            ct.default_bool_field_name: bool(i),
+            ct.default_float_field_name: i * 1.0,
+            ct.default_double_field_name: i * 1.0,
+            ct.default_string_field_name: str(i),
+            ct.default_json_field_name: {
+                "number": i,
+                "string": str(i),
+                "bool": bool(i),
+                "list": [j for j in range(i, i + ct.default_json_list_length)],
+            },
+        }
         if with_json is False:
             dict.pop(ct.default_json_field_name, None)
         if language:
@@ -1722,24 +2111,32 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
             dict[ct.default_float_vec_field_name] = gen_vectors(1, dim)[0]
         else:
             for i in range(len(multiple_dim_array)):
-                dict[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i],
-                                                                  ct.append_vector_type[i])[0]
+                dict[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i], ct.append_vector_type[i])[
+                    0
+                ]
     if len(multiple_dim_array) != 0:
-        with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + f'_dim{dim}.txt', 'wb') as json_file:
+        with open(ct.rows_all_data_type_file_path + f"_{partition_id}" + f"_dim{dim}.txt", "wb") as json_file:
             pickle.dump(array, json_file)
             log.info("generated rows data")
 
     return array
 
 
-def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
-                                      primary_field=ct.default_int64_field_name, nullable_fields={}, language=None):
+def gen_default_binary_dataframe_data(
+    nb=ct.default_nb,
+    dim=ct.default_dim,
+    start=0,
+    auto_id=False,
+    primary_field=ct.default_int64_field_name,
+    nullable_fields={},
+    language=None,
+):
     int_data = [i for i in range(start, start + nb)]
     int_values = pd.Series(data=int_data)
     if ct.default_int64_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_int64_field_name])
         null_data = [None for _ in range(null_number)]
-        int_data = int_data[:nb - null_number] + null_data
+        int_data = int_data[: nb - null_number] + null_data
         int_values = pd.Series(data=int_data, dtype=object)
 
     float_data = [np.float32(i) for i in range(start, start + nb)]
@@ -1747,7 +2144,7 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
     if ct.default_float_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_float_field_name])
         null_data = [None for _ in range(null_number)]
-        float_data = float_data[:nb - null_number] + null_data
+        float_data = float_data[: nb - null_number] + null_data
         float_values = pd.Series(data=float_data, dtype=object)
 
     string_data = [str(i) for i in range(start, start + nb)]
@@ -1757,16 +2154,18 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
         null_data = [None for _ in range(null_number)]
-        string_data = string_data[:nb - null_number] + null_data
+        string_data = string_data[: nb - null_number] + null_data
         string_values = pd.Series(data=string_data, dtype=object)
 
     binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
-    df = pd.DataFrame({
-        ct.default_int64_field_name: int_values,
-        ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
-        ct.default_binary_vec_field_name: binary_vec_values
-    })
+    df = pd.DataFrame(
+        {
+            ct.default_int64_field_name: int_values,
+            ct.default_float_field_name: float_values,
+            ct.default_string_field_name: string_values,
+            ct.default_binary_vec_field_name: binary_vec_values,
+        }
+    )
     if auto_id is True:
         if primary_field == ct.default_int64_field_name:
             df.drop(ct.default_int64_field_name, axis=1, inplace=True)
@@ -1780,8 +2179,10 @@ def gen_default_list_sparse_data(nb=ct.default_nb, dim=ct.default_dim, start=0, 
     int_values = [i for i in range(start, start + nb)]
     float_values = [np.float32(i) for i in range(start, start + nb)]
     string_values = [str(i) for i in range(start, start + nb)]
-    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
-                   for i in range(start, start + nb)]
+    json_values = [
+        {"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
+        for i in range(start, start + nb)
+    ]
     sparse_vec_values = gen_vectors(nb, dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
     if with_json:
         data = [int_values, float_values, string_values, json_values, sparse_vec_values]
@@ -1804,11 +2205,9 @@ def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000, wi
     return data
 
 
-def prepare_bulk_insert_data(schema=None,
-                             nb=ct.default_nb,
-                             file_type="npy",
-                             minio_endpoint="127.0.0.1:9000",
-                             bucket_name="milvus-bucket"):
+def prepare_bulk_insert_data(
+    schema=None, nb=ct.default_nb, file_type="npy", minio_endpoint="127.0.0.1:9000", bucket_name="milvus-bucket"
+):
     schema = gen_default_collection_schema() if schema is None else schema
     dim = get_dim_by_schema(schema=schema)
     log.info(f"start to generate raw data for bulk insert")
@@ -1817,7 +2216,9 @@ def prepare_bulk_insert_data(schema=None,
     log.info(f"generate raw data for bulk insert cost {time.time() - t0} s")
     data_dir = "/tmp/bulk_insert_data"
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    log.info(f"schema:{schema}, nb:{nb}, file_type:{file_type}, minio_endpoint:{minio_endpoint}, bucket_name:{bucket_name}")
+    log.info(
+        f"schema:{schema}, nb:{nb}, file_type:{file_type}, minio_endpoint:{minio_endpoint}, bucket_name:{bucket_name}"
+    )
     files = []
     log.info(f"generate {file_type} files for bulk insert")
     if file_type == "json":
@@ -1842,14 +2243,14 @@ def gen_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
 def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=0, random_pk=False):
     """
     Generates column data based on the given schema.
-    
+
     Args:
         nb (int): Number of rows to generate. Defaults to ct.default_nb.
         schema (Schema): Collection schema. If None, uses default schema.
         skip_vectors (bool): Whether to skip vector fields. Defaults to False.
         start (int): Starting value for primary key fields (default: 0)
         random_pk (bool, optional): Whether to generate random primary key values (default: False)
-    
+
     Returns:
         list: List of column data arrays matching the schema fields (excluding auto_id fields).
     """
@@ -1894,8 +2295,15 @@ def convert_orm_schema_to_dict_schema(orm_schema):
     return schema_dict
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, 
-                           skip_field_names=[], desired_field_names=[], desired_dynamic_field_names=[]):
+def gen_row_data_by_schema(
+    nb=ct.default_nb,
+    schema=None,
+    start=0,
+    random_pk=False,
+    skip_field_names=[],
+    desired_field_names=[],
+    desired_dynamic_field_names=[],
+):
     """
     Generates row data based on the given schema.
 
@@ -1933,20 +2341,20 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         schema = convert_orm_schema_to_dict_schema(schema)
 
     # Now schema is always a dict after conversion, process it uniformly
-    enable_dynamic = schema.get('enable_dynamic_field', False)
+    enable_dynamic = schema.get("enable_dynamic_field", False)
     # Get all fields from schema
-    all_fields = schema.get('fields', [])
+    all_fields = schema.get("fields", [])
     fields = []
     for field in all_fields:
         # if desired_field_names is specified, only generate the fields in desired_field_names
-        if field.get('name', None) in desired_field_names:
+        if field.get("name", None) in desired_field_names:
             fields.append(field)
         # elif desired_field_names is not specified, generate all fields
         elif not desired_field_names:
             fields.append(field)
 
     # Get struct_fields from schema
-    struct_fields = schema.get('struct_fields', [])
+    struct_fields = schema.get("struct_fields", [])
     # log.debug(f"[gen_row_data_by_schema] struct_fields from schema: {len(struct_fields)} items")
     if struct_fields:
         pass
@@ -1957,42 +2365,42 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
     if not struct_fields:
         struct_fields = []
         for field in fields:
-            if field.get('type') == DataType.ARRAY and field.get('element_type') == DataType.STRUCT:
+            if field.get("type") == DataType.ARRAY and field.get("element_type") == DataType.STRUCT:
                 # Convert field format to struct_field format
                 struct_field_dict = {
-                    'name': field.get('name'),
-                    'max_capacity': field.get('params', {}).get('max_capacity', 100),
-                    'fields': []
+                    "name": field.get("name"),
+                    "max_capacity": field.get("params", {}).get("max_capacity", 100),
+                    "fields": [],
                 }
                 # Get struct fields from field - key can be 'struct_fields' or 'struct_schema'
-                struct_field_list = field.get('struct_fields') or field.get('struct_schema')
+                struct_field_list = field.get("struct_fields") or field.get("struct_schema")
                 if struct_field_list:
                     # If it's a dict with 'fields' key, get the fields
-                    if isinstance(struct_field_list, dict) and 'fields' in struct_field_list:
-                        struct_field_dict['fields'] = struct_field_list['fields']
+                    if isinstance(struct_field_list, dict) and "fields" in struct_field_list:
+                        struct_field_dict["fields"] = struct_field_list["fields"]
                     # If it's already a list, use it directly
                     elif isinstance(struct_field_list, list):
-                        struct_field_dict['fields'] = struct_field_list
+                        struct_field_dict["fields"] = struct_field_list
                 struct_fields.append(struct_field_dict)
 
     # Get function output fields to skip
     func_output_fields = []
-    functions = schema.get('functions', [])
+    functions = schema.get("functions", [])
     for func in functions:
-        output_field_names = func.get('output_field_names', [])
+        output_field_names = func.get("output_field_names", [])
         func_output_fields.extend(output_field_names)
     func_output_fields = list(set(func_output_fields))
 
     # Filter fields that need data generation
     fields_needs_data = []
     for field in fields:
-        field_name = field.get('name', None)
-        if field.get('auto_id', False):
+        field_name = field.get("name", None)
+        if field.get("auto_id", False):
             continue
         if field_name in func_output_fields or field_name in skip_field_names:
             continue
         # Skip struct array fields as they are handled separately via struct_fields
-        if field.get('type') == DataType.ARRAY and field.get('element_type') == DataType.STRUCT:
+        if field.get("type") == DataType.ARRAY and field.get("element_type") == DataType.STRUCT:
             continue
         fields_needs_data.append(field)
 
@@ -2002,25 +2410,32 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         tmp = {}
         # Generate data for regular fields
         for field in fields_needs_data:
-            tmp[field.get('name', None)] = gen_data_by_collection_field(field, random_pk=random_pk)
+            tmp[field.get("name", None)] = gen_data_by_collection_field(field, random_pk=random_pk)
             # Handle primary key fields specially
-            if field.get('is_primary', False) is True and field.get('type', None) == DataType.INT64:
-                tmp[field.get('name', None)] = start
+            if field.get("is_primary", False) is True and field.get("type", None) == DataType.INT64:
+                tmp[field.get("name", None)] = start
                 start += 1
-            if field.get('is_primary', False) is True and field.get('type', None) == DataType.VARCHAR:
-                tmp[field.get('name', None)] = str(start)
+            if field.get("is_primary", False) is True and field.get("type", None) == DataType.VARCHAR:
+                tmp[field.get("name", None)] = str(start)
                 start += 1
 
         # Generate data for struct array fields
         for struct_field in struct_fields:
-            field_name = struct_field.get('name', None)
+            field_name = struct_field.get("name", None)
             struct_data = gen_struct_array_data(struct_field, start=start, random_pk=random_pk)
             tmp[field_name] = struct_data
-        
+
         # generate additional data for dynamic fields
         if enable_dynamic:
             for name in desired_dynamic_field_names:
-                data_types = [DataType.JSON, DataType.INT64, DataType.FLOAT, DataType.VARCHAR, DataType.BOOL, DataType.ARRAY]
+                data_types = [
+                    DataType.JSON,
+                    DataType.INT64,
+                    DataType.FLOAT,
+                    DataType.VARCHAR,
+                    DataType.BOOL,
+                    DataType.ARRAY,
+                ]
                 data_type = data_types[random.randint(0, len(data_types) - 1)]
                 dynamic_field = gen_scalar_field(data_type, nullable=True, skip_wrapper=True)
                 tmp[name] = gen_data_by_collection_field(dynamic_field)
@@ -2031,9 +2446,16 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
     return data
 
 
-def gen_row_data_by_schema_with_defaults(nb=ct.default_nb, schema=None, start=0, random_pk=False,
-                                         skip_field_names=[], desired_field_names=[],
-                                         desired_dynamic_field_names=[], default_values={}):
+def gen_row_data_by_schema_with_defaults(
+    nb=ct.default_nb,
+    schema=None,
+    start=0,
+    random_pk=False,
+    skip_field_names=[],
+    desired_field_names=[],
+    desired_dynamic_field_names=[],
+    default_values={},
+):
     """
     Same as gen_row_data_by_schema but supports overriding specific field values via default_values.
 
@@ -2066,10 +2488,15 @@ def gen_row_data_by_schema_with_defaults(nb=ct.default_nb, schema=None, start=0,
     # skip generation for fields covered by default_values to avoid wasted computation
     effective_skip = list(skip_field_names) + [f for f in default_values if f not in skip_field_names]
 
-    rows = gen_row_data_by_schema(nb=nb, schema=schema, start=start, random_pk=random_pk,
-                                  skip_field_names=effective_skip,
-                                  desired_field_names=desired_field_names,
-                                  desired_dynamic_field_names=desired_dynamic_field_names)
+    rows = gen_row_data_by_schema(
+        nb=nb,
+        schema=schema,
+        start=start,
+        random_pk=random_pk,
+        skip_field_names=effective_skip,
+        desired_field_names=desired_field_names,
+        desired_dynamic_field_names=desired_dynamic_field_names,
+    )
 
     if not default_values:
         return rows
@@ -2101,7 +2528,7 @@ def iter_mc_insert_list_data(data: list, batch: int, nb: int):
     :return: generator of row-dict sub-lists
     """
     for start in range(0, nb, batch):
-        yield data[start:start + batch]
+        yield data[start : start + batch]
 
 
 def gen_milvus_client_schema(schema, fields: list, field_params: dict = {}):
@@ -2148,22 +2575,28 @@ def gen_milvus_client_schema(schema, fields: list, field_params: dict = {}):
 
                 if _field_element in [DataType.STRING.name, DataType.VARCHAR.name]:
                     _kwargs.update({"max_length": ct.default_length})
-                elif _field_element in [DataType.BINARY_VECTOR.name, DataType.FLOAT_VECTOR.name,
-                                        DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name]:
+                elif _field_element in [
+                    DataType.BINARY_VECTOR.name,
+                    DataType.FLOAT_VECTOR.name,
+                    DataType.FLOAT16_VECTOR.name,
+                    DataType.BFLOAT16_VECTOR.name,
+                ]:
                     _kwargs.update({"dim": ct.default_dim})
 
                 params = field_params.get(field, {})
                 if not isinstance(params, dict):
                     raise ValueError(
                         f"[gen_milvus_client_schema] Field `{field}` params is not a dict, "
-                        f"type: {type(params)}, params: {params}")
+                        f"type: {type(params)}, params: {params}"
+                    )
                 _kwargs.update(params)
                 schema.add_field(field_name=field, datatype=v, **_kwargs)
                 break
         else:
             raise ValueError(
                 f"[gen_milvus_client_schema] Cannot infer DataType for field '{field}'. "
-                f"Rename with a lowercase DataType prefix (e.g. 'int64_{field}', 'float_vector_{field}').")
+                f"Rename with a lowercase DataType prefix (e.g. 'int64_{field}', 'float_vector_{field}')."
+            )
     return schema
 
 
@@ -2260,10 +2693,19 @@ def get_scalar_field_name_list(schema=None):
         schema = gen_default_collection_schema()
     fields = schema.fields
     for field in fields:
-        if field.dtype in [DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
-                           DataType.DOUBLE, DataType.VARCHAR]:
+        if field.dtype in [
+            DataType.BOOL,
+            DataType.INT8,
+            DataType.INT16,
+            DataType.INT32,
+            DataType.INT64,
+            DataType.FLOAT,
+            DataType.DOUBLE,
+            DataType.VARCHAR,
+        ]:
             vec_fields.append(field.name)
     return vec_fields
+
 
 def get_json_field_name_list(schema=None):
     json_fields = []
@@ -2275,6 +2717,7 @@ def get_json_field_name_list(schema=None):
             json_fields.append(field.name)
     return json_fields
 
+
 def get_geometry_field_name_list(schema=None):
     geometry_fields = []
     if schema is None:
@@ -2284,6 +2727,7 @@ def get_geometry_field_name_list(schema=None):
         if field.dtype == DataType.GEOMETRY:
             geometry_fields.append(field.name)
     return geometry_fields
+
 
 def get_binary_vec_field_name(schema=None):
     if schema is None:
@@ -2305,6 +2749,7 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+
 def get_int8_vec_field_name_list(schema=None):
     vec_fields = []
     if schema is None:
@@ -2314,6 +2759,7 @@ def get_int8_vec_field_name_list(schema=None):
         if field.dtype in [DataType.INT8_VECTOR]:
             vec_fields.append(field.name)
     return vec_fields
+
 
 def get_emb_list_field_name_list(schema=None):
     vec_fields = []
@@ -2325,6 +2771,7 @@ def get_emb_list_field_name_list(schema=None):
             if field.dtype in [DataType.FLOAT_VECTOR]:
                 vec_fields.append(f"{struct_field.name}[{field.name}]")
     return vec_fields
+
 
 def get_bm25_vec_field_name_list(schema=None):
     if not hasattr(schema, "functions"):
@@ -2338,6 +2785,7 @@ def get_bm25_vec_field_name_list(schema=None):
 
     return bm25_outputs
 
+
 def get_minhash_vec_field_name_list(schema=None):
     if not hasattr(schema, "functions"):
         return []
@@ -2349,15 +2797,17 @@ def get_minhash_vec_field_name_list(schema=None):
     minhash_outputs = list(set(minhash_outputs))
     return minhash_outputs
 
+
 def get_dim_by_schema(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
     fields = schema.fields
     for field in fields:
         if field.dtype == DataType.FLOAT_VECTOR or field.dtype == DataType.BINARY_VECTOR:
-            dim = field.params['dim']
+            dim = field.params["dim"]
             return dim
     return None
+
 
 def get_dense_anns_field_name_list(schema=None):
     if schema is None:
@@ -2372,14 +2822,17 @@ def get_dense_anns_field_name_list(schema=None):
     for field in fields:
         if field.name in func_output_fields:
             continue
-        if field.dtype in [DataType.FLOAT_VECTOR,DataType.FLOAT16_VECTOR,DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR]:
-            item = {
-                "name": field.name,
-                "dtype": field.dtype,
-                "dim": field.params['dim']
-            }
+        if field.dtype in [
+            DataType.FLOAT_VECTOR,
+            DataType.FLOAT16_VECTOR,
+            DataType.BFLOAT16_VECTOR,
+            DataType.INT8_VECTOR,
+            DataType.BINARY_VECTOR,
+        ]:
+            item = {"name": field.name, "dtype": field.dtype, "dim": field.params["dim"]}
             anns_fields.append(item)
     return anns_fields
+
 
 def get_struct_array_vector_field_list(schema=None):
     if schema is None:
@@ -2389,29 +2842,33 @@ def get_struct_array_vector_field_list(schema=None):
     struct_vector_fields = []
 
     for struct_field in struct_fields:
-            struct_field_name = struct_field.name
-            # Check each sub-field for vector types
-            for sub_field in struct_field.fields:
-                sub_field_name = sub_field.name if hasattr(sub_field, 'name') else sub_field.get('name')
-                sub_field_dtype = sub_field.dtype if hasattr(sub_field, 'dtype') else sub_field.get('type')
+        struct_field_name = struct_field.name
+        # Check each sub-field for vector types
+        for sub_field in struct_field.fields:
+            sub_field_name = sub_field.name if hasattr(sub_field, "name") else sub_field.get("name")
+            sub_field_dtype = sub_field.dtype if hasattr(sub_field, "dtype") else sub_field.get("type")
 
-                if sub_field_dtype in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR,
-                                      DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR,
-                                      DataType.BINARY_VECTOR]:
-                    # Get dimension
-                    if hasattr(sub_field, 'params'):
-                        dim = sub_field.params.get('dim')
-                    else:
-                        dim = sub_field.get('params', {}).get('dim')
+            if sub_field_dtype in [
+                DataType.FLOAT_VECTOR,
+                DataType.FLOAT16_VECTOR,
+                DataType.BFLOAT16_VECTOR,
+                DataType.INT8_VECTOR,
+                DataType.BINARY_VECTOR,
+            ]:
+                # Get dimension
+                if hasattr(sub_field, "params"):
+                    dim = sub_field.params.get("dim")
+                else:
+                    dim = sub_field.get("params", {}).get("dim")
 
-                    item = {
-                        "struct_field": struct_field_name,
-                        "vector_field": sub_field_name,
-                        "anns_field": f"{struct_field_name}[{sub_field_name}]",
-                        "dtype": sub_field_dtype,
-                        "dim": dim
-                    }
-                    struct_vector_fields.append(item)
+                item = {
+                    "struct_field": struct_field_name,
+                    "vector_field": sub_field_name,
+                    "anns_field": f"{struct_field_name}[{sub_field_name}]",
+                    "dtype": sub_field_dtype,
+                    "dim": dim,
+                }
+                struct_vector_fields.append(item)
 
     return struct_vector_fields
 
@@ -2439,26 +2896,27 @@ def gen_struct_array_data(struct_field, start=0, random_pk=False):
 
     # Handle both dict and object formats
     if isinstance(struct_field, dict):
-        max_capacity = struct_field.get('max_capacity', 100)
-        fields = struct_field.get('fields', [])
+        max_capacity = struct_field.get("max_capacity", 100)
+        fields = struct_field.get("fields", [])
     else:
         # StructFieldSchema object
-        max_capacity = getattr(struct_field, 'max_capacity', 100) or 100
+        max_capacity = getattr(struct_field, "max_capacity", 100) or 100
         fields = struct_field.fields
 
     arr_len = random.randint(1, max_capacity)
     for _ in range(arr_len):
         struct_data = {}
         for field in fields:
-            field_name = field.get('name') if isinstance(field, dict) else field.name
+            field_name = field.get("name") if isinstance(field, dict) else field.name
             struct_data[field_name] = gen_data_by_collection_field(field, nb=None, start=start, random_pk=random_pk)
         struct_array_data.append(struct_data)
     return struct_array_data
 
+
 def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
     """
     Generates test data for a given collection field based on its data type and properties.
-    
+
     Args:
         field (dict or Field): Field information, either as a dictionary (v2 client) or Field object (ORM client)
         nb (int, optional): Bumber of data batch to generate. If None, returns a single value which usually used by row data generation
@@ -2466,7 +2924,7 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         random_pk (bool, optional): Whether to generate random primary key values (default: False)
     Returns:
         Single value if nb is None, otherwise returns a list of generated values
-    
+
     Notes:
         - Handles various data types including primitive types, vectors, arrays and JSON
         - For nullable fields, generates None values approximately 20% of the time
@@ -2475,14 +2933,14 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         - For vector fields, generates random vectors of specified dimension
         - For array fields, generates arrays filled with random values of element type
     """
-    
+
     if isinstance(field, dict):
         # for v2 client, it accepts a dict of field info
-        nullable = field.get('nullable', False)
-        data_type = field.get('type', None)
-        params = field.get('params', {}) or {}
+        nullable = field.get("nullable", False)
+        data_type = field.get("type", None)
+        params = field.get("params", {}) or {}
         enable_analyzer = params.get("enable_analyzer", False)
-        is_primary = field.get('is_primary', False)
+        is_primary = field.get("is_primary", False)
     else:
         # for ORM client, it accepts a field object
         nullable = field.nullable
@@ -2498,7 +2956,7 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [random.choice([True, False]) for _ in range(nb)]
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0  and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)]
+            return [None if i % 2 == 0 and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)]
     elif data_type == DataType.INT8:
         if nb is None:
             return random.randint(-128, 127) if random.random() < 0.8 or nullable is False else None
@@ -2522,18 +2980,30 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [random.randint(-2147483648, 2147483647) for _ in range(nb)]
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647) for i in range(nb)]
+            return [
+                None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647)
+                for i in range(nb)
+            ]
     elif data_type == DataType.INT64:
         if nb is None:
-            return random.randint(-9223372036854775808, 9223372036854775807) if random.random() < 0.8 or nullable is False else None
+            return (
+                random.randint(-9223372036854775808, 9223372036854775807)
+                if random.random() < 0.8 or nullable is False
+                else None
+            )
         if nullable is False:
-            if is_primary is True and random_pk is False: 
-                return [i for i in range(start, start+nb)]
+            if is_primary is True and random_pk is False:
+                return [i for i in range(start, start + nb)]
             else:
                 return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(nb)]
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-9223372036854775808, 9223372036854775807) for i in range(nb)]
+            return [
+                None
+                if i % 2 == 0 and random.random() < 0.4
+                else random.randint(-9223372036854775808, 9223372036854775807)
+                for i in range(nb)
+            ]
     elif data_type == DataType.FLOAT:
         if nb is None:
             return np.float32(random.random()) if random.random() < 0.8 or nullable is False else None
@@ -2552,29 +3022,47 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [None if i % 2 == 0 and random.random() < 0.4 else np.float64(random.random()) for i in range(nb)]
     elif data_type == DataType.VARCHAR:
         if isinstance(field, dict):
-            max_length = field.get('params')['max_length']
+            max_length = field.get("params")["max_length"]
         else:
-            max_length = field.params['max_length']
-        max_length = min(20, max_length-1)
+            max_length = field.params["max_length"]
+        max_length = min(20, max_length - 1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0] if random.random() < 0.8 or nullable is False else None
+            return (
+                gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+                if random.random() < 0.8 or nullable is False
+                else None
+            )
         if nullable is False:
             if is_primary is True and random_pk is False:
-                return [str(i) for i in range(start, start+nb)]
+                return [str(i) for i in range(start, start + nb)]
             else:
                 return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0 and random.random() < 0.4 else gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0] for i in range(nb)]
+            return [
+                None
+                if i % 2 == 0 and random.random() < 0.4
+                else gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
+                for i in range(nb)
+            ]
     elif data_type == DataType.JSON:
         if nb is None:
-            return {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)} if random.random() < 0.8 or nullable is False else None
+            return (
+                {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)}
+                if random.random() < 0.8 or nullable is False
+                else None
+            )
         if nullable is False:
             return [{"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0 and random.random() < 0.4 else {"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
+            return [
+                None
+                if i % 2 == 0 and random.random() < 0.4
+                else {"name": str(i), "address": i, "count": random.randint(0, 100)}
+                for i in range(nb)
+            ]
     elif data_type == DataType.GEOMETRY:
         if nb is None:
             lon = random.uniform(-180, 180)
@@ -2584,15 +3072,24 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for _ in range(nb)]
         else:
             # gen 20% none data for nullable field
-            return [None if i % 2 == 0 and random.random() < 0.4 else f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for i in range(nb)]
+            return [
+                None
+                if i % 2 == 0 and random.random() < 0.4
+                else f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})"
+                for i in range(nb)
+            ]
 
     elif data_type in ct.all_vector_types:
         if isinstance(field, dict):
-            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.get('params')['dim']
+            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.get("params")["dim"]
         else:
-            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params['dim']
+            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params["dim"]
         if nb is None:
-            return gen_vectors(1, dim, vector_data_type=data_type)[0] if random.random() < 0.8 or nullable is False else None
+            return (
+                gen_vectors(1, dim, vector_data_type=data_type)[0]
+                if random.random() < 0.8 or nullable is False
+                else None
+            )
         if nullable is False:
             return gen_vectors(nb, dim, vector_data_type=data_type)
         else:
@@ -2601,10 +3098,10 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [None if i % 2 == 0 and random.random() < 0.4 else vectors[i] for i in range(nb)]
     elif data_type == DataType.ARRAY:
         if isinstance(field, dict):
-            max_capacity = field.get('params')['max_capacity']
-            element_type = field.get('element_type')
+            max_capacity = field.get("params")["max_capacity"]
+            element_type = field.get("element_type")
         else:
-            max_capacity = field.params['max_capacity']
+            max_capacity = field.params["max_capacity"]
             element_type = field.element_type
 
         # Struct array fields are handled separately in gen_row_data_by_schema
@@ -2614,7 +3111,11 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
 
         if element_type == DataType.INT8:
             if nb is None:
-                return [random.randint(-128, 127) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [random.randint(-128, 127) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[random.randint(-128, 127) for _ in range(max_capacity)] for _ in range(nb)]
             else:
@@ -2622,67 +3123,122 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
                 return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-128, 127) for i in range(nb)]
         if element_type == DataType.INT16:
             if nb is None:
-                return [random.randint(-32768, 32767) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [random.randint(-32768, 32767) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[random.randint(-32768, 32767) for _ in range(max_capacity)] for _ in range(nb)]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-32768, 32767) for i in range(nb)]
+                return [
+                    None if i % 2 == 0 and random.random() < 0.4 else random.randint(-32768, 32767) for i in range(nb)
+                ]
         if element_type == DataType.INT32:
             if nb is None:
-                return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647) for i in range(nb)]
+                return [
+                    None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647)
+                    for i in range(nb)
+                ]
         if element_type == DataType.INT64:
             if nb is None:
-                return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
-                return [[random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] for _ in range(nb)]
+                return [
+                    [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)]
+                    for _ in range(nb)
+                ]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-9223372036854775808, 9223372036854775807) for i in range(nb)]
+                return [
+                    None
+                    if i % 2 == 0 and random.random() < 0.4
+                    else random.randint(-9223372036854775808, 9223372036854775807)
+                    for i in range(nb)
+                ]
         if element_type == DataType.BOOL:
             if nb is None:
-                return [random.choice([True, False]) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [random.choice([True, False]) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[random.choice([True, False]) for _ in range(max_capacity)] for _ in range(nb)]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)]
+                return [
+                    None if i % 2 == 0 and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)
+                ]
         if element_type == DataType.FLOAT:
             if nb is None:
-                return [np.float32(random.random()) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [np.float32(random.random()) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else np.float32(random.random()) for i in range(nb)]
+                return [
+                    None if i % 2 == 0 and random.random() < 0.4 else np.float32(random.random()) for i in range(nb)
+                ]
         if element_type == DataType.DOUBLE:
             if nb is None:
-                return [np.float64(random.random()) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    [np.float64(random.random()) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
                 return [[np.float64(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else np.float64(random.random()) for i in range(nb)]
+                return [
+                    None if i % 2 == 0 and random.random() < 0.4 else np.float64(random.random()) for i in range(nb)
+                ]
         if element_type == DataType.VARCHAR:
             if isinstance(field, dict):
-                max_length = field.get('params')['max_length']
+                max_length = field.get("params")["max_length"]
             else:
-                max_length = field.params['max_length']
+                max_length = field.params["max_length"]
             max_length = min(20, max_length - 1)
             length = random.randint(0, max_length)
             if nb is None:
-                return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+                return (
+                    ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
+                    if random.random() < 0.8 or nullable is False
+                    else None
+                )
             if nullable is False:
-                return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
+                return [
+                    ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
+                    for _ in range(nb)
+                ]
             else:
                 # gen 20% none data for nullable field
-                return [None if i % 2 == 0 and random.random() < 0.4 else "".join([chr(random.randint(97, 122)) for _ in range(length)]) for i in range(nb)]
-    
+                return [
+                    None
+                    if i % 2 == 0 and random.random() < 0.4
+                    else "".join([chr(random.randint(97, 122)) for _ in range(length)])
+                    for i in range(nb)
+                ]
+
     elif data_type == DataType.TIMESTAMPTZ:
         if nb is None:
             return gen_timestamptz_str() if random.random() < 0.8 or nullable is False else None
@@ -2690,10 +3246,11 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
             return [gen_timestamptz_str() for _ in range(nb)]
         # gen 20% none data for nullable field
         return [None if i % 2 == 0 and random.random() < 0.4 else gen_timestamptz_str() for i in range(nb)]
-    
+
     else:
         raise MilvusException(message=f"gen data failed, data type {data_type} not implemented")
     return None
+
 
 def gen_timestamptz_str():
     """
@@ -2728,6 +3285,7 @@ def gen_timestamptz_str():
     else:
         # naive time string (no timezone), e.g. "2024-12-31 22:00:00"
         return base.strftime("%Y-%m-%d %H:%M:%S")
+
 
 def gen_varchar_values(nb: int, length: int = 0):
     return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
@@ -2849,11 +3407,13 @@ def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
 
 
 def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = np.arange(nb, dtype='int64')
-    float_values = np.arange(nb, dtype='float32')
+    int_values = np.arange(nb, dtype="int64")
+    float_values = np.arange(nb, dtype="float32")
     string_values = [np.str_(i) for i in range(nb)]
-    json_values = [{"number": i, "string": str(i), "bool": bool(i),
-                    "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(nb)]
+    json_values = [
+        {"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(i, i + ct.default_json_list_length)]}
+        for i in range(nb)
+    ]
     float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, string_values, json_values, float_vec_values]
     return data
@@ -2880,21 +3440,13 @@ def gen_autoindex_params():
         {"index_type": "IVF_FLAT", "metric_type": "L2", "nlist": "1024", "m": "100"},
         {"index_type": "DISKANN", "metric_type": "L2"},
         {"index_type": "IVF_PQ", "nlist": "128", "m": "16", "nbits": "8", "metric_type": "IP"},
-        {"index_type": "IVF_SQ8", "nlist": "128", "metric_type": "COSINE"}
+        {"index_type": "IVF_SQ8", "nlist": "128", "metric_type": "COSINE"},
     ]
     return index_params
 
 
 def gen_invalid_field_types():
-    field_types = [
-        6,
-        1.0,
-        [[]],
-        {},
-        (),
-        "",
-        "a"
-    ]
+    field_types = [6, 1.0, [[]], {}, (), "", "a"]
     return field_types
 
 
@@ -2982,14 +3534,9 @@ def gen_invalid_search_params_type():
 #     return search_params
 #
 
+
 def gen_autoindex_search_params():
-    search_params = [
-        {},
-        {"metric_type": "IP"},
-        {"nlist": "1024"},
-        {"efSearch": "100"},
-        {"search_k": "1000"}
-    ]
+    search_params = [{}, {"metric_type": "IP"}, {"nlist": "1024"}, {"efSearch": "100"}, {"search_k": "1000"}]
     return search_params
 
 
@@ -3010,28 +3557,57 @@ def gen_normal_expressions_and_templates():
     expressions = [
         ["", {"expr": "", "expr_params": {}}],
         ["int64 > 0", {"expr": "int64 > {value_0}", "expr_params": {"value_0": 0}}],
-        ["(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
-         {"expr": "(int64 > {value_0} && int64 < {value_1}) or (int64 > {value_2} && int64 < {value_3})",
-          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        [
+            "(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
+            {
+                "expr": "(int64 > {value_0} && int64 < {value_1}) or (int64 > {value_2} && int64 < {value_3})",
+                "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000},
+            },
+        ],
         ["int64 not in [1, 2, 3]", {"expr": "int64 not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
-        ["int64 in [1, 2, 3] and float != 2", {"expr": "int64 in {value_0} and float != {value_1}",
-                                               "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
-        ["int64 == 0 || float == 10**2 || (int64 + 1) == 3",
-         {"expr": "int64 == {value_0} || float == {value_1} || (int64 + {value_2}) == {value_3}",
-          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
-        ["0 <= int64 < 400 and int64 % 100 == 0",
-         {"expr": "{value_0} <= int64 < {value_1} and int64 % {value_2} == {value_0}",
-          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 100}}],
-        ["200+300 < int64 <= 500+500", {"expr": "{value_0} < int64 <= {value_1}",
-                                        "expr_params": {"value_1": 500+500, "value_0": 200+300}}],
-        ["int64 > 400 && int64 < 200", {"expr": "int64 > {value_0} && int64 < {value_1}",
-                                        "expr_params": {"value_0": 400, "value_1": 200}}],
-        ["int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
-         {"expr": "int64 in {value_0} or float in {value_1}",
-          "expr_params": {"value_0": [int(300/2), 900%40, -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
-        ["float <= -4**5/2 && float > 500-1 && float != 500/2+260",
-         {"expr": "float <= {value_0} && float > {value_1} && float != {value_2}",
-          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
+        [
+            "int64 in [1, 2, 3] and float != 2",
+            {"expr": "int64 in {value_0} and float != {value_1}", "expr_params": {"value_0": [1, 2, 3], "value_1": 2}},
+        ],
+        [
+            "int64 == 0 || float == 10**2 || (int64 + 1) == 3",
+            {
+                "expr": "int64 == {value_0} || float == {value_1} || (int64 + {value_2}) == {value_3}",
+                "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3},
+            },
+        ],
+        [
+            "0 <= int64 < 400 and int64 % 100 == 0",
+            {
+                "expr": "{value_0} <= int64 < {value_1} and int64 % {value_2} == {value_0}",
+                "expr_params": {"value_0": 0, "value_1": 400, "value_2": 100},
+            },
+        ],
+        [
+            "200+300 < int64 <= 500+500",
+            {"expr": "{value_0} < int64 <= {value_1}", "expr_params": {"value_1": 500 + 500, "value_0": 200 + 300}},
+        ],
+        [
+            "int64 > 400 && int64 < 200",
+            {"expr": "int64 > {value_0} && int64 < {value_1}", "expr_params": {"value_0": 400, "value_1": 200}},
+        ],
+        [
+            "int64 in [300/2, 900%40, -10*30+800, (100+200)*2] or float in [+3**6, 2**10/2]",
+            {
+                "expr": "int64 in {value_0} or float in {value_1}",
+                "expr_params": {
+                    "value_0": [int(300 / 2), 900 % 40, -10 * 30 + 800, (100 + 200) * 2],
+                    "value_1": [+(3**6) * 1.0, 2**10 / 2 * 1.0],
+                },
+            },
+        ],
+        [
+            "float <= -4**5/2 && float > 500-1 && float != 500/2+260",
+            {
+                "expr": "float <= {value_0} && float > {value_1} && float != {value_2}",
+                "expr_params": {"value_0": -(4**5) / 2, "value_1": 500 - 1, "value_2": 500 / 2 + 260},
+            },
+        ],
     ]
     return expressions
 
@@ -3043,28 +3619,62 @@ def gen_json_field_expressions_and_templates():
     """
     expressions = [
         ["json_field['number'] > 0", {"expr": "json_field['number'] > {value_0}", "expr_params": {"value_0": 0}}],
-        ["0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
-         {"expr": "{value_0} <= json_field['number'] < {value_1} or {value_2} > json_field['number'] >= {value_3}",
-          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
-        ["json_field['number'] not in [1, 2, 3]", {"expr": "json_field['number'] not in {value_0}",
-                                                   "expr_params": {"value_0": [1, 2, 3]}}],
-        ["json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
-         {"expr": "json_field['number'] in {value_0} and json_field['float'] != {value_1}",
-          "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
-        ["json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
-         {"expr": "json_field['number'] == {value_0} || json_field['float'] == {value_1} || json_field['number'] + {value_2} == {value_3}",
-          "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3}}],
-        ["json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
-         {"expr": "json_field['number'] < {value_0} and json_field['number'] >= {value_1} and json_field['number'] % {value_1} == 0",
-          "expr_params": {"value_0": 400, "value_1": 100}}],
-        ["json_field['float'] > 400 && json_field['float'] < 200", {"expr": "json_field['float'] > {value_0} && json_field['float'] < {value_1}",
-                                                                    "expr_params": {"value_0": 400, "value_1": 200}}],
-        ["json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
-         {"expr": "json_field['number'] in {value_0} or json_field['float'] in {value_1}",
-          "expr_params": {"value_0": [int(300/2), -10*30+800, (100+200)*2], "value_1": [+3**6*1.0, 2**10/2*1.0]}}],
-        ["json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260",
-         {"expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
-          "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
+        [
+            "0 <= json_field['number'] < 400 or 1000 > json_field['number'] >= 500",
+            {
+                "expr": "{value_0} <= json_field['number'] < {value_1} or {value_2} > json_field['number'] >= {value_3}",
+                "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500},
+            },
+        ],
+        [
+            "json_field['number'] not in [1, 2, 3]",
+            {"expr": "json_field['number'] not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}},
+        ],
+        [
+            "json_field['number'] in [1, 2, 3] and json_field['float'] != 2",
+            {
+                "expr": "json_field['number'] in {value_0} and json_field['float'] != {value_1}",
+                "expr_params": {"value_0": [1, 2, 3], "value_1": 2},
+            },
+        ],
+        [
+            "json_field['number'] == 0 || json_field['float'] == 10**2 || json_field['number'] + 1 == 3",
+            {
+                "expr": "json_field['number'] == {value_0} || json_field['float'] == {value_1} || json_field['number'] + {value_2} == {value_3}",
+                "expr_params": {"value_0": 0, "value_1": 10**2, "value_2": 1, "value_3": 3},
+            },
+        ],
+        [
+            "json_field['number'] < 400 and json_field['number'] >= 100 and json_field['number'] % 100 == 0",
+            {
+                "expr": "json_field['number'] < {value_0} and json_field['number'] >= {value_1} and json_field['number'] % {value_1} == 0",
+                "expr_params": {"value_0": 400, "value_1": 100},
+            },
+        ],
+        [
+            "json_field['float'] > 400 && json_field['float'] < 200",
+            {
+                "expr": "json_field['float'] > {value_0} && json_field['float'] < {value_1}",
+                "expr_params": {"value_0": 400, "value_1": 200},
+            },
+        ],
+        [
+            "json_field['number'] in [300/2, -10*30+800, (100+200)*2] or json_field['float'] in [+3**6, 2**10/2]",
+            {
+                "expr": "json_field['number'] in {value_0} or json_field['float'] in {value_1}",
+                "expr_params": {
+                    "value_0": [int(300 / 2), -10 * 30 + 800, (100 + 200) * 2],
+                    "value_1": [+(3**6) * 1.0, 2**10 / 2 * 1.0],
+                },
+            },
+        ],
+        [
+            "json_field['float'] <= -4**5/2 && json_field['float'] > 500-1 && json_field['float'] != 500/2+260",
+            {
+                "expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
+                "expr_params": {"value_0": -(4**5) / 2, "value_1": 500 - 1, "value_2": 500 / 2 + 260},
+            },
+        ],
     ]
 
     return expressions
@@ -3078,202 +3688,386 @@ def gen_json_field_expressions_all_single_operator(json_cast_type=None):
     if json_cast_type == "ARRAY_DOUBLE":
         # For ARRAY_DOUBLE type, use array-specific expressions
         expressions = [
-            "json_contains(json_field['a'], 1)", "JSON_CONTAINS(json_field['a'], 1)",
-            "json_contains(json_field['a'], 1.0)", "json_contains(json_field['a'], 2)",
-            "json_contains_all(json_field['a'], [1, 2])", "JSON_CONTAINS_ALL(json_field['a'], [1, 2])",
-            "json_contains_all(json_field['a'], [1.0, 2.0])", "json_contains_all(json_field['a'], [2, 4])",
-            "json_contains_any(json_field['a'], [1, 2])", "JSON_CONTAINS_ANY(json_field['a'], [1, 2])",
-            "json_contains_any(json_field['a'], [1.0, 2.0])", "json_contains_any(json_field['a'], [2, 4])",
-            "array_contains(json_field['a'], 1)", "ARRAY_CONTAINS(json_field['a'], 1)",
-            "array_contains(json_field['a'], 1.0)", "array_contains(json_field['a'], 2)",
-            "array_contains_all(json_field['a'], [1, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1, 2])",
-            "array_contains_all(json_field['a'], [1.0, 2.0])", "array_contains_all(json_field['a'], [2, 4])",
-            "array_contains_any(json_field['a'], [1, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1, 2])",
-            "array_contains_any(json_field['a'], [1.0, 2.0])", "array_contains_any(json_field['a'], [2, 4])",
-            "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10"
+            "json_contains(json_field['a'], 1)",
+            "JSON_CONTAINS(json_field['a'], 1)",
+            "json_contains(json_field['a'], 1.0)",
+            "json_contains(json_field['a'], 2)",
+            "json_contains_all(json_field['a'], [1, 2])",
+            "JSON_CONTAINS_ALL(json_field['a'], [1, 2])",
+            "json_contains_all(json_field['a'], [1.0, 2.0])",
+            "json_contains_all(json_field['a'], [2, 4])",
+            "json_contains_any(json_field['a'], [1, 2])",
+            "JSON_CONTAINS_ANY(json_field['a'], [1, 2])",
+            "json_contains_any(json_field['a'], [1.0, 2.0])",
+            "json_contains_any(json_field['a'], [2, 4])",
+            "array_contains(json_field['a'], 1)",
+            "ARRAY_CONTAINS(json_field['a'], 1)",
+            "array_contains(json_field['a'], 1.0)",
+            "array_contains(json_field['a'], 2)",
+            "array_contains_all(json_field['a'], [1, 2])",
+            "ARRAY_CONTAINS_ALL(json_field['a'], [1, 2])",
+            "array_contains_all(json_field['a'], [1.0, 2.0])",
+            "array_contains_all(json_field['a'], [2, 4])",
+            "array_contains_any(json_field['a'], [1, 2])",
+            "ARRAY_CONTAINS_ANY(json_field['a'], [1, 2])",
+            "array_contains_any(json_field['a'], [1.0, 2.0])",
+            "array_contains_any(json_field['a'], [2, 4])",
+            "array_length(json_field['a']) < 10",
+            "ARRAY_LENGTH(json_field['a']) < 10",
         ]
     else:
-        expressions = ["json_field['a'] <= 1", "json_field['a'] <= 1.0", "json_field['a'] >= 1", "json_field['a'] >= 1.0",
-                       "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
-                       "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
-                       "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
-                       "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992",
-                       "json_field['a'] == '1'",
-                       "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
-                       "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
-                       "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
-                       "EXISTS json_field['a']['b']", "exists json_field['a']['b']", "json_field['a'] + 1 >= 2",
-                       "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
-                       "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
-                       "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
-                       "json_field['a'][0] == 1 && json_field['a'][1] == 2",
-                       "json_field['a'][0] == 1 and json_field['a'][1] == 2",
-                       "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
-                       "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
-                       "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
-                       "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
-                       "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
-                       "json_field['a'] in [1]",  "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
-                       "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
-                       ]
+        expressions = [
+            "json_field['a'] <= 1",
+            "json_field['a'] <= 1.0",
+            "json_field['a'] >= 1",
+            "json_field['a'] >= 1.0",
+            "json_field['a'] < 2",
+            "json_field['a'] < 2.0",
+            "json_field['a'] > 0",
+            "json_field['a'] > 0.0",
+            "json_field['a'] <= '1'",
+            "json_field['a'] >= '1'",
+            "json_field['a'] < '2'",
+            "json_field['a'] > '0'",
+            "json_field['a'] == 1",
+            "json_field['a'] == 1.0",
+            "json_field['a'] == True",
+            "json_field['a'] == 9707199254740993.0",
+            "json_field['a'] == 9707199254740992",
+            "json_field['a'] == '1'",
+            "json_field['a'] != '1'",
+            "json_field['a'] like '1%'",
+            "json_field['a'] like '%1'",
+            "json_field['a'] like '%1%'",
+            "json_field['a'] LIKE '1%'",
+            "json_field['a'] LIKE '%1'",
+            "json_field['a'] LIKE '%1%'",
+            "EXISTS json_field['a']",
+            "exists json_field['a']",
+            "EXISTS json_field['a']['b']",
+            "exists json_field['a']['b']",
+            "json_field['a'] + 1 >= 2",
+            "json_field['a'] - 1 <= 0",
+            "json_field['a'] + 1.0 >= 2",
+            "json_field['a'] - 1.0 <= 0",
+            "json_field['a'] * 2 == 2",
+            "json_field['a'] * 1.0 == 1.0",
+            "json_field / 1 == 1",
+            "json_field['a'] / 1.0 == 1",
+            "json_field['a'] % 10 == 1",
+            "json_field['a'] == 1**2",
+            "json_field['a'][0] == 1 && json_field['a'][1] == 2",
+            "json_field['a'][0] == 1 and json_field['a'][1] == 2",
+            "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
+            "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
+            "json_field['a'] == 1 || json_field['a'] == '1'",
+            "json_field['a'] == 1 or json_field['a'] == '1'",
+            "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
+            "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
+            "json_field['a'] in [1]",
+            "json_field is null",
+            "json_field IS NULL",
+            "json_field is not null",
+            "json_field IS NOT NULL",
+            "json_field['a'] is null",
+            "json_field['a'] IS NULL",
+            "json_field['a'] is not null",
+            "json_field['a'] IS NOT NULL",
+        ]
 
     return expressions
 
 
-def gen_field_expressions_all_single_operator_each_field(field = ct.default_int64_field_name):
+def gen_field_expressions_all_single_operator_each_field(field=ct.default_int64_field_name):
     """
     Gen a list of filter in expression-format(as a string)
     """
-    if field in [ct.default_int8_field_name, ct.default_int16_field_name, ct.default_int32_field_name,
-                 ct.default_int64_field_name]:
-        expressions = [f"{field} <= 1", f"{field} >= 1",
-                       f"{field} < 2",  f"{field} > 0",
-                       f"{field} == 1", f"{field} != 1",
-                       f"{field} == 9707199254740992", f"{field} != 9707199254740992",
-                       f"{field} + 1 >= 2", f"{field} - 1 <= 0",
-                       f"{field} * 2 == 2", f"{field} / 1 == 1",
-                       f"{field} % 10 == 1", f"{field} == 1 || {field} == 2",
-                       f"{field} == 1 or {field} == 2",
-                       f"{field} in [1]", f"{field} not in [1]",
-                       f"{field} is null", f"{field} IS NULL",
-                       f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+    if field in [
+        ct.default_int8_field_name,
+        ct.default_int16_field_name,
+        ct.default_int32_field_name,
+        ct.default_int64_field_name,
+    ]:
+        expressions = [
+            f"{field} <= 1",
+            f"{field} >= 1",
+            f"{field} < 2",
+            f"{field} > 0",
+            f"{field} == 1",
+            f"{field} != 1",
+            f"{field} == 9707199254740992",
+            f"{field} != 9707199254740992",
+            f"{field} + 1 >= 2",
+            f"{field} - 1 <= 0",
+            f"{field} * 2 == 2",
+            f"{field} / 1 == 1",
+            f"{field} % 10 == 1",
+            f"{field} == 1 || {field} == 2",
+            f"{field} == 1 or {field} == 2",
+            f"{field} in [1]",
+            f"{field} not in [1]",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_bool_field_name]:
-        expressions = [f"{field} == True", f"{field} == False",
-                       f"{field} != True", f"{field} != False",
-                       f"{field} <= True", f"{field} >= True",
-                       f"{field} <= False", f"{field} >= False",
-                       f"{field} < True", f"{field} > True",
-                       f"{field} < False", f"{field} > False",
-                       f"{field} == True && {field} == False",
-                       f"{field} == True and {field} == False ",
-                       f"{field} == True || {field} == False",
-                       f"{field} == True or {field} == False",
-                       f"{field} in [True]", f"{field} in [False]", f"{field} in [True, False]",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"]
+        expressions = [
+            f"{field} == True",
+            f"{field} == False",
+            f"{field} != True",
+            f"{field} != False",
+            f"{field} <= True",
+            f"{field} >= True",
+            f"{field} <= False",
+            f"{field} >= False",
+            f"{field} < True",
+            f"{field} > True",
+            f"{field} < False",
+            f"{field} > False",
+            f"{field} == True && {field} == False",
+            f"{field} == True and {field} == False ",
+            f"{field} == True || {field} == False",
+            f"{field} == True or {field} == False",
+            f"{field} in [True]",
+            f"{field} in [False]",
+            f"{field} in [True, False]",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_float_field_name, ct.default_double_field_name]:
-        expressions = [f"{field} <= 1", f"{field} >= 1",
-                       f"{field} < 2", f"{field} > 0",
-                       f"{field} == 1", f"{field} != 1",
-                       f"{field} == 9707199254740992", f"{field} != 9707199254740992",
-                       f"{field} <= 1.0", f"{field} >= 1.0",
-                       f"{field} < 2.0", f"{field} > 0.0",
-                       f"{field} == 1.0", f"{field} != 1.0",
-                       f"{field} == 9707199254740992.0", f"{field} != 9707199254740992.0",
-                       f"{field} - 1 <= 0", f"{field} + 1.0 >= 2",
-                       f"{field} - 1.0 <= 0", f"{field} * 2 == 2",
-                       f"{field} * 1.0 == 1.0", f"{field} / 1 == 1",
-                       f"{field} / 1.0 == 1.0", f"{field} == 1**2",
-                       f"{field} == 1 && {field} == 2",
-                       f"{field} == 1 and {field} == 2.0",
-                       f"{field} >=1 && {field} == 3.0",
-                       f"{field} >=1 and {field} == 3",
-                       f"{field} == 1 || {field} == 2.0",
-                       f"{field} == 1 or {field} == 2.0",
-                       f"{field} >= 1  || {field} <=2.0",
-                       f"{field} >= 1.0 or {field} <= 2.0",
-                       f"{field} in [1]", f"{field} in [1, 2]",
-                       f"{field} in [1.0]", f"{field} in [1.0, 2.0]",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+        expressions = [
+            f"{field} <= 1",
+            f"{field} >= 1",
+            f"{field} < 2",
+            f"{field} > 0",
+            f"{field} == 1",
+            f"{field} != 1",
+            f"{field} == 9707199254740992",
+            f"{field} != 9707199254740992",
+            f"{field} <= 1.0",
+            f"{field} >= 1.0",
+            f"{field} < 2.0",
+            f"{field} > 0.0",
+            f"{field} == 1.0",
+            f"{field} != 1.0",
+            f"{field} == 9707199254740992.0",
+            f"{field} != 9707199254740992.0",
+            f"{field} - 1 <= 0",
+            f"{field} + 1.0 >= 2",
+            f"{field} - 1.0 <= 0",
+            f"{field} * 2 == 2",
+            f"{field} * 1.0 == 1.0",
+            f"{field} / 1 == 1",
+            f"{field} / 1.0 == 1.0",
+            f"{field} == 1**2",
+            f"{field} == 1 && {field} == 2",
+            f"{field} == 1 and {field} == 2.0",
+            f"{field} >=1 && {field} == 3.0",
+            f"{field} >=1 and {field} == 3",
+            f"{field} == 1 || {field} == 2.0",
+            f"{field} == 1 or {field} == 2.0",
+            f"{field} >= 1  || {field} <=2.0",
+            f"{field} >= 1.0 or {field} <= 2.0",
+            f"{field} in [1]",
+            f"{field} in [1, 2]",
+            f"{field} in [1.0]",
+            f"{field} in [1.0, 2.0]",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_string_field_name]:
-        expressions = [f"{field} <= '1'", f"{field} >= '1'", f"{field} < '2'", f"{field} > '0'",
-                       f"{field} == '1'", f"{field} != '1'", f"{field} like '1%'", f"{field} like '%1'",
-                       f"{field} like '%1%'", f"{field} LIKE '1%'", f"{field} LIKE '%1'",
-                       f"{field} LIKE '%1%'",
-                       f"{field} == '1' && {field} == '2'",
-                       f"{field} == '1' and {field} == '2'",
-                       f"{field} == '1' || {field} == '2'",
-                       f"{field} == '1' or {field} == '2'",
-                       f"{field} >= '1' || {field} <= '2'",
-                       f"{field} >= '1' or {field} <= '2'",
-                       f"{field} in ['1']", f"{field} in ['1', '2']",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
-    elif field in [ct.default_int8_array_field_name, ct.default_int16_array_field_name,
-                   ct.default_int32_array_field_name, ct.default_int64_array_field_name]:
-        expressions = [f"{field}[0] <= 1", f"{field}[0] >= 1",
-                       f"{field}[0] < 2", f"{field}[0] > 0",
-                       f"{field}[1] == 1", f"{field}[1] != 1",
-                       f"{field}[0] == 9707199254740992", f"{field}[0] != 9707199254740992",
-                       f"{field}[0] + 1 >= 2", f"{field}[0] - 1 <= 0",
-                       f"{field}[0] + 1.0 >= 2", f"{field}[0] - 1.0 <= 0",
-                       f"{field}[0] * 2 == 2", f"{field}[1] * 1.0 == 1.0",
-                       f"{field}[1] / 1 == 1", f"{field}[0] / 1.0 == 1", f"{field}[1] % 10 == 1",
-                       f"{field}[0] == 1 && {field}[1] == 2", f"{field}[0] == 1 and {field}[1] == 2",
-                       f"{field}[0] >=1 && {field}[2] <= 3", f"{field}[0] >=1 and {field}[1] == 2",
-                       f"{field}[0] >=1  || {field}[1] <=2", f"{field}[0] >=1 or {field}[1] <=2",
-                       f"{field}[0] in [1]", f"json_contains({field}, 1)", f"JSON_CONTAINS({field}, 1)",
-                       f"json_contains_all({field}, [1, 2])", f"JSON_CONTAINS_ALL({field}, [1, 2])",
-                       f"json_contains_any({field}, [1, 2])", f"JSON_CONTAINS_ANY({field}, [1, 2])",
-                       f"array_contains({field}, 2)", f"ARRAY_CONTAINS({field}, 2)",
-                       f"array_contains_all({field}, [1, 2])", f"ARRAY_CONTAINS_ALL({field}, [1, 2])",
-                       f"array_contains_any({field}, [1, 2])", f"ARRAY_CONTAINS_ANY({field}, [1, 2])",
-                       f"array_length({field}) < 10", f"ARRAY_LENGTH({field}) < 10",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+        expressions = [
+            f"{field} <= '1'",
+            f"{field} >= '1'",
+            f"{field} < '2'",
+            f"{field} > '0'",
+            f"{field} == '1'",
+            f"{field} != '1'",
+            f"{field} like '1%'",
+            f"{field} like '%1'",
+            f"{field} like '%1%'",
+            f"{field} LIKE '1%'",
+            f"{field} LIKE '%1'",
+            f"{field} LIKE '%1%'",
+            f"{field} == '1' && {field} == '2'",
+            f"{field} == '1' and {field} == '2'",
+            f"{field} == '1' || {field} == '2'",
+            f"{field} == '1' or {field} == '2'",
+            f"{field} >= '1' || {field} <= '2'",
+            f"{field} >= '1' or {field} <= '2'",
+            f"{field} in ['1']",
+            f"{field} in ['1', '2']",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
+    elif field in [
+        ct.default_int8_array_field_name,
+        ct.default_int16_array_field_name,
+        ct.default_int32_array_field_name,
+        ct.default_int64_array_field_name,
+    ]:
+        expressions = [
+            f"{field}[0] <= 1",
+            f"{field}[0] >= 1",
+            f"{field}[0] < 2",
+            f"{field}[0] > 0",
+            f"{field}[1] == 1",
+            f"{field}[1] != 1",
+            f"{field}[0] == 9707199254740992",
+            f"{field}[0] != 9707199254740992",
+            f"{field}[0] + 1 >= 2",
+            f"{field}[0] - 1 <= 0",
+            f"{field}[0] + 1.0 >= 2",
+            f"{field}[0] - 1.0 <= 0",
+            f"{field}[0] * 2 == 2",
+            f"{field}[1] * 1.0 == 1.0",
+            f"{field}[1] / 1 == 1",
+            f"{field}[0] / 1.0 == 1",
+            f"{field}[1] % 10 == 1",
+            f"{field}[0] == 1 && {field}[1] == 2",
+            f"{field}[0] == 1 and {field}[1] == 2",
+            f"{field}[0] >=1 && {field}[2] <= 3",
+            f"{field}[0] >=1 and {field}[1] == 2",
+            f"{field}[0] >=1  || {field}[1] <=2",
+            f"{field}[0] >=1 or {field}[1] <=2",
+            f"{field}[0] in [1]",
+            f"json_contains({field}, 1)",
+            f"JSON_CONTAINS({field}, 1)",
+            f"json_contains_all({field}, [1, 2])",
+            f"JSON_CONTAINS_ALL({field}, [1, 2])",
+            f"json_contains_any({field}, [1, 2])",
+            f"JSON_CONTAINS_ANY({field}, [1, 2])",
+            f"array_contains({field}, 2)",
+            f"ARRAY_CONTAINS({field}, 2)",
+            f"array_contains_all({field}, [1, 2])",
+            f"ARRAY_CONTAINS_ALL({field}, [1, 2])",
+            f"array_contains_any({field}, [1, 2])",
+            f"ARRAY_CONTAINS_ANY({field}, [1, 2])",
+            f"array_length({field}) < 10",
+            f"ARRAY_LENGTH({field}) < 10",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_float_array_field_name, ct.default_double_array_field_name]:
-        expressions = [f"{field}[0] <= 1", f"{field}[0] >= 1",
-                       f"{field}[0] < 2", f"{field}[0] > 0",
-                       f"{field}[1] == 1", f"{field}[1] != 1",
-                       f"{field}[0] == 9707199254740992", f"{field}[0] != 9707199254740992",
-                       f"{field}[0] <= 1.0", f"{field}[0] >= 1.0",
-                       f"{field}[0] < 2.0", f"{field}[0] > 0.0",
-                       f"{field}[1] == 1.0", f"{field}[1] != 1.0",
-                       f"{field}[0] == 9707199254740992.0",
-                       f"{field}[0] - 1 <= 0", f"{field}[0] + 1.0 >= 2",
-                       f"{field}[0] - 1.0 <= 0", f"{field}[0] * 2 == 2",
-                       f"{field}[0] * 1.0 == 1.0", f"{field}[0] / 1 == 1",
-                       f"{field}[0] / 1.0 == 1.0", f"{field}[0] == 1**2",
-                       f"{field}[0] == 1 && {field}[1] == 2",
-                       f"{field}[0] == 1 and {field}[1] == 2.0",
-                       f"{field}[0] >=1 && {field}[2] == 3.0",
-                       f"{field}[0] >=1 and {field}[2] == 3",
-                       f"{field}[0] == 1 || {field}[1] == 2.0",
-                       f"{field}[0] == 1 or {field}[1] == 2.0",
-                       f"{field}[0] >= 1  || {field}[1] <=2.0",
-                       f"{field}[0] >= 1.0 or {field}[1] <= 2.0",
-                       f"{field}[0] in [1]", f"{field}[0] in [1.0]", f"json_contains({field}, 1.0)",
-                       f"JSON_CONTAINS({field}, 1.0)", f"json_contains({field}, 1.0)", f"JSON_CONTAINS({field}, 1.0)",
-                       f"json_contains_all({field}, [2.0, 4.0])", f"JSON_CONTAINS_ALL({field}, [2.0, 4.0])",
-                       f"json_contains_any({field}, [2.0, 4.0])", f"JSON_CONTAINS_ANY({field}, [2.0, 4.0])",
-                       f"array_contains({field}, 2.0)", f"ARRAY_CONTAINS({field}, 2.0)",
-                       f"array_contains({field}, 2.0)", f"ARRAY_CONTAINS({field}, 2.0)",
-                       f"array_contains_all({field}, [1.0, 2.0])", f"ARRAY_CONTAINS_ALL({field}, [1.0, 2.0])",
-                       f"array_contains_any({field}, [1.0, 2.0])", f"ARRAY_CONTAINS_ANY({field}, [1.0, 2.0])",
-                       f"array_length({field}) < 10", f"ARRAY_LENGTH({field}) < 10",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+        expressions = [
+            f"{field}[0] <= 1",
+            f"{field}[0] >= 1",
+            f"{field}[0] < 2",
+            f"{field}[0] > 0",
+            f"{field}[1] == 1",
+            f"{field}[1] != 1",
+            f"{field}[0] == 9707199254740992",
+            f"{field}[0] != 9707199254740992",
+            f"{field}[0] <= 1.0",
+            f"{field}[0] >= 1.0",
+            f"{field}[0] < 2.0",
+            f"{field}[0] > 0.0",
+            f"{field}[1] == 1.0",
+            f"{field}[1] != 1.0",
+            f"{field}[0] == 9707199254740992.0",
+            f"{field}[0] - 1 <= 0",
+            f"{field}[0] + 1.0 >= 2",
+            f"{field}[0] - 1.0 <= 0",
+            f"{field}[0] * 2 == 2",
+            f"{field}[0] * 1.0 == 1.0",
+            f"{field}[0] / 1 == 1",
+            f"{field}[0] / 1.0 == 1.0",
+            f"{field}[0] == 1**2",
+            f"{field}[0] == 1 && {field}[1] == 2",
+            f"{field}[0] == 1 and {field}[1] == 2.0",
+            f"{field}[0] >=1 && {field}[2] == 3.0",
+            f"{field}[0] >=1 and {field}[2] == 3",
+            f"{field}[0] == 1 || {field}[1] == 2.0",
+            f"{field}[0] == 1 or {field}[1] == 2.0",
+            f"{field}[0] >= 1  || {field}[1] <=2.0",
+            f"{field}[0] >= 1.0 or {field}[1] <= 2.0",
+            f"{field}[0] in [1]",
+            f"{field}[0] in [1.0]",
+            f"json_contains({field}, 1.0)",
+            f"JSON_CONTAINS({field}, 1.0)",
+            f"json_contains({field}, 1.0)",
+            f"JSON_CONTAINS({field}, 1.0)",
+            f"json_contains_all({field}, [2.0, 4.0])",
+            f"JSON_CONTAINS_ALL({field}, [2.0, 4.0])",
+            f"json_contains_any({field}, [2.0, 4.0])",
+            f"JSON_CONTAINS_ANY({field}, [2.0, 4.0])",
+            f"array_contains({field}, 2.0)",
+            f"ARRAY_CONTAINS({field}, 2.0)",
+            f"array_contains({field}, 2.0)",
+            f"ARRAY_CONTAINS({field}, 2.0)",
+            f"array_contains_all({field}, [1.0, 2.0])",
+            f"ARRAY_CONTAINS_ALL({field}, [1.0, 2.0])",
+            f"array_contains_any({field}, [1.0, 2.0])",
+            f"ARRAY_CONTAINS_ANY({field}, [1.0, 2.0])",
+            f"array_length({field}) < 10",
+            f"ARRAY_LENGTH({field}) < 10",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_bool_array_field_name]:
-        expressions = [f"{field}[0] == True", f"{field}[0] == False",
-                       f"{field}[0] != True", f"{field}[0] != False",
-                       f"{field}[0] <= True", f"{field}[0] >= True",
-                       f"{field}[1] <= False", f"{field}[1] >= False",
-                       f"{field}[0] < True", f"{field}[1] > True",
-                       f"{field}[0] < False", f"{field}[0] > False",
-                       f"{field}[0] == True && {field}[1] == False",
-                       f"{field}[0] == True and {field}[1] == False ",
-                       f"{field}[0] == True || {field}[1] == False",
-                       f"{field}[0] == True or {field}[1] == False",
-                       f"{field}[0] in [True]", f"{field}[1] in [False]", f"{field}[0] in [True, False]",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+        expressions = [
+            f"{field}[0] == True",
+            f"{field}[0] == False",
+            f"{field}[0] != True",
+            f"{field}[0] != False",
+            f"{field}[0] <= True",
+            f"{field}[0] >= True",
+            f"{field}[1] <= False",
+            f"{field}[1] >= False",
+            f"{field}[0] < True",
+            f"{field}[1] > True",
+            f"{field}[0] < False",
+            f"{field}[0] > False",
+            f"{field}[0] == True && {field}[1] == False",
+            f"{field}[0] == True and {field}[1] == False ",
+            f"{field}[0] == True || {field}[1] == False",
+            f"{field}[0] == True or {field}[1] == False",
+            f"{field}[0] in [True]",
+            f"{field}[1] in [False]",
+            f"{field}[0] in [True, False]",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     elif field in [ct.default_string_array_field_name]:
-        expressions = [f"{field}[0] <= '1'", f"{field}[0] >= '1'",
-                       f"{field}[0] < '2'", f"{field}[0] > '0'",
-                       f"{field}[1] == '1'", f"{field}[1] != '1'",
-                       f"{field}[1] like '1%'", f"{field}[1] like '%1'",
-                       f"{field}[1] like '%1%'", f"{field}[1] LIKE '1%'",
-                       f"{field}[1] LIKE '%1'", f"{field}[1] LIKE '%1%'",
-                       f"{field}[1] == '1' && {field}[2] == '2'",
-                       f"{field}[1] == '1' and {field}[2] == '2'",
-                       f"{field}[0] == '1' || {field}[2] == '2'",
-                       f"{field}[0] == '1' or {field}[2] == '2'",
-                       f"{field}[1] >= '1' || {field}[2] <= '2'",
-                       f"{field}[1] >= '1' or {field}[2] <= '2'",
-                       f"{field}[0] in ['0']", f"{field}[1] in ['1', '2']",
-                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
-                       ]
+        expressions = [
+            f"{field}[0] <= '1'",
+            f"{field}[0] >= '1'",
+            f"{field}[0] < '2'",
+            f"{field}[0] > '0'",
+            f"{field}[1] == '1'",
+            f"{field}[1] != '1'",
+            f"{field}[1] like '1%'",
+            f"{field}[1] like '%1'",
+            f"{field}[1] like '%1%'",
+            f"{field}[1] LIKE '1%'",
+            f"{field}[1] LIKE '%1'",
+            f"{field}[1] LIKE '%1%'",
+            f"{field}[1] == '1' && {field}[2] == '2'",
+            f"{field}[1] == '1' and {field}[2] == '2'",
+            f"{field}[0] == '1' || {field}[2] == '2'",
+            f"{field}[0] == '1' or {field}[2] == '2'",
+            f"{field}[1] >= '1' || {field}[2] <= '2'",
+            f"{field}[1] >= '1' or {field}[2] <= '2'",
+            f"{field}[0] in ['0']",
+            f"{field}[1] in ['1', '2']",
+            f"{field} is null",
+            f"{field} IS NULL",
+            f"{field} is not null",
+            f"{field} IS NOT NULL",
+        ]
     else:
         raise Exception("Invalid field name")
 
@@ -3293,10 +4087,11 @@ def concatenate_uneven_arrays(arr1, arr2):
         if a == "" or b == "":
             result.append(a + b)
         else:
-            random_op = op_list[random.randint(0, len(op_list)-1)]
-            result.append( a + " " + random_op + " " + b)
+            random_op = op_list[random.randint(0, len(op_list) - 1)]
+            result.append(a + " " + random_op + " " + b)
 
     return result
+
 
 def gen_multiple_field_expressions(field_name_list=[], random_field_number=0, expr_number=1):
     """
@@ -3335,14 +4130,24 @@ def gen_multiple_field_expressions(field_name_list=[], random_field_number=0, ex
 
     field_name_list_cp = field_name_list.copy()
 
-    all_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
-                  ct.default_int32_field_name, ct.default_int64_field_name,
-                  ct.default_float_field_name, ct.default_double_field_name,
-                  ct.default_string_field_name, ct.default_bool_field_name,
-                  ct.default_int8_array_field_name, ct.default_int16_array_field_name,
-                  ct.default_int32_array_field_name,ct.default_int64_array_field_name,
-                  ct.default_bool_array_field_name, ct.default_float_array_field_name,
-                  ct.default_double_array_field_name, ct.default_string_array_field_name]
+    all_fields = [
+        ct.default_int8_field_name,
+        ct.default_int16_field_name,
+        ct.default_int32_field_name,
+        ct.default_int64_field_name,
+        ct.default_float_field_name,
+        ct.default_double_field_name,
+        ct.default_string_field_name,
+        ct.default_bool_field_name,
+        ct.default_int8_array_field_name,
+        ct.default_int16_array_field_name,
+        ct.default_int32_array_field_name,
+        ct.default_int64_array_field_name,
+        ct.default_bool_array_field_name,
+        ct.default_float_array_field_name,
+        ct.default_double_array_field_name,
+        ct.default_string_array_field_name,
+    ]
 
     if len(field_name_list) == 0 and random_field_number != 0:
         if random_field_number <= len(all_fields):
@@ -3350,7 +4155,7 @@ def gen_multiple_field_expressions(field_name_list=[], random_field_number=0, ex
         else:
             random_array = random.sample(range(len(all_fields)), len(all_fields))
             for _ in range(random_field_number - len(all_fields)):
-                random_array.append(random.randint(0, len(all_fields)-1))
+                random_array.append(random.randint(0, len(all_fields) - 1))
         for i in random_array:
             field_name_list_cp.append(all_fields[i])
     if len(field_name_list) == 0 and random_field_number == 0:
@@ -3371,24 +4176,54 @@ def gen_array_field_expressions_and_templates():
     """
     expressions = [
         ["int32_array[0] > 0", {"expr": "int32_array[0] > {value_0}", "expr_params": {"value_0": 0}}],
-        ["0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
-         {"expr": "{value_0} <= int32_array[0] < {value_1} or {value_2} > float_array[1] >= {value_3}",
-          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500}}],
-        ["int32_array[1] not in [1, 2, 3]", {"expr": "int32_array[1] not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}}],
-        ["int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
-         {"expr": "int32_array[1] in {value_0} and string_array[1] != {value_2}",
-          "expr_params": {"value_0": [1, 2, 3], "value_2": "2"}}],
-        ["int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", {"expr": "int32_array == {value_0}",
-                                                            "expr_params": {"value_0": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}}],
-        ["int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
-         {"expr": "int32_array[1] + {value_0} == {value_2} && int32_array[0] - {value_0} != {value_0}",
-          "expr_params": {"value_0": 1, "value_2": 3}}],
-        ["int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
-         {"expr": "int32_array[1] % {value_0} == {value_1} && string_array[1] in {value_2}",
-          "expr_params": {"value_0": 100, "value_1": 0, "value_2": ["1", "2"]}}],
-        ["int32_array[1] in [300/2, -10*30+800, (200-100)*2] or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)",
-         {"expr": "int32_array[1] in {value_0} or (float_array[1] <= {value_1} || {value_2} <= int32_array[1] < {value_3})",
-          "expr_params": {"value_0": [int(300/2), -10*30+800, (200-100)*2], "value_1": -4**5/2, "value_2": 100, "value_3": 200}}]
+        [
+            "0 <= int32_array[0] < 400 or 1000 > float_array[1] >= 500",
+            {
+                "expr": "{value_0} <= int32_array[0] < {value_1} or {value_2} > float_array[1] >= {value_3}",
+                "expr_params": {"value_0": 0, "value_1": 400, "value_2": 1000, "value_3": 500},
+            },
+        ],
+        [
+            "int32_array[1] not in [1, 2, 3]",
+            {"expr": "int32_array[1] not in {value_0}", "expr_params": {"value_0": [1, 2, 3]}},
+        ],
+        [
+            "int32_array[1] in [1, 2, 3] and string_array[1] != '2'",
+            {
+                "expr": "int32_array[1] in {value_0} and string_array[1] != {value_2}",
+                "expr_params": {"value_0": [1, 2, 3], "value_2": "2"},
+            },
+        ],
+        [
+            "int32_array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
+            {"expr": "int32_array == {value_0}", "expr_params": {"value_0": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}},
+        ],
+        [
+            "int32_array[1] + 1 == 3 && int32_array[0] - 1 != 1",
+            {
+                "expr": "int32_array[1] + {value_0} == {value_2} && int32_array[0] - {value_0} != {value_0}",
+                "expr_params": {"value_0": 1, "value_2": 3},
+            },
+        ],
+        [
+            "int32_array[1] % 100 == 0 && string_array[1] in ['1', '2']",
+            {
+                "expr": "int32_array[1] % {value_0} == {value_1} && string_array[1] in {value_2}",
+                "expr_params": {"value_0": 100, "value_1": 0, "value_2": ["1", "2"]},
+            },
+        ],
+        [
+            "int32_array[1] in [300/2, -10*30+800, (200-100)*2] or (float_array[1] <= -4**5/2 || 100 <= int32_array[1] < 200)",
+            {
+                "expr": "int32_array[1] in {value_0} or (float_array[1] <= {value_1} || {value_2} <= int32_array[1] < {value_3})",
+                "expr_params": {
+                    "value_0": [int(300 / 2), -10 * 30 + 800, (200 - 100) * 2],
+                    "value_1": -(4**5) / 2,
+                    "value_2": 100,
+                    "value_3": 200,
+                },
+            },
+        ],
     ]
     return expressions
 
@@ -3417,24 +4252,21 @@ def gen_normal_string_expressions(fields=None):
     expressions = []
     for field in fields:
         expression = [
-            f"\"0\"< {field} < \"3\"",
-            f"{field} >= \"0\"",
-            f"({field} > \"0\" && {field} < \"100\") or ({field} > \"200\" && {field} < \"300\")",
-            f"\"0\" <= {field} <= \"100\"",
-            f"{field} == \"0\"|| {field} == \"1\"|| {field} ==\"2\"",
-            f"{field} != \"0\"",
-            f"{field} not in [\"0\", \"1\", \"2\"]",
-            f"{field} in [\"0\", \"1\", \"2\"]"
+            f'"0"< {field} < "3"',
+            f'{field} >= "0"',
+            f'({field} > "0" && {field} < "100") or ({field} > "200" && {field} < "300")',
+            f'"0" <= {field} <= "100"',
+            f'{field} == "0"|| {field} == "1"|| {field} =="2"',
+            f'{field} != "0"',
+            f'{field} not in ["0", "1", "2"]',
+            f'{field} in ["0", "1", "2"]',
         ]
         expressions.extend(expression)
     return expressions
 
 
 def gen_invalid_string_expressions():
-    expressions = [
-        "varchar in [0, \"1\"]",
-        "varchar not in [\"0\", 1, 2]"
-    ]
+    expressions = ['varchar in [0, "1"]', 'varchar not in ["0", 1, 2]']
     return expressions
 
 
@@ -3446,24 +4278,84 @@ def gen_normal_expressions_and_templates_field(field):
     expressions_and_templates = [
         ["", {"expr": "", "expr_params": {}}],
         [f"{field} > 0", {"expr": f"{field} > {{value_0}}", "expr_params": {"value_0": 0}}],
-        [f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
-         {"expr": f"({field} > {{value_0}} && {field} < {{value_1}}) or ({field} > {{value_2}} && {field} < {{value_3}})",
-          "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000}}],
+        [
+            f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
+            {
+                "expr": f"({field} > {{value_0}} && {field} < {{value_1}}) or ({field} > {{value_2}} && {field} < {{value_3}})",
+                "expr_params": {"value_0": 0, "value_1": 400, "value_2": 500, "value_3": 1000},
+            },
+        ],
         [f"{field} not in [1, 2, 3]", {"expr": f"{field} not in {{value_0}}", "expr_params": {"value_0": [1, 2, 3]}}],
-        [f"{field} in [1, 2, 3] and {field} != 2", {"expr": f"{field} in {{value_0}} and {field} != {{value_1}}", "expr_params": {"value_0": [1, 2, 3], "value_1": 2}}],
-        [f"{field} == 0 || {field} == 1 || {field} == 2", {"expr": f"{field} == {{value_0}} || {field} == {{value_1}} || {field} == {{value_2}}",
-         "expr_params": {"value_0": 0, "value_1": 1, "value_2": 2}}],
-        [f"0 < {field} < 400", {"expr": f"{{value_0}} < {field} < {{value_1}}", "expr_params": {"value_0": 0, "value_1": 400}}],
-        [f"500 <= {field} <= 1000", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 500, "value_1": 1000}}],
-        [f"200+300 <= {field} <= 500+500", {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 200+300, "value_1": 500+500}}],
-        [f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [300*1.0/2, 900*1.0%40, -10*30*1.0+800, 2048*1.0/2%200, (100+200)*1.0*2]}}],
-        [f"{field} in [+3**6, 2**10/2]", {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [+3**6*1.0, 2**10*1.0/2]}}],
-        [f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260", {"expr": f"{field} <= {{value_0}} && {field} > {{value_1}} && {field} != {{value_2}}",
-         "expr_params": {"value_0": 4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
-        [f"{field} > 400 && {field} < 200", {"expr": f"{field} > {{value_0}} && {field} < {{value_1}}", "expr_params": {"value_0": 400, "value_1": 200}}],
-        [f"{field} < -2**8", {"expr": f"{field} < {{value_0}}", "expr_params": {"value_0": -2**8}}],
-        [f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2", {"expr": f"({field} + {{value_0}}) == {{value_1}} || {field} * {{value_2}} == {{value_3}} || {field} == {{value_4}}",
-         "expr_params": {"value_0": 1, "value_1": 3, "value_2": 2, "value_3": 64, "value_4": 10**2}}]
+        [
+            f"{field} in [1, 2, 3] and {field} != 2",
+            {
+                "expr": f"{field} in {{value_0}} and {field} != {{value_1}}",
+                "expr_params": {"value_0": [1, 2, 3], "value_1": 2},
+            },
+        ],
+        [
+            f"{field} == 0 || {field} == 1 || {field} == 2",
+            {
+                "expr": f"{field} == {{value_0}} || {field} == {{value_1}} || {field} == {{value_2}}",
+                "expr_params": {"value_0": 0, "value_1": 1, "value_2": 2},
+            },
+        ],
+        [
+            f"0 < {field} < 400",
+            {"expr": f"{{value_0}} < {field} < {{value_1}}", "expr_params": {"value_0": 0, "value_1": 400}},
+        ],
+        [
+            f"500 <= {field} <= 1000",
+            {"expr": f"{{value_0}} <= {field} <= {{value_1}}", "expr_params": {"value_0": 500, "value_1": 1000}},
+        ],
+        [
+            f"200+300 <= {field} <= 500+500",
+            {
+                "expr": f"{{value_0}} <= {field} <= {{value_1}}",
+                "expr_params": {"value_0": 200 + 300, "value_1": 500 + 500},
+            },
+        ],
+        [
+            f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]",
+            {
+                "expr": f"{field} in {{value_0}}",
+                "expr_params": {
+                    "value_0": [
+                        300 * 1.0 / 2,
+                        900 * 1.0 % 40,
+                        -10 * 30 * 1.0 + 800,
+                        2048 * 1.0 / 2 % 200,
+                        (100 + 200) * 1.0 * 2,
+                    ]
+                },
+            },
+        ],
+        [
+            f"{field} in [+3**6, 2**10/2]",
+            {"expr": f"{field} in {{value_0}}", "expr_params": {"value_0": [+(3**6) * 1.0, 2**10 * 1.0 / 2]}},
+        ],
+        [
+            f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260",
+            {
+                "expr": f"{field} <= {{value_0}} && {field} > {{value_1}} && {field} != {{value_2}}",
+                "expr_params": {"value_0": 4**5 / 2, "value_1": 500 - 1, "value_2": 500 / 2 + 260},
+            },
+        ],
+        [
+            f"{field} > 400 && {field} < 200",
+            {
+                "expr": f"{field} > {{value_0}} && {field} < {{value_1}}",
+                "expr_params": {"value_0": 400, "value_1": 200},
+            },
+        ],
+        [f"{field} < -2**8", {"expr": f"{field} < {{value_0}}", "expr_params": {"value_0": -(2**8)}}],
+        [
+            f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2",
+            {
+                "expr": f"({field} + {{value_0}}) == {{value_1}} || {field} * {{value_2}} == {{value_3}} || {field} == {{value_4}}",
+                "expr_params": {"value_0": 1, "value_1": 3, "value_2": 2, "value_3": 64, "value_4": 10**2},
+            },
+        ],
     ]
     return expressions_and_templates
 
@@ -3487,7 +4379,7 @@ def gen_integer_overflow_expressions():
         "int32 < -2147483648",
         "int32 == 2147483648",
         "int32 < 2147483648 || int32 == -2147483648",
-        "int8 in  [-129, 1] || int16 in [32769] || int32 in [2147483650, 0]"
+        "int8 in  [-129, 1] || int16 in [32769] || int32 in [2147483650, 0]",
     ]
     return expressions
 
@@ -3495,14 +4387,16 @@ def gen_integer_overflow_expressions():
 def gen_modulo_expression(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            (Expr.EQ(Expr.MOD(field, 10).subset, 1).value, field),
-            (Expr.LT(Expr.MOD(field, 17).subset, 9).value, field),
-            (Expr.LE(Expr.MOD(field, 100).subset, 50).value, field),
-            (Expr.GT(Expr.MOD(field, 50).subset, 40).value, field),
-            (Expr.GE(Expr.MOD(field, 29).subset, 15).value, field),
-            (Expr.NE(Expr.MOD(field, 29).subset, 10).value, field),
-        ])
+        exprs.extend(
+            [
+                (Expr.EQ(Expr.MOD(field, 10).subset, 1).value, field),
+                (Expr.LT(Expr.MOD(field, 17).subset, 9).value, field),
+                (Expr.LE(Expr.MOD(field, 100).subset, 50).value, field),
+                (Expr.GT(Expr.MOD(field, 50).subset, 40).value, field),
+                (Expr.GE(Expr.MOD(field, 29).subset, 15).value, field),
+                (Expr.NE(Expr.MOD(field, 29).subset, 10).value, field),
+            ]
+        )
     return exprs
 
 
@@ -3511,12 +4405,12 @@ def count_match_expr(values_l: list, rex_l: str, op: str, values_r: list, rex_r:
         raise ValueError(f"[count_match_expr] values not equal: {len(values_l)} != {len(values_r)}")
 
     res = []
-    if op in ['and', '&&']:
+    if op in ["and", "&&"]:
         for i in range(len(values_l)):
             if re.search(rex_l, values_l[i]) and re.search(rex_r, values_r[i]):
                 res.append(i)
 
-    elif op in ['or', '||']:
+    elif op in ["or", "||"]:
         for i in range(len(values_l)):
             if re.search(rex_l, values_l[i]) or re.search(rex_r, values_r[i]):
                 res.append(i)
@@ -3529,83 +4423,133 @@ def count_match_expr(values_l: list, rex_l: str, op: str, values_r: list, rex_r:
 def gen_varchar_expression(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            (Expr.like(field, "a%").value, field, r'^a.*'),
-            (Expr.LIKE(field, "%b").value, field, r'.*b$'),
-            (Expr.AND(Expr.like(field, "%b").subset, Expr.LIKE(field, "z%").subset).value, field, r'^z.*b$'),
-            (Expr.And(Expr.like(field, "i%").subset, Expr.LIKE(field, "%j").subset).value, field, r'^i.*j$'),
-            (Expr.OR(Expr.like(field, "%h%").subset, Expr.LIKE(field, "%jo").subset).value, field, fr'(?:h.*|.*jo$)'),
-            (Expr.Or(Expr.like(field, "ip%").subset, Expr.LIKE(field, "%yu%").subset).value, field, fr'(?:^ip.*|.*yu)'),
-        ])
+        exprs.extend(
+            [
+                (Expr.like(field, "a%").value, field, r"^a.*"),
+                (Expr.LIKE(field, "%b").value, field, r".*b$"),
+                (Expr.AND(Expr.like(field, "%b").subset, Expr.LIKE(field, "z%").subset).value, field, r"^z.*b$"),
+                (Expr.And(Expr.like(field, "i%").subset, Expr.LIKE(field, "%j").subset).value, field, r"^i.*j$"),
+                (
+                    Expr.OR(Expr.like(field, "%h%").subset, Expr.LIKE(field, "%jo").subset).value,
+                    field,
+                    rf"(?:h.*|.*jo$)",
+                ),
+                (
+                    Expr.Or(Expr.like(field, "ip%").subset, Expr.LIKE(field, "%yu%").subset).value,
+                    field,
+                    rf"(?:^ip.*|.*yu)",
+                ),
+            ]
+        )
     return exprs
 
 
 def gen_varchar_operation(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            (Expr.EQ(field, '"a"').value, field, r'a'),
-            (Expr.GT(field, '"a"').value, field, r'[^a]'),
-            (Expr.GE(field, '"a"').value, field, r'.*'),
-            (Expr.LT(field, '"z"').value, field, r'[^z]'),
-            (Expr.LE(field, '"z"').value, field, r'.*')
-        ])
+        exprs.extend(
+            [
+                (Expr.EQ(field, '"a"').value, field, r"a"),
+                (Expr.GT(field, '"a"').value, field, r"[^a]"),
+                (Expr.GE(field, '"a"').value, field, r".*"),
+                (Expr.LT(field, '"z"').value, field, r"[^z]"),
+                (Expr.LE(field, '"z"').value, field, r".*"),
+            ]
+        )
     return exprs
 
 
 def gen_varchar_unicode_expression(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            (Expr.like(field, "国%").value, field, r'^国.*'),
-            (Expr.LIKE(field, "%中").value, field, r'.*中$'),
-            (Expr.AND(Expr.like(field, "%江").subset, Expr.LIKE(field, "麚%").subset).value, field, r'^麚.*江$'),
-            (Expr.And(Expr.like(field, "鄷%").subset, Expr.LIKE(field, "%薞").subset).value, field, r'^鄷.*薞$'),
-            (Expr.OR(Expr.like(field, "%核%").subset, Expr.LIKE(field, "%臥蜜").subset).value, field, fr'(?:核.*|.*臥蜜$)'),
-            (Expr.Or(Expr.like(field, "咴矷%").subset, Expr.LIKE(field, "%濉蠬%").subset).value, field, fr'(?:^咴矷.*|.*濉蠬)'),
-        ])
+        exprs.extend(
+            [
+                (Expr.like(field, "国%").value, field, r"^国.*"),
+                (Expr.LIKE(field, "%中").value, field, r".*中$"),
+                (Expr.AND(Expr.like(field, "%江").subset, Expr.LIKE(field, "麚%").subset).value, field, r"^麚.*江$"),
+                (Expr.And(Expr.like(field, "鄷%").subset, Expr.LIKE(field, "%薞").subset).value, field, r"^鄷.*薞$"),
+                (
+                    Expr.OR(Expr.like(field, "%核%").subset, Expr.LIKE(field, "%臥蜜").subset).value,
+                    field,
+                    rf"(?:核.*|.*臥蜜$)",
+                ),
+                (
+                    Expr.Or(Expr.like(field, "咴矷%").subset, Expr.LIKE(field, "%濉蠬%").subset).value,
+                    field,
+                    rf"(?:^咴矷.*|.*濉蠬)",
+                ),
+            ]
+        )
     return exprs
 
 
 def gen_varchar_unicode_expression_array(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            ExprCheckParams(field, Expr.ARRAY_CONTAINS(field, '"中"').value, 'set(["中"]).issubset({0})'),
-            ExprCheckParams(field, Expr.array_contains(field, '"国"').value, 'set(["国"]).issubset({0})'),
-            ExprCheckParams(field, Expr.ARRAY_CONTAINS_ALL(field, ["华"]).value, 'set(["华"]).issubset({0})'),
-            ExprCheckParams(field, Expr.array_contains_all(field, ["中", "国"]).value, 'set(["中", "国"]).issubset({0})'),
-            ExprCheckParams(field, Expr.ARRAY_CONTAINS_ANY(field, ["紅"]).value, 'not set(["紅"]).isdisjoint({0})'),
-            ExprCheckParams(field, Expr.array_contains_any(field, ["紅", "父", "环", "稵"]).value,
-                            'not set(["紅", "父", "环", "稵"]).isdisjoint({0})'),
-            ExprCheckParams(field, Expr.AND(Expr.ARRAY_CONTAINS(field, '"噜"').value,
-                                            Expr.ARRAY_CONTAINS_ANY(field, ["浮", "沮", "茫"]).value).value,
-                            'set(["噜"]).issubset({0}) and not set(["浮", "沮", "茫"]).isdisjoint({0})'),
-            ExprCheckParams(field, Expr.And(Expr.ARRAY_CONTAINS_ALL(field, ["爤"]).value,
-                                            Expr.array_contains_any(field, ["暁", "非", "鸳", "丹"]).value).value,
-                            'set(["爤"]).issubset({0}) and not set(["暁", "非", "鸳", "丹"]).isdisjoint({0})'),
-            ExprCheckParams(field, Expr.OR(Expr.array_contains(field, '"草"').value,
-                                           Expr.array_contains_all(field, ["昩", "苴"]).value).value,
-                            'set(["草"]).issubset({0}) or set(["昩", "苴"]).issubset({0})'),
-            ExprCheckParams(field, Expr.Or(Expr.ARRAY_CONTAINS_ANY(field, ["魡", "展", "隶", "韀", "脠", "噩"]).value,
-                                           Expr.array_contains_any(field, ["备", "嘎", "蝐", "秦", "万"]).value).value,
-                            'not set(["魡", "展", "隶", "韀", "脠", "噩"]).isdisjoint({0}) or ' +
-                            'not set(["备", "嘎", "蝐", "秦", "万"]).isdisjoint({0})')
-        ])
+        exprs.extend(
+            [
+                ExprCheckParams(field, Expr.ARRAY_CONTAINS(field, '"中"').value, 'set(["中"]).issubset({0})'),
+                ExprCheckParams(field, Expr.array_contains(field, '"国"').value, 'set(["国"]).issubset({0})'),
+                ExprCheckParams(field, Expr.ARRAY_CONTAINS_ALL(field, ["华"]).value, 'set(["华"]).issubset({0})'),
+                ExprCheckParams(
+                    field, Expr.array_contains_all(field, ["中", "国"]).value, 'set(["中", "国"]).issubset({0})'
+                ),
+                ExprCheckParams(field, Expr.ARRAY_CONTAINS_ANY(field, ["紅"]).value, 'not set(["紅"]).isdisjoint({0})'),
+                ExprCheckParams(
+                    field,
+                    Expr.array_contains_any(field, ["紅", "父", "环", "稵"]).value,
+                    'not set(["紅", "父", "环", "稵"]).isdisjoint({0})',
+                ),
+                ExprCheckParams(
+                    field,
+                    Expr.AND(
+                        Expr.ARRAY_CONTAINS(field, '"噜"').value,
+                        Expr.ARRAY_CONTAINS_ANY(field, ["浮", "沮", "茫"]).value,
+                    ).value,
+                    'set(["噜"]).issubset({0}) and not set(["浮", "沮", "茫"]).isdisjoint({0})',
+                ),
+                ExprCheckParams(
+                    field,
+                    Expr.And(
+                        Expr.ARRAY_CONTAINS_ALL(field, ["爤"]).value,
+                        Expr.array_contains_any(field, ["暁", "非", "鸳", "丹"]).value,
+                    ).value,
+                    'set(["爤"]).issubset({0}) and not set(["暁", "非", "鸳", "丹"]).isdisjoint({0})',
+                ),
+                ExprCheckParams(
+                    field,
+                    Expr.OR(
+                        Expr.array_contains(field, '"草"').value, Expr.array_contains_all(field, ["昩", "苴"]).value
+                    ).value,
+                    'set(["草"]).issubset({0}) or set(["昩", "苴"]).issubset({0})',
+                ),
+                ExprCheckParams(
+                    field,
+                    Expr.Or(
+                        Expr.ARRAY_CONTAINS_ANY(field, ["魡", "展", "隶", "韀", "脠", "噩"]).value,
+                        Expr.array_contains_any(field, ["备", "嘎", "蝐", "秦", "万"]).value,
+                    ).value,
+                    'not set(["魡", "展", "隶", "韀", "脠", "噩"]).isdisjoint({0}) or '
+                    + 'not set(["备", "嘎", "蝐", "秦", "万"]).isdisjoint({0})',
+                ),
+            ]
+        )
     return exprs
 
 
 def gen_number_operation(expr_fields):
     exprs = []
     for field in expr_fields:
-        exprs.extend([
-            (Expr.LT(Expr.ADD(field, 23), 100).value, field),
-            (Expr.LT(Expr.ADD(-23, field), 121).value, field),
-            (Expr.LE(Expr.SUB(field, 123), 99).value, field),
-            (Expr.GT(Expr.MUL(field, 2), 88).value, field),
-            (Expr.GT(Expr.MUL(3, field), 137).value, field),
-            (Expr.GE(Expr.DIV(field, 30), 20).value, field),
-        ])
+        exprs.extend(
+            [
+                (Expr.LT(Expr.ADD(field, 23), 100).value, field),
+                (Expr.LT(Expr.ADD(-23, field), 121).value, field),
+                (Expr.LE(Expr.SUB(field, 123), 99).value, field),
+                (Expr.GT(Expr.MUL(field, 2), 88).value, field),
+                (Expr.GT(Expr.MUL(3, field), 137).value, field),
+                (Expr.GE(Expr.DIV(field, 30), 20).value, field),
+            ]
+        )
     return exprs
 
 
@@ -3618,7 +4562,7 @@ def ip(x, y):
 
 
 def cosine(x, y):
-    return np.dot(x, y)/(np.linalg.norm(x)*np.linalg.norm(y))
+    return np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y))
 
 
 def jaccard(x, y):
@@ -3695,7 +4639,7 @@ def compare_distance_vector_and_vector_list(x, y, metric, distance):
         assert False
     for i in range(len(y)):
         if metric == "L2":
-            distance_i = (l2(x, y[i]))**2
+            distance_i = (l2(x, y[i])) ** 2
         elif metric == "IP":
             distance_i = ip(x, y[i])
         elif metric == "COSINE":
@@ -3739,7 +4683,7 @@ def index_to_dict(index):
         "collection_name": index.collection_name,
         "field_name": index.field_name,
         # "name": index.name,
-        "params": index.params
+        "params": index.params,
     }
 
 
@@ -3766,8 +4710,8 @@ def assert_json_contains(expr, list_data):
         opposite = True
         expr = expr.split("not ", 1)[1]
     result_ids = []
-    expr_prefix = expr.split('(', 1)[0]
-    exp_ids = eval(expr.split(', ', 1)[1].split(')', 1)[0])
+    expr_prefix = expr.split("(", 1)[0]
+    exp_ids = eval(expr.split(", ", 1)[1].split(")", 1)[0])
     if expr_prefix in ["json_contains", "JSON_CONTAINS", "array_contains", "ARRAY_CONTAINS"]:
         for i in range(len(list_data)):
             if exp_ids in list_data[i]:
@@ -3802,17 +4746,29 @@ def gen_partitions(collection_w, partition_num=1):
     log.info("gen_partitions: creating partitions")
     for i in range(partition_num):
         partition_name = "search_partition_" + str(i)
-        collection_w.create_partition(partition_name=partition_name,
-                                      description="search partition")
+        collection_w.create_partition(partition_name=partition_name, description="search partition")
     par = collection_w.partitions
     assert len(par) == (partition_num + 1)
     log.info("gen_partitions: created partitions %s" % par)
 
 
-def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim, insert_offset=0, enable_dynamic_field=False, with_json=True,
-                random_primary_key=False, multiple_dim_array=[], primary_field=ct.default_int64_field_name,
-                vector_data_type=DataType.FLOAT_VECTOR, nullable_fields={}, language=None):
+def insert_data(
+    collection_w,
+    nb=ct.default_nb,
+    is_binary=False,
+    is_all_data_type=False,
+    auto_id=False,
+    dim=ct.default_dim,
+    insert_offset=0,
+    enable_dynamic_field=False,
+    with_json=True,
+    random_primary_key=False,
+    multiple_dim_array=[],
+    primary_field=ct.default_int64_field_name,
+    vector_data_type=DataType.FLOAT_VECTOR,
+    nullable_fields={},
+    language=None,
+):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -3834,64 +4790,108 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
             if not is_all_data_type:
                 if not enable_dynamic_field:
                     if vector_data_type == DataType.FLOAT_VECTOR:
-                        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                  random_primary_key=random_primary_key,
-                                                                  multiple_dim_array=multiple_dim_array,
-                                                                  multiple_vector_field_name=vector_name_list,
-                                                                  vector_data_type=vector_data_type,
-                                                                  auto_id=auto_id, primary_field=primary_field,
-                                                                  nullable_fields=nullable_fields, language=language)
+                        default_data = gen_default_dataframe_data(
+                            nb // num,
+                            dim=dim,
+                            start=start,
+                            with_json=with_json,
+                            random_primary_key=random_primary_key,
+                            multiple_dim_array=multiple_dim_array,
+                            multiple_vector_field_name=vector_name_list,
+                            vector_data_type=vector_data_type,
+                            auto_id=auto_id,
+                            primary_field=primary_field,
+                            nullable_fields=nullable_fields,
+                            language=language,
+                        )
                     elif vector_data_type in ct.append_vector_type:
-                        default_data = gen_default_list_data(nb // num, dim=dim, start=start, with_json=with_json,
-                                                             random_primary_key=random_primary_key,
-                                                             multiple_dim_array=multiple_dim_array,
-                                                             multiple_vector_field_name=vector_name_list,
-                                                             vector_data_type=vector_data_type,
-                                                             auto_id=auto_id, primary_field=primary_field,
-                                                             nullable_fields=nullable_fields, language=language)
+                        default_data = gen_default_list_data(
+                            nb // num,
+                            dim=dim,
+                            start=start,
+                            with_json=with_json,
+                            random_primary_key=random_primary_key,
+                            multiple_dim_array=multiple_dim_array,
+                            multiple_vector_field_name=vector_name_list,
+                            vector_data_type=vector_data_type,
+                            auto_id=auto_id,
+                            primary_field=primary_field,
+                            nullable_fields=nullable_fields,
+                            language=language,
+                        )
 
                 else:
-                    default_data = gen_default_rows_data(nb // num, dim=dim, start=start, with_json=with_json,
-                                                         multiple_dim_array=multiple_dim_array,
-                                                         multiple_vector_field_name=vector_name_list,
-                                                         vector_data_type=vector_data_type,
-                                                         auto_id=auto_id, primary_field=primary_field,
-                                                         nullable_fields=nullable_fields, language=language)
+                    default_data = gen_default_rows_data(
+                        nb // num,
+                        dim=dim,
+                        start=start,
+                        with_json=with_json,
+                        multiple_dim_array=multiple_dim_array,
+                        multiple_vector_field_name=vector_name_list,
+                        vector_data_type=vector_data_type,
+                        auto_id=auto_id,
+                        primary_field=primary_field,
+                        nullable_fields=nullable_fields,
+                        language=language,
+                    )
 
             else:
                 if not enable_dynamic_field:
                     if vector_data_type == DataType.FLOAT_VECTOR:
-                        default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                      random_primary_key=random_primary_key,
-                                                                      multiple_dim_array=multiple_dim_array,
-                                                                      multiple_vector_field_name=vector_name_list,
-                                                                      auto_id=auto_id, primary_field=primary_field,
-                                                                      nullable_fields=nullable_fields, language=language)
+                        default_data = gen_general_list_all_data_type(
+                            nb // num,
+                            dim=dim,
+                            start=start,
+                            with_json=with_json,
+                            random_primary_key=random_primary_key,
+                            multiple_dim_array=multiple_dim_array,
+                            multiple_vector_field_name=vector_name_list,
+                            auto_id=auto_id,
+                            primary_field=primary_field,
+                            nullable_fields=nullable_fields,
+                            language=language,
+                        )
                     elif vector_data_type == DataType.FLOAT16_VECTOR or vector_data_type == DataType.BFLOAT16_VECTOR:
-                        default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                      random_primary_key=random_primary_key,
-                                                                      multiple_dim_array=multiple_dim_array,
-                                                                      multiple_vector_field_name=vector_name_list,
-                                                                      auto_id=auto_id, primary_field=primary_field,
-                                                                      nullable_fields=nullable_fields, language=language)
+                        default_data = gen_general_list_all_data_type(
+                            nb // num,
+                            dim=dim,
+                            start=start,
+                            with_json=with_json,
+                            random_primary_key=random_primary_key,
+                            multiple_dim_array=multiple_dim_array,
+                            multiple_vector_field_name=vector_name_list,
+                            auto_id=auto_id,
+                            primary_field=primary_field,
+                            nullable_fields=nullable_fields,
+                            language=language,
+                        )
                 else:
-                    if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt'):
-                        with open(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt', 'rb') as f:
+                    if os.path.exists(ct.rows_all_data_type_file_path + f"_{i}" + f"_dim{dim}.txt"):
+                        with open(ct.rows_all_data_type_file_path + f"_{i}" + f"_dim{dim}.txt", "rb") as f:
                             default_data = pickle.load(f)
                     else:
-                        default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start,
-                                                                           with_json=with_json,
-                                                                           multiple_dim_array=multiple_dim_array,
-                                                                           multiple_vector_field_name=vector_name_list,
-                                                                           partition_id=i, auto_id=auto_id,
-                                                                           primary_field=primary_field,
-                                                                           language=language)
+                        default_data = gen_default_rows_data_all_data_type(
+                            nb // num,
+                            dim=dim,
+                            start=start,
+                            with_json=with_json,
+                            multiple_dim_array=multiple_dim_array,
+                            multiple_vector_field_name=vector_name_list,
+                            partition_id=i,
+                            auto_id=auto_id,
+                            primary_field=primary_field,
+                            language=language,
+                        )
         else:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start,
-                                                                              auto_id=auto_id,
-                                                                              primary_field=primary_field,
-                                                                              nullable_fields=nullable_fields,
-                                                                              language=language)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(
+                nb // num,
+                dim=dim,
+                start=start,
+                auto_id=auto_id,
+                primary_field=primary_field,
+                nullable_fields=nullable_fields,
+                language=language,
+            )
             binary_raw_vectors.extend(binary_raw_data)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         log.info(f"inserted {nb // num} data into collection {collection_w.name}")
@@ -3917,6 +4917,7 @@ def get_segment_distribution(res):
     Get segment distribution
     """
     from collections import defaultdict
+
     segment_distribution = defaultdict(lambda: {"sealed": []})
     for r in res:
         for node_id in r.nodeIds:
@@ -3944,35 +4945,38 @@ def percent_to_int(string):
 
 
 def gen_grant_list(collection_name):
-    grant_list = [{"object": "Collection", "object_name": collection_name, "privilege": "Load"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Release"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Compaction"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Delete"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "GetStatistics"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "CreateIndex"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "IndexDetail"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "DropIndex"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Search"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Flush"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Query"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "LoadBalance"},
-                  {"object": "Collection", "object_name": collection_name, "privilege": "Import"},
-                  {"object": "Global", "object_name": "*", "privilege": "All"},
-                  {"object": "Global", "object_name": "*", "privilege": "CreateCollection"},
-                  {"object": "Global", "object_name": "*", "privilege": "DropCollection"},
-                  {"object": "Global", "object_name": "*", "privilege": "DescribeCollection"},
-                  {"object": "Global", "object_name": "*", "privilege": "ShowCollections"},
-                  {"object": "Global", "object_name": "*", "privilege": "CreateOwnership"},
-                  {"object": "Global", "object_name": "*", "privilege": "DropOwnership"},
-                  {"object": "Global", "object_name": "*", "privilege": "SelectOwnership"},
-                  {"object": "Global", "object_name": "*", "privilege": "ManageOwnership"},
-                  {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
-                  {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
+    grant_list = [
+        {"object": "Collection", "object_name": collection_name, "privilege": "Load"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Release"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Compaction"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Delete"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "GetStatistics"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "CreateIndex"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "IndexDetail"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "DropIndex"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Search"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Flush"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Query"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "LoadBalance"},
+        {"object": "Collection", "object_name": collection_name, "privilege": "Import"},
+        {"object": "Global", "object_name": "*", "privilege": "All"},
+        {"object": "Global", "object_name": "*", "privilege": "CreateCollection"},
+        {"object": "Global", "object_name": "*", "privilege": "DropCollection"},
+        {"object": "Global", "object_name": "*", "privilege": "DescribeCollection"},
+        {"object": "Global", "object_name": "*", "privilege": "ShowCollections"},
+        {"object": "Global", "object_name": "*", "privilege": "CreateOwnership"},
+        {"object": "Global", "object_name": "*", "privilege": "DropOwnership"},
+        {"object": "Global", "object_name": "*", "privilege": "SelectOwnership"},
+        {"object": "Global", "object_name": "*", "privilege": "ManageOwnership"},
+        {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
+        {"object": "User", "object_name": "*", "privilege": "SelectUser"},
+    ]
     return grant_list
 
 
-def install_milvus_operator_specific_config(namespace, milvus_mode, release_name, image,
-                                            rate_limit_enable, collection_rate_limit):
+def install_milvus_operator_specific_config(
+    namespace, milvus_mode, release_name, image, rate_limit_enable, collection_rate_limit
+):
     """
     namespace : str
     milvus_mode : str -> standalone or cluster
@@ -4009,22 +5013,22 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
         log.error("[rate_limit_enable] is not 'true' or 'false'")
 
     data_config = {
-        'metadata.namespace': namespace,
-        'spec.mode': milvus_mode,
-        'metadata.name': release_name,
-        'spec.components.image': image,
-        'spec.components.proxy.serviceType': 'LoadBalancer',
-        'spec.components.dataNode.replicas': 2,
-        'spec.config.common.retentionDuration': 60,
-        'spec.config.quotaAndLimits.enable': rate_limit_enable,
-        'spec.config.quotaAndLimits.ddl.collectionRate': collection_rate_limit,
+        "metadata.namespace": namespace,
+        "spec.mode": milvus_mode,
+        "metadata.name": release_name,
+        "spec.components.image": image,
+        "spec.components.proxy.serviceType": "LoadBalancer",
+        "spec.components.dataNode.replicas": 2,
+        "spec.config.common.retentionDuration": 60,
+        "spec.config.quotaAndLimits.enable": rate_limit_enable,
+        "spec.config.quotaAndLimits.ddl.collectionRate": collection_rate_limit,
     }
     mil = MilvusOperator()
     mil.install(data_config)
     if mil.wait_for_healthy(release_name, namespace, timeout=1800):
-        host = mil.endpoint(release_name, namespace).split(':')[0]
+        host = mil.endpoint(release_name, namespace).split(":")[0]
     else:
-        raise MilvusException(message=f'Milvus healthy timeout 1800s')
+        raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
     return host
 
@@ -4032,12 +5036,12 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 def get_wildcard_output_field_names(collection_w, output_fields):
     """
     Processes output fields with wildcard ('*') expansion for collection queries.
-    
+
     Args:
-        collection_w (Union[dict, CollectionWrapper]): Collection information, 
+        collection_w (Union[dict, CollectionWrapper]): Collection information,
         either as a dict (v2 client) or ORM wrapper.
         output_fields (List[str]): List of requested output fields, may contain '*' wildcard.
-    
+
     Returns:
         List[str]: Expanded list of output fields with wildcard replaced by all available field names.
     """
@@ -4046,8 +5050,8 @@ def get_wildcard_output_field_names(collection_w, output_fields):
         field_names = [field.name for field in collection_w.schema.fields]
     else:
         # in client v2, it accepts a dict of collection info
-        fields = collection_w.get('fields', None)
-        field_names = [field.get('name') for field in fields]
+        fields = collection_w.get("fields", None)
+        field_names = [field.get("name") for field in fields]
 
     output_fields = output_fields.copy()
     if "*" in output_fields:
@@ -4064,16 +5068,18 @@ def extract_vector_field_name_list(collection_w):
     return: the vector field name list without the default float vector field name
     """
     schema_dict = collection_w.schema.to_dict()
-    fields = schema_dict.get('fields')
+    fields = schema_dict.get("fields")
     vector_name_list = []
     for field in fields:
-        if field['type'] == DataType.FLOAT_VECTOR \
-                or field['type'] == DataType.FLOAT16_VECTOR \
-                or field['type'] == DataType.BFLOAT16_VECTOR \
-                or field['type'] == DataType.SPARSE_FLOAT_VECTOR\
-                or field['type'] == DataType.INT8_VECTOR:
-            if field['name'] != ct.default_float_vec_field_name:
-                vector_name_list.append(field['name'])
+        if (
+            field["type"] == DataType.FLOAT_VECTOR
+            or field["type"] == DataType.FLOAT16_VECTOR
+            or field["type"] == DataType.BFLOAT16_VECTOR
+            or field["type"] == DataType.SPARSE_FLOAT_VECTOR
+            or field["type"] == DataType.INT8_VECTOR
+        ):
+            if field["name"] != ct.default_float_vec_field_name:
+                vector_name_list.append(field["name"])
 
     return vector_name_list
 
@@ -4088,10 +5094,10 @@ def get_field_dtype_by_field_name(schema, field_name):
     if not isinstance(schema, dict):
         schema = convert_orm_schema_to_dict_schema(schema)
 
-    fields = schema.get('fields')
+    fields = schema.get("fields")
     for field in fields:
-        if field['name'] == field_name:
-            return field['type']
+        if field["name"] == field_name:
+            return field["type"]
     return None
 
 
@@ -4100,11 +5106,11 @@ def get_activate_func_from_metric_type(metric_type):
     if metric_type == "COSINE":
         activate_function = lambda x: (1 + x) * 0.5
     elif metric_type == "IP":
-        activate_function = lambda x: 0.5 + math.atan(x)/ math.pi
+        activate_function = lambda x: 0.5 + math.atan(x) / math.pi
     elif metric_type == "BM25":
         activate_function = lambda x: 2 * math.atan(x) / math.pi
     else:
-        activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
+        activate_function = lambda x: 1.0 - 2 * math.atan(x) / math.pi
     return activate_function
 
 
@@ -4124,10 +5130,10 @@ def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):
         for key, distance in result.items():
             search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + distance
 
-    if round_decimal != -1 :
+    if round_decimal != -1:
         for k, v in search_res_dict_merge.items():
             multiplier = math.pow(10.0, round_decimal)
-            v = math.floor(v*multiplier+0.5) / multiplier
+            v = math.floor(v * multiplier + 0.5) / multiplier
             search_res_dict_merge[k] = v
 
     sorted_list = sorted(search_res_dict_merge.items(), key=lambda x: x[1], reverse=True)
@@ -4158,10 +5164,10 @@ def get_hybrid_search_base_results(search_res_dict_array, weights, metric_types,
             weight = weights[i]
             search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + activate_function(distance) * weights[i]
 
-    if round_decimal != -1 :
+    if round_decimal != -1:
         for k, v in search_res_dict_merge.items():
             multiplier = math.pow(10.0, round_decimal)
-            v = math.floor(v*multiplier+0.5) / multiplier
+            v = math.floor(v * multiplier + 0.5) / multiplier
             search_res_dict_merge[k] = v
 
     sorted_list = sorted(search_res_dict_merge.items(), key=lambda x: x[1], reverse=True)
@@ -4214,18 +5220,17 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
     # another option is coo, coordinate List
 
     rng = np.random.default_rng()
-    vectors = [{
-        d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
-    } for _ in range(nb)]
+    vectors = [
+        {d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))}
+        for _ in range(nb)
+    ]
     if empty_percentage > 0:
         empty_nb = int(nb * empty_percentage / 100)
         empty_ids = random.sample(range(nb), empty_nb)
         for i in empty_ids:
             vectors[i] = {}
     if sparse_format == "coo":
-        vectors = [
-            {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
-        ]
+        vectors = [{"indices": list(x.keys()), "values": list(x.values())} for x in vectors]
     return vectors
 
 
@@ -4240,7 +5245,7 @@ def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
         vectors = gen_sparse_vectors(nb, dim)
     elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(nb)    # for Full Text Search
+        vectors = gen_text_vectors(nb)  # for Full Text Search
     elif vector_data_type == DataType.BINARY_VECTOR:
         vectors = gen_binary_vectors(nb, dim)[1]
     elif vector_data_type == DataType.INT8_VECTOR:
@@ -4250,7 +5255,7 @@ def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
         raise Exception(f"Invalid vector data type: {vector_data_type}")
     if dim > 1:
         if vector_data_type == DataType.FLOAT_VECTOR:
-            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = preprocessing.normalize(vectors, axis=1, norm="l2")
             vectors = vectors.tolist()
     return vectors
 
@@ -4267,7 +5272,6 @@ def gen_int8_vectors(num, dim):
 
 
 def gen_text_vectors(nb, language="en"):
-
     fake = Faker("en_US")
     if language == "zh":
         fake = Faker("zh_CN")
@@ -4309,15 +5313,20 @@ def set_field_schema(field: str, params: dict):
             if _field_element in [DataType.STRING.name, DataType.VARCHAR.name]:
                 _kwargs.update({"max_length": ct.default_length})
 
-            elif _field_element in [DataType.BINARY_VECTOR.name, DataType.FLOAT_VECTOR.name,
-                                    DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name]:
+            elif _field_element in [
+                DataType.BINARY_VECTOR.name,
+                DataType.FLOAT_VECTOR.name,
+                DataType.FLOAT16_VECTOR.name,
+                DataType.BFLOAT16_VECTOR.name,
+            ]:
                 _kwargs.update({"dim": ct.default_dim})
 
             if isinstance(params, dict):
                 _kwargs.update(params)
             else:
                 raise ValueError(
-                    f"[set_field_schema] Field `{field}` params is not a dict, type: {type(params)}, params: {params}")
+                    f"[set_field_schema] Field `{field}` params is not a dict, type: {type(params)}, params: {params}"
+                )
             return ApiFieldSchemaWrapper().init_field_schema(name=field, dtype=v, **_kwargs)[0]
     raise ValueError(f"[set_field_schema] Can't set field:`{field}` schema: {params}")
 
@@ -4372,16 +5381,21 @@ def check_key_exist(source: dict, target: dict):
 
 
 def gen_unicode_string():
-    return chr(random.randint(0x4e00, 0x9fbf))
+    return chr(random.randint(0x4E00, 0x9FBF))
 
 
 def gen_unicode_string_batch(nb, string_len: int = 1):
-    return [''.join([gen_unicode_string() for _ in range(string_len)]) for _ in range(nb)]
+    return ["".join([gen_unicode_string() for _ in range(string_len)]) for _ in range(nb)]
 
 
 def gen_unicode_string_array_batch(nb, string_len: int = 1, max_capacity: int = ct.default_max_capacity):
-    return [[''.join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))]) for _ in
-             range(random.randint(0, max_capacity))] for _ in range(nb)]
+    return [
+        [
+            "".join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))])
+            for _ in range(random.randint(0, max_capacity))
+        ]
+        for _ in range(nb)
+    ]
 
 
 def iter_insert_list_data(data: list, batch: int, total_len: int):
@@ -4406,20 +5420,20 @@ def gen_collection_name_by_testcase_name(module_index=1):
 def parse_fmod(x: int, y: int) -> int:
     """
     Computes the floating-point remainder of x/y with the same sign as x.
-    
+
     This function mimics the behavior of the C fmod() function for integer inputs,
     where the result has the same sign as the dividend (x).
-    
+
     Args:
         x (int): The dividend
         y (int): The divisor
-        
+
     Returns:
         int: The remainder of x/y with the same sign as x
-        
+
     Raises:
         ValueError: If y is 0 (division by zero)
-        
+
     Examples:
         parse_fmod(5, 3) -> 2
         parse_fmod(-5, 3) -> -2
@@ -4427,11 +5441,12 @@ def parse_fmod(x: int, y: int) -> int:
         parse_fmod(-5, -3) -> -2
     """
     if y == 0:
-        raise ValueError(f'[parse_fmod] Math domain error, `y` can not bt `0`')
+        raise ValueError(f"[parse_fmod] Math domain error, `y` can not bt `0`")
 
     v = abs(x) % abs(y)
 
     return v if x >= 0 else -v
+
 
 def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     """
@@ -4461,7 +5476,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             return 31
         if month in (4, 6, 9, 11):
             return 30
-        is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
+        is_leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
         return 29 if is_leap else 28
 
     def _apply_offset_to_utc(
@@ -4469,7 +5484,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     ) -> Tuple[int, int, int, int, int, int]:
         sign, oh, om = offset
         delta_minutes = oh * 60 + om
-        if sign == '+':
+        if sign == "+":
             delta_minutes = -delta_minutes
         else:
             delta_minutes = +delta_minutes
@@ -4506,7 +5521,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     def _format_fixed(y: int, m: int, d: int, hh: int, mi: int, ss: int, offset_minutes: int) -> str:
         if offset_minutes == 0:
             return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mi:02d}:{ss:02d}Z"
-        sign = '+' if offset_minutes >= 0 else '-'
+        sign = "+" if offset_minutes >= 0 else "-"
         total = abs(offset_minutes)
         oh, om = divmod(total, 60)
         return f"{y:04d}-{m:02d}-{d:02d}T{hh:02d}:{mi:02d}:{ss:02d}{sign}{oh:02d}:{om:02d}"
@@ -4565,7 +5580,9 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
         m = basic_re.match(norm)
         if not m:
             raise ValueError(f"Invalid timestamp string: {raw}")
-        y, mo, d, hh, mi, ss = map(int, (m.group("y"), m.group("m"), m.group("d"), m.group("h"), m.group("mi"), m.group("s")))
+        y, mo, d, hh, mi, ss = map(
+            int, (m.group("y"), m.group("m"), m.group("d"), m.group("h"), m.group("mi"), m.group("s"))
+        )
         offset_str = m.group("offset")
         target_minutes = _target_offset_minutes()
 
@@ -4581,7 +5598,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
         if target_minutes == 0:
             return _format_fixed(uy, um, ud, uh, umi, uss, 0)
 
-        reverse_sign = '-' if target_minutes >= 0 else '+'
+        reverse_sign = "-" if target_minutes >= 0 else "+"
         ty, tm, td, th, tmi, ts = _apply_offset_to_utc(
             uy, um, ud, uh, umi, uss, (reverse_sign, abs(target_minutes) // 60, abs(target_minutes) % 60)
         )
@@ -4620,7 +5637,7 @@ def get_field_warmup(describe_res, field_name):
 
 def get_collection_warmup(describe_res, key):
     """Get collection level warmup value from describe_collection result
-       key: "warmup.scalarField" / "warmup.scalarIndex" / "warmup.vectorField" / "warmup.vectorIndex"
+    key: "warmup.scalarField" / "warmup.scalarIndex" / "warmup.vectorField" / "warmup.vectorIndex"
     """
     return describe_res.get("properties", {}).get(key, None)
 

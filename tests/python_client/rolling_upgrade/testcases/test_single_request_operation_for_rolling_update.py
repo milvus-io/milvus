@@ -76,9 +76,7 @@ class TestOperations(TestBase):
         self.health_checkers = checkers
         for k, v in self.health_checkers.items():
             if k in [Op.bulk_insert]:
-                files = v.prepare_bulk_insert_data(
-                    nb=3000, minio_endpoint=self.minio_endpoint
-                )
+                files = v.prepare_bulk_insert_data(nb=3000, minio_endpoint=self.minio_endpoint)
                 v.update(files=files)
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -118,11 +116,7 @@ class TestOperations(TestBase):
         cc.start_monitor_threads(self.health_checkers)
 
         # wait request_duration
-        request_duration = (
-            request_duration.replace("h", "*3600+")
-            .replace("m", "*60+")
-            .replace("s", "")
-        )
+        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)

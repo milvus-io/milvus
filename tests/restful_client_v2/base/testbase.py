@@ -5,8 +5,19 @@ import time
 import uuid
 from pymilvus import connections, db, MilvusClient
 from utils.util_log import test_log as logger
-from api.milvus import (VectorClient, CollectionClient, PartitionClient, IndexClient, AliasClient,
-                        UserClient, RoleClient, ImportJobClient, StorageClient, Requests, DatabaseClient)
+from api.milvus import (
+    VectorClient,
+    CollectionClient,
+    PartitionClient,
+    IndexClient,
+    AliasClient,
+    UserClient,
+    RoleClient,
+    ImportJobClient,
+    StorageClient,
+    Requests,
+    DatabaseClient,
+)
 from utils.utils import get_data_by_payload
 
 
@@ -42,9 +53,9 @@ class TestBase(Base):
 
     def teardown_method(self):
         # Clean up collections
-        if hasattr(self, 'api_key') and self.api_key:
+        if hasattr(self, "api_key") and self.api_key:
             self.collection_client.api_key = self.api_key
-        all_collections = self.collection_client.collection_list()['data']
+        all_collections = self.collection_client.collection_list()["data"]
         if self.name in all_collections:
             logger.info(f"collection {self.name} exist, drop it")
             payload = {
@@ -58,18 +69,14 @@ class TestBase(Base):
         for item in self.collection_client.name_list:
             db_name = item[0]
             c_name = item[1]
-            payload = {
-                "collectionName": c_name,
-                "dbName": db_name
-            }
+            payload = {"collectionName": c_name, "dbName": db_name}
             try:
                 self.collection_client.collection_drop(payload)
             except Exception as e:
                 logger.error(f"drop collection error: {e}")
 
-
         # Clean up databases created by this client
-        if hasattr(self, 'api_key') and self.api_key:
+        if hasattr(self, "api_key") and self.api_key:
             self.database_client.api_key = self.api_key
         for db_name in self.database_client.db_names[:]:  # Create a copy of the list to iterate
             logger.info(f"database {db_name} exist, drop it")
@@ -105,7 +112,16 @@ class TestBase(Base):
             self.partition_client.api_key = None
         connections.connect(uri=endpoint, token=token)
 
-    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=3000, batch_size=1000, return_insert_id=False):
+    def init_collection(
+        self,
+        collection_name,
+        pk_field="id",
+        metric_type="L2",
+        dim=128,
+        nb=3000,
+        batch_size=1000,
+        return_insert_id=False,
+    ):
         # create collection
         schema_payload = {
             "collectionName": collection_name,
@@ -116,7 +132,7 @@ class TestBase(Base):
             "vectorField": "vector",
         }
         rsp = self.collection_client.collection_create(schema_payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_collection_load_completed(collection_name)
         batch_size = batch_size
         batch = nb // batch_size
@@ -127,29 +143,23 @@ class TestBase(Base):
         for i in range(batch):
             nb = batch_size
             data = get_data_by_payload(schema_payload, nb)
-            payload = {
-                "collectionName": collection_name,
-                "data": data
-            }
+            payload = {"collectionName": collection_name, "data": data}
             body_size = sys.getsizeof(json.dumps(payload))
             logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
             if return_insert_id:
-                insert_ids.extend(rsp['data']['insertIds'])
+                insert_ids.extend(rsp["data"]["insertIds"])
             full_data.extend(data)
         # insert remainder data
         if remainder:
             nb = remainder
             data = get_data_by_payload(schema_payload, nb)
-            payload = {
-                "collectionName": collection_name,
-                "data": data
-            }
+            payload = {"collectionName": collection_name, "data": data}
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 0
+            assert rsp["code"] == 0
             if return_insert_id:
-                insert_ids.extend(rsp['data']['insertIds'])
+                insert_ids.extend(rsp["data"]["insertIds"])
             full_data.extend(data)
         if return_insert_id:
             return schema_payload, full_data, insert_ids

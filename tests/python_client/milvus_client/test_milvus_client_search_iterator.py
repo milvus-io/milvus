@@ -26,7 +26,7 @@ default_new_field_name = ct.default_new_field_name
 
 
 def external_filter_half(hits):
-    return hits[0: len(hits) // 2]
+    return hits[0 : len(hits) // 2]
 
 
 def external_filter_all(hits):
@@ -51,7 +51,7 @@ def external_filter_with_outputs(hits):
 
 
 class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
-    """ Test case of search iterator interface """
+    """Test case of search iterator interface"""
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_iterator_using_mul_db(self):
@@ -71,8 +71,15 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.using_database(client, "default")
@@ -87,10 +94,17 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
         error_msg = "alias or database may have been changed"
-        self.search_iterator(client, collection_name, vectors_to_search, batch_size, search_params=search_params,
-                             use_mul_db=True, another_db=my_db,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={ct.err_code: 1, ct.err_msg: error_msg})
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size,
+            search_params=search_params,
+            use_mul_db=True,
+            another_db=my_db,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={ct.err_code: 1, ct.err_msg: error_msg},
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -116,8 +130,15 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name_new in collections
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.insert(client, collection_name_new, rows)
@@ -126,10 +147,17 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
         error_msg = "alias or database may have been changed"
-        self.search_iterator(client, alias, vectors_to_search, batch_size, search_params=search_params,
-                             use_alias=True, another_collection=collection_name_new,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={ct.err_code: 1, ct.err_msg: error_msg})
+        self.search_iterator(
+            client,
+            alias,
+            vectors_to_search,
+            batch_size,
+            search_params=search_params,
+            use_alias=True,
+            another_collection=collection_name_new,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={ct.err_code: 1, ct.err_msg: error_msg},
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
         self.release_collection(client, collection_name_new)
@@ -146,15 +174,12 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nonexistent")
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"collection not found[database=default]"
-                             f"[collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
         vectors_to_search = cf.gen_vectors(1, default_dim)
         insert_ids = [i for i in range(default_nb)]
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        self.search_iterator(
+            client, collection_name, vectors_to_search, batch_size=5, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", ["str", [[1, 2], [3, 4]]])
@@ -171,23 +196,32 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"search_iterator_v2 does not support processing multiple vectors simultaneously"}
-        self.search_iterator(client, collection_name, data,
-                             batch_size=5,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {
+            ct.err_code: 1,
+            ct.err_msg: f"search_iterator_v2 does not support processing multiple vectors simultaneously",
+        }
+        self.search_iterator(
+            client, collection_name, data, batch_size=5, check_task=CheckTasks.err_res, check_items=error
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -206,23 +240,29 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"The vector data for search cannot be empty"}
-        self.search_iterator(client, collection_name, data,
-                             batch_size=5,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"The vector data for search cannot be empty"}
+        self.search_iterator(
+            client, collection_name, data, batch_size=5, check_task=CheckTasks.err_res, check_items=error
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -244,24 +284,35 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"batch size cannot be less than zero"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=batch_size,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"batch size cannot be less than zero"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=batch_size,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -280,26 +331,40 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: invalidexpr, "
-                             f"data type: JSON: invalid parameter"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             filter=expr,
-                             batch_size=20,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: invalidexpr, "
+            f"data type: JSON: invalid parameter",
+        }
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            filter=expr,
+            batch_size=20,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -320,32 +385,45 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`limit` value {limit} is illegal"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             limit=limit,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`limit` value {limit} is illegal"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=5,
+            limit=limit,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", ["id"])
-    @pytest.mark.skip("A field that does not currently exist will simply have no effect, "
-                      "but it would be better if an error were reported.")
+    @pytest.mark.skip(
+        "A field that does not currently exist will simply have no effect, "
+        "but it would be better if an error were reported."
+    )
     def test_milvus_client_search_iterator_with_invalid_output(self, output_fields):
         """
         target: test search iterator with nonexistent output field
@@ -360,34 +438,47 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`output_fields` value {output_fields} is illegal"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             limit=10,
-                             output_fields=output_fields,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`output_fields` value {output_fields} is illegal"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=5,
+            limit=10,
+            output_fields=output_fields,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("search_params", ["tt"])
-    @pytest.mark.skip("A param that does not currently exist will simply have no effect, "
-                      "but it would be better if an error were reported.")
+    @pytest.mark.skip(
+        "A param that does not currently exist will simply have no effect, "
+        "but it would be better if an error were reported."
+    )
     def test_milvus_client_search_iterator_with_invalid_search_params(self, search_params):
         """
         target: test search iterator with nonexistent search_params key
@@ -402,28 +493,39 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"'str' object has no attribute 'get'"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             limit=10,
-                             output_fields=["id", "float", "varchar"],
-                             search_params=search_params,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"'str' object has no attribute 'get'"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=5,
+            limit=10,
+            output_fields=["id", "float", "varchar"],
+            search_params=search_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -443,29 +545,44 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2,
-                                              "num_partitions": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={
+                "collection_name": collection_name,
+                "dim": default_dim,
+                "consistency_level": 2,
+                "num_partitions": 2,
+            },
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`partition_name_array` value {partition_name} is illegal"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             partition_names=partition_name,
-                             batch_size=5,
-                             limit=10,
-                             output_fields=["id", "float", "varchar"],
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`partition_name_array` value {partition_name} is illegal"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            partition_names=partition_name,
+            batch_size=5,
+            limit=10,
+            output_fields=["id", "float", "varchar"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -484,33 +601,49 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"partition name {partition_name} not found"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             partition_names=[partition_name],
-                             batch_size=5,
-                             limit=10,
-                             output_fields=["id", "float", "varchar"],
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: f"partition name {partition_name} not found"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            partition_names=[partition_name],
+            batch_size=5,
+            limit=10,
+            output_fields=["id", "float", "varchar"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("anns_field", ["nonexistent", ])
+    @pytest.mark.parametrize(
+        "anns_field",
+        [
+            "nonexistent",
+        ],
+    )
     def test_milvus_client_search_iterator_with_nonexistent_anns_field(self, anns_field):
         """
         target: test search iterator with nonexistent anns field
@@ -524,29 +657,43 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: failed to get field schema by name: "
-                             f"fieldName({anns_field}) not found: invalid parameter"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             limit=10,
-                             anns_field=anns_field,
-                             output_fields=["id", "float", "varchar"],
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"failed to create query plan: failed to get field schema by name: "
+            f"fieldName({anns_field}) not found: invalid parameter",
+        }
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=5,
+            limit=10,
+            anns_field=anns_field,
+            output_fields=["id", "float", "varchar"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -565,28 +712,39 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f"`round_decimal` value {round_decimal} is illegal"}
-        self.search_iterator(client, collection_name, vectors_to_search,
-                             batch_size=5,
-                             limit=10,
-                             round_decimal=round_decimal,
-                             output_fields=["id", "float", "varchar"],
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: f"`round_decimal` value {round_decimal} is illegal"}
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=5,
+            limit=10,
+            round_decimal=round_decimal,
+            output_fields=["id", "float", "varchar"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -605,34 +763,54 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "consistency_level": 2,
-                                              "dim": default_dim})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "consistency_level": 2, "dim": default_dim},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {}
         with pytest.raises(TypeError, match="got an unexpected keyword argument 'metric_type'"):
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=100,
-                                 external_filter_func=external_filter_invalid_arguments(metric_type="L2"),
-                                 check_task=CheckTasks.check_nothing)
-        it = self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                  search_params=search_params, limit=100,
-                                  external_filter_func=external_filter_invalid_arguments,
-                                  check_task=CheckTasks.check_nothing)[0]
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=100,
+                external_filter_func=external_filter_invalid_arguments(metric_type="L2"),
+                check_task=CheckTasks.check_nothing,
+            )
+        it = self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size,
+            search_params=search_params,
+            limit=100,
+            external_filter_func=external_filter_invalid_arguments,
+            check_task=CheckTasks.check_nothing,
+        )[0]
         with pytest.raises(TypeError, match="missing 1 required positional argument: 'iaminvalid'"):
             it.next()
 
 
 class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
-    """ Test case of search iterator interface """
+    """Test case of search iterator interface"""
 
     @pytest.fixture(scope="function", params=[True, False])
     def auto_id(self, request):
@@ -671,87 +849,146 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         self.using_database(client, "default")
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, metric_type=metric_type,
-                               consistency_level="Bounded")
+        self.create_collection(
+            client, collection_name, default_dim, metric_type=metric_type, consistency_level="Bounded"
+        )
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 2})
+        self.describe_collection(
+            client,
+            collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 2},
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0,
-                 default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
         # 3. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
-        self.search_iterator(client, collection_name=collection_name, data=vectors_to_search,
-                             anns_field=default_vector_field_name,
-                             search_params=search_params, batch_size=batch_size,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"metric_type": metric_type, "batch_size": batch_size})
+        self.search_iterator(
+            client,
+            collection_name=collection_name,
+            data=vectors_to_search,
+            anns_field=default_vector_field_name,
+            search_params=search_params,
+            batch_size=batch_size,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"metric_type": metric_type, "batch_size": batch_size},
+        )
         limit = 200
-        res = self.search(client, collection_name, vectors_to_search,
-                          search_params=search_params, limit=200,
-                          check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, 
-                                       "enable_milvus_client_api": True,
-                                       "pk_name": default_primary_key_field_name})[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            search_params=search_params,
+            limit=200,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": 1,
+                "limit": limit,
+                "enable_milvus_client_api": True,
+                "pk_name": default_primary_key_field_name,
+            },
+        )[0]
         if add_field:
-            self.add_collection_field(client, collection_name, field_name=default_new_field_name, data_type=DataType.INT64,
-                                      nullable=True)
+            self.add_collection_field(
+                client, collection_name, field_name=default_new_field_name, data_type=DataType.INT64, nullable=True
+            )
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
-                radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
-                range_filter = res[0][0].get('distance', 0) + 0.1
+                radius = res[0][limit // 2].get("distance", 0) - 0.1  # pick a radius to make sure there exists results
+                range_filter = res[0][0].get("distance", 0) + 0.1
             else:
-                radius = res[0][limit // 2].get('distance', 0) + 0.1
-                range_filter = res[0][0].get('distance', 0) - 0.1
+                radius = res[0][limit // 2].get("distance", 0) + 0.1
+                range_filter = res[0][0].get("distance", 0) - 0.1
             search_params = {"params": {"radius": radius, "range_filter": range_filter}}
             log.debug(f"search iterator with limit={limit} radius={radius}, range_filter={range_filter}")
             expected_batch_size = batch_size if limit == -1 else min(batch_size, limit)
             # external filter not set
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter half
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_half,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_half,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter nothing
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_nothing,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_nothing,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter with outputs
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit, output_fields=["*"],
-                                 external_filter_func=external_filter_with_outputs,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                output_fields=["*"],
+                external_filter_func=external_filter_with_outputs,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter all
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_all,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": 0, "iterate_times": 1})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_all,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": 0, "iterate_times": 1},
+            )
             if add_field:
                 # external filter with new field as output field
-                self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                     search_params=search_params, limit=limit, output_fields=[default_new_field_name],
-                                     external_filter_func=external_filter_with_outputs,
-                                     check_task=CheckTasks.check_search_iterator,
-                                     check_items={"batch_size": expected_batch_size})
+                self.search_iterator(
+                    client,
+                    collection_name,
+                    vectors_to_search,
+                    batch_size,
+                    search_params=search_params,
+                    limit=limit,
+                    output_fields=[default_new_field_name],
+                    external_filter_func=external_filter_with_outputs,
+                    check_task=CheckTasks.check_search_iterator,
+                    check_items={"batch_size": expected_batch_size},
+                )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -843,7 +1080,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     #     self.drop_collection(client, new_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize('id_type', ["int", "string"])
+    @pytest.mark.parametrize("id_type", ["int", "string"])
     def test_milvus_client_search_iterator_delete_with_ids(self, id_type):
         """
         target: test delete (high level api)
@@ -853,44 +1090,74 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, id_type=id_type, max_length=128,
-                               consistency_level="Strong")
+        self.create_collection(
+            client, collection_name, default_dim, id_type=id_type, max_length=128, consistency_level="Strong"
+        )
         # 2. insert
         default_nb = ct.default_nb
-        if id_type == 'int':
-            rows = [{default_primary_key_field_name: i,
-                     default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                     default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        if id_type == "int":
+            rows = [
+                {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                    default_float_field_name: i * 1.0,
+                    default_string_field_name: str(i),
+                }
+                for i in range(default_nb)
+            ]
         else:
             rows = [
-                {default_primary_key_field_name: cf.gen_unique_str()+str(i),
-                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+                {
+                    default_primary_key_field_name: cf.gen_unique_str() + str(i),
+                    default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                    default_float_field_name: i * 1.0,
+                    default_string_field_name: str(i),
+                }
+                for i in range(default_nb)
+            ]
         self.insert(client, collection_name, rows)[0]
         # 3. search_iterator and delete
         vectors_to_search = cf.gen_vectors(1, default_dim)
         batch_size = 200
         search_params = {"params": {}}
-        it = self.search_iterator(client, collection_name, vectors_to_search, batch_size=batch_size,
-                                  search_params=search_params, limit=500,
-                                  check_task=CheckTasks.check_nothing)[0]
+        it = self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=batch_size,
+            search_params=search_params,
+            limit=500,
+            check_task=CheckTasks.check_nothing,
+        )[0]
         res = it.next()
         it.close()
         delete_ids = res.ids()
         self.delete(client, collection_name, ids=delete_ids)
         # search iterator again
-        it2 = self.search_iterator(client, collection_name, vectors_to_search, batch_size=batch_size,
-                                   search_params=search_params, limit=500,
-                                   check_task=CheckTasks.check_nothing)[0]
+        it2 = self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=batch_size,
+            search_params=search_params,
+            limit=500,
+            check_task=CheckTasks.check_nothing,
+        )[0]
         res2 = it2.next()
         it2.close()
         for del_id in delete_ids:
             assert del_id not in res2.ids()
         # search iterator again
-        self.search_iterator(client, collection_name, vectors_to_search, batch_size=batch_size,
-                             search_params=search_params, limit=500,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size})
+        self.search_iterator(
+            client,
+            collection_name,
+            vectors_to_search,
+            batch_size=batch_size,
+            search_params=search_params,
+            limit=500,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size},
+        )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -900,9 +1167,9 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("metric_type", ct.dense_metrics)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_search_iterator_after_json_path_index(self, metric_type, enable_dynamic_field,
-                                                                 supported_json_cast_type,
-                                                                 supported_varchar_scalar_index):
+    def test_milvus_client_search_iterator_after_json_path_index(
+        self, metric_type, enable_dynamic_field, supported_json_cast_type, supported_varchar_scalar_index
+    ):
         """
         target: test search iterator after creating json path index
         method: Search iterator after creating json path index
@@ -930,32 +1197,45 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
             schema.add_field(json_field_name, DataType.JSON)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type=metric_type)
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]['b']"})
-        index_params.add_index(field_name=json_field_name,
-                               index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type,
-                                       "json_path": f"{json_field_name}['a'][0]"})
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, metric_type=metric_type)
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]['b']"},
+        )
+        index_params.add_index(
+            field_name=json_field_name,
+            index_type=supported_varchar_scalar_index,
+            params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a'][0]"},
+        )
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, metric_type=metric_type
+        )
         # 2. insert
-        rows = [{default_primary_key_field_name: i,
-                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]) if random.random() >= 0.2 else None,
-                 default_float_field_name: i * 1.0,
-                 default_string_field_name: str(i),
-                 json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]) if random.random() >= 0.2 else None,
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                json_field_name: {"a": {"b": i}},
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. release and load collection to make sure the new index is loaded
@@ -964,55 +1244,100 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         # 4. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
-        self.search_iterator(client, collection_name=collection_name, data=vectors_to_search,
-                             anns_field=default_vector_field_name,
-                             search_params=search_params, batch_size=batch_size,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"metric_type": metric_type, "batch_size": batch_size})
+        self.search_iterator(
+            client,
+            collection_name=collection_name,
+            data=vectors_to_search,
+            anns_field=default_vector_field_name,
+            search_params=search_params,
+            batch_size=batch_size,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"metric_type": metric_type, "batch_size": batch_size},
+        )
         limit = 200
-        res = self.search(client, collection_name, vectors_to_search,
-                          search_params=search_params, limit=limit,
-                          check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, "pk_name": default_primary_key_field_name, 
-                                       "enable_milvus_client_api": True})[0]
+        res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            search_params=search_params,
+            limit=limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": 1,
+                "limit": limit,
+                "pk_name": default_primary_key_field_name,
+                "enable_milvus_client_api": True,
+            },
+        )[0]
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
-                radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
-                range_filter = res[0][0].get('distance', 0) + 0.1
+                radius = res[0][limit // 2].get("distance", 0) - 0.1  # pick a radius to make sure there exists results
+                range_filter = res[0][0].get("distance", 0) + 0.1
             else:
-                radius = res[0][limit // 2].get('distance', 0) + 0.1
-                range_filter = res[0][0].get('distance', 0) - 0.1
+                radius = res[0][limit // 2].get("distance", 0) + 0.1
+                range_filter = res[0][0].get("distance", 0) - 0.1
             search_params = {"params": {"radius": radius, "range_filter": range_filter}}
             log.debug(f"search iterator with limit={limit} radius={radius}, range_filter={range_filter}")
             expected_batch_size = batch_size if limit == -1 else min(batch_size, limit)
             # external filter not set
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter half
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_half,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_half,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter nothing
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_nothing,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_nothing,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter with outputs
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit, output_fields=["*"],
-                                 external_filter_func=external_filter_with_outputs,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": expected_batch_size})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                output_fields=["*"],
+                external_filter_func=external_filter_with_outputs,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": expected_batch_size},
+            )
             # external filter all
-            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
-                                 search_params=search_params, limit=limit,
-                                 external_filter_func=external_filter_all,
-                                 check_task=CheckTasks.check_search_iterator,
-                                 check_items={"batch_size": 0, "iterate_times": 1})
+            self.search_iterator(
+                client,
+                collection_name,
+                vectors_to_search,
+                batch_size,
+                search_params=search_params,
+                limit=limit,
+                external_filter_func=external_filter_all,
+                check_task=CheckTasks.check_search_iterator,
+                check_items={"batch_size": 0, "iterate_times": 1},
+            )
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)

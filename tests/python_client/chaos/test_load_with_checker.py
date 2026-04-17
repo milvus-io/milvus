@@ -4,18 +4,20 @@ import json
 from time import sleep
 from minio import Minio
 from pymilvus import connections
-from chaos.checker import (CollectionCreateChecker,
-                           InsertChecker,
-                           FlushChecker,
-                           SearchChecker,
-                           QueryChecker,
-                           IndexCreateChecker,
-                           DeleteChecker,
-                           CompactChecker,
-                           CollectionDropChecker,
-                           LoadBalanceChecker,
-                           BulkInsertChecker,
-                           Op)
+from chaos.checker import (
+    CollectionCreateChecker,
+    InsertChecker,
+    FlushChecker,
+    SearchChecker,
+    QueryChecker,
+    IndexCreateChecker,
+    DeleteChecker,
+    CompactChecker,
+    CollectionDropChecker,
+    LoadBalanceChecker,
+    BulkInsertChecker,
+    Op,
+)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
@@ -34,14 +36,13 @@ class TestChaosBase:
     expect_search = constants.SUCC
     expect_query = constants.SUCC
     expect_delete = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestChaos(TestChaosBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port):
         connections.connect("default", host=host, port=port)
@@ -97,7 +98,7 @@ class TestChaos(TestChaosBase):
             data_dict = {"rows": entities}
         file_name = "bulk_insert_data_source.json"
         files = [file_name]
-        #TODO: npy file type is not supported so far
+        # TODO: npy file type is not supported so far
         log.info("generate bulk insert file")
         with open(file_name, "w") as f:
             f.write(json.dumps(data_dict))
@@ -108,20 +109,22 @@ class TestChaos(TestChaosBase):
         log.info("prepare data for bulk insert done")
 
     def teardown(self):
-        chaos_res = CusResource(kind=self._chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
-        meta_name = self._chaos_config.get('metadata', None).get('name', None)
+        chaos_res = CusResource(
+            kind=self._chaos_config["kind"],
+            group=constants.CHAOS_GROUP,
+            version=constants.CHAOS_VERSION,
+            namespace=constants.CHAOS_NAMESPACE,
+        )
+        meta_name = self._chaos_config.get("metadata", None).get("name", None)
         chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
-        log.info(f'Alive threads: {threading.enumerate()}')
+        log.info(f"Alive threads: {threading.enumerate()}")
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_generator(self):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         cc.start_monitor_threads(self.health_checkers)
 
         log.info("start checkers")

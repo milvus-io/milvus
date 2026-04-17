@@ -17,6 +17,7 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
     Data: 3000 rows
     Index: COSINE on float_vector
     """
+
     shared_alias = "TestSearchIteratorShared"
 
     def setup_class(self):
@@ -45,6 +46,7 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
 
         def teardown():
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -59,12 +61,16 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_vectors(1, default_dim)
         search_params = {"metric_type": "COSINE"}
-        self.search_iterator(client, self.collection_name, data=search_vectors,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_iterator_invalid_nq(self):
@@ -77,13 +83,16 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
         batch_size = 100
         search_vectors = cf.gen_vectors(2, default_dim)
         search_params = {"metric_type": "COSINE"}
-        self.search_iterator(client, self.collection_name, data=search_vectors,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             check_task=CheckTasks.err_res,
-                             check_items={"err_code": 1,
-                                          "err_msg": "does not support processing multiple vectors"})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1, "err_msg": "does not support processing multiple vectors"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_iterator_not_support_search_by_pk(self):
@@ -98,25 +107,29 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, default_dim)
         search_params = {"metric_type": "COSINE"}
         ids_to_search = [1]
-        self.search_iterator(client, self.collection_name,
-                             data=None,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             ids=ids_to_search,
-                             check_task=CheckTasks.err_res,
-                             check_items={"err_code": 999,
-                                          "err_msg": "object of type 'NoneType' has no len()"})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=None,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            ids=ids_to_search,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999, "err_msg": "object of type 'NoneType' has no len()"},
+        )
 
-        self.search_iterator(client, self.collection_name,
-                             data=search_vectors,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             ids=ids_to_search,
-                             check_task=CheckTasks.err_res,
-                             check_items={"err_code": 999,
-                                          "err_msg": "Either ids or data must be provided, not both"})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            ids=ids_to_search,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999, "err_msg": "Either ids or data must be provided, not both"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_iterator_with_expression(self):
@@ -131,14 +144,17 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, default_dim)
         search_params = {"metric_type": "COSINE"}
         expression = f"1000 <= {ct.default_int64_field_name} < 2000"
-        self.search_iterator(client, self.collection_name, data=search_vectors,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             filter=expression,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size,
-                                          "pk_range": (1000, 2000)})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            filter=expression,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size, "pk_range": (1000, 2000)},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_iterator_cosine(self):
@@ -156,31 +172,42 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
         search_params = {"metric_type": "COSINE"}
 
         # get distance reference from regular search
-        res = self.search(client, self.collection_name,
-                          data=search_vector,
-                          anns_field=ct.default_float_vec_field_name,
-                          search_params=search_params,
-                          limit=limit,
-                          check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit,
-                                       "metric": "COSINE",
-                                       "enable_milvus_client_api": True,
-                                       "pk_name": ct.default_int64_field_name})[0]
+        res = self.search(
+            client,
+            self.collection_name,
+            data=search_vector,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=search_params,
+            limit=limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": 1,
+                "limit": limit,
+                "metric": "COSINE",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )[0]
 
         # COSINE: higher distance = more similar, so radius < range_filter
         radius = res[0][limit // 2]["distance"] - 0.1
         range_filter = res[0][0]["distance"] + 0.1
-        range_search_params = {"metric_type": "COSINE",
-                               "params": {"radius": radius, "range_filter": range_filter}}
-        self.search_iterator(client, self.collection_name, data=search_vector,
-                             batch_size=batch_size,
-                             search_params=range_search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"metric_type": "COSINE",
-                                          "batch_size": batch_size,
-                                          "radius": radius,
-                                          "range_filter": range_filter})
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": radius, "range_filter": range_filter}}
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vector,
+            batch_size=batch_size,
+            search_params=range_search_params,
+            anns_field=ct.default_float_vec_field_name,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={
+                "metric_type": "COSINE",
+                "batch_size": batch_size,
+                "radius": radius,
+                "range_filter": range_filter,
+            },
+        )
 
 
 class TestSearchIteratorIndependent(TestMilvusClientV2Base):
@@ -222,25 +249,34 @@ class TestSearchIteratorIndependent(TestMilvusClientV2Base):
 
         search_vector = cf.gen_vectors(1, dim, vector_data_type)
         search_params = {"metric_type": metric_type}
-        self.search_iterator(client, collection_name, data=search_vector,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"metric_type": metric_type,
-                                          "batch_size": batch_size})
+        self.search_iterator(
+            client,
+            collection_name,
+            data=search_vector,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"metric_type": metric_type, "batch_size": batch_size},
+        )
 
         limit = 200
-        res = self.search(client, collection_name,
-                          data=search_vector,
-                          anns_field=ct.default_float_vec_field_name,
-                          search_params=search_params,
-                          limit=limit,
-                          check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit,
-                                       "metric": metric_type,
-                                       "enable_milvus_client_api": True,
-                                       "pk_name": ct.default_int64_field_name})[0]
+        res = self.search(
+            client,
+            collection_name,
+            data=search_vector,
+            anns_field=ct.default_float_vec_field_name,
+            search_params=search_params,
+            limit=limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": 1,
+                "limit": limit,
+                "metric": metric_type,
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )[0]
         # range search iterator with radius/range_filter derived from regular search distances
         if metric_type != "L2":
             radius = res[0][limit // 2]["distance"] - 0.1
@@ -248,16 +284,22 @@ class TestSearchIteratorIndependent(TestMilvusClientV2Base):
         else:
             radius = res[0][limit // 2]["distance"] + 0.1
             range_filter = res[0][0]["distance"] - 0.1
-        range_search_params = {"metric_type": metric_type,
-                               "params": {"radius": radius, "range_filter": range_filter}}
-        self.search_iterator(client, collection_name, data=search_vector,
-                             batch_size=batch_size,
-                             search_params=range_search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"metric_type": metric_type, "batch_size": batch_size,
-                                          "radius": radius,
-                                          "range_filter": range_filter})
+        range_search_params = {"metric_type": metric_type, "params": {"radius": radius, "range_filter": range_filter}}
+        self.search_iterator(
+            client,
+            collection_name,
+            data=search_vector,
+            batch_size=batch_size,
+            search_params=range_search_params,
+            anns_field=ct.default_float_vec_field_name,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={
+                "metric_type": metric_type,
+                "batch_size": batch_size,
+                "radius": radius,
+                "range_filter": range_filter,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_iterator_binary(self):
@@ -282,17 +324,20 @@ class TestSearchIteratorIndependent(TestMilvusClientV2Base):
         self.insert(client, collection_name, data=data)
         self.flush(client, collection_name)
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT",
-                      metric_type="JACCARD")
+        idx.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
         _, binary_search_vectors = cf.gen_binary_vectors(1, ct.default_dim)
-        self.search_iterator(client, collection_name, data=binary_search_vectors,
-                             batch_size=batch_size,
-                             search_params=ct.default_search_binary_params,
-                             anns_field=ct.default_binary_vec_field_name,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size})
+        self.search_iterator(
+            client,
+            collection_name,
+            data=binary_search_vectors,
+            batch_size=batch_size,
+            search_params=ct.default_search_binary_params,
+            anns_field=ct.default_binary_vec_field_name,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "IP"])
@@ -325,11 +370,14 @@ class TestSearchIteratorIndependent(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(1, dim)
         search_params = {"metric_type": metric_type}
         expression = f"1000 <= {ct.default_int64_field_name} < 2000"
-        self.search_iterator(client, collection_name, data=search_vectors,
-                             batch_size=batch_size,
-                             search_params=search_params,
-                             anns_field=ct.default_float_vec_field_name,
-                             filter=expression,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size,
-                                          "pk_range": (1000, 2000)})
+        self.search_iterator(
+            client,
+            collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            search_params=search_params,
+            anns_field=ct.default_float_vec_field_name,
+            filter=expression,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size, "pk_range": (1000, 2000)},
+        )

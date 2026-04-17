@@ -36,8 +36,7 @@ class TestDatabaseOperation(TestBase):
         describe_rsp = self.database_client.database_describe({"dbName": db_name})
         assert describe_rsp["code"] == 0
         assert any(
-            prop["key"] == "mmap.enabled" and prop["value"] == "true"
-            for prop in describe_rsp["data"]["properties"]
+            prop["key"] == "mmap.enabled" and prop["value"] == "true" for prop in describe_rsp["data"]["properties"]
         )
 
     def test_alter_database_properties(self):
@@ -54,8 +53,7 @@ class TestDatabaseOperation(TestBase):
         describe_rsp = self.database_client.database_describe({"dbName": db_name})
         assert describe_rsp["code"] == 0
         assert any(
-            prop["key"] == "mmap.enabled" and prop["value"] == "true"
-            for prop in describe_rsp["data"]["properties"]
+            prop["key"] == "mmap.enabled" and prop["value"] == "true" for prop in describe_rsp["data"]["properties"]
         )
 
         # Alter properties
@@ -67,8 +65,7 @@ class TestDatabaseOperation(TestBase):
         describe_rsp = self.database_client.database_describe({"dbName": db_name})
         assert describe_rsp["code"] == 0
         assert any(
-            prop["key"] == "mmap.enabled" and prop["value"] == "false"
-            for prop in describe_rsp["data"]["properties"]
+            prop["key"] == "mmap.enabled" and prop["value"] == "false" for prop in describe_rsp["data"]["properties"]
         )
 
     def test_list_databases(self):
@@ -93,9 +90,7 @@ class TestDatabaseOperation(TestBase):
         properties = {"mmap.enabled": True}
 
         # Create database
-        self.database_client.database_create(
-            {"dbName": db_name, "properties": properties}
-        )
+        self.database_client.database_create({"dbName": db_name, "properties": properties})
 
         # Describe database
         rsp = self.database_client.database_describe({"dbName": db_name})
@@ -168,7 +163,6 @@ class TestDatabaseOperationNegative(TestBase):
 class TestDatabaseProperties(TestBase):
     """Test database properties operations"""
 
-
     def test_alter_database_properties(self):
         """
         target: test alter database properties
@@ -178,9 +172,7 @@ class TestDatabaseProperties(TestBase):
         # Create database
         client = self.database_client
         db_name = "test_alter_props"
-        payload = {
-            "dbName": db_name
-        }
+        payload = {"dbName": db_name}
         response = client.database_create(payload)
         assert response["code"] == 0
         orders = [[True, False], [False, True]]

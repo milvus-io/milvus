@@ -9,8 +9,8 @@ from idx_hnsw import HNSW
 
 index_type = "HNSW"
 success = "success"
-pk_field_name = 'id'
-vector_field_name = 'vector'
+pk_field_name = "id"
+vector_field_name = "vector"
 dim = ct.default_dim
 default_nb = ct.default_nb
 default_build_params = {"M": 16, "efConstruction": 200}
@@ -36,25 +36,27 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
         random_vectors = list(cf.gen_vectors(default_nb * insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
         for j in range(insert_times):
             start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
+            rows = [
+                {pk_field_name: i + start_pk, vector_field_name: random_vectors[i + start_pk]}
+                for i in range(default_nb)
+            ]
             self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # create index
         build_params = params.get("params", None)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
-                               index_type=index_type,
-                               params=build_params)
+        index_params.add_index(
+            field_name=vector_field_name,
+            metric_type=cf.get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR),
+            index_type=index_type,
+            params=build_params,
+        )
         # build index
         if params.get("expected", None) != success:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items=params.get("expected"))
+            self.create_index(
+                client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=params.get("expected")
+            )
         else:
             self.create_index(client, collection_name, index_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
@@ -65,14 +67,20 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
             # search
             nq = 2
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-            self.search(client, collection_name, search_vectors,
-                        search_params=default_search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name})
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=default_search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": nq,
+                    "limit": ct.default_limit,
+                    "pk_name": pk_field_name,
+                },
+            )
 
             # verify the index params are persisted
             idx_info = client.describe_index(collection_name, vector_field_name)
@@ -106,16 +114,17 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
         # create index
         index_params = self.prepare_index_params(client)[0]
         metric_type = cf.get_default_metric_for_vector_type(vector_data_type)
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric_type,
-                               index_type=index_type,
-                               M=16,
-                               efConstruction=200)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric_type, index_type=index_type, M=16, efConstruction=200
+        )
         if vector_data_type not in HNSW.supported_vector_types:
-            self.create_index(client, collection_name, index_params,
-                              check_task=CheckTasks.err_res,
-                              check_items={"err_code": 999,
-                                           "err_msg": f"can't build with this index HNSW: invalid parameter"})
+            self.create_index(
+                client,
+                collection_name,
+                index_params,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 999, "err_msg": f"can't build with this index HNSW: invalid parameter"},
+            )
         else:
             self.create_index(client, collection_name, index_params)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
@@ -124,14 +133,20 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
             # search
             nq = 2
             search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=vector_data_type)
-            self.search(client, collection_name, search_vectors,
-                        search_params=default_search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name})
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=default_search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": nq,
+                    "limit": ct.default_limit,
+                    "pk_name": pk_field_name,
+                },
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", HNSW.supported_metrics)
@@ -148,23 +163,21 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
 
         # insert data
         insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
+        random_vectors = list(cf.gen_vectors(default_nb * insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
         for j in range(insert_times):
             start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
+            rows = [
+                {pk_field_name: i + start_pk, vector_field_name: random_vectors[i + start_pk]}
+                for i in range(default_nb)
+            ]
             self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=vector_field_name,
-                               metric_type=metric,
-                               index_type=index_type,
-                               M=16,
-                               efConstruction=200)
+        index_params.add_index(
+            field_name=vector_field_name, metric_type=metric, index_type=index_type, M=16, efConstruction=200
+        )
         self.create_index(client, collection_name, index_params)
         self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
         # load collection
@@ -172,14 +185,20 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
         # search
         nq = 2
         search_vectors = cf.gen_vectors(nq, dim=dim, vector_data_type=DataType.FLOAT_VECTOR)
-        self.search(client, collection_name, search_vectors,
-                    search_params=default_search_params,
-                    limit=ct.default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": nq,
-                                 "limit": ct.default_limit,
-                                 "pk_name": pk_field_name})
+        self.search(
+            client,
+            collection_name,
+            search_vectors,
+            search_params=default_search_params,
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": nq,
+                "limit": ct.default_limit,
+                "pk_name": pk_field_name,
+            },
+        )
 
 
 @pytest.mark.xdist_group("TestHnswSearchParams")
@@ -204,19 +223,22 @@ class TestHnswSearchParams(TestMilvusClientV2Base):
         collection_schema = self.create_schema(client)[0]
         collection_schema.add_field(pk_field_name, DataType.INT64, is_primary=True, auto_id=False)
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
-        self.create_collection(client, self.collection_name, schema=collection_schema,
-                               enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
+        self.create_collection(
+            client,
+            self.collection_name,
+            schema=collection_schema,
+            enable_dynamic_field=self.enable_dynamic_field,
+            force_teardown=False,
+        )
         insert_times = 2
-        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
-                                       vector_data_type=DataType.FLOAT_VECTOR)
+        float_vectors = cf.gen_vectors(
+            default_nb * insert_times, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR
+        )
         for j in range(insert_times):
             rows = []
             for i in range(default_nb):
                 pk = i + j * default_nb
-                row = {
-                    pk_field_name: pk,
-                    self.float_vector_field_name: list(float_vectors[pk])
-                }
+                row = {pk_field_name: pk, self.float_vector_field_name: list(float_vectors[pk])}
                 self.datas.append(row)
                 rows.append(row)
             self.insert(client, self.collection_name, data=rows)
@@ -224,16 +246,19 @@ class TestHnswSearchParams(TestMilvusClientV2Base):
         self.flush(client, self.collection_name)
         # Create HNSW index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=self.float_vector_field_name,
-                               metric_type="COSINE",
-                               index_type=index_type,
-                               params=default_build_params)
+        index_params.add_index(
+            field_name=self.float_vector_field_name,
+            metric_type="COSINE",
+            index_type=index_type,
+            params=default_build_params,
+        )
         self.create_index(client, self.collection_name, index_params=index_params)
         self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
         self.load_collection(client, self.collection_name)
 
         def teardown():
             self.drop_collection(self._client(), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -248,17 +273,27 @@ class TestHnswSearchParams(TestMilvusClientV2Base):
         search_vectors = cf.gen_vectors(nq, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         search_params = params.get("params", None)
         if params.get("expected", None) != success:
-            self.search(client, collection_name, search_vectors,
-                        search_params=search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.err_res,
-                        check_items=params.get("expected"))
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.err_res,
+                check_items=params.get("expected"),
+            )
         else:
-            self.search(client, collection_name, search_vectors,
-                        search_params=search_params,
-                        limit=ct.default_limit,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"enable_milvus_client_api": True,
-                                     "nq": nq,
-                                     "limit": ct.default_limit,
-                                     "pk_name": pk_field_name}) 
+            self.search(
+                client,
+                collection_name,
+                search_vectors,
+                search_params=search_params,
+                limit=ct.default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": nq,
+                    "limit": ct.default_limit,
+                    "pk_name": pk_field_name,
+                },
+            )

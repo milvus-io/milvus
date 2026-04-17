@@ -49,9 +49,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
         def check_create():
             return downstream_client.has_collection(collection_name)
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create collection {collection_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
         # Create partition
         upstream_client.create_partition(collection_name, partition_name)
@@ -63,16 +61,12 @@ class TestCDCSyncPartition(TestCDCSyncBase):
         # Wait for partition sync to downstream
         def check_partition():
             try:
-                downstream_partitions = downstream_client.list_partitions(
-                    collection_name
-                )
+                downstream_partitions = downstream_client.list_partitions(collection_name)
                 return partition_name in downstream_partitions
             except:
                 return False
 
-        assert self.wait_for_sync(
-            check_partition, sync_timeout, f"create partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_partition, sync_timeout, f"create partition {partition_name}")
 
     def test_drop_partition(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_PARTITION operation sync."""
@@ -98,9 +92,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 return downstream_client.has_collection(
                     collection_name
-                ) and partition_name in downstream_client.list_partitions(
-                    collection_name
-                )
+                ) and partition_name in downstream_client.list_partitions(collection_name)
             except:
                 return False
 
@@ -120,16 +112,12 @@ class TestCDCSyncPartition(TestCDCSyncBase):
         # Wait for drop to sync to downstream
         def check_drop():
             try:
-                downstream_partitions = downstream_client.list_partitions(
-                    collection_name
-                )
+                downstream_partitions = downstream_client.list_partitions(collection_name)
                 return partition_name not in downstream_partitions
             except:
                 return True  # If error, assume partition is dropped
 
-        assert self.wait_for_sync(
-            check_drop, sync_timeout, f"drop partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_drop, sync_timeout, f"drop partition {partition_name}")
 
     def test_load_partition(self, upstream_client, downstream_client, sync_timeout):
         """Test LOAD_PARTITION operation sync."""
@@ -152,9 +140,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Create index and load collection (required for querying/searching)
         index_params = upstream_client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector", index_type="AUTOINDEX", metric_type="L2"
-        )
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
         upstream_client.create_index(collection_name, index_params)
 
         # Wait for setup to sync
@@ -162,9 +148,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 return downstream_client.has_collection(
                     collection_name
-                ) and partition_name in downstream_client.list_partitions(
-                    collection_name
-                )
+                ) and partition_name in downstream_client.list_partitions(collection_name)
             except:
                 return False
 
@@ -177,9 +161,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
         # Load partition
         upstream_client.load_partitions(collection_name, [partition_name])
         # check partition load state in upstream
-        upstream_load_state = upstream_client.get_load_state(
-            collection_name, partition_name
-        )
+        upstream_load_state = upstream_client.get_load_state(collection_name, partition_name)
         load_state = str(upstream_load_state["state"])
         print(f"DEBUG: partition load state in upstream: {load_state}")
 
@@ -190,17 +172,13 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 load_state = downstream_client.get_load_state(
                     collection_name=collection_name, partition_name=partition_name
                 )
-                print(
-                    f"DEBUG: partition load state in check_load: {load_state['state']}"
-                )
+                print(f"DEBUG: partition load state in check_load: {load_state['state']}")
                 return "Loaded" == str(load_state["state"])
             except Exception as e:
                 print(f"DEBUG: get_load_state exception in check_load: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_load, sync_timeout, f"load partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_load, sync_timeout, f"load partition {partition_name}")
 
     def test_release_partition(self, upstream_client, downstream_client, sync_timeout):
         """Test RELEASE_PARTITION operation sync."""
@@ -223,9 +201,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Create index and load collection (required for querying/searching)
         index_params = upstream_client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector", index_type="AUTOINDEX", metric_type="L2"
-        )
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
         upstream_client.create_index(collection_name, index_params)
         upstream_client.load_collection(collection_name)
         upstream_client.load_partitions(collection_name, [partition_name])
@@ -248,17 +224,13 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             except:
                 return False
 
-        assert self.wait_for_sync(
-            check_setup, sync_timeout, f"setup and load partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_setup, sync_timeout, f"setup and load partition {partition_name}")
 
         # Release partition
         upstream_client.release_partitions(collection_name, [partition_name])
 
         # check partition load state in upstream
-        upstream_load_state = upstream_client.get_load_state(
-            collection_name, partition_name
-        )
+        upstream_load_state = upstream_client.get_load_state(collection_name, partition_name)
         load_state = str(upstream_load_state["state"])
         print(f"DEBUG: partition load state in upstream: {load_state}")
 
@@ -273,20 +245,14 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                     partition_names=[partition_name],
                     output_fields=[],
                 )
-                print(
-                    f"DEBUG: released partition {partition_name} can still be searched: {res}"
-                )
-                print(
-                    f"DEBUG: released partition {partition_name} can still be searched"
-                )
+                print(f"DEBUG: released partition {partition_name} can still be searched: {res}")
+                print(f"DEBUG: released partition {partition_name} can still be searched")
                 return False
             except:
                 print(f"DEBUG: released partition {partition_name} cannot be searched")
                 return True
 
-        assert self.wait_for_sync(
-            check_release, sync_timeout, f"release partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_release, sync_timeout, f"release partition {partition_name}")
 
         # check partition load state in downstream
         def check_release():
@@ -299,17 +265,13 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                     partition_names=[partition_name],
                     output_fields=[],
                 )
-                print(
-                    f"DEBUG: released partition {partition_name} can still be searched"
-                )
+                print(f"DEBUG: released partition {partition_name} can still be searched")
                 return False
             except:
                 print(f"DEBUG: released partition {partition_name} cannot be searched")
                 return True
 
-        assert self.wait_for_sync(
-            check_release, sync_timeout, f"release partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_release, sync_timeout, f"release partition {partition_name}")
 
     def test_partition_insert(self, upstream_client, downstream_client, sync_timeout):
         """Test INSERT operation to partition sync."""
@@ -332,9 +294,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Create index and load collection (required for querying/searching)
         index_params = upstream_client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector", index_type="AUTOINDEX", metric_type="L2"
-        )
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
         upstream_client.create_index(collection_name, index_params)
         upstream_client.load_collection(collection_name)
 
@@ -343,9 +303,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 return downstream_client.has_collection(
                     collection_name
-                ) and partition_name in downstream_client.list_partitions(
-                    collection_name
-                )
+                ) and partition_name in downstream_client.list_partitions(collection_name)
             except:
                 return False
 
@@ -357,9 +315,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Insert data to specific partition
         test_data = self.generate_test_data(100)
-        result = upstream_client.insert(
-            collection_name, test_data, partition_name=partition_name
-        )
+        result = upstream_client.insert(collection_name, test_data, partition_name=partition_name)
         inserted_count = result.get("insert_count", len(test_data))
 
         # Flush to ensure data is persisted
@@ -380,9 +336,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             except:
                 return False
 
-        assert self.wait_for_sync(
-            check_data, sync_timeout, f"insert data to partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_data, sync_timeout, f"insert data to partition {partition_name}")
 
     def test_partition_delete(self, upstream_client, downstream_client, sync_timeout):
         """Test DELETE operation from partition sync."""
@@ -406,9 +360,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Create index and load collection (required for querying/searching)
         index_params = upstream_client.prepare_index_params()
-        index_params.add_index(
-            field_name="vector", index_type="AUTOINDEX", metric_type="L2"
-        )
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="L2")
         upstream_client.create_index(collection_name, index_params)
         upstream_client.load_collection(collection_name)
 
@@ -417,9 +369,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 return downstream_client.has_collection(
                     collection_name
-                ) and partition_name in downstream_client.list_partitions(
-                    collection_name
-                )
+                ) and partition_name in downstream_client.list_partitions(collection_name)
             except:
                 return False
 
@@ -431,9 +381,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
         # Insert data to partition
         test_data = self.generate_test_data(100)
-        upstream_client.insert(
-            collection_name, test_data, partition_name=partition_name
-        )
+        upstream_client.insert(collection_name, test_data, partition_name=partition_name)
         upstream_client.flush(collection_name)
 
         # Wait for initial data sync by querying partition
@@ -450,15 +398,11 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             except:
                 return False
 
-        assert self.wait_for_sync(
-            check_data, sync_timeout, f"initial data sync to partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_data, sync_timeout, f"initial data sync to partition {partition_name}")
 
         # Delete some data from partition
         delete_ids = list(range(20))  # Delete first 20 records
-        upstream_client.delete(
-            collection_name, filter=f"id in {delete_ids}", partition_name=partition_name
-        )
+        upstream_client.delete(collection_name, filter=f"id in {delete_ids}", partition_name=partition_name)
         upstream_client.flush(collection_name)
         deleted_result = upstream_client.query(
             collection_name=collection_name,
@@ -498,9 +442,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
 
                 print(f"DEBUG: deleted_result in check_delete: {deleted_result}")
                 print(f"DEBUG: count_result in check_delete: {count_result}")
-                print(
-                    f"DEBUG: deleted_count: {deleted_count}, total_count: {total_count}"
-                )
+                print(f"DEBUG: deleted_count: {deleted_count}, total_count: {total_count}")
 
                 # Verify deleted records are gone and total count is correct in partition
                 return deleted_count == 0 and total_count == 80
@@ -508,6 +450,4 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 print(f"DEBUG: query exception in check_delete: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_delete, sync_timeout, f"delete data from partition {partition_name}"
-        )
+        assert self.wait_for_sync(check_delete, sync_timeout, f"delete data from partition {partition_name}")

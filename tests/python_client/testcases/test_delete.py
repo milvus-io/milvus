@@ -14,11 +14,11 @@ from pymilvus.grpc_gen.common_pb2 import SegmentState
 prefix = "delete"
 half_nb = ct.default_nb // 2
 tmp_nb = 3000
-tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
-query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
-query_tmp_expr_str = [{f'{ct.default_string_field_name}': "0"}]
+tmp_expr = f"{ct.default_int64_field_name} in {[0]}"
+query_res_tmp_expr = [{f"{ct.default_int64_field_name}": 0}]
+query_tmp_expr_str = [{f"{ct.default_string_field_name}": "0"}]
 exp_res = "exp_res"
-default_string_expr = "varchar in [ \"0\"]"
+default_string_expr = 'varchar in [ "0"]'
 default_invalid_string_exp = "varchar >= 0"
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varchar")
@@ -34,7 +34,7 @@ class TestDeleteParams(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize('is_binary', [False, True])
+    @pytest.mark.parametrize("is_binary", [False, True])
     def test_delete_entities(self, is_binary):
         """
         target: test delete data from collection
@@ -46,7 +46,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with default_nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, is_binary=is_binary)[0:4]
-        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
+        expr = f"{ct.default_int64_field_name} in {ids[:half_nb]}"
 
         # delete half of data
         del_res = collection_w.delete(expr)[0]
@@ -58,7 +58,7 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize('is_binary', [False, True])
+    @pytest.mark.parametrize("is_binary", [False, True])
     def test_delete_entities_with_range(self, is_binary):
         """
         target: test delete data from collection
@@ -69,8 +69,10 @@ class TestDeleteParams(TestcaseBase):
         expected: Query result is empty
         """
         # init collection with default_nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, auto_id=True, is_binary=is_binary)[0:4]
-        expr = f'{ct.default_int64_field_name} < {ids[half_nb]}'
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, insert_data=True, auto_id=True, is_binary=is_binary
+        )[0:4]
+        expr = f"{ct.default_int64_field_name} < {ids[half_nb]}"
 
         # delete half of data
         del_res = collection_w.delete(expr)[0]
@@ -121,8 +123,10 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 999, ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str"
-                                               % str(expr)}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "Illegal str variables: {'filter': %s}, expect non-empty str" % str(expr),
+        }
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -135,8 +139,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -148,7 +151,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[]}'
+        expr = f"{ct.default_int64_field_name} in {[]}"
 
         # delete empty entities
         collection_w.delete(expr)
@@ -162,7 +165,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0]}'
+        expr = f"{ct.default_int64_field_name} in {[0]}"
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
@@ -176,7 +179,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with default_nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        expr = f"{ct.default_int64_field_name} in {ids}"
         del_res, _ = collection_w.delete(expr)
 
         # assert results
@@ -192,11 +195,11 @@ class TestDeleteParams(TestcaseBase):
         method: delete with expr vector field
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
-                                                    is_all_data_type=True, is_index=True)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, is_all_data_type=True, is_index=True
+        )[0]
         expr = f"{ct.default_float_vec_field_name} in [[0.1]]"
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
+        error = {ct.err_code: 1100, ct.err_msg: f"failed to create delete plan: cannot parse expression: {expr}"}
 
         collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -211,11 +214,13 @@ class TestDeleteParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # No exception
-        expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
+        expr = f"{ct.default_int64_field_name} in {[tmp_nb]}"
         collection_w.delete(expr=expr)
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': query_res_tmp_expr,
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": query_res_tmp_expr, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_part_not_existed_values(self):
@@ -226,7 +231,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, tmp_nb]}'
+        expr = f"{ct.default_int64_field_name} in {[0, tmp_nb]}"
         collection_w.delete(expr=expr)
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
@@ -239,7 +244,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0.0, 1.0]}'
+        expr = f"{ct.default_int64_field_name} in {[0.0, 1.0]}"
 
         # Bad exception message
         error = {ct.err_code: 1100, ct.err_msg: "failed to create delete plan: cannot parse expression"}
@@ -254,7 +259,7 @@ class TestDeleteParams(TestcaseBase):
         """
         # init collection with tmp_nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, 1.0]}'
+        expr = f"{ct.default_int64_field_name} in {[0, 1.0]}"
 
         # Bad exception message
         error = {ct.err_code: 1100, ct.err_msg: "failed to create delete plan: cannot parse expression"}
@@ -283,11 +288,12 @@ class TestDeleteParams(TestcaseBase):
 
         # query with deleted id and query with existed id
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty, partition_names=[partition_w.name])
-        res = df.iloc[1:2, :1].to_dict('records')
-        collection_w.query(f'{ct.default_int64_field_name} in [1]',
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df.iloc[1:2, :1].to_dict("records")
+        collection_w.query(
+            f"{ct.default_int64_field_name} in [1]",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_default_partition(self):
@@ -314,11 +320,12 @@ class TestDeleteParams(TestcaseBase):
         # create, insert with flush, load collection
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
-        error = {ct.err_code: 0,
-                 ct.err_msg: "Illegal nullable str variables: {'partition_name': %s}, "
-                             "expect None or non-empty str" % str(partition_name)}
-        collection_w.delete(tmp_expr, partition_name=partition_name,
-                            check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 0,
+            ct.err_msg: "Illegal nullable str variables: {'partition_name': %s}, "
+            "expect None or non-empty str" % str(partition_name),
+        }
+        collection_w.delete(tmp_expr, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestDeleteOperation(TestcaseBase):
@@ -370,8 +377,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
 
         # create index
-        index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "COSINE", "params": {"nlist": 64}}
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
         collection_w.release()
@@ -382,9 +388,12 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.has_index()[0]
 
         # search with id 0 vectors
-        search_res, _ = collection_w.search([vectors[0][ct.default_float_vec_field_name][0]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [vectors[0][ct.default_float_vec_field_name][0]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         assert 0 not in search_res[0].ids
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -403,22 +412,24 @@ class TestDeleteOperation(TestcaseBase):
         insert_res, _ = collection_w.insert(df)
 
         # delete half and flush
-        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        expr = f"{ct.default_int64_field_name} in {insert_res.primary_keys[: ct.default_nb // 2]}"
         del_res, _ = collection_w.delete(expr)
         assert collection_w.num_entities in [ct.default_nb, ct.default_nb // 2]
 
         # create index
-        index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "COSINE", "params": {"nlist": 64}}
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
 
         collection_w.load()
-        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [df[ct.default_float_vec_field_name][0]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results not contains deleted ids
-        inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
+        inter = set(insert_res.primary_keys[: ct.default_nb // 2]).intersection(set(search_res[0].ids))
         assert len(inter) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -450,21 +461,23 @@ class TestDeleteOperation(TestcaseBase):
         # insert id tmp_nb and delete id 0 and tmp_nb, delete records from WAL
         df_new = cf.gen_default_dataframe_data(nb=1, start=tmp_nb)
         collection_w.insert(df_new)
-        collection_w.delete(expr=f'{ct.default_int64_field_name} in {[tmp_nb]}')
+        collection_w.delete(expr=f"{ct.default_int64_field_name} in {[tmp_nb]}")
 
         # query with id 0 and tmp_nb
-        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            expr=f"{ct.default_int64_field_name} in {[0, tmp_nb]}", check_task=CheckTasks.check_query_empty
+        )
 
         # insert deleted ids and query last two rows
-        df_same = cf.gen_default_dataframe_data(tmp_nb+1)
+        df_same = cf.gen_default_dataframe_data(tmp_nb + 1)
         collection_w.insert(df_same)
-        res = df_same.iloc[-2:, [0, 1, -1]].to_dict('records')
-        collection_w.query(expr=f'{ct.default_int64_field_name} >= {tmp_nb-1}',
-                           output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res, 'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df_same.iloc[-2:, [0, 1, -1]].to_dict("records")
+        collection_w.query(
+            expr=f"{ct.default_int64_field_name} >= {tmp_nb - 1}",
+            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_delta_logs(self):
@@ -483,7 +496,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete id 0 and flush
         for i in range(L0_binlog_num_compaction + 1):
-            delete_expr = f'{ct.default_int64_field_name} in {[i, i+1]}'
+            delete_expr = f"{ct.default_int64_field_name} in {[i, i + 1]}"
             del_res, _ = collection_w.delete(delete_expr)
             assert del_res.delete_count == 2
             collection_w.flush()
@@ -491,18 +504,19 @@ class TestDeleteOperation(TestcaseBase):
         # load and query id 0, delete records from L0 segment
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        query_expr = f'{ct.default_int64_field_name} < {L0_binlog_num_compaction+2}'
+        query_expr = f"{ct.default_int64_field_name} < {L0_binlog_num_compaction + 2}"
         collection_w.query(query_expr, check_task=CheckTasks.check_query_empty)
 
         # insert deleted ids and query last two rows
-        df_same = cf.gen_default_dataframe_data(L0_binlog_num_compaction+2)
+        df_same = cf.gen_default_dataframe_data(L0_binlog_num_compaction + 2)
         collection_w.insert(df_same)
-        res = df_same.iloc[:, [0, 1, -1]].to_dict('records')
-        collection_w.query(expr=f'{ct.default_int64_field_name} < {L0_binlog_num_compaction+2}',
-                           output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res, 'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df_same.iloc[:, [0, 1, -1]].to_dict("records")
+        collection_w.query(
+            expr=f"{ct.default_int64_field_name} < {L0_binlog_num_compaction + 2}",
+            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search(self):
@@ -514,20 +528,25 @@ class TestDeleteOperation(TestcaseBase):
         # init collection with nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
         entity, _ = collection_w.query(tmp_expr, output_fields=["*"])
-        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results contains entity
         assert 0 in search_res[0].ids
 
-        expr = f'{ct.default_int64_field_name} in {ids[:ct.default_nb // 2]}'
+        expr = f"{ct.default_int64_field_name} in {ids[: ct.default_nb // 2]}"
         collection_w.delete(expr)
-        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                              ct.default_float_vec_field_name,
-                                              ct.default_search_params, ct.default_limit)
+        search_res_2, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search result is not equal to entity
-        inter = set(ids[:ct.default_nb // 2]
-                    ).intersection(set(search_res_2[0].ids))
+        inter = set(ids[: ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
@@ -542,9 +561,12 @@ class TestDeleteOperation(TestcaseBase):
         # init collection with nb default data
         collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
         entity, _ = collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name])
-        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results contains entity
         assert 0 in search_res[0].ids
         # rename collection
@@ -553,14 +575,16 @@ class TestDeleteOperation(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
         collection_w = self.init_collection_wrap(name=new_collection_name)
         # delete entities
-        expr = f'{ct.default_int64_field_name} in {ids[:ct.default_nb // 2]}'
+        expr = f"{ct.default_int64_field_name} in {ids[: ct.default_nb // 2]}"
         collection_w.delete(expr)
-        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                              ct.default_float_vec_field_name,
-                                              ct.default_search_params, ct.default_limit)
+        search_res_2, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search result is not equal to entity
-        inter = set(ids[:ct.default_nb // 2]
-                    ).intersection(set(search_res_2[0].ids))
+        inter = set(ids[: ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
@@ -587,10 +611,13 @@ class TestDeleteOperation(TestcaseBase):
         res, _ = collection_w.query(tmp_expr, output_fields=["*"])
         assert len(res) == 0
 
-        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            output_fields=[ct.default_int64_field_name, ct.default_float_field_name])
+        search_res, _ = collection_w.search(
+            [df[ct.default_float_vec_field_name][1]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+        )
         assert len(search_res) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -617,10 +644,11 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
 
         # raise exception
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"Failed to get partition id: partition not found[partition={ct.default_tag}]"}
-        collection_w.delete(tmp_expr, partition_name=ct.default_tag,
-                            check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"Failed to get partition id: partition not found[partition={ct.default_tag}]",
+        }
+        collection_w.delete(tmp_expr, partition_name=ct.default_tag, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_from_partition_with_another_ids(self):
@@ -636,11 +664,13 @@ class TestDeleteOperation(TestcaseBase):
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
 
         # delete entities from another partition
-        expr = f'{ct.default_int64_field_name} in {[0]}'
+        expr = f"{ct.default_int64_field_name} in {[0]}"
         collection_w.delete(expr, partition_name=ct.default_partition_name)
-        collection_w.query(expr, check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': query_res_tmp_expr,
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": query_res_tmp_expr, "pk_name": collection_w.primary_field.name},
+        )
 
         # delete entities from own partition
         collection_w.delete(expr, partition_name=partition_w.name)
@@ -668,14 +698,17 @@ class TestDeleteOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb * 2
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(tmp_expr, partition_names=[ct.default_partition_name],
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            tmp_expr, partition_names=[ct.default_partition_name], check_task=CheckTasks.check_query_empty
+        )
 
         # query on partition_w with id 0 and get an result
-        collection_w.query(tmp_expr, partition_names=[partition_w.name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': query_res_tmp_expr,
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            tmp_expr,
+            partition_names=[partition_w.name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": query_res_tmp_expr, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_delete_auto_id_collection(self):
@@ -688,7 +721,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)[0:4]
 
         # delete with insert ids
-        expr = f'{ct.default_int64_field_name} in {[ids[0]]}'
+        expr = f"{ct.default_int64_field_name} in {[ids[0]]}"
         res, _ = collection_w.delete(expr)
 
         # verify delete result
@@ -746,12 +779,13 @@ class TestDeleteOperation(TestcaseBase):
         # insert deleted id and query
         df_same = cf.gen_default_dataframe_data(1)
         collection_w.insert(df_same)
-        res = df_same.iloc[:, [0, 1, -1]].to_dict('records')
-        collection_w.query(expr=tmp_expr,
-                           output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res, 'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df_same.iloc[:, [0, 1, -1]].to_dict("records")
+        collection_w.query(
+            expr=tmp_expr,
+            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_growing_data_channel_delete(self):
@@ -825,7 +859,7 @@ class TestDeleteOperation(TestcaseBase):
         # insert data and flush data and delete ids.
         # if no insert, datanode will not really flush delete ids
         collection_w.insert(cf.gen_default_dataframe_data(nb=1, start=tmp_nb))
-        log.info(f'Collection num entities: {collection_w.num_entities}')
+        log.info(f"Collection num entities: {collection_w.num_entities}")
 
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
@@ -907,7 +941,7 @@ class TestDeleteOperation(TestcaseBase):
         # delete
         del_expr = f"{ct.default_int64_field_name} in [0, 1, 3, 5]"
         del_res, _ = collection_w.delete(del_expr)
-        log.debug(f'to_query:{to_query}')
+        log.debug(f"to_query:{to_query}")
         if to_query:
             collection_w.query(del_expr, check_task=CheckTasks.check_query_empty)
 
@@ -919,14 +953,19 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
 
         # query entity
-        res = df_new.iloc[:, [0, 1, -1]].to_dict('records')
-        collection_w.query(del_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res, 'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
-        search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
-                                            anns_field=ct.default_float_vec_field_name,
-                                            param=default_search_params, limit=1)
+        res = df_new.iloc[:, [0, 1, -1]].to_dict("records")
+        collection_w.query(
+            del_expr,
+            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
+        search_res, _ = collection_w.search(
+            data=[df_new[ct.default_float_vec_field_name][0]],
+            anns_field=ct.default_float_vec_field_name,
+            param=default_search_params,
+            limit=1,
+        )
         assert search_res[0][0].id == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -953,12 +992,18 @@ class TestDeleteOperation(TestcaseBase):
         # load and query
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        res = df.iloc[:1, :1].to_dict('records')
-        collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
-                            param=default_search_params, limit=1)
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df.iloc[:1, :1].to_dict("records")
+        collection_w.search(
+            data=[df[ct.default_float_vec_field_name][0]],
+            anns_field=ct.default_float_vec_field_name,
+            param=default_search_params,
+            limit=1,
+        )
+        collection_w.query(
+            tmp_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name},
+        )
 
         # delete
         collection_w.delete(tmp_expr)
@@ -972,14 +1017,19 @@ class TestDeleteOperation(TestcaseBase):
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [0, 1, -1]].to_dict('records')
-        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res, 'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
-        search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
-                                            anns_field=ct.default_float_vec_field_name,
-                                            param=default_search_params, limit=1)
+        res = df_new.iloc[[0], [0, 1, -1]].to_dict("records")
+        collection_w.query(
+            tmp_expr,
+            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
+        search_res, _ = collection_w.search(
+            data=[df_new[ct.default_float_vec_field_name][0]],
+            anns_field=ct.default_float_vec_field_name,
+            param=default_search_params,
+            limit=1,
+        )
         assert search_res[0][0].id == 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -993,12 +1043,12 @@ class TestDeleteOperation(TestcaseBase):
         collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, auto_id=True)[0:4]
 
         for del_id in ids:
-            expr = f'{ct.default_int64_field_name} in {[del_id]}'
+            expr = f"{ct.default_int64_field_name} in {[del_id]}"
             res = collection_w.delete(expr)[0]
             assert res.delete_count == 1
 
         # query with all ids
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        expr = f"{ct.default_int64_field_name} in {ids}"
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1013,12 +1063,12 @@ class TestDeleteOperation(TestcaseBase):
 
         batch = 10
         for i in range(tmp_nb // batch):
-            expr = f'{ct.default_int64_field_name} in {ids[i * batch: (i + 1) * batch]}'
+            expr = f"{ct.default_int64_field_name} in {ids[i * batch : (i + 1) * batch]}"
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
 
         # query with all ids
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        expr = f"{ct.default_int64_field_name} in {ids}"
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1055,11 +1105,16 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.insert(df_new)
         if to_flush_data:
             log.debug(collection_w.num_entities)
-        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [0, 4]].to_dict('records'), 
-                                        'with_vec': True,
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            tmp_expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                "exp_res": df_new.iloc[[0], [0, 4]].to_dict("records"),
+                "with_vec": True,
+                "pk_name": collection_w.primary_field.name,
+            },
+        )
 
         collection_w.delete(tmp_expr)
         if to_flush_delete:
@@ -1093,9 +1148,8 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
         # delete id 1 and query id 0 and 1
-        collection_w.delete(expr=f'{ct.default_int64_field_name} in {[1]}')
-        collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}',
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.delete(expr=f"{ct.default_int64_field_name} in {[1]}")
+        collection_w.query(expr=f"{ct.default_int64_field_name} in {[0, 1]}", check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_after_handoff(self):
@@ -1109,8 +1163,7 @@ class TestDeleteOperation(TestcaseBase):
         """
         # init collection and load
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
-        index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "L2", "params": {"nlist": 64}}
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         collection_w.load()
 
@@ -1162,15 +1215,18 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete even numbers
         ids = [i for i in range(0, tmp_nb * multi, 2)]
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        expr = f"{ct.default_int64_field_name} in {ids}"
         collection_w.delete(expr)
 
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
-        search_res, _ = collection_w.search(cf.gen_vectors(ct.default_nq, ct.default_dim),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(ct.default_nq, ct.default_dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         for res_id in search_res[0].ids:
             assert res_id not in ids
 
@@ -1200,7 +1256,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
 
-        expr = f'{ct.default_int64_field_name} in {ids}'
+        expr = f"{ct.default_int64_field_name} in {ids}"
         collection_w.delete(expr)
 
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
@@ -1227,13 +1283,14 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.flush()
 
         # query with Consistency level not strong
-        collection_w.query(expr=delete_expr, consistency_level=consistency_level,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            expr=delete_expr, consistency_level=consistency_level, check_task=CheckTasks.check_query_empty
+        )
 
 
 class TestDeleteString(TestcaseBase):
     """
-    Test case of delete interface with string 
+    Test case of delete interface with string
     """
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1244,14 +1301,14 @@ class TestDeleteString(TestcaseBase):
         expected: No exception for second deletion
         """
         # init collection with nb default data
-        collection_w = \
-            self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name
+        )[0]
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
         collection_w.num_entities
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1259,17 +1316,17 @@ class TestDeleteString(TestcaseBase):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is string field
-                2.create string and float index ,delete entities, query 
+                2.create string and float index ,delete entities, query
                 3.search
         expected: assert index and deleted id not in search result
         """
         # create collection, insert tmp_nb, flush and load
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False,
-                                                             primary_field=ct.default_string_field_name)[0:2]
+        collection_w, vectors = self.init_collection_general(
+            prefix, insert_data=True, is_index=False, primary_field=ct.default_string_field_name
+        )[0:2]
 
         # create index
-        index_params_one = {"index_type": "IVF_SQ8",
-                            "metric_type": "COSINE", "params": {"nlist": 64}}
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
         index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
@@ -1279,14 +1336,16 @@ class TestDeleteString(TestcaseBase):
         collection_w.load()
         # delete entity
         collection_w.delete(default_string_expr)
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         assert collection_w.has_index(index_name=index_name2)
 
         # search with id 0 vectors
-        search_res, _ = collection_w.search([vectors[0][ct.default_float_vec_field_name][0]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [vectors[0][ct.default_float_vec_field_name][0]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         assert "0" not in search_res[0].ids
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1306,26 +1365,28 @@ class TestDeleteString(TestcaseBase):
         insert_res, _ = collection_w.insert(df)
 
         # delete half and flush
-        expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
-        expr = expr.replace("'", "\"")
+        expr = f"{ct.default_string_field_name} in {insert_res.primary_keys[: ct.default_nb // 2]}"
+        expr = expr.replace("'", '"')
         collection_w.delete(expr)
         collection_w.flush()
 
         # create index
-        index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "COSINE", "params": {"nlist": 64}}
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         assert collection_w.has_index()[0]
 
         collection_w.load()
         res = collection_w.query(expr="", output_fields=["count(*)"])[0]
         assert res[0]["count(*)"] == ct.default_nb // 2
-        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [df[ct.default_float_vec_field_name][0]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results not contains deleted ids
-        inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
-        assert len(inter) == 0,  "assert no deleted ids in search results"
+        inter = set(insert_res.primary_keys[: ct.default_nb // 2]).intersection(set(search_res[0].ids))
+        assert len(inter) == 0, "assert no deleted ids in search results"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_ids_both_L0_segment_and_WAL_with_string(self):
@@ -1352,8 +1413,7 @@ class TestDeleteString(TestcaseBase):
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # insert id tmp_nb and delete id 0 and tmp_nb
         df_new = cf.gen_default_dataframe_data(nb=1, start=tmp_nb)
@@ -1361,18 +1421,20 @@ class TestDeleteString(TestcaseBase):
         collection_w.delete(expr=f'{ct.default_string_field_name} in ["tmp_nb"]')
 
         # query with id 0 and tmp_nb
-        collection_w.query(expr=f'{ct.default_string_field_name} in ["0", "tmp_nb"]',
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            expr=f'{ct.default_string_field_name} in ["0", "tmp_nb"]', check_task=CheckTasks.check_query_empty
+        )
 
         # insert deleted id and query
         df_same = cf.gen_default_dataframe_data(1)
         collection_w.insert(df_same)
-        res = df_same.iloc[:, [2, -1]].to_dict('records')
-        collection_w.query(expr=default_string_expr,
-                           output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res, 'with_vec': True, 
-                                        "pk_name": collection_w.primary_field.name})
+        res = df_same.iloc[:, [2, -1]].to_dict("records")
+        collection_w.query(
+            expr=default_string_expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search_with_string(self):
@@ -1382,24 +1444,30 @@ class TestDeleteString(TestcaseBase):
         expected: deleted entity is not in the search result
         """
         # init collection with nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True,
-                                                               primary_field=ct.default_string_field_name)[0:4]
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, insert_data=True, primary_field=ct.default_string_field_name
+        )[0:4]
         entity, _ = collection_w.query(default_string_expr, output_fields=["*"])
-        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results contains entity
         assert "0" in search_res[0].ids
 
-        expr = f'{ct.default_string_field_name} in {ids[:ct.default_nb // 2]}'
-        expr = expr.replace("'", "\"")
+        expr = f"{ct.default_string_field_name} in {ids[: ct.default_nb // 2]}"
+        expr = expr.replace("'", '"')
         collection_w.delete(expr)
-        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                              ct.default_float_vec_field_name,
-                                              ct.default_search_params, ct.default_limit)
+        search_res_2, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search result is not equal to entity
-        inter = set(ids[:ct.default_nb // 2]
-                    ).intersection(set(search_res_2[0].ids))
+        inter = set(ids[: ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
@@ -1413,8 +1481,9 @@ class TestDeleteString(TestcaseBase):
         expected: delete one entity
         """
         # init collection with nb default data
-        collection_w = \
-            self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name
+        )[0]
         expr = f'{ct.default_string_field_name} in ["0", "0", "0"]'
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 1
@@ -1444,11 +1513,13 @@ class TestDeleteString(TestcaseBase):
         res, _ = collection_w.query(default_string_expr, output_fields=["*"])
         assert len(res) == 0
 
-        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit,
-                                            output_fields=[ct.default_int64_field_name, ct.default_float_field_name,
-                                                           ct.default_string_field_name])
+        search_res, _ = collection_w.search(
+            [df[ct.default_float_vec_field_name][1]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+            output_fields=[ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name],
+        )
         assert len(search_res) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1470,19 +1541,21 @@ class TestDeleteString(TestcaseBase):
         partition_w.insert(df)
 
         # delete same id 0 from default_partition, and query on it get empty result
-        collection_w.delete(default_string_expr,
-                            partition_name=ct.default_partition_name)
+        collection_w.delete(default_string_expr, partition_name=ct.default_partition_name)
         assert collection_w.num_entities == tmp_nb * 2
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr, partition_names=[ct.default_partition_name],
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            default_string_expr, partition_names=[ct.default_partition_name], check_task=CheckTasks.check_query_empty
+        )
 
         # query on partition_w with id 0 and get an result
-        collection_w.query(default_string_expr, partition_names=[partition_w.name],
-                           check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': query_tmp_expr_str,
-                                        "pk_name": collection_w.primary_field.name})
+        collection_w.query(
+            default_string_expr,
+            partition_names=[partition_w.name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": query_tmp_expr_str, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_segment_without_flush_with_string(self):
@@ -1508,18 +1581,18 @@ class TestDeleteString(TestcaseBase):
         # load and query with id
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # insert deleted id and query
         df_same = cf.gen_default_dataframe_data(1)
         collection_w.insert(df_same)
-        res = df_same.iloc[:, [2, -1]].to_dict('records')
-        collection_w.query(expr=default_string_expr,
-                           output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res, 'with_vec': True, 
-                                        "pk_name": collection_w.primary_field.name})
+        res = df_same.iloc[:, [2, -1]].to_dict("records")
+        collection_w.query(
+            expr=default_string_expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "with_vec": True, "pk_name": collection_w.primary_field.name},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_growing_data_channel_delete_with_string(self):
@@ -1544,8 +1617,7 @@ class TestDeleteString(TestcaseBase):
         del_res = collection_w.delete(default_string_expr)[0]
         assert del_res.delete_count == 1
         # query id 0
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_data_channel_delete_with_string(self):
@@ -1570,8 +1642,7 @@ class TestDeleteString(TestcaseBase):
 
         # delete ids and query
         collection_w.delete(default_string_expr)
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_sealed_segment_with_flush_string(self):
@@ -1599,8 +1670,7 @@ class TestDeleteString(TestcaseBase):
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_data_sealed_delete_string(self):
@@ -1626,8 +1696,7 @@ class TestDeleteString(TestcaseBase):
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_entity_loop_with_string(self):
@@ -1637,18 +1706,19 @@ class TestDeleteString(TestcaseBase):
         expected: No exception
         """
         # init an auto_id collection and insert tmp_nb data, flush and load
-        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
-                                                               primary_field=ct.default_string_field_name)[0:4]
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name
+        )[0:4]
 
         for del_id in ids:
-            expr = f'{ct.default_string_field_name} in {[del_id]}'
-            expr = expr.replace("'", "\"")
+            expr = f"{ct.default_string_field_name} in {[del_id]}"
+            expr = expr.replace("'", '"')
             res = collection_w.delete(expr)[0]
             assert res.delete_count == 1
 
         # query with all ids
-        expr = f'{ct.default_string_field_name} in {ids}'
-        expr = expr.replace("'", "\"")
+        expr = f"{ct.default_string_field_name} in {ids}"
+        expr = expr.replace("'", '"')
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1659,19 +1729,20 @@ class TestDeleteString(TestcaseBase):
         expected: No exception
         """
         # init an auto_id collection and insert tmp_nb data
-        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True,
-                                                               primary_field=ct.default_string_field_name)[0:4]
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name
+        )[0:4]
 
         batch = 10
         for i in range(tmp_nb // batch):
-            expr = f'{ct.default_string_field_name} in {ids[i * batch: (i + 1) * batch]}'
-            expr = expr.replace("'", "\"")
+            expr = f"{ct.default_string_field_name} in {ids[i * batch : (i + 1) * batch]}"
+            expr = expr.replace("'", '"')
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
 
         # query with all ids
-        expr = f'{ct.default_string_field_name} in {ids}'
-        expr = expr.replace("'", "\"")
+        expr = f"{ct.default_string_field_name} in {ids}"
+        expr = expr.replace("'", '"')
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1702,24 +1773,28 @@ class TestDeleteString(TestcaseBase):
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # insert new entity with same id 0 and query
         df_new = cf.gen_default_dataframe_data(1)
         collection_w.insert(df_new)
         if to_flush_data:
             log.debug(collection_w.num_entities)
-        collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [2, 4]].to_dict('records'),
-                                        'pk_name': collection_w.primary_field.name, 'with_vec': True})
+        collection_w.query(
+            default_string_expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                "exp_res": df_new.iloc[[0], [2, 4]].to_dict("records"),
+                "pk_name": collection_w.primary_field.name,
+                "with_vec": True,
+            },
+        )
 
         collection_w.delete(default_string_expr)
         if to_flush_delete:
             log.debug(collection_w.num_entities)
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_merge_ids_channel_and_sealed_string(self):
@@ -1746,13 +1821,13 @@ class TestDeleteString(TestcaseBase):
         # load and query id 0
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # delete id 1 and query id 0 and 1
         collection_w.delete(expr=f'{ct.default_string_field_name} in ["1"]')
-        collection_w.query(expr=f'{ct.default_string_field_name} in ["0", "1"]',
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(
+            expr=f'{ct.default_string_field_name} in ["0", "1"]', check_task=CheckTasks.check_query_empty
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_after_handoff_with_string(self):
@@ -1767,8 +1842,7 @@ class TestDeleteString(TestcaseBase):
         # init collection and load
         schema = cf.gen_string_pk_default_collection_schema()
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema, shards_num=1)
-        index_params = {"index_type": "IVF_SQ8",
-                        "metric_type": "L2", "params": {"nlist": 64}}
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params)
         collection_w.load()
 
@@ -1787,8 +1861,7 @@ class TestDeleteString(TestcaseBase):
             if len(segment_infos) > 0 and segment_infos[0].state == SegmentState.Sealed:
                 break
         # query deleted id
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_insert_multi_with_string(self):
@@ -1812,16 +1885,19 @@ class TestDeleteString(TestcaseBase):
 
         # delete even numbers
         ids = [str(i) for i in range(0, tmp_nb * multi, 2)]
-        expr = f'{ct.default_string_field_name} in {ids}'
-        expr = expr.replace("'", "\"")
+        expr = f"{ct.default_string_field_name} in {ids}"
+        expr = expr.replace("'", '"')
         collection_w.delete(expr)
 
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
-        search_res, _ = collection_w.search(cf.gen_vectors(ct.default_nq, ct.default_dim),
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            cf.gen_vectors(ct.default_nq, ct.default_dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         for res_id in search_res[0].ids:
             assert res_id not in ids
 
@@ -1830,18 +1906,20 @@ class TestDeleteString(TestcaseBase):
         """
         target: test delete data with string expr
         method: 1.create collection, insert data and collection.load()
-                2.collection delete with invalid expr 
+                2.collection delete with invalid expr
                 3.query expr
         expected: Raise exception
         """
-        collection_w = \
-            self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        collection_w = self.init_collection_general(
+            prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name
+        )[0]
         collection_w.load()
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create delete plan: cannot parse expression: {default_invalid_string_exp}, "
-                             f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
-        collection_w.delete(expr=default_invalid_string_exp,
-                            check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: f"failed to create delete plan: cannot parse expression: {default_invalid_string_exp}, "
+            f"error: comparisons between VarChar and Int64 are not supported: invalid parameter",
+        }
+        collection_w.delete(expr=default_invalid_string_exp, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("to_query", [True, False])
@@ -1868,18 +1946,23 @@ class TestDeleteString(TestcaseBase):
         # load and query
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        res = df.iloc[:1, 2:3].to_dict('records')
-        collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
-                            param=default_search_params, limit=1)
-        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, 
-                           check_items={'exp_res': res,
-                                        "pk_name": collection_w.primary_field.name})
+        res = df.iloc[:1, 2:3].to_dict("records")
+        collection_w.search(
+            data=[df[ct.default_float_vec_field_name][0]],
+            anns_field=ct.default_float_vec_field_name,
+            param=default_search_params,
+            limit=1,
+        )
+        collection_w.query(
+            default_string_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name},
+        )
 
         # delete
         collection_w.delete(default_string_expr)
         if to_query:
-            collection_w.query(default_string_expr,
-                               check_task=CheckTasks.check_query_empty)
+            collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # re-insert
         df_new = cf.gen_default_dataframe_data(nb=1)
@@ -1887,15 +1970,19 @@ class TestDeleteString(TestcaseBase):
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [2, 4]].to_dict('records')
-        collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res,
-                                        'pk_name': collection_w.primary_field.name,
-                                        'with_vec': True})
-        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
-                            anns_field=ct.default_float_vec_field_name,
-                            param=default_search_params, limit=1)
+        res = df_new.iloc[[0], [2, 4]].to_dict("records")
+        collection_w.query(
+            default_string_expr,
+            output_fields=[ct.default_float_vec_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name, "with_vec": True},
+        )
+        collection_w.search(
+            data=[df_new[ct.default_float_vec_field_name][0]],
+            anns_field=ct.default_float_vec_field_name,
+            param=default_search_params,
+            limit=1,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_with_string_field_is_empty(self):
@@ -1912,7 +1999,7 @@ class TestDeleteString(TestcaseBase):
 
         nb = 3000
         df = cf.gen_default_list_data(nb)
-        df[2] = [""for _ in range(nb)] 
+        df[2] = ["" for _ in range(nb)]
 
         collection_w.insert(df)
         collection_w.flush()
@@ -1921,7 +2008,7 @@ class TestDeleteString(TestcaseBase):
         assert collection_w.num_entities == nb
 
         # delete
-        string_expr = "varchar in [\"\", \"\"]"
+        string_expr = 'varchar in ["", ""]'
         del_res, _ = collection_w.delete(string_expr)
         assert del_res.delete_count == 1
 
@@ -1945,8 +2032,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, True, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -1979,8 +2067,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, True, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -2023,11 +2112,13 @@ class TestDeleteComplexExpr(TestcaseBase):
         array_length = 100
         data = []
         for i in range(nb):
-            arr = {ct.default_int64_field_name: i,
-                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
-                   ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
-                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
-                   ct.default_string_array_field_name: [str(i) for i in range(array_length)]}
+            arr = {
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
+                ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                ct.default_string_array_field_name: [str(i) for i in range(array_length)],
+            }
             data.append(arr)
         collection_w.insert(data)
         collection_w.flush()
@@ -2069,11 +2160,13 @@ class TestDeleteComplexExpr(TestcaseBase):
         array_length = 100
         data = []
         for i in range(nb):
-            arr = {ct.default_int64_field_name: i,
-                   ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
-                   ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
-                   ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
-                   ct.default_string_array_field_name: [str(i) for i in range(array_length)]}
+            arr = {
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
+                ct.default_int32_array_field_name: [np.int32(i) for i in range(array_length)],
+                ct.default_float_array_field_name: [np.float32(i) for i in range(array_length)],
+                ct.default_string_array_field_name: [str(i) for i in range(array_length)],
+            }
             data.append(arr)
         collection_w.insert(data)
         collection_w.flush()
@@ -2113,8 +2206,9 @@ class TestDeleteComplexExpr(TestcaseBase):
             pytest.skip("only support when enable_dynamic_filed == True")
         # init collection with nb default data
         nb = 1000
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, False, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # insert
         string_list = [cf.gen_str_by_length() for _ in range(nb)]
@@ -2122,7 +2216,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data = cf.gen_default_rows_data(nb)
             for i in range(nb):
                 data[i][ct.default_json_field_name] = {"string": string_list[i]}
-                data[i]['NewStr'] = string_list[i]
+                data[i]["NewStr"] = string_list[i]
                 data[i][ct.default_string_field_name] = string_list[i]
         else:
             data = cf.gen_default_dataframe_data(nb)
@@ -2133,16 +2227,19 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.load()
 
         # delete with expressions
-        deleted_str = [s for s in string_list if s.startswith('a')]
+        deleted_str = [s for s in string_list if s.startswith("a")]
         expression = f"{field_name} {like} 'a%'"
         res = collection_w.delete(expression)[0]
         assert res.delete_count == len(deleted_str)
 
         # query to check
         collection_w.load()
-        collection_w.query("int64 >= 0", output_fields=['count(*)'],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'count(*)': nb - len(deleted_str)})
+        collection_w.query(
+            "int64 >= 0",
+            output_fields=["count(*)"],
+            check_task=CheckTasks.check_query_results,
+            check_items={"count(*)": nb - len(deleted_str)},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_expr_empty_string(self):
@@ -2194,7 +2291,7 @@ class TestDeleteComplexExpr(TestcaseBase):
             data = cf.gen_default_rows_data()
             for i in range(ct.default_nb):
                 data[i][ct.default_json_field_name] = {"list": listMix[i]}
-                data[i]['list'] = listMix[i]
+                data[i]["list"] = listMix[i]
         else:
             data = cf.gen_default_dataframe_data()
             data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
@@ -2213,8 +2310,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.query(expression, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL",
-                                             "json_contains_any", "JSON_CONTAINS_ANY"])
+    @pytest.mark.parametrize(
+        "expr_prefix", ["json_contains_all", "JSON_CONTAINS_ALL", "json_contains_any", "JSON_CONTAINS_ANY"]
+    )
     @pytest.mark.parametrize("field_name", ["json_field['list']", "list"])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_expr_json_contains_all(self, expr_prefix, field_name, enable_dynamic_field):
@@ -2229,12 +2327,14 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w = self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0]
 
         # insert
-        listMix = [[i, i * 0.00001, bool(i % 2), [i, str(i)]] for i in range(ct.default_nb)]  # mix int, float, list, bool
+        listMix = [
+            [i, i * 0.00001, bool(i % 2), [i, str(i)]] for i in range(ct.default_nb)
+        ]  # mix int, float, list, bool
         if enable_dynamic_field:
             data = cf.gen_default_rows_data()
             for i in range(ct.default_nb):
                 data[i][ct.default_json_field_name] = {"list": listMix[i]}
-                data[i]['list'] = listMix[i]
+                data[i]["list"] = listMix[i]
         else:
             data = cf.gen_default_dataframe_data()
             data[ct.default_json_field_name] = [{"list": listMix[i]} for i in range(ct.default_nb)]
@@ -2254,9 +2354,10 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.query(expression, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expressions",
-                             cf.gen_field_compare_expressions(["int64_1", "json_field['int'][0]"],
-                                                              ["int64_2", "json_field['int'][1]"]))
+    @pytest.mark.parametrize(
+        "expressions",
+        cf.gen_field_compare_expressions(["int64_1", "json_field['int'][0]"], ["int64_2", "json_field['int'][1]"]),
+    )
     def test_delete_expr_compare_two_variables(self, expressions):
         """
         target: test delete expr using 2 variables
@@ -2266,8 +2367,12 @@ class TestDeleteComplexExpr(TestcaseBase):
         # init collection with nb default data
         nb = 1000
         dim = 32
-        fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
-                  cf.gen_json_field("json_field"), cf.gen_float_vec_field("float_vector", dim=dim)]
+        fields = [
+            cf.gen_int64_field("int64_1"),
+            cf.gen_int64_field("int64_2"),
+            cf.gen_json_field("json_field"),
+            cf.gen_float_vec_field("float_vector", dim=dim),
+        ]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
         collection_w = self.init_collection_wrap(schema=schema)
 
@@ -2276,12 +2381,14 @@ class TestDeleteComplexExpr(TestcaseBase):
         int64_2_values = [random.randint(0, nb) for _ in range(nb)]
         vectors = cf.gen_vectors(nb, dim)
         json_values = [[i, int64_2_values[i]] for i in range(nb)]
-        data = pd.DataFrame({
-            "int64_1": int64_1_values,
-            "int64_2": int64_2_values,
-            "json_field": [{"int": json_values[i]} for i in range(nb)],
-            "float_vector": vectors
-        })
+        data = pd.DataFrame(
+            {
+                "int64_1": int64_1_values,
+                "int64_2": int64_2_values,
+                "json_field": [{"int": json_values[i]} for i in range(nb)],
+                "float_vector": vectors,
+            }
+        )
         collection_w.insert(data)
         collection_w.flush()
         collection_w.create_index("float_vector")
@@ -2301,8 +2408,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, True, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -2311,11 +2419,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         json_field = {}
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
-                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
-                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+                json_field["number"] = _vectors[i][ct.default_json_field_name]["number"]
+                json_field["float"] = _vectors[i][ct.default_json_field_name]["float"]
             else:
-                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
-                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+                json_field["number"] = _vectors[ct.default_json_field_name][i]["number"]
+                json_field["float"] = _vectors[ct.default_json_field_name][i]["float"]
             if not expr or eval(expr):
                 filter_ids.append(_id)
 
@@ -2336,8 +2444,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, True, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -2346,11 +2455,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         json_field = {}
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
-                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
-                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+                json_field["number"] = _vectors[i][ct.default_json_field_name]["number"]
+                json_field["float"] = _vectors[i][ct.default_json_field_name]["float"]
             else:
-                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
-                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+                json_field["number"] = _vectors[ct.default_json_field_name][i]["number"]
+                json_field["float"] = _vectors[ct.default_json_field_name][i]["float"]
             if not expr or eval(expr):
                 filter_ids.append(_id)
 
@@ -2364,8 +2473,10 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("normal_expressions, json_expressions", zip(cf.gen_normal_expressions_and_templates()[1:4],
-                                                                         cf.gen_json_field_expressions_and_templates()[6:9]))
+    @pytest.mark.parametrize(
+        "normal_expressions, json_expressions",
+        zip(cf.gen_normal_expressions_and_templates()[1:4], cf.gen_json_field_expressions_and_templates()[6:9]),
+    )
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_expr_complex_mixed(self, normal_expressions, json_expressions, enable_dynamic_field):
         """
@@ -2374,24 +2485,25 @@ class TestDeleteComplexExpr(TestcaseBase):
         expected: delete successfully
         """
         # init collection with nb default data
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, True, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, True, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # filter result with expression in collection
-        expr = normal_expressions[0] + ' and ' + json_expressions[0]
+        expr = normal_expressions[0] + " and " + json_expressions[0]
         _vectors = _vectors[0]
         expr = expr.replace("&&", "and").replace("||", "or")
         filter_ids = []
         json_field = {}
         for i, _id in enumerate(insert_ids):
             if enable_dynamic_field:
-                json_field['number'] = _vectors[i][ct.default_json_field_name]['number']
-                json_field['float'] = _vectors[i][ct.default_json_field_name]['float']
+                json_field["number"] = _vectors[i][ct.default_json_field_name]["number"]
+                json_field["float"] = _vectors[i][ct.default_json_field_name]["float"]
                 int64 = _vectors[i][ct.default_int64_field_name]
                 float = _vectors[i][ct.default_float_field_name]
             else:
-                json_field['number'] = _vectors[ct.default_json_field_name][i]['number']
-                json_field['float'] = _vectors[ct.default_json_field_name][i]['float']
+                json_field["number"] = _vectors[ct.default_json_field_name][i]["number"]
+                json_field["float"] = _vectors[ct.default_json_field_name][i]["float"]
                 int64 = _vectors.int64[i]
                 float = _vectors.float[i]
             if not expr or eval(expr):
@@ -2399,7 +2511,7 @@ class TestDeleteComplexExpr(TestcaseBase):
 
         # delete with expressions and template mixed
         json_expr = cf.get_expr_from_template(json_expressions[1]).replace("&&", "and").replace("||", "or")
-        expr = normal_expressions[0] + ' and ' + json_expr
+        expr = normal_expressions[0] + " and " + json_expr
         json_expr_params = cf.get_expr_params_from_template(json_expressions[1])
         res = collection_w.delete(expr=expr, expr_params=json_expr_params)[0]
         assert res.delete_count == len(filter_ids)
@@ -2408,7 +2520,9 @@ class TestDeleteComplexExpr(TestcaseBase):
         collection_w.query(f"int64 in {filter_ids}", check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(["varchar", "json_field['string']", "NewStr"]))
+    @pytest.mark.parametrize(
+        "expression", cf.gen_normal_string_expressions(["varchar", "json_field['string']", "NewStr"])
+    )
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_delete_string_expressions_normal(self, expression, enable_dynamic_field):
         """
@@ -2420,15 +2534,16 @@ class TestDeleteComplexExpr(TestcaseBase):
             pytest.skip("only support when enable_dynamic_filed == True")
         # init collection with nb default data
         nb = 1000
-        collection_w, _vectors, _, insert_ids = \
-            self.init_collection_general(prefix, False, enable_dynamic_field=enable_dynamic_field)[0:4]
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(
+            prefix, False, enable_dynamic_field=enable_dynamic_field
+        )[0:4]
 
         # insert
         if enable_dynamic_field:
             data = cf.gen_default_rows_data(nb)
             for i in range(nb):
                 data[i][ct.default_json_field_name] = {"string": str(i)}
-                data[i]['NewStr'] = str(i)
+                data[i]["NewStr"] = str(i)
         else:
             data = cf.gen_default_dataframe_data(nb)
             data[ct.default_json_field_name] = [{"string": str(i)} for i in range(nb)]
@@ -2443,11 +2558,11 @@ class TestDeleteComplexExpr(TestcaseBase):
         json_field = {}
         for i in range(nb):
             if enable_dynamic_field:
-                json_field['string'] = _vectors[i][ct.default_json_field_name]['string']
+                json_field["string"] = _vectors[i][ct.default_json_field_name]["string"]
                 varchar = _vectors[i][ct.default_string_field_name]
-                NewStr = _vectors[i]['NewStr']
+                NewStr = _vectors[i]["NewStr"]
             else:
-                json_field['string'] = _vectors[ct.default_json_field_name][i]['string']
+                json_field["string"] = _vectors[ct.default_json_field_name][i]["string"]
                 varchar = _vectors.varchar[i]
             if not expression or eval(expression):
                 filter_ids.append(i)
@@ -2458,9 +2573,12 @@ class TestDeleteComplexExpr(TestcaseBase):
 
         # query to check
         collection_w.load()
-        collection_w.query("int64 >= 0", output_fields=['count(*)'],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={'count(*)': nb - len(filter_ids)})
+        collection_w.query(
+            "int64 >= 0",
+            output_fields=["count(*)"],
+            check_task=CheckTasks.check_query_results,
+            check_items={"count(*)": nb - len(filter_ids)},
+        )
 
 
 class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
@@ -2480,24 +2598,32 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: deleted entity is not in the search result
         """
         # init collection with nb default data
-        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True,
-                                                               nullable_fields={ct.default_float_field_name: null_data_percent},
-                                                               default_value_fields = {ct.default_string_field_name: "data"})[0:4]
+        collection_w, _, _, ids = self.init_collection_general(
+            prefix,
+            insert_data=True,
+            nullable_fields={ct.default_float_field_name: null_data_percent},
+            default_value_fields={ct.default_string_field_name: "data"},
+        )[0:4]
         entity, _ = collection_w.query(tmp_expr, output_fields=["*"])
-        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                            ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit)
+        search_res, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search results contains entity
         assert 0 in search_res[0].ids
 
-        expr = f'{ct.default_int64_field_name} in {ids[:ct.default_nb // 2]}'
+        expr = f"{ct.default_int64_field_name} in {ids[: ct.default_nb // 2]}"
         collection_w.delete(expr)
-        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
-                                              ct.default_float_vec_field_name,
-                                              ct.default_search_params, ct.default_limit)
+        search_res_2, _ = collection_w.search(
+            [entity[0][ct.default_float_vec_field_name]],
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # assert search result is not equal to entity
-        inter = set(ids[:ct.default_nb // 2]
-                    ).intersection(set(search_res_2[0].ids))
+        inter = set(ids[: ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
         # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
@@ -2510,16 +2636,19 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: No exception for second deletion
         """
         # init collection with nb default data
-        collection_w = \
-            self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name,
-                                         nullable_fields={ct.default_float_field_name: null_data_percent},
-                                         default_value_fields={ct.default_int64_field_name: 100})[0]
+        collection_w = self.init_collection_general(
+            prefix,
+            nb=tmp_nb,
+            insert_data=True,
+            primary_field=ct.default_string_field_name,
+            nullable_fields={ct.default_float_field_name: null_data_percent},
+            default_value_fields={ct.default_int64_field_name: 100},
+        )[0]
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
         collection_w.num_entities
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2531,14 +2660,17 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: No exception for second deletion
         """
         # init collection with nb default data
-        collection_w = \
-            self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name,
-                                         nullable_fields={ct.default_float_field_name: null_data_percent},
-                                         default_value_fields={ct.default_int64_field_name: 100})[0]
+        collection_w = self.init_collection_general(
+            prefix,
+            nb=tmp_nb,
+            insert_data=True,
+            primary_field=ct.default_string_field_name,
+            nullable_fields={ct.default_float_field_name: null_data_percent},
+            default_value_fields={ct.default_int64_field_name: 100},
+        )[0]
 
         # assert delete successfully and no exception
         collection_w.delete(expr=default_string_expr)
         collection_w.num_entities
-        collection_w.query(default_string_expr,
-                           check_task=CheckTasks.check_query_empty)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)

@@ -101,29 +101,25 @@ def reconnect(connections, alias="default", timeout=360):
     return connections.connect(alias)
 
 
-def assert_statistic(
-    checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49
-):
+def assert_statistic(checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49):
     for k in checkers.keys():
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
-        error_messages = getattr(checkers[k], 'error_messages', set())
+        error_messages = getattr(checkers[k], "error_messages", set())
         if expectations.get(k, "") == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
-            )
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
             pytest.assume(
                 succ_rate < fail_rate_threshold or total < 2,
                 f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
             )
         else:
-            log.info(
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            # Build assertion message with error details
+            assert_msg = (
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             )
-            # Build assertion message with error details
-            assert_msg = f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             if error_messages:
                 error_details = "; ".join(error_messages)
                 assert_msg += f", unique errors({len(error_messages)}): [{error_details}]"

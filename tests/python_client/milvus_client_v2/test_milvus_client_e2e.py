@@ -17,7 +17,7 @@ default_search_exp = "id >= 0"
 
 
 class TestMilvusClientE2E(TestMilvusClientV2Base):
-    """ Test case of end-to-end interface """
+    """Test case of end-to-end interface"""
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("flush_enable", [True, False])
@@ -98,8 +98,16 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Verify scalar indexes are created if enabled
         indexes = self.list_indexes(client, collection_name)[0]
         log.info(f"Created indexes: {indexes}")
-        expected_scalar_indexes = ["int8_field", "int16_field", "int32_field", "int64_field",
-                                   "float_field", "double_field", "varchar_field", "array_field"]
+        expected_scalar_indexes = [
+            "int8_field",
+            "int16_field",
+            "int32_field",
+            "int64_field",
+            "float_field",
+            "double_field",
+            "varchar_field",
+            "array_field",
+        ]
         if scalar_index_enable:
             for field in expected_scalar_indexes:
                 assert field in indexes, f"Scalar index not created for field: {field}"
@@ -112,7 +120,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         t1 = time.time()
         log.info(f"Load collection cost {t1 - t0:.4f} seconds")
-        
+
         # 5. Search
         t0 = time.time()
         vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=vector_type)
@@ -124,19 +132,20 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             anns_field="vector",
             search_params=search_params,
             limit=default_limit,
-            output_fields=['*'],
+            output_fields=["*"],
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": len(vectors_to_search),
-                         "pk_name": "id",
-                         "limit": default_limit,
-                         "metric": "COSINE"}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "pk_name": "id",
+                "limit": default_limit,
+                "metric": "COSINE",
+            },
         )
         # Verify no NaN distances (nullable vector leak detection)
         for hits in search_res:
             for hit in hits:
-                assert not math.isnan(hit["distance"]), \
-                    f"NaN distance found in search result, pk={hit['id']}"
+                assert not math.isnan(hit["distance"]), f"NaN distance found in search result, pk={hit['id']}"
         t1 = time.time()
         log.info(f"Search cost {t1 - t0:.4f} seconds")
 
@@ -145,108 +154,172 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Data-driven query cases: (filter_string, predicate_lambda, with_vec, description)
         query_cases = [
             # Boolean field (with_vec=False: skip nullable vector comparison in check)
-            ("bool_field == true",
-             lambda r: r["bool_field"] is not None and r["bool_field"] is True,
-             False, "bool true"),
+            (
+                "bool_field == true",
+                lambda r: r["bool_field"] is not None and r["bool_field"] is True,
+                False,
+                "bool true",
+            ),
             # Int8: null or < 10
-            ("int8_field is null || int8_field < 10",
-             lambda r: r["int8_field"] is None or r["int8_field"] < 10,
-             True, "int8 null or < 10"),
+            (
+                "int8_field is null || int8_field < 10",
+                lambda r: r["int8_field"] is None or r["int8_field"] < 10,
+                True,
+                "int8 null or < 10",
+            ),
             # Int16: range [100, 200)
-            ("100 <= int16_field < 200",
-             lambda r: r["int16_field"] is not None and 100 <= r["int16_field"] < 200,
-             True, "int16 range [100, 200)"),
+            (
+                "100 <= int16_field < 200",
+                lambda r: r["int16_field"] is not None and 100 <= r["int16_field"] < 200,
+                True,
+                "int16 range [100, 200)",
+            ),
             # Int32: in set
-            ("int32_field in [1,2,5,6]",
-             lambda r: r["int32_field"] is not None and r["int32_field"] in [1, 2, 5, 6],
-             True, "int32 in [1,2,5,6]"),
+            (
+                "int32_field in [1,2,5,6]",
+                lambda r: r["int32_field"] is not None and r["int32_field"] in [1, 2, 5, 6],
+                True,
+                "int32 in [1,2,5,6]",
+            ),
             # Int64: range [4678, 5050)
-            ("int64_field >= 4678 and int64_field < 5050",
-             lambda r: r["int64_field"] is not None and r["int64_field"] >= 4678 and r["int64_field"] < 5050,
-             True, "int64 range [4678, 5050)"),
+            (
+                "int64_field >= 4678 and int64_field < 5050",
+                lambda r: r["int64_field"] is not None and r["int64_field"] >= 4678 and r["int64_field"] < 5050,
+                True,
+                "int64 range [4678, 5050)",
+            ),
             # Float: (0.5, 0.7]
-            ("float_field > 0.5 and float_field <= 0.7",
-             lambda r: r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7,
-             True, "float (0.5, 0.7]"),
+            (
+                "float_field > 0.5 and float_field <= 0.7",
+                lambda r: r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7,
+                True,
+                "float (0.5, 0.7]",
+            ),
             # Double: [0.5, 0.7]
-            ("0.5 <=double_field <= 0.7",
-             lambda r: r["double_field"] is not None and 0.5 <= r["double_field"] <= 0.7,
-             True, "double [0.5, 0.7]"),
+            (
+                "0.5 <=double_field <= 0.7",
+                lambda r: r["double_field"] is not None and 0.5 <= r["double_field"] <= 0.7,
+                True,
+                "double [0.5, 0.7]",
+            ),
             # Varchar: like prefix
-            ('varchar_field like "varchar_1%"',
-             lambda r: r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_1"),
-             True, "varchar like varchar_1%"),
+            (
+                'varchar_field like "varchar_1%"',
+                lambda r: r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_1"),
+                True,
+                "varchar like varchar_1%",
+            ),
             # Varchar: is null
-            ("varchar_field is null",
-             lambda r: r["varchar_field"] is None,
-             True, "varchar is null"),
+            ("varchar_field is null", lambda r: r["varchar_field"] is None, True, "varchar is null"),
             # JSON: is null
-            ("json_field is null",
-             lambda r: r["json_field"] is None,
-             True, "json is null"),
+            ("json_field is null", lambda r: r["json_field"] is None, True, "json is null"),
             # Array: is null
-            ("array_field is null",
-             lambda r: r["array_field"] is None,
-             True, "array is null"),
+            ("array_field is null", lambda r: r["array_field"] is None, True, "array is null"),
             # Multiple fields all null
-            ("varchar_field is null and json_field is null and array_field is null",
-             lambda r: r["varchar_field"] is None and r["json_field"] is None and r["array_field"] is None,
-             True, "multi fields all null"),
+            (
+                "varchar_field is null and json_field is null and array_field is null",
+                lambda r: r["varchar_field"] is None and r["json_field"] is None and r["array_field"] is None,
+                True,
+                "multi fields all null",
+            ),
             # Mix: varchar null and json not null
-            ("varchar_field is null and json_field is not null",
-             lambda r: r["varchar_field"] is None and r["json_field"] is not None,
-             True, "varchar null and json not null"),
+            (
+                "varchar_field is null and json_field is not null",
+                lambda r: r["varchar_field"] is None and r["json_field"] is not None,
+                True,
+                "varchar null and json not null",
+            ),
             # Int8: not null and > 100
-            ("int8_field is not null and int8_field > 100",
-             lambda r: r["int8_field"] is not None and r["int8_field"] > 100,
-             True, "int8 not null and > 100"),
+            (
+                "int8_field is not null and int8_field > 100",
+                lambda r: r["int8_field"] is not None and r["int8_field"] > 100,
+                True,
+                "int8 not null and > 100",
+            ),
             # Int16: not null and < 100
-            ("int16_field is not null and int16_field < 100",
-             lambda r: r["int16_field"] is not None and r["int16_field"] < 100,
-             True, "int16 not null and < 100"),
+            (
+                "int16_field is not null and int16_field < 100",
+                lambda r: r["int16_field"] is not None and r["int16_field"] < 100,
+                True,
+                "int16 not null and < 100",
+            ),
             # Float: not null and (0.5, 0.7]
-            ("float_field is not null and float_field > 0.5 and float_field <= 0.7",
-             lambda r: r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7,
-             True, "float not null and (0.5, 0.7]"),
+            (
+                "float_field is not null and float_field > 0.5 and float_field <= 0.7",
+                lambda r: r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7,
+                True,
+                "float not null and (0.5, 0.7]",
+            ),
             # Double: not null and <= 0.2
-            ("double_field is not null and double_field <= 0.2",
-             lambda r: r["double_field"] is not None and r["double_field"] <= 0.2,
-             True, "double not null and <= 0.2"),
+            (
+                "double_field is not null and double_field <= 0.2",
+                lambda r: r["double_field"] is not None and r["double_field"] <= 0.2,
+                True,
+                "double not null and <= 0.2",
+            ),
             # Varchar: not null
-            ("varchar_field is not null",
-             lambda r: r["varchar_field"] is not None,
-             True, "varchar not null"),
+            ("varchar_field is not null", lambda r: r["varchar_field"] is not None, True, "varchar not null"),
             # JSON: not null and count < 15
-            ("json_field is not null and json_field['count'] < 15",
-             lambda r: r["json_field"] is not None and r["json_field"]["count"] < 15,
-             True, "json not null and count < 15"),
+            (
+                "json_field is not null and json_field['count'] < 15",
+                lambda r: r["json_field"] is not None and r["json_field"]["count"] < 15,
+                True,
+                "json not null and count < 15",
+            ),
             # Array: not null and first element < 100
-            ("array_field is not null and array_field[0] < 100",
-             lambda r: r["array_field"] is not None and r["array_field"][0] < 100,
-             True, "array not null and [0] < 100"),
+            (
+                "array_field is not null and array_field[0] < 100",
+                lambda r: r["array_field"] is not None and r["array_field"][0] < 100,
+                True,
+                "array not null and [0] < 100",
+            ),
             # Multiple fields all not null
-            ("varchar_field is not null and json_field is not null and array_field is not null",
-             lambda r: r["varchar_field"] is not None and r["json_field"] is not None and r["array_field"] is not None,
-             True, "multi fields all not null"),
+            (
+                "varchar_field is not null and json_field is not null and array_field is not null",
+                lambda r: r["varchar_field"] is not None
+                and r["json_field"] is not None
+                and r["array_field"] is not None,
+                True,
+                "multi fields all not null",
+            ),
             # Complex: int32 null, float > 0.7, varchar not null
-            ("int32_field is null and float_field > 0.7 and varchar_field is not null",
-             lambda r: (r["int32_field"] is None and
-                        r["float_field"] is not None and r["float_field"] > 0.7 and
-                        r["varchar_field"] is not None),
-             True, "int32 null and float > 0.7 and varchar not null"),
+            (
+                "int32_field is null and float_field > 0.7 and varchar_field is not null",
+                lambda r: (
+                    r["int32_field"] is None
+                    and r["float_field"] is not None
+                    and r["float_field"] > 0.7
+                    and r["varchar_field"] is not None
+                ),
+                True,
+                "int32 null and float > 0.7 and varchar not null",
+            ),
             # Complex: varchar not null, int64 in [5, 15], float null
-            ("varchar_field is not null and 5 <= int64_field <= 15 and float_field is null",
-             lambda r: (r["varchar_field"] is not None and
-                        r["int64_field"] is not None and 5 <= r["int64_field"] <= 15 and
-                        r["float_field"] is None),
-             True, "varchar not null and int64 [5,15] and float null"),
+            (
+                "varchar_field is not null and 5 <= int64_field <= 15 and float_field is null",
+                lambda r: (
+                    r["varchar_field"] is not None
+                    and r["int64_field"] is not None
+                    and 5 <= r["int64_field"] <= 15
+                    and r["float_field"] is None
+                ),
+                True,
+                "varchar not null and int64 [5,15] and float null",
+            ),
             # Complex: int8 not null < 15, double null, varchar not null like varchar_2%
-            ("int8_field is not null and int8_field < 15 and double_field is null and "
-             "varchar_field is not null and varchar_field like \"varchar_2%\"",
-             lambda r: (r["int8_field"] is not None and r["int8_field"] < 15 and
-                        r["double_field"] is None and
-                        r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_2")),
-             True, "int8 < 15 and double null and varchar like varchar_2%"),
+            (
+                "int8_field is not null and int8_field < 15 and double_field is null and "
+                'varchar_field is not null and varchar_field like "varchar_2%"',
+                lambda r: (
+                    r["int8_field"] is not None
+                    and r["int8_field"] < 15
+                    and r["double_field"] is None
+                    and r["varchar_field"] is not None
+                    and r["varchar_field"].startswith("varchar_2")
+                ),
+                True,
+                "int8 < 15 and double null and varchar like varchar_2%",
+            ),
         ]
 
         for filter_str, predicate, with_vec, desc in query_cases:
@@ -256,14 +329,9 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
                 client,
                 collection_name,
                 filter=filter_str,
-                output_fields=['*'],
+                output_fields=["*"],
                 check_task=CheckTasks.check_query_results,
-                check_items={
-                    "exp_res": expected,
-                    "with_vec": with_vec,
-                    "vector_type": vector_type,
-                    "pk_name": "id"
-                }
+                check_items={"exp_res": expected, "with_vec": with_vec, "vector_type": vector_type, "pk_name": "id"},
             )
 
         t1 = time.time()
@@ -281,7 +349,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             collection_name,
             filter=default_search_exp,
             check_task=CheckTasks.check_query_results,
-            check_items={"exp_res": []}
+            check_items={"exp_res": []},
         )
 
         # 9. Verify deletion via search — should return 0 results
@@ -293,11 +361,13 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             search_params=search_params,
             limit=default_limit,
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": len(vectors_to_search),
-                         "pk_name": "id",
-                         "limit": 0,
-                         "metric": "COSINE"}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "pk_name": "id",
+                "limit": 0,
+                "metric": "COSINE",
+            },
         )
 
         # 10. Cleanup
@@ -340,9 +410,18 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # JSON type
         schema.add_field("json_field", DataType.JSON, nullable=True)
         # Array float type
-        schema.add_field("array_float_field", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=15, nullable=True)
+        schema.add_field(
+            "array_float_field", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=15, nullable=True
+        )
         # Array varchar type
-        schema.add_field("array_varchar_field", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=15, max_length=100, nullable=True)
+        schema.add_field(
+            "array_varchar_field",
+            DataType.ARRAY,
+            element_type=DataType.VARCHAR,
+            max_capacity=15,
+            max_length=100,
+            nullable=True,
+        )
 
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
@@ -379,13 +458,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             anns_field="vector",
             search_params=search_params,
             limit=default_limit,
-            output_fields=['*'],
+            output_fields=["*"],
             check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": len(vectors_to_search),
-                         "pk_name": "id",
-                         "limit": default_limit,
-                         "metric": "COSINE"}
+            check_items={
+                "enable_milvus_client_api": True,
+                "nq": len(vectors_to_search),
+                "pk_name": "id",
+                "limit": default_limit,
+                "metric": "COSINE",
+            },
         )
 
         # use query iterator to get all the data and compare with the inserted original data

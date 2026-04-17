@@ -13,18 +13,19 @@ from deepdiff import DeepDiff
 
 epsilon = ct.epsilon
 
+
 def deep_approx_compare(x, y, epsilon=epsilon):
     """
     Recursively compares two objects for approximate equality, handling floating-point precision.
-    
+
     Args:
         x: First object to compare
         y: Second object to compare
         epsilon: Tolerance for floating-point comparisons (default: 1e-6)
-    
+
     Returns:
         bool: True if objects are approximately equal, False otherwise
-    
+
     Handles:
         - Numeric types (int, float, numpy scalars)
         - Sequences (list, tuple, numpy arrays)
@@ -73,9 +74,11 @@ def deep_approx_compare(x, y, epsilon=epsilon):
 
 
 import re
+
 # Pre-compile regex patterns for better performance
-_GEO_PATTERN = re.compile(r'(POINT|LINESTRING|POLYGON)\s+\(')
-_WHITESPACE_PATTERN = re.compile(r'\s+')
+_GEO_PATTERN = re.compile(r"(POINT|LINESTRING|POLYGON)\s+\(")
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+
 
 def normalize_geo_string(s):
     """
@@ -87,9 +90,9 @@ def normalize_geo_string(s):
     Returns:
         Normalized GEO string or original value if not a GEO string
     """
-    if isinstance(s, str) and s.startswith(('POINT', 'LINESTRING', 'POLYGON')):
-        s = _GEO_PATTERN.sub(r'\1(', s)
-        s = _WHITESPACE_PATTERN.sub(' ', s).strip()
+    if isinstance(s, str) and s.startswith(("POINT", "LINESTRING", "POLYGON")):
+        s = _GEO_PATTERN.sub(r"\1(", s)
+        s = _WHITESPACE_PATTERN.sub(" ", s).strip()
     return s
 
 
@@ -111,7 +114,7 @@ def normalize_value(value):
 
     # Convert list-like protobuf/custom types to standard list
     type_name = type(value).__name__
-    if type_name in ('RepeatedScalarContainer', 'HybridExtraList', 'RepeatedCompositeContainer'):
+    if type_name in ("RepeatedScalarContainer", "HybridExtraList", "RepeatedCompositeContainer"):
         value = list(value)
 
     # Handle list of dicts (main use case for search/query results)
@@ -128,7 +131,11 @@ def normalize_value(value):
                         normalized_dict[k] = float(v) if isinstance(v, np.floating) else int(v)
                     elif isinstance(v, np.ndarray):
                         normalized_dict[k] = v.tolist()
-                    elif type(v).__name__ in ('RepeatedScalarContainer', 'HybridExtraList', 'RepeatedCompositeContainer'):
+                    elif type(v).__name__ in (
+                        "RepeatedScalarContainer",
+                        "HybridExtraList",
+                        "RepeatedCompositeContainer",
+                    ):
                         normalized_dict[k] = list(v)
                     else:
                         normalized_dict[k] = v
@@ -141,18 +148,19 @@ def normalize_value(value):
     # Return as-is for other types
     return value
 
+
 def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     Compares two lists of dictionaries for equality (order-insensitive) with floating-point tolerance.
-    
+
     Args:
         a (list): First list of dictionaries to compare
         b (list): Second list of dictionaries to compare
         epsilon (float, optional): Tolerance for floating-point comparisons. Defaults to 1e-6.
-    
+
     Returns:
         bool: True if lists contain equivalent dictionaries (order doesn't matter), False otherwise
-    
+
     Note:
         Uses deep_approx_compare() for dictionary comparison with floating-point tolerance.
         Maintains O(n²) complexity due to nested comparisons.
@@ -183,6 +191,7 @@ def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
 
     return True
 
+
 def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon):
     """
     Compare two lists of dictionaries for equality (order-insensitive) with floating-point tolerance using DeepDiff.
@@ -193,9 +202,11 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
 
     # Check length first
     if len(a_normalized) != len(b_normalized):
-        log.debug(f"[COMPARE_LISTS] Length mismatch: Query result length({len(a_normalized)}) != Expected result length({len(b_normalized)})")
+        log.debug(
+            f"[COMPARE_LISTS] Length mismatch: Query result length({len(a_normalized)}) != Expected result length({len(b_normalized)})"
+        )
         return False
-    
+
     for i in range(len(a_normalized)):
         diff = DeepDiff(
             a_normalized[i],
@@ -210,6 +221,7 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
             log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
             return False
     return True
+
 
 def ip_check(ip):
     if ip == "localhost":
@@ -265,8 +277,10 @@ def list_de_duplication(_list):
     # Keep the order of the elements unchanged
     result.sort(key=_list.index)
 
-    log.debug("[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s" % (
-        str(_list), str(result)))
+    log.debug(
+        "[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s"
+        % (str(_list), str(result))
+    )
     return result
 
 
@@ -313,7 +327,7 @@ def list_contain_check(sublist, superlist):
 
 
 def get_connect_object_name(_list):
-    """ get the name of the objects that returned by the connection """
+    """get the name of the objects that returned by the connection"""
     if not isinstance(_list, list):
         log.error("[GET_CONNECT_OBJECT_NAME] Type of list(%s) is not a list." % str(_list))
         return _list
@@ -321,13 +335,16 @@ def get_connect_object_name(_list):
     new_list = []
     for i in _list:
         if not isinstance(i, tuple):
-            log.error("[GET_CONNECT_OBJECT_NAME] The element:%s of the list is not tuple, please check manually."
-                      % str(i))
+            log.error(
+                "[GET_CONNECT_OBJECT_NAME] The element:%s of the list is not tuple, please check manually." % str(i)
+            )
             return _list
 
         if len(i) != 2:
-            log.error("[GET_CONNECT_OBJECT_NAME] The length of the tuple:%s is not equal to 2, please check manually."
-                      % str(i))
+            log.error(
+                "[GET_CONNECT_OBJECT_NAME] The length of the tuple:%s is not equal to 2, please check manually."
+                % str(i)
+            )
             return _list
 
         if i[1] is not None:
@@ -447,7 +464,7 @@ def output_field_value_check(search_res, original, pk_name):
     pk_name = ct.default_primary_field_name if pk_name is None else pk_name
     nq = len(search_res)
     limit = len(search_res[0])
-    check_nqs = min(2, nq)       # the output field values are wrong only at nq>=2  #45338
+    check_nqs = min(2, nq)  # the output field values are wrong only at nq>=2  #45338
     for n in range(check_nqs):
         for i in range(limit):
             entity = search_res[n][i].fields
@@ -468,7 +485,9 @@ def output_field_value_check(search_res, original, pk_name):
                     num = original[original[pk_name] == _id].index.to_list()[0]
                     expected_val = original[field][num]
                     # pandas converts None to NaN, while Milvus returns None for nullable fields
-                    if entity[field] is None and (expected_val is None or (isinstance(expected_val, float) and np.isnan(expected_val))):
+                    if entity[field] is None and (
+                        expected_val is None or (isinstance(expected_val, float) and np.isnan(expected_val))
+                    ):
                         continue
                     assert expected_val == entity[field], f"the output field values are wrong at nq={n}"
 

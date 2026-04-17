@@ -17,7 +17,7 @@ ENABLE_LOG_SAVE = False
 
 def simplify_list(lst):
     if len(lst) > 20:
-        return [lst[0], '...', lst[-1]]
+        return [lst[0], "...", lst[-1]]
     return lst
 
 
@@ -26,12 +26,20 @@ def simplify_dict(d):
         d = {}
     if len(d) > 20:
         keys = list(d.keys())
-        d = {keys[0]: d[keys[0]], '...': '...', keys[-1]: d[keys[-1]]}
+        d = {keys[0]: d[keys[0]], "...": "...", keys[-1]: d[keys[-1]]}
     simplified = {}
     for k, v in d.items():
         if isinstance(v, list):
-            simplified[k] = simplify_list([simplify_dict(item) if isinstance(item, dict) else simplify_list(
-                item) if isinstance(item, list) else item for item in v])
+            simplified[k] = simplify_list(
+                [
+                    simplify_dict(item)
+                    if isinstance(item, dict)
+                    else simplify_list(item)
+                    if isinstance(item, list)
+                    else item
+                    for item in v
+                ]
+            )
         elif isinstance(v, dict):
             simplified[k] = simplify_dict(v)
         else:
@@ -62,35 +70,45 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
     data_dict = json.loads(data) if data else {}
     data_dict_simple = simplify_dict(data_dict)
     if ENABLE_LOG_SAVE:
-        with open('request_response.jsonl', 'a') as f:
-            f.write(json.dumps({
-                "method": method,
-                "url": url,
-                "headers": headers,
-                "params": params,
-                "data": data_dict_simple,
-                "response": response.json()
-            }) + "\n")
+        with open("request_response.jsonl", "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "method": method,
+                        "url": url,
+                        "headers": headers,
+                        "params": params,
+                        "data": data_dict_simple,
+                        "response": response.json(),
+                    }
+                )
+                + "\n"
+            )
     data = json.dumps(data_dict_simple, indent=4)
     try:
         if response.status_code == 200:
-            if ('code' in response.json() and response.json()["code"] == 0) or (
-                    'Code' in response.json() and response.json()["Code"] == 0):
+            if ("code" in response.json() and response.json()["code"] == 0) or (
+                "Code" in response.json() and response.json()["Code"] == 0
+            ):
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {str_response}")
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {str_response}"
+                )
 
             else:
                 logger.debug(
-                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
+                    f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}"
+                )
         else:
             logger.debug(
-                f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}")
+                f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}"
+            )
     except Exception as e:
         logger.debug(
-            f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}")
+            f"method: \nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {data}, \nresponse: {response.text}, \nerror: {e}"
+        )
 
 
-class Requests():
+class Requests:
     uuid = str(uuid.uuid1())
 
     def __init__(self, url=None, api_key=None):
@@ -99,10 +117,10 @@ class Requests():
         if self.__class__.uuid is None:
             self.__class__.uuid = str(uuid.uuid1())
         self.headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': self.__class__.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": self.__class__.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT,
         }
 
     @classmethod
@@ -111,10 +129,10 @@ class Requests():
 
     def update_headers(self):
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': self.__class__.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": self.__class__.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT,
         }
         return headers
 
@@ -124,11 +142,11 @@ class Requests():
     def post(self, url, headers=None, data=None, params=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.post(url, headers=headers, data=data, params=params)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "post", params=params)
         return response
 
@@ -136,14 +154,14 @@ class Requests():
     def get(self, url, headers=None, params=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         if data is None or data == "null":
             response = requests.get(url, headers=headers, params=params)
         else:
             response = requests.get(url, headers=headers, params=params, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "get", params=params)
         return response
 
@@ -151,11 +169,11 @@ class Requests():
     def put(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.put(url, headers=headers, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "put")
         return response
 
@@ -163,11 +181,11 @@ class Requests():
     def delete(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
-        str_data = data[:200] + '...' + data[-200:] if len(data) > 400 else data
+        str_data = data[:200] + "..." + data[-200:] if len(data) > 400 else data
         t0 = time.time()
         response = requests.delete(url, headers=headers, data=data)
         tt = time.time() - t0
-        str_response = response.text[:200] + '...' + response.text[-200:] if len(response.text) > 400 else response.text
+        str_response = response.text[:200] + "..." + response.text[-200:] if len(response.text) > 400 else response.text
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "delete")
         return response
 
@@ -183,17 +201,17 @@ class VectorClient(Requests):
 
     def update_headers(self):
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'Accept-Type-Allow-Int64': "true",
-            'RequestId': self.__class__.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept-Type-Allow-Int64": "true",
+            "RequestId": self.__class__.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT,
         }
         return headers
 
     def vector_search(self, payload, db_name="default", timeout=10):
         time.sleep(1)
-        url = f'{self.endpoint}/v2/vectordb/entities/search'
+        url = f"{self.endpoint}/v2/vectordb/entities/search"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -218,7 +236,7 @@ class VectorClient(Requests):
 
     def vector_advanced_search(self, payload, db_name="default", timeout=10):
         time.sleep(1)
-        url = f'{self.endpoint}/v2/vectordb/entities/advanced_search'
+        url = f"{self.endpoint}/v2/vectordb/entities/advanced_search"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -243,7 +261,7 @@ class VectorClient(Requests):
 
     def vector_hybrid_search(self, payload, db_name="default", timeout=10):
         time.sleep(1)
-        url = f'{self.endpoint}/v2/vectordb/entities/hybrid_search'
+        url = f"{self.endpoint}/v2/vectordb/entities/hybrid_search"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -268,7 +286,7 @@ class VectorClient(Requests):
 
     def vector_query(self, payload, db_name="default", timeout=5):
         time.sleep(1)
-        url = f'{self.endpoint}/v2/vectordb/entities/query'
+        url = f"{self.endpoint}/v2/vectordb/entities/query"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -293,7 +311,7 @@ class VectorClient(Requests):
 
     def vector_get(self, payload, db_name="default"):
         time.sleep(1)
-        url = f'{self.endpoint}/v2/vectordb/entities/get'
+        url = f"{self.endpoint}/v2/vectordb/entities/get"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -302,7 +320,7 @@ class VectorClient(Requests):
         return response.json()
 
     def vector_delete(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/entities/delete'
+        url = f"{self.endpoint}/v2/vectordb/entities/delete"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -311,7 +329,7 @@ class VectorClient(Requests):
         return response.json()
 
     def vector_insert(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/entities/insert'
+        url = f"{self.endpoint}/v2/vectordb/entities/insert"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -320,7 +338,7 @@ class VectorClient(Requests):
         return response.json()
 
     def vector_upsert(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/entities/upsert'
+        url = f"{self.endpoint}/v2/vectordb/entities/upsert"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -330,7 +348,6 @@ class VectorClient(Requests):
 
 
 class CollectionClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -353,27 +370,24 @@ class CollectionClient(Requests):
         if headers is not None:
             return headers
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {self.api_key}',
-            'RequestId': self.__class__.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "RequestId": self.__class__.uuid,
+            "Request-Timeout": REQUEST_TIMEOUT,
         }
         return headers
 
     def collection_has(self, db_name="default", collection_name=None):
-        url = f'{self.endpoint}/v2/vectordb/collections/has'
+        url = f"{self.endpoint}/v2/vectordb/collections/has"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def collection_rename(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/collections/rename'
+        url = f"{self.endpoint}/v2/vectordb/collections/rename"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -382,43 +396,34 @@ class CollectionClient(Requests):
         return response.json()
 
     def collection_stats(self, db_name="default", collection_name=None):
-        url = f'{self.endpoint}/v2/vectordb/collections/get_stats'
+        url = f"{self.endpoint}/v2/vectordb/collections/get_stats"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def collection_load(self, db_name="default", collection_name=None):
-        url = f'{self.endpoint}/v2/vectordb/collections/load'
+        url = f"{self.endpoint}/v2/vectordb/collections/load"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def collection_release(self, db_name="default", collection_name=None):
-        url = f'{self.endpoint}/v2/vectordb/collections/release'
+        url = f"{self.endpoint}/v2/vectordb/collections/release"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def collection_load_state(self, db_name="default", collection_name=None, partition_names=None):
-        url = f'{self.endpoint}/v2/vectordb/collections/get_load_state'
+        url = f"{self.endpoint}/v2/vectordb/collections/get_load_state"
         if self.db_name is not None:
             db_name = self.db_name
         data = {
@@ -432,16 +437,12 @@ class CollectionClient(Requests):
         return res
 
     def collection_list(self, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/collections/list'
+        url = f"{self.endpoint}/v2/vectordb/collections/list"
         params = {}
         if self.db_name is not None:
-            params = {
-                "dbName": self.db_name
-            }
+            params = {"dbName": self.db_name}
         if db_name != "default":
-            params = {
-                "dbName": db_name
-            }
+            params = {"dbName": db_name}
         response = self.post(url, headers=self.update_headers(), params=params)
         res = response.json()
         return res
@@ -452,7 +453,7 @@ class CollectionClient(Requests):
         db_name = payload.get("dbName", db_name)
         self.name_list.append((db_name, c_name))
 
-        url = f'{self.endpoint}/v2/vectordb/collections/create'
+        url = f"{self.endpoint}/v2/vectordb/collections/create"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -465,24 +466,18 @@ class CollectionClient(Requests):
         return response.json()
 
     def collection_describe(self, collection_name, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/collections/describe'
+        url = f"{self.endpoint}/v2/vectordb/collections/describe"
         data = {"collectionName": collection_name}
         if self.db_name is not None:
-            data = {
-                "collectionName": collection_name,
-                "dbName": self.db_name
-            }
+            data = {"collectionName": collection_name, "dbName": self.db_name}
         if db_name != "default":
-            data = {
-                "collectionName": collection_name,
-                "dbName": db_name
-            }
+            data = {"collectionName": collection_name, "dbName": db_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         return response.json()
 
     def collection_drop(self, payload, db_name="default"):
         time.sleep(1)  # wait for collection drop and in case of rate limit
-        url = f'{self.endpoint}/v2/vectordb/collections/drop'
+        url = f"{self.endpoint}/v2/vectordb/collections/drop"
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -493,9 +488,7 @@ class CollectionClient(Requests):
     def refresh_load(self, collection_name, db_name="default"):
         """Refresh load collection"""
         url = f"{self.endpoint}/v2/vectordb/collections/refresh_load"
-        payload = {
-            "collectionName": collection_name
-        }
+        payload = {"collectionName": collection_name}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -506,10 +499,7 @@ class CollectionClient(Requests):
     def alter_collection_properties(self, collection_name, properties, db_name="default"):
         """Alter collection properties"""
         url = f"{self.endpoint}/v2/vectordb/collections/alter_properties"
-        payload = {
-            "collectionName": collection_name,
-            "properties": properties
-        }
+        payload = {"collectionName": collection_name, "properties": properties}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -520,10 +510,7 @@ class CollectionClient(Requests):
     def drop_collection_properties(self, collection_name, delete_keys, db_name="default"):
         """Drop collection properties"""
         url = f"{self.endpoint}/v2/vectordb/collections/drop_properties"
-        payload = {
-            "collectionName": collection_name,
-            "propertyKeys": delete_keys
-        }
+        payload = {"collectionName": collection_name, "propertyKeys": delete_keys}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -534,11 +521,7 @@ class CollectionClient(Requests):
     def alter_field_properties(self, collection_name, field_name, field_params, db_name="default"):
         """Alter field properties"""
         url = f"{self.endpoint}/v2/vectordb/collections/fields/alter_properties"
-        payload = {
-            "collectionName": collection_name,
-            "fieldName": field_name,
-            "fieldParams": field_params
-        }
+        payload = {"collectionName": collection_name, "fieldName": field_name, "fieldParams": field_params}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -549,23 +532,18 @@ class CollectionClient(Requests):
     def add_field(self, collection_name, field_params, db_name="default"):
         """Add field"""
         url = f"{self.endpoint}/v2/vectordb/collections/fields/add"
-        payload = {
-            "collectionName": collection_name,
-            "schema": field_params
-        }
+        payload = {"collectionName": collection_name, "schema": field_params}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
-        return response.json()    
+        return response.json()
 
     def flush(self, collection_name, db_name="default"):
         """Flush collection"""
         url = f"{self.endpoint}/v2/vectordb/collections/flush"
-        payload = {
-            "collectionName": collection_name
-        }
+        payload = {"collectionName": collection_name}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -576,9 +554,7 @@ class CollectionClient(Requests):
     def compact(self, collection_name, db_name="default"):
         """Compact collection"""
         url = f"{self.endpoint}/v2/vectordb/collections/compact"
-        payload = {
-            "collectionName": collection_name
-        }
+        payload = {"collectionName": collection_name}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -589,9 +565,7 @@ class CollectionClient(Requests):
     def get_compaction_state(self, collection_name, db_name="default"):
         """Get compaction state"""
         url = f"{self.endpoint}/v2/vectordb/collections/get_compaction_state"
-        payload = {
-            "collectionName": collection_name
-        }
+        payload = {"collectionName": collection_name}
         if self.db_name is not None:
             payload["dbName"] = self.db_name
         if db_name != "default":
@@ -601,7 +575,6 @@ class CollectionClient(Requests):
 
 
 class PartitionClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -610,105 +583,72 @@ class PartitionClient(Requests):
         self.headers = self.update_headers()
 
     def partition_list(self, db_name="default", collection_name=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/list'
-        data = {
-            "collectionName": collection_name
-        }
+        url = f"{self.endpoint}/v2/vectordb/partitions/list"
+        data = {"collectionName": collection_name}
         if self.db_name is not None:
-            data = {
-                "dbName": self.db_name,
-                "collectionName": collection_name
-            }
+            data = {"dbName": self.db_name, "collectionName": collection_name}
         if db_name != "default":
-            data = {
-                "dbName": db_name,
-                "collectionName": collection_name
-            }
+            data = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def partition_create(self, db_name="default", collection_name=None, partition_name=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/create'
+        url = f"{self.endpoint}/v2/vectordb/partitions/create"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionName": partition_name
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name, "partitionName": partition_name}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def partition_drop(self, db_name="default", collection_name=None, partition_name=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/drop'
+        url = f"{self.endpoint}/v2/vectordb/partitions/drop"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionName": partition_name
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name, "partitionName": partition_name}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def partition_load(self, db_name="default", collection_name=None, partition_names=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/load'
+        url = f"{self.endpoint}/v2/vectordb/partitions/load"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionNames": partition_names
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name, "partitionNames": partition_names}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def partition_release(self, db_name="default", collection_name=None, partition_names=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/release'
+        url = f"{self.endpoint}/v2/vectordb/partitions/release"
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionNames": partition_names
-        }
+        payload = {"dbName": db_name, "collectionName": collection_name, "partitionNames": partition_names}
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def partition_has(self, db_name="default", collection_name=None, partition_name=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/has'
+        url = f"{self.endpoint}/v2/vectordb/partitions/has"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionName": partition_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name, "partitionName": partition_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def partition_stats(self, db_name="default", collection_name=None, partition_name=None):
-        url = f'{self.endpoint}/v2/vectordb/partitions/get_stats'
+        url = f"{self.endpoint}/v2/vectordb/partitions/get_stats"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "partitionName": partition_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name, "partitionName": partition_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
 
 class UserClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -717,53 +657,50 @@ class UserClient(Requests):
         self.headers = self.update_headers()
 
     def user_list(self):
-        url = f'{self.endpoint}/v2/vectordb/users/list'
+        url = f"{self.endpoint}/v2/vectordb/users/list"
         response = self.post(url, headers=self.update_headers())
         res = response.json()
         return res
 
     def user_create(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/users/create'
+        url = f"{self.endpoint}/v2/vectordb/users/create"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def user_password_update(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/users/update_password'
+        url = f"{self.endpoint}/v2/vectordb/users/update_password"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def user_describe(self, user_name):
-        url = f'{self.endpoint}/v2/vectordb/users/describe'
-        data = {
-            "userName": user_name
-        }
+        url = f"{self.endpoint}/v2/vectordb/users/describe"
+        data = {"userName": user_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def user_drop(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/users/drop'
+        url = f"{self.endpoint}/v2/vectordb/users/drop"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def user_grant(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/users/grant_role'
+        url = f"{self.endpoint}/v2/vectordb/users/grant_role"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def user_revoke(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/users/revoke_role'
+        url = f"{self.endpoint}/v2/vectordb/users/revoke_role"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
 
 class RoleClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -773,13 +710,13 @@ class RoleClient(Requests):
         self.role_names = []
 
     def role_list(self):
-        url = f'{self.endpoint}/v2/vectordb/roles/list'
+        url = f"{self.endpoint}/v2/vectordb/roles/list"
         response = self.post(url, headers=self.update_headers())
         res = response.json()
         return res
 
     def role_create(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/roles/create'
+        url = f"{self.endpoint}/v2/vectordb/roles/create"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         if res["code"] == 0:
@@ -787,35 +724,32 @@ class RoleClient(Requests):
         return res
 
     def role_describe(self, role_name):
-        url = f'{self.endpoint}/v2/vectordb/roles/describe'
-        data = {
-            "roleName": role_name
-        }
+        url = f"{self.endpoint}/v2/vectordb/roles/describe"
+        data = {"roleName": role_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def role_drop(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/roles/drop'
+        url = f"{self.endpoint}/v2/vectordb/roles/drop"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def role_grant(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/roles/grant_privilege'
+        url = f"{self.endpoint}/v2/vectordb/roles/grant_privilege"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def role_revoke(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/roles/revoke_privilege'
+        url = f"{self.endpoint}/v2/vectordb/roles/revoke_privilege"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
 
 class IndexClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -824,7 +758,7 @@ class IndexClient(Requests):
         self.headers = self.update_headers()
 
     def index_create(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/indexes/create'
+        url = f"{self.endpoint}/v2/vectordb/indexes/create"
         if self.db_name is not None:
             db_name = self.db_name
         payload["dbName"] = db_name
@@ -832,33 +766,31 @@ class IndexClient(Requests):
         res = response.json()
         return res
 
-    def index_describe(self, collection_name=None, index_name=None, db_name="default", ):
-        url = f'{self.endpoint}/v2/vectordb/indexes/describe'
+    def index_describe(
+        self,
+        collection_name=None,
+        index_name=None,
+        db_name="default",
+    ):
+        url = f"{self.endpoint}/v2/vectordb/indexes/describe"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name,
-            "indexName": index_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name, "indexName": index_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def index_list(self, collection_name=None, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/indexes/list'
+        url = f"{self.endpoint}/v2/vectordb/indexes/list"
         if self.db_name is not None:
             db_name = self.db_name
-        data = {
-            "dbName": db_name,
-            "collectionName": collection_name
-        }
+        data = {"dbName": db_name, "collectionName": collection_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def index_drop(self, payload, db_name="default"):
-        url = f'{self.endpoint}/v2/vectordb/indexes/drop'
+        url = f"{self.endpoint}/v2/vectordb/indexes/drop"
         if self.db_name is not None:
             db_name = self.db_name
         payload["dbName"] = db_name
@@ -869,11 +801,7 @@ class IndexClient(Requests):
     def alter_index_properties(self, collection_name, index_name, properties, db_name="default"):
         """Alter index properties"""
         url = f"{self.endpoint}/v2/vectordb/indexes/alter_properties"
-        payload = {
-            "collectionName": collection_name,
-            "indexName": index_name,
-            "properties": properties
-        }
+        payload = {"collectionName": collection_name, "indexName": index_name, "properties": properties}
         if self.db_name is not None:
             db_name = self.db_name
         if db_name != "default":
@@ -884,11 +812,7 @@ class IndexClient(Requests):
     def drop_index_properties(self, collection_name, index_name, delete_keys, db_name="default"):
         """Drop index properties"""
         url = f"{self.endpoint}/v2/vectordb/indexes/drop_properties"
-        payload = {
-            "collectionName": collection_name,
-            "indexName": index_name,
-            "propertyKeys": delete_keys
-        }
+        payload = {"collectionName": collection_name, "indexName": index_name, "propertyKeys": delete_keys}
         if self.db_name is not None:
             db_name = self.db_name
         if db_name != "default":
@@ -898,7 +822,6 @@ class IndexClient(Requests):
 
 
 class AliasClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -907,41 +830,38 @@ class AliasClient(Requests):
         self.headers = self.update_headers()
 
     def list_alias(self):
-        url = f'{self.endpoint}/v2/vectordb/aliases/list'
+        url = f"{self.endpoint}/v2/vectordb/aliases/list"
         response = self.post(url, headers=self.update_headers())
         res = response.json()
         return res
 
     def describe_alias(self, alias_name):
-        url = f'{self.endpoint}/v2/vectordb/aliases/describe'
-        data = {
-            "aliasName": alias_name
-        }
+        url = f"{self.endpoint}/v2/vectordb/aliases/describe"
+        data = {"aliasName": alias_name}
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def alter_alias(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/aliases/alter'
+        url = f"{self.endpoint}/v2/vectordb/aliases/alter"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def drop_alias(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/aliases/drop'
+        url = f"{self.endpoint}/v2/vectordb/aliases/drop"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def create_alias(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/aliases/create'
+        url = f"{self.endpoint}/v2/vectordb/aliases/create"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
 
 class ImportJobClient(Requests):
-
     def __init__(self, endpoint, token):
         super().__init__(url=endpoint, api_key=token)
         self.endpoint = endpoint
@@ -955,7 +875,7 @@ class ImportJobClient(Requests):
         payload["dbName"] = db_name
         if db_name is None:
             payload.pop("dbName")
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/list'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/list"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
@@ -963,7 +883,7 @@ class ImportJobClient(Requests):
     def create_import_jobs(self, payload, db_name="default"):
         if self.db_name is not None:
             db_name = self.db_name
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/create'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/create"
         payload["dbName"] = db_name
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
@@ -972,15 +892,12 @@ class ImportJobClient(Requests):
     def get_import_job_progress(self, job_id, db_name="default"):
         if self.db_name is not None:
             db_name = self.db_name
-        payload = {
-            "dbName": db_name,
-            "jobID": job_id
-        }
+        payload = {"dbName": db_name, "jobID": job_id}
         if db_name is None:
             payload.pop("dbName")
         if job_id is None:
             payload.pop("jobID")
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/get_progress'
+        url = f"{self.endpoint}/v2/vectordb/jobs/import/get_progress"
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
@@ -991,7 +908,7 @@ class ImportJobClient(Requests):
         rsp = self.get_import_job_progress(job_id)
         while not finished:
             rsp = self.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Completed":
+            if rsp["data"]["state"] == "Completed":
                 finished = True
             time.sleep(5)
             if time.time() - t0 > 120:
@@ -1012,9 +929,9 @@ class DatabaseClient(Requests):
         """Create a database"""
         url = f"{self.endpoint}/v2/vectordb/databases/create"
         rsp = self.post(url, data=payload).json()
-        if rsp['code'] == 0:
-            self.db_name = payload['dbName']
-            self.db_names.append(payload['dbName'])
+        if rsp["code"] == 0:
+            self.db_name = payload["dbName"]
+            self.db_names.append(payload["dbName"])
         return rsp
 
     def database_list(self, payload):
@@ -1041,26 +958,19 @@ class DatabaseClient(Requests):
     def alter_database_properties(self, db_name, properties):
         """Alter database properties"""
         url = f"{self.endpoint}/v2/vectordb/databases/alter"
-        payload = {
-            "dbName": db_name,
-            "properties": properties
-        }
+        payload = {"dbName": db_name, "properties": properties}
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
     def drop_database_properties(self, db_name, property_keys):
         """Drop database properties"""
         url = f"{self.endpoint}/v2/vectordb/databases/drop_properties"
-        payload = {
-            "dbName": db_name,
-            "propertyKeys": property_keys
-        }
+        payload = {"dbName": db_name, "propertyKeys": property_keys}
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
 
-class StorageClient():
-
+class StorageClient:
     def __init__(self, endpoint, access_key, secret_key, bucket_name, root_path="file"):
         self.endpoint = endpoint
         self.access_key = access_key
@@ -1090,10 +1000,7 @@ class StorageClient():
             logger.error("fail to copy files to minio", exc)
 
     def get_collection_binlog(self, collection_id):
-        dir_list = [
-            "delta_log",
-            "insert_log"
-        ]
+        dir_list = ["delta_log", "insert_log"]
         binlog_list = []
         # list objects dir/collection_id in bucket
         for dir in dir_list:
@@ -1107,9 +1014,6 @@ class StorageClient():
 
 if __name__ == "__main__":
     sc = StorageClient(
-        endpoint="10.104.19.57:9000",
-        access_key="minioadmin",
-        secret_key="minioadmin",
-        bucket_name="milvus-bucket"
+        endpoint="10.104.19.57:9000", access_key="minioadmin", secret_key="minioadmin", bucket_name="milvus-bucket"
     )
     sc.get_collection_binlog("448305293023730313")

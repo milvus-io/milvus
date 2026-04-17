@@ -1,6 +1,8 @@
 import subprocess
 import json
-def get_chart_version(repo = "milvus/milvus", app_version="2.2.0"):
+
+
+def get_chart_version(repo="milvus/milvus", app_version="2.2.0"):
     """
     Get helm chart version by app version
     """
@@ -19,8 +21,10 @@ def get_chart_version(repo = "milvus/milvus", app_version="2.2.0"):
     result = all_chart_versions[-1]
     return result
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Get helm charts version by app version")
     parser.add_argument("--app-version", type=str, default="2.2.0", help="app version")
     parser.add_argument("--repo", type=str, default="milvus/milvus", help="helm repo")

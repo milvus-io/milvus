@@ -272,8 +272,9 @@ class PhraseMatchTestGenerator:
             # Generate multiple documents for each pattern
             if slop == 0:  # Exact phrase
                 text = " ".join(pattern_words)
-                pattern_documents.append({
-                    "id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)})
+                pattern_documents.append(
+                    {"id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)}
+                )
 
             else:  # Pattern with gaps
                 # Generate slop number of unique words
@@ -290,10 +291,9 @@ class PhraseMatchTestGenerator:
                     all_words.insert(pos, word)
 
                 text = " ".join(all_words)
-                pattern_documents.append({
-                    "id": random.randint(0, 1000000),
-                    "text": text,
-                    "emb": self.generate_embedding(dim)})
+                pattern_documents.append(
+                    {"id": random.randint(0, 1000000), "text": text, "emb": self.generate_embedding(dim)}
+                )
 
         new_pattern_documents = []
         start = 1000000
@@ -326,9 +326,7 @@ class PhraseMatchTestGenerator:
             queries.append(
                 {
                     "id": i,
-                    "query": " ".join(words)
-                    if self.language == "en"
-                    else "".join(words),
+                    "query": " ".join(words) if self.language == "en" else "".join(words),
                     "slop": random.choice(slop_values),
                     "type": f"{num_words}_words",
                 }
@@ -368,4 +366,3 @@ class PhraseMatchTestGenerator:
             matched_docs.extend(doc_id)
 
         return matched_docs
-

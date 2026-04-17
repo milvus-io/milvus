@@ -8,9 +8,7 @@ def run_kubectl_get_pod(duration, interval, release_name):
     end_time = time.time() + duration
     while time.time() < end_time:
         cmd = f"kubectl get pod |grep {release_name}"
-        res = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        res = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = res.communicate()
         output = stdout.decode("utf-8")
         log.info(f"{cmd}\n{output}\n")
@@ -18,9 +16,7 @@ def run_kubectl_get_pod(duration, interval, release_name):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='Script to run "kubectl get pod" command at regular intervals'
-    )
+    parser = argparse.ArgumentParser(description='Script to run "kubectl get pod" command at regular intervals')
     parser.add_argument(
         "-d",
         "--duration",

@@ -35,7 +35,7 @@ exp_schema = "schema"
 
 
 class TestUtilityParams(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.fixture(scope="function", params=["JACCARD", "Superstructure", "Substructure"])
     def get_not_support_metric(self, request):
@@ -68,9 +68,11 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = get_invalid_type_collection_name
-        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 999,
-                                                      ct.err_msg: f"`collection_name` value {c_name} is illegal"})
+        self.utility_wrap.has_collection(
+            c_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_name_value_invalid(self, get_invalid_value_collection_name):
@@ -96,9 +98,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_type_collection_name
         p_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
-                                        check_items={ct.err_code: 999,
-                                                     ct.err_msg: f"`collection_name` value {c_name} is illegal"})
+        self.utility_wrap.has_partition(
+            c_name,
+            p_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_collection_name_value_invalid(self, get_invalid_value_collection_name):
@@ -126,9 +131,12 @@ class TestUtilityParams(TestcaseBase):
         ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = get_invalid_type_collection_name
-        ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 999,
-                                      ct.err_msg: f"`partition_name` value {p_name} is illegal"})
+        ut.has_partition(
+            c_name,
+            p_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: f"`partition_name` value {p_name} is illegal"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_name_value_invalid(self, get_invalid_value_collection_name):
@@ -156,9 +164,11 @@ class TestUtilityParams(TestcaseBase):
     def test_drop_collection_name_type_invalid(self, get_invalid_type_collection_name):
         self._connect()
         c_name = get_invalid_type_collection_name
-        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res,
-                                          check_items={ct.err_code: 999,
-                                                       ct.err_msg: f"`collection_name` value {c_name} is illegal"})
+        self.utility_wrap.drop_collection(
+            c_name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_name_value_invalid(self, get_invalid_value_collection_name):
@@ -181,8 +191,11 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         using = "empty"
         ut = ApiUtilityWrapper()
-        ex, _ = ut.list_collections(using=using, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 0, ct.err_msg: "should create connect"})
+        ex, _ = ut.list_collections(
+            using=using,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 0, ct.err_msg: "should create connect"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_name", ct.invalid_resource_names)
@@ -196,8 +209,9 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {invalid_name}"}
         if invalid_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty"}
-        self.utility_wrap.index_building_progress(collection_name=invalid_name,
-                                                  check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.index_building_progress(
+            collection_name=invalid_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     # TODO: not support index name
     @pytest.mark.tags(CaseLabel.L1)
@@ -211,8 +225,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         collection_w = self.init_collection_wrap()
         error = {ct.err_code: 999, ct.err_msg: "index not found"}
-        self.utility_wrap.index_building_progress(collection_name=collection_w.name, index_name=invalid_index_name,
-                                                  check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.index_building_progress(
+            collection_name=collection_w.name,
+            index_name=invalid_index_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("not ready")
@@ -295,8 +313,9 @@ class TestUtilityParams(TestcaseBase):
         err_msg = {ct.err_code: 999, ct.err_msg: "partition not found"}
         if partition_name is None:
             err_msg = {ct.err_code: 999, ct.err_msg: "is illegal"}
-        self.utility_wrap.loading_progress(collection_w.name, partition_names,
-                                           check_task=CheckTasks.err_res, check_items=err_msg)
+        self.utility_wrap.loading_progress(
+            collection_w.name, partition_names, check_task=CheckTasks.err_res, check_items=err_msg
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
@@ -309,8 +328,9 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         collection_w.load()
         err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
-        self.utility_wrap.loading_progress(collection_w.name, partition_names,
-                                           check_task=CheckTasks.err_res, check_items=err_msg)
+        self.utility_wrap.loading_progress(
+            collection_w.name, partition_names, check_task=CheckTasks.err_res, check_items=err_msg
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_collection_not_existed(self):
@@ -324,8 +344,11 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.wait_for_loading_complete(
             c_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 100, ct.err_msg: "collection not found[database=default]"
-                                                       "[collection={}]".format(c_name)})
+            check_items={
+                ct.err_code: 100,
+                ct.err_msg: "collection not found[database=default][collection={}]".format(c_name),
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_partition_not_existed(self):
@@ -337,9 +360,11 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         collection_w = self.init_collection_wrap()
         self.utility_wrap.wait_for_loading_complete(
-            collection_w.name, partition_names=[ct.default_tag],
+            collection_w.name,
+            partition_names=[ct.default_tag],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 200, ct.err_msg: f'partition not found[partition={ct.default_tag}]'})
+            check_items={ct.err_code: 200, ct.err_msg: f"partition not found[partition={ct.default_tag}]"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_not_existed(self):
@@ -368,11 +393,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         invalid_vector = get_invalid_vector_dict
         if not isinstance(invalid_vector, dict):
-            self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "vectors_left value {} "
-                                                                    "is illegal".format(invalid_vector)})
+            self.utility_wrap.calc_distance(
+                invalid_vector,
+                invalid_vector,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1, "err_msg": "vectors_left value {} is illegal".format(invalid_vector)},
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -385,11 +411,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         invalid_vector = get_invalid_vector_dict
         if isinstance(invalid_vector, dict):
-            self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "vectors_left value {} "
-                                                                    "is illegal".format(invalid_vector)})
+            self.utility_wrap.calc_distance(
+                invalid_vector,
+                invalid_vector,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1, "err_msg": "vectors_left value {} is illegal".format(invalid_vector)},
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -404,11 +431,12 @@ class TestUtilityParams(TestcaseBase):
         vector = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vector}
         if not isinstance(invalid_vector, dict):
-            self.utility_wrap.calc_distance(op_l, invalid_vector,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "vectors_right value {} "
-                                                                    "is illegal".format(invalid_vector)})
+            self.utility_wrap.calc_distance(
+                op_l,
+                invalid_vector,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1, "err_msg": "vectors_right value {} is illegal".format(invalid_vector)},
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="calc_distance interface is no longer supported")
@@ -423,11 +451,12 @@ class TestUtilityParams(TestcaseBase):
         vector = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vector}
         if isinstance(invalid_vector, dict):
-            self.utility_wrap.calc_distance(op_l, invalid_vector,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "vectors_right value {} "
-                                                                    "is illegal".format(invalid_vector)})
+            self.utility_wrap.calc_distance(
+                op_l,
+                invalid_vector,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1, "err_msg": "vectors_right value {} is illegal".format(invalid_vector)},
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_type(self, get_invalid_type_collection_name):
@@ -440,11 +469,15 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = get_invalid_type_collection_name
         new_collection_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 999,
-                                                         "err_msg": "`collection_name` value {} is illegal".format(
-                                                             old_collection_name)})
+        self.utility_wrap.rename_collection(
+            old_collection_name,
+            new_collection_name,
+            check_task=CheckTasks.err_res,
+            check_items={
+                "err_code": 999,
+                "err_msg": "`collection_name` value {} is illegal".format(old_collection_name),
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_value(self, get_invalid_value_collection_name):
@@ -460,9 +493,9 @@ class TestUtilityParams(TestcaseBase):
         error = {"err_code": 4, "err_msg": "collection not found"}
         if old_collection_name in [None, ""]:
             error = {"err_code": 999, "err_msg": "is illegal"}
-        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items=error)
+        self.utility_wrap.rename_collection(
+            old_collection_name, new_collection_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_type(self, get_invalid_type_collection_name):
@@ -475,11 +508,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = collection_w.name
         new_collection_name = get_invalid_type_collection_name
-        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "`collection_name` value {} is "
-                                                                    "illegal".format(new_collection_name)})
+        self.utility_wrap.rename_collection(
+            old_collection_name,
+            new_collection_name,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1, "err_msg": "`collection_name` value {} is illegal".format(new_collection_name)},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_value(self, get_invalid_value_collection_name):
@@ -495,9 +529,10 @@ class TestUtilityParams(TestcaseBase):
         error = {"err_code": 1100, "err_msg": "Invalid collection name"}
         if new_collection_name in [None, ""]:
             error = {"err_code": 999, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
-        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res, check_items=error)
-    
+        self.utility_wrap.rename_collection(
+            old_collection_name, new_collection_name, check_task=CheckTasks.err_res, check_items=error
+        )
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):
         """
@@ -509,10 +544,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = "test_collection_non_exist"
         new_collection_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 100,
-                                                         "err_msg": "collection not found"})
+        self.utility_wrap.rename_collection(
+            old_collection_name,
+            new_collection_name,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 100, "err_msg": "collection not found"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_name(self):
@@ -524,10 +561,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = collection_w.name
-        self.utility_wrap.rename_collection(old_collection_name, old_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1100,
-                                                         "err_msg": "collection name or database name should be different"})
+        self.utility_wrap.rename_collection(
+            old_collection_name,
+            old_collection_name,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100, "err_msg": "collection name or database name should be different"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_alias(self):
@@ -541,10 +580,12 @@ class TestUtilityParams(TestcaseBase):
         old_collection_name = collection_w.name
         alias = "test_alias"
         self.utility_wrap.create_alias(old_collection_name, alias)
-        self.utility_wrap.rename_collection(old_collection_name, alias,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 65535,
-                                                         "err_msg": f"cannot rename collection to an existing alias: {alias}"})
+        self.utility_wrap.rename_collection(
+            old_collection_name,
+            alias,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 65535, "err_msg": f"cannot rename collection to an existing alias: {alias}"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_using_alias(self):
@@ -559,15 +600,19 @@ class TestUtilityParams(TestcaseBase):
         alias = cf.gen_unique_str(prefix + "alias")
         new_collection_name = cf.gen_unique_str(prefix + "new")
         self.utility_wrap.create_alias(old_collection_name, alias)
-        self.utility_wrap.rename_collection(alias, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
-                                                         "err_msg": "unsupported use an alias to "
-                                                                    "rename collection, alias:{}".format(alias)})
+        self.utility_wrap.rename_collection(
+            alias,
+            new_collection_name,
+            check_task=CheckTasks.err_res,
+            check_items={
+                "err_code": 1,
+                "err_msg": "unsupported use an alias to rename collection, alias:{}".format(alias),
+            },
+        )
 
 
 class TestUtilityBase(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.fixture(scope="function", params=["metric_type", "metric"])
     def metric_field(self, request):
@@ -713,9 +758,8 @@ class TestUtilityBase(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         self.utility_wrap.index_building_progress(
-            c_name,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+            c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 4, ct.err_msg: "collection not found"}
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_empty(self):
@@ -728,7 +772,7 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(cw.collection, default_field_name, default_index_params)
         res, _ = self.utility_wrap.index_building_progress(c_name)
-        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 'Finished'}
+        exp_res = {"total_rows": 0, "indexed_rows": 0, "pending_index_rows": 0, "state": "Finished"}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -765,10 +809,10 @@ class TestUtilityBase(TestcaseBase):
         # The indexed_rows may be 0 due to compaction,
         # remove this assertion for now
         # assert res['indexed_rows'] == nb
-        assert res['total_rows'] == nb
+        assert res["total_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason='wait to modify')
+    @pytest.mark.skip(reason="wait to modify")
     def test_index_process_collection_indexing(self):
         """
         target: test building_process
@@ -787,7 +831,7 @@ class TestUtilityBase(TestcaseBase):
         while True:
             time.sleep(1)
             res, _ = self.utility_wrap.index_building_progress(c_name)
-            if 0 < res['indexed_rows'] <= nb:
+            if 0 < res["indexed_rows"] <= nb:
                 break
             if time.time() - start > 5:
                 raise MilvusException(1, f"Index build completed in more than 5s")
@@ -802,9 +846,8 @@ class TestUtilityBase(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         self.utility_wrap.wait_for_index_building_complete(
-            c_name,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 4, ct.err_msg: "collection not found"})
+            c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 4, ct.err_msg: "collection not found"}
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_empty(self):
@@ -819,7 +862,7 @@ class TestUtilityBase(TestcaseBase):
         cw.create_index(default_field_name, default_index_params)
         assert self.utility_wrap.wait_for_index_building_complete(c_name)[0]
         res, _ = self.utility_wrap.index_building_progress(c_name)
-        exp_res = {'total_rows': 0, 'indexed_rows': 0, 'pending_index_rows': 0, 'state': 'Finished'}
+        exp_res = {"total_rows": 0, "indexed_rows": 0, "pending_index_rows": 0, "state": "Finished"}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -852,10 +895,11 @@ class TestUtilityBase(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        self.utility_wrap.loading_progress(collection_w.name,
-                                           check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 101,
-                                                        ct.err_msg: 'collection not loaded'})
+        self.utility_wrap.loading_progress(
+            collection_w.name,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 101, ct.err_msg: "collection not loaded"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
@@ -868,7 +912,7 @@ class TestUtilityBase(TestcaseBase):
         # create, insert default_nb, flush and load
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=nb)[0]
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res[loading_progress] == '100%'
+        assert res[loading_progress] == "100%"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_async_load(self):
@@ -886,7 +930,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         loading_int = cf.percent_to_int(res[loading_progress])
         if -1 != loading_int:
-            assert (0 <= loading_int <= 100)
+            assert 0 <= loading_int <= 100
         else:
             log.info("The output of loading progress is not a string or a percentage")
 
@@ -901,7 +945,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        exp_res = {loading_progress: '100%'}
+        exp_res = {loading_progress: "100%"}
 
         assert exp_res == res
 
@@ -915,8 +959,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
         collection_w.release()
         error = {ct.err_code: 999, ct.err_msg: "collection not loaded"}
-        self.utility_wrap.loading_progress(collection_w.name,
-                                           check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.loading_progress(collection_w.name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_release_partition(self):
@@ -931,7 +974,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         partition_w.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[loading_progress] == '100%'
+        assert res[loading_progress] == "100%"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_load_partition(self):
@@ -946,7 +989,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.release()
         partition_w.load()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[loading_progress] == '100%'
+        assert res[loading_progress] == "100%"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_loading_progress_with_partition(self):
@@ -959,7 +1002,7 @@ class TestUtilityBase(TestcaseBase):
         half = ct.default_nb
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         res = self.utility_wrap.loading_progress(collection_w.name, partition_names=[partition_w.name])[0]
-        assert res[loading_progress] == '100%'
+        assert res[loading_progress] == "100%"
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_loading_progress_multi_replicas(self):
@@ -979,22 +1022,22 @@ class TestUtilityBase(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         collection_w.load(partition_names=[ct.default_partition_name], replica_number=2)
         res_collection, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_collection == {loading_progress: '100%'}
+        assert res_collection == {loading_progress: "100%"}
 
         # create partition and insert
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         partition_w.insert(cf.gen_default_dataframe_data(start=ct.default_nb))
         assert partition_w.num_entities == ct.default_nb
         res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_part_partition == {'loading_progress': '100%'}
+        assert res_part_partition == {"loading_progress": "100%"}
 
         res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_part_partition == {'loading_progress': '100%'}
+        assert res_part_partition == {"loading_progress": "100%"}
 
         collection_w.release()
         collection_w.load(replica_number=2)
         res_all_partitions, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_all_partitions == {'loading_progress': '100%'}
+        assert res_all_partitions == {"loading_progress": "100%"}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_loading_collection_empty(self):
@@ -1028,7 +1071,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.load(_async=True)
         self.utility_wrap.wait_for_loading_complete(collection_w.name, timeout=45)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res[loading_progress] == '100%'
+        assert res[loading_progress] == "100%"
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_collection(self):
@@ -1069,6 +1112,7 @@ class TestUtilityBase(TestcaseBase):
         expected: no exception
         """
         from time import sleep
+
         loops = 3
         c_name = cf.gen_unique_str(prefix)
         for _ in range(loops):
@@ -1092,10 +1136,11 @@ class TestUtilityBase(TestcaseBase):
         alias = cf.gen_unique_str(prefix + "alias")
         self.utility_wrap.create_alias(old_collection_name, alias)
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
-        collection_w = self.init_collection_wrap(name=new_collection_name,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: new_collection_name,
-                                                              exp_schema: default_schema})
+        collection_w = self.init_collection_wrap(
+            name=new_collection_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: new_collection_name, exp_schema: default_schema},
+        )
         collections = self.utility_wrap.list_collections()[0]
         assert new_collection_name in collections
         assert old_collection_name not in collections
@@ -1125,14 +1170,16 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name_2, old_collection_name_1)
         self.utility_wrap.rename_collection(tmp_collection_name, old_collection_name_2)
         # check collection renamed successfully
-        collection_w_1 = self.init_collection_wrap(name=old_collection_name_1,
-                                                   check_task=CheckTasks.check_collection_property,
-                                                   check_items={exp_name: old_collection_name_1,
-                                                                exp_schema: default_schema})
-        collection_w_2 = self.init_collection_wrap(name=old_collection_name_2,
-                                                   check_task=CheckTasks.check_collection_property,
-                                                   check_items={exp_name: old_collection_name_2,
-                                                                exp_schema: default_schema})
+        collection_w_1 = self.init_collection_wrap(
+            name=old_collection_name_1,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: old_collection_name_1, exp_schema: default_schema},
+        )
+        collection_w_2 = self.init_collection_wrap(
+            name=old_collection_name_2,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: old_collection_name_2, exp_schema: default_schema},
+        )
         collections = self.utility_wrap.list_collections()[0]
         assert old_collection_name_1 in collections
         assert old_collection_name_2 in collections
@@ -1163,10 +1210,11 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
         # 5. rename back to old collection name
         self.utility_wrap.rename_collection(new_collection_name, old_collection_name)
-        collection_w = self.init_collection_wrap(name=old_collection_name,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: old_collection_name,
-                                                              exp_schema: default_schema})
+        collection_w = self.init_collection_wrap(
+            name=old_collection_name,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: old_collection_name, exp_schema: default_schema},
+        )
         collections = self.utility_wrap.list_collections()[0]
         assert old_collection_name in collections
         assert new_collection_name not in collections
@@ -1194,10 +1242,11 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.drop_alias(collection_alias[0])
         # 5. rename collection to the dropped alias name
         self.utility_wrap.rename_collection(old_collection_name, collection_alias[0])
-        self.init_collection_wrap(name=collection_alias[0],
-                                  check_task=CheckTasks.check_collection_property,
-                                  check_items={exp_name: collection_alias[0],
-                                               exp_schema: default_schema})
+        self.init_collection_wrap(
+            name=collection_alias[0],
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: collection_alias[0], exp_schema: default_schema},
+        )
         collections = self.utility_wrap.list_collections()[0]
         assert collection_alias[0] in collections
         assert old_collection_name not in collections
@@ -1212,12 +1261,18 @@ class TestUtilityBase(TestcaseBase):
         # 1. create 2 collections
         a_name = cf.gen_unique_str("aa")
         b_name = cf.gen_unique_str("bb")
-        self.init_collection_wrap(name=a_name, schema=default_schema,
-                                  check_task=CheckTasks.check_collection_property,
-                                  check_items={exp_name: a_name, exp_schema: default_schema})
-        self.init_collection_wrap(name=b_name, schema=default_schema,
-                                  check_task=CheckTasks.check_collection_property,
-                                  check_items={exp_name: b_name, exp_schema: default_schema})
+        self.init_collection_wrap(
+            name=a_name,
+            schema=default_schema,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: a_name, exp_schema: default_schema},
+        )
+        self.init_collection_wrap(
+            name=b_name,
+            schema=default_schema,
+            check_task=CheckTasks.check_collection_property,
+            check_items={exp_name: b_name, exp_schema: default_schema},
+        )
 
         # 2. drop collection a
         self.utility_wrap.drop_collection(a_name)
@@ -1278,7 +1333,7 @@ class TestUtilityBase(TestcaseBase):
 
 
 class TestUtilityAdvanced(TestcaseBase):
-    """ Test case of index interface """
+    """Test case of index interface"""
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_multi_collections(self):
@@ -1334,7 +1389,7 @@ class TestUtilityAdvanced(TestcaseBase):
                 assert not self.utility_wrap.has_collection(name)[0]
 
         for i in range(thread_num):
-            x = threading.Thread(target=create_and_drop_collection, args=(c_names[i * num:(i + 1) * num],))
+            x = threading.Thread(target=create_and_drop_collection, args=(c_names[i * num : (i + 1) * num],))
             threads.append(x)
             x.start()
         for t in threads:
@@ -1380,7 +1435,7 @@ class TestUtilityAdvanced(TestcaseBase):
                     primary_field: FieldParams(is_primary=True, max_length=128).to_dict,
                     ct.default_float_vec_field_name: FieldParams(dim=ct.default_dim).to_dict,
                 },
-            )
+            ),
         )
 
         for _ in range(segment_num):
@@ -1395,7 +1450,7 @@ class TestUtilityAdvanced(TestcaseBase):
 
         # get_query_segment_info and verify results
         res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
-        assert len(res_sealed) > 0 # maybe mix compaction to 1 segment
+        assert len(res_sealed) > 0  # maybe mix compaction to 1 segment
         cnt = 0
         for r in res_sealed:
             log.info(f"segmentID {r.segmentID}: state: {r.state}; num_rows: {r.num_rows}; is_sorted: {r.is_sorted} ")
@@ -1404,12 +1459,14 @@ class TestUtilityAdvanced(TestcaseBase):
         assert cnt == nb * segment_num
 
         # verify search
-        self.collection_wrap.search(data=cf.gen_vectors(ct.default_nq, ct.default_dim),
-                                    anns_field=ct.default_float_vec_field_name, param=DefaultVectorSearchParams.IVF_SQ8(),
-                                    limit=ct.default_limit,
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": ct.default_nq,
-                                                 "limit": ct.default_limit})
+        self.collection_wrap.search(
+            data=cf.gen_vectors(ct.default_nq, ct.default_dim),
+            anns_field=ct.default_float_vec_field_name,
+            param=DefaultVectorSearchParams.IVF_SQ8(),
+            limit=ct.default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": ct.default_nq, "limit": ct.default_limit},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_growing_query_segment_info(self):
@@ -1433,7 +1490,7 @@ class TestUtilityAdvanced(TestcaseBase):
                     primary_field: FieldParams(is_primary=True, max_length=128).to_dict,
                     ct.default_float_vec_field_name: FieldParams(dim=ct.default_dim).to_dict,
                 },
-            )
+            ),
         )
 
         # index -> load
@@ -1506,9 +1563,11 @@ class TestUtilityAdvanced(TestcaseBase):
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
         assert len(all_querynodes) > 1
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         src_node_id = all_querynodes[0]
         des_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -1551,9 +1610,11 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         # use a node id greater than all nodes (not just querynodes) to ensure it truly does not exist
         all_node_ids = [node["identifier"] for node in ms.nodes]
         invalid_src_node_id = max(all_node_ids) + 1
@@ -1561,9 +1622,14 @@ class TestUtilityAdvanced(TestcaseBase):
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
-        self.utility_wrap.load_balance(collection_w.name, invalid_src_node_id, dst_node_ids, sealed_segment_ids,
-                                       check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "source node not found in any replica"})
+        self.utility_wrap.load_balance(
+            collection_w.name,
+            invalid_src_node_id,
+            dst_node_ids,
+            sealed_segment_ids,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "source node not found in any replica"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_dst_node_not_exist(self):
@@ -1589,9 +1655,11 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         src_node_id = all_querynodes[0]
         # use node ids greater than all nodes (not just querynodes) to ensure they truly do not exist
         all_node_ids = [node["identifier"] for node in ms.nodes]
@@ -1599,9 +1667,14 @@ class TestUtilityAdvanced(TestcaseBase):
         dst_node_ids = [max_node_id + 1, max_node_id + 2]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
-        self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
-                                       check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"})
+        self.utility_wrap.load_balance(
+            collection_w.name,
+            src_node_id,
+            dst_node_ids,
+            sealed_segment_ids,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
@@ -1627,21 +1700,28 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         if len(segment_distribution[src_node_id]["sealed"]) == 0:
-            sealed_segment_ids = [0] # add a segment id which is not exist
+            sealed_segment_ids = [0]  # add a segment id which is not exist
         else:
             # add a segment id which is not exist
             sealed_segment_ids.append(max(segment_distribution[src_node_id]["sealed"]) + 1)
         # load balance
-        self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
-                                       check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 999, ct.err_msg: "not found in source node"})
+        self.utility_wrap.load_balance(
+            collection_w.name,
+            src_node_id,
+            dst_node_ids,
+            sealed_segment_ids,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 999, ct.err_msg: "not found in source node"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_sealed_segment_id_not_exist(self):
@@ -1667,19 +1747,30 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         # add segment ids which are not exist
-        sealed_segment_ids = [sealed_segment_id
-                              for sealed_segment_id in range(max(segment_distribution[src_node_id]["sealed"]) + 100,
-                                                             max(segment_distribution[src_node_id]["sealed"]) + 103)]
+        sealed_segment_ids = [
+            sealed_segment_id
+            for sealed_segment_id in range(
+                max(segment_distribution[src_node_id]["sealed"]) + 100,
+                max(segment_distribution[src_node_id]["sealed"]) + 103,
+            )
+        ]
         # load balance
-        self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
-                                       check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "not found in source node"})
+        self.utility_wrap.load_balance(
+            collection_w.name,
+            src_node_id,
+            dst_node_ids,
+            sealed_segment_ids,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "not found in source node"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_balance_in_one_group(self):
@@ -1715,10 +1806,11 @@ class TestUtilityAdvanced(TestcaseBase):
                 break
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        group_nodes = sorted(group_nodes,
-                             key=lambda x: len(
-                                 segment_distribution[x]["sealed"])
-                             if x in segment_distribution else 0, reverse=True)
+        group_nodes = sorted(
+            group_nodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
         src_node_id = group_nodes[0]
         dst_node_ids = group_nodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -1771,9 +1863,14 @@ class TestUtilityAdvanced(TestcaseBase):
         segment_distribution = cf.get_segment_distribution(res)
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
-        self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
-                                       check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "must be in the same replica group"})
+        self.utility_wrap.load_balance(
+            collection_w.name,
+            src_node_id,
+            dst_node_ids,
+            sealed_segment_ids,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1, ct.err_msg: "must be in the same replica group"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="querycoordv2")
@@ -1793,14 +1890,19 @@ class TestUtilityAdvanced(TestcaseBase):
         # handoff: insert and flush one segment
         df = cf.gen_default_dataframe_data()
         insert_res, _ = collection_w.insert(df)
-        term_expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:10]}'
-        res = df.iloc[:10, :1].to_dict('records')
-        collection_w.query(term_expr, check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res,
-                                        "pk_name": collection_w.primary_field.name})
-        search_res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                                   ct.default_float_vec_field_name,
-                                                   ct.default_search_params, ct.default_limit)
+        term_expr = f"{ct.default_int64_field_name} in {insert_res.primary_keys[:10]}"
+        res = df.iloc[:10, :1].to_dict("records")
+        collection_w.query(
+            term_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name},
+        )
+        search_res_before, _ = collection_w.search(
+            df[ct.default_float_vec_field_name][:1].to_list(),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         log.debug(collection_w.num_entities)
 
         start = time.time()
@@ -1814,12 +1916,17 @@ class TestUtilityAdvanced(TestcaseBase):
                 raise MilvusException(1, f"Get query segment info after handoff cost more than 20s")
 
         # query and search from handoff segments
-        collection_w.query(term_expr, check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res,
-                                        "pk_name": collection_w.primary_field.name})
-        search_res_after, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
-                                                  ct.default_float_vec_field_name,
-                                                  ct.default_search_params, ct.default_limit)
+        collection_w.query(
+            term_expr,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res, "pk_name": collection_w.primary_field.name},
+        )
+        search_res_after, _ = collection_w.search(
+            df[ct.default_float_vec_field_name][:1].to_list(),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )
         # the ids between twice search is different because of index building
         # log.debug(search_res_before[0].ids)
         # log.debug(search_res_after[0].ids)
@@ -1832,7 +1939,6 @@ class TestUtilityAdvanced(TestcaseBase):
 
 @pytest.mark.tags(CaseLabel.L3)
 class TestUtilityFlushAll(TestcaseBase):
-
     @pytest.mark.parametrize("with_db", [True, False])
     def test_flush_all_multi_collections(self, with_db):
         """
@@ -1857,9 +1963,10 @@ class TestUtilityFlushAll(TestcaseBase):
             self.database_wrap.using_database(db_name)
 
         for i in range(collection_num):
-            collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
-                                                                             is_index=True)
-            collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+            collection_w, _, _, insert_ids, _ = self.init_collection_general(
+                prefix, insert_data=True, is_flush=False, is_index=True
+            )
+            collection_w.delete(f"{ct.default_int64_field_name} in {insert_ids[:delete_num]}")
             collection_names.append(collection_w.name)
 
         self.utility_wrap.flush_all(timeout=300)
@@ -1870,9 +1977,9 @@ class TestUtilityFlushAll(TestcaseBase):
 
             cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
             cw.load()
-            cw.query(f'{ct.default_int64_field_name} in {insert_ids[:100]}', check_task=CheckTasks.check_query_empty)
+            cw.query(f"{ct.default_int64_field_name} in {insert_ids[:100]}", check_task=CheckTasks.check_query_empty)
 
-            res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_ids[:delete_num]}')
+            res, _ = cw.query(f"{ct.default_int64_field_name} not in {insert_ids[:delete_num]}")
             assert len(res) == ct.default_nb - delete_num
 
     def test_flush_all_db_collections(self):
@@ -1903,7 +2010,7 @@ class TestUtilityFlushAll(TestcaseBase):
                 # create index
                 collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
                 # delete
-                collection_w.delete(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}')
+                collection_w.delete(f"{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}")
                 db_collection_names.append(collection_w.name)
             collection_names[db_name] = db_collection_names
             self.utility_wrap.list_collections()
@@ -1921,10 +2028,12 @@ class TestUtilityFlushAll(TestcaseBase):
 
                 cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
                 cw.load()
-                cw.query(f'{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}',
-                         check_task=CheckTasks.check_query_empty)
+                cw.query(
+                    f"{ct.default_int64_field_name} in {insert_res.primary_keys[:delete_num]}",
+                    check_task=CheckTasks.check_query_empty,
+                )
 
-                res, _ = cw.query(f'{ct.default_int64_field_name} not in {insert_res.primary_keys[:delete_num]}')
+                res, _ = cw.query(f"{ct.default_int64_field_name} not in {insert_res.primary_keys[:delete_num]}")
                 assert len(res) == tmp_nb - delete_num
 
     def test_flush_empty_db_collections(self):
@@ -1993,9 +2102,10 @@ class TestUtilityFlushAll(TestcaseBase):
         delete_num = 100
 
         for i in range(collection_num):
-            collection_w, _, _, insert_ids, _ = self.init_collection_general(prefix, insert_data=True, is_flush=False,
-                                                                             is_index=True)
-            collection_w.delete(f'{ct.default_int64_field_name} in {insert_ids[:delete_num]}')
+            collection_w, _, _, insert_ids, _ = self.init_collection_general(
+                prefix, insert_data=True, is_flush=False, is_index=True
+            )
+            collection_w.delete(f"{ct.default_int64_field_name} in {insert_ids[:delete_num]}")
             collection_names.append(collection_w.name)
 
         self.utility_wrap.flush_all(_async=True)
@@ -2025,6 +2135,7 @@ class TestUtilityFlushAll(TestcaseBase):
         expected:
         """
         from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+
         collection_num = 5
         collection_names = []
         delete_num = 100
@@ -2073,9 +2184,7 @@ class TestUtilityFlushAll(TestcaseBase):
 
             cw.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
             cw.load()
-            cw.query(f'{ct.default_int64_field_name} in {delete_ids}', check_task=CheckTasks.check_query_empty)
+            cw.query(f"{ct.default_int64_field_name} in {delete_ids}", check_task=CheckTasks.check_query_empty)
 
-            res, _ = cw.query(f'{ct.default_int64_field_name} not in {delete_ids}')
+            res, _ = cw.query(f"{ct.default_int64_field_name} not in {delete_ids}")
             assert len(res) == ct.default_nb * 2 - delete_num
-
-

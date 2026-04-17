@@ -8,7 +8,7 @@ from time import sleep
 from pathlib import Path
 from minio import Minio
 from pymilvus import connections
-from chaos.checker import (InsertChecker, SearchChecker, QueryChecker, BulkInsertChecker, Op)
+from chaos.checker import InsertChecker, SearchChecker, QueryChecker, BulkInsertChecker, Op
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
@@ -27,25 +27,28 @@ def assert_statistic(checkers, expectations={}):
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
-        if expectations.get(k, '') == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+        if expectations.get(k, "") == constants.FAIL:
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate < 0.49 or total < 2,
+                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
         else:
-            log.info(
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 and total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate > 0.90 and total > 2,
+                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
 
 
 def get_querynode_info(release_name):
     querynode_id_pod_pair = {}
     querynode_ip_pod_pair = get_pod_ip_name_pairs(
-        "chaos-testing", f"app.kubernetes.io/instance={release_name}, component=querynode")
+        "chaos-testing", f"app.kubernetes.io/instance={release_name}, component=querynode"
+    )
     ms = MilvusSys()
     for node in ms.query_nodes:
-        ip = node["infos"]['hardware_infos']["ip"].split(":")[0]
+        ip = node["infos"]["hardware_infos"]["ip"].split(":")[0]
         querynode_id_pod_pair[node["identifier"]] = querynode_ip_pod_pair[ip]
     return querynode_id_pod_pair
 
@@ -57,18 +60,17 @@ class TestChaosBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestChaos(TestChaosBase):
-
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, milvus_ns):
         connections.add_connection(default={"host": host, "port": port})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -76,7 +78,7 @@ class TestChaos(TestChaosBase):
         self.host = host
         self.port = port
         self.instance_name = instance_name
-        self.milvus_sys = MilvusSys(alias='default')
+        self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
@@ -89,7 +91,7 @@ class TestChaos(TestChaosBase):
             Op.insert: InsertChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
             Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=True),
-            Op.query: QueryChecker(collection_name=c_name)
+            Op.query: QueryChecker(collection_name=c_name),
         }
         self.health_checkers = checkers
 
@@ -136,7 +138,7 @@ class TestChaos(TestChaosBase):
     def test_bulk_insert(self):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         # c_name = cf.gen_unique_str("BulkInsertChecker_")
         # self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)

@@ -4,8 +4,11 @@ import time
 from loguru import logger
 import pymilvus
 from pymilvus import (
-    FieldSchema, CollectionSchema, DataType,
-    Collection, list_collections,
+    FieldSchema,
+    CollectionSchema,
+    DataType,
+    Collection,
+    list_collections,
 )
 
 # Explicit exports for `from utils import *` consumers (action_*.py).
@@ -35,18 +38,26 @@ __all__ = [
 ]
 
 logger.remove()
-logger.add(sys.stderr, format= "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "
     "<cyan>{thread.name}</cyan> |"
     "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="INFO")
+    level="INFO",
+)
 
 pymilvus_version = pymilvus.__version__
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW"]
 
-default_index_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}]
+default_index_params = [
+    {},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"M": 48, "efConstruction": 500},
+]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
 
@@ -111,12 +122,13 @@ def get_collections(prefix, check=False):
 
 def create_collections_and_insert_data(prefix, flush=True, count=3000, collection_cnt=11):
     import random
+
     dim = 128
     nb = count // 10
     default_fields = [
         FieldSchema(name="count", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="random_value", dtype=DataType.DOUBLE),
-        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
+        FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
     for index_name in all_index_types[:collection_cnt]:
@@ -134,18 +146,17 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
                 [
                     [i for i in range(nb * j, nb * j + nb)],
                     [float(random.randrange(-20, -10)) for _ in range(nb)],
-                    vectors[nb*j:nb*j+nb]
+                    vectors[nb * j : nb * j + nb],
                 ]
             )
             end_time = time.time()
-            logger.info(f"[{j+1}/{times}] insert {nb} data, time: {end_time - start_time:.4f}")
+            logger.info(f"[{j + 1}/{times}] insert {nb} data, time: {end_time - start_time:.4f}")
             total_time += end_time - start_time
             if j <= times - 3:
                 collection.flush()
                 collection.num_entities
             if j == times - 3:
                 collection.compact()
-
 
         logger.info(f"end insert, time: {total_time:.4f}")
         if flush:
@@ -264,8 +275,13 @@ def load_and_search(prefix, replicas=1):
         # define output_fields of search result
         v_search = vectors[:1]
         res = c.search(
-            v_search, "float_vector", search_params, topK,
-            "count > 500", output_fields=["count", "random_value"], timeout=120
+            v_search,
+            "float_vector",
+            search_params,
+            topK,
+            "count > 500",
+            output_fields=["count", "random_value"],
+            timeout=120,
         )
         end_time = time.time()
         # show result
@@ -284,7 +300,7 @@ def load_and_search(prefix, replicas=1):
         else:
             output_fields = ["count", "random_value", "float_vector"]
         res = c.query(expr, output_fields, timeout=120)
-        sorted_res = sorted(res, key=lambda k: k['count'])
+        sorted_res = sorted(res, key=lambda k: k["count"])
         for r in sorted_res:
             logger.info(r)
         t1 = time.time()

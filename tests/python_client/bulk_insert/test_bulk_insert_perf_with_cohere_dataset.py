@@ -2,7 +2,7 @@ import pytest
 import threading
 from time import sleep
 from pymilvus import connections, DataType, FieldSchema, CollectionSchema
-from chaos.checker import (BulkInsertChecker, Op)
+from chaos.checker import BulkInsertChecker, Op
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
@@ -17,16 +17,18 @@ def assert_statistic(checkers, expectations={}):
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
-        if expectations.get(k, '') == constants.FAIL:
-            log.info(
-                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+        if expectations.get(k, "") == constants.FAIL:
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate < 0.49 or total < 2,
+                f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
         else:
-            log.info(
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 and total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(
+                succ_rate > 0.90 and total > 2,
+                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+            )
 
 
 class TestBulkInsertBase:
@@ -36,22 +38,21 @@ class TestBulkInsertBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    host = '127.0.0.1'
+    host = "127.0.0.1"
     port = 19530
     _chaos_config = None
     health_checkers = {}
 
 
 class TestBUlkInsertPerf(TestBulkInsertBase):
-
     def teardown_method(self):
         sleep(10)
-        log.info(f'Alive threads: {threading.enumerate()}')
+        log.info(f"Alive threads: {threading.enumerate()}")
 
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, milvus_ns):
         connections.add_connection(default={"host": host, "port": port})
-        connections.connect(alias='default')
+        connections.connect(alias="default")
 
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -68,7 +69,7 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
             FieldSchema(name="views", dtype=DataType.DOUBLE),
             FieldSchema(name="paragraph_id", dtype=DataType.INT64),
             FieldSchema(name="langs", dtype=DataType.INT64),
-            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768)
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768),
         ]
         schema = CollectionSchema(fields=fields, description="test collection")
         fields_name = ["id", "title", "text", "url", "wiki_id", "views", "paragraph_id", "langs", "emb"]
@@ -81,8 +82,9 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
         if file_type == "parquet":
             files = ["train-00000-of-00252.parquet"]
         checkers = {
-            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False, schema=schema,
-                                              files=files, insert_data=False)
+            Op.bulk_insert: BulkInsertChecker(
+                collection_name=c_name, use_one_collection=False, schema=schema, files=files, insert_data=False
+            )
         }
         self.health_checkers = checkers
 
@@ -90,7 +92,7 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
     def test_bulk_insert_perf(self):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
-        log.info(connections.get_connection_addr('default'))
+        log.info(connections.get_connection_addr("default"))
         self.init_health_checkers()
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s

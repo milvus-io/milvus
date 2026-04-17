@@ -75,9 +75,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         logger.info(f"Collection {collection_name} created in upstream")
 
         # Wait for creation to sync
-        logger.info(
-            f"Waiting for collection {collection_name} to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for collection {collection_name} to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_create():
             has_collection = downstream_client.has_collection(collection_name)
@@ -85,9 +83,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 logger.info(f"Collection {collection_name} found in downstream")
             return has_collection
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create collection {collection_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
         # Create alias
         logger.info(f"Creating alias {alias_name} for collection {collection_name}")
@@ -103,20 +99,14 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         logger.info(f"Confirmed alias {alias_name} exists in upstream")
 
         # Verify alias points to correct collection using describe_alias
-        logger.info(
-            f"Verifying alias {alias_name} points to collection {collection_name}"
-        )
+        logger.info(f"Verifying alias {alias_name} points to collection {collection_name}")
         alias_desc = upstream_client.describe_alias(alias_name)
         logger.info(f"Alias description: {alias_desc}")
         assert alias_desc.get("collection_name") == collection_name
-        logger.info(
-            f"Confirmed alias {alias_name} correctly points to {collection_name}"
-        )
+        logger.info(f"Confirmed alias {alias_name} correctly points to {collection_name}")
 
         # Wait for alias sync to downstream
-        logger.info(
-            f"Waiting for alias {alias_name} to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for alias {alias_name} to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_alias():
             try:
@@ -127,19 +117,10 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                     logger.info(f"Alias {alias_name} found in downstream")
                     # Also verify alias points to correct collection in downstream
                     try:
-                        downstream_alias_desc = downstream_client.describe_alias(
-                            alias_name
-                        )
-                        logger.info(
-                            f"Downstream alias description: {downstream_alias_desc}"
-                        )
-                        if (
-                            downstream_alias_desc.get("collection_name")
-                            == collection_name
-                        ):
-                            logger.info(
-                                f"Downstream alias {alias_name} correctly points to {collection_name}"
-                            )
+                        downstream_alias_desc = downstream_client.describe_alias(alias_name)
+                        logger.info(f"Downstream alias description: {downstream_alias_desc}")
+                        if downstream_alias_desc.get("collection_name") == collection_name:
+                            logger.info(f"Downstream alias {alias_name} correctly points to {collection_name}")
                             return True
                         else:
                             logger.warning(
@@ -154,9 +135,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 logger.warning(f"Error checking downstream aliases: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_alias, sync_timeout, f"create alias {alias_name}"
-        )
+        assert self.wait_for_sync(check_alias, sync_timeout, f"create alias {alias_name}")
         logger.info("=== test_create_alias completed successfully ===")
 
     def test_drop_alias(self, upstream_client, downstream_client, sync_timeout):
@@ -189,9 +168,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         logger.info(f"Alias {alias_name} created in upstream")
 
         # Wait for setup to sync
-        logger.info(
-            f"Waiting for collection and alias setup to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for collection and alias setup to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_setup():
             try:
@@ -199,17 +176,13 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 downstream_aliases_result = downstream_client.list_aliases()
                 downstream_aliases = downstream_aliases_result.get("aliases", [])
                 has_alias = alias_name in downstream_aliases
-                logger.info(
-                    f"Downstream - has_collection: {has_collection}, has_alias: {has_alias}"
-                )
+                logger.info(f"Downstream - has_collection: {has_collection}, has_alias: {has_alias}")
                 return has_collection and has_alias
             except Exception as e:
                 logger.warning(f"Error checking downstream setup: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_setup, sync_timeout, f"setup collection and alias {collection_name}"
-        )
+        assert self.wait_for_sync(check_setup, sync_timeout, f"setup collection and alias {collection_name}")
 
         # Drop alias
         logger.info(f"Dropping alias {alias_name} from upstream")
@@ -225,9 +198,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         logger.info(f"Confirmed alias {alias_name} is dropped from upstream")
 
         # Wait for drop to sync to downstream
-        logger.info(
-            f"Waiting for alias drop to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for alias drop to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_drop():
             try:
@@ -236,9 +207,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 downstream_aliases = downstream_aliases_result.get("aliases", [])
                 is_dropped = alias_name not in downstream_aliases
                 if is_dropped:
-                    logger.info(
-                        f"Alias {alias_name} successfully dropped from downstream"
-                    )
+                    logger.info(f"Alias {alias_name} successfully dropped from downstream")
                 return is_dropped
             except Exception as e:
                 logger.warning(f"Error checking downstream aliases during drop: {e}")
@@ -264,9 +233,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         self.resources_to_cleanup.append(("alias", alias_name))
 
         # Initial cleanup
-        logger.info(
-            f"Performing initial cleanup for collections: {old_collection}, {new_collection}"
-        )
+        logger.info(f"Performing initial cleanup for collections: {old_collection}, {new_collection}")
         self.cleanup_collection(upstream_client, old_collection)
         self.cleanup_collection(upstream_client, new_collection)
 
@@ -286,18 +253,12 @@ class TestCDCSyncAlias(TestCDCSyncBase):
         logger.info(f"New collection {new_collection} created in upstream")
 
         # Create alias pointing to old collection
-        logger.info(
-            f"Creating alias {alias_name} pointing to old collection {old_collection}"
-        )
+        logger.info(f"Creating alias {alias_name} pointing to old collection {old_collection}")
         upstream_client.create_alias(old_collection, alias_name)
-        logger.info(
-            f"Alias {alias_name} created in upstream pointing to {old_collection}"
-        )
+        logger.info(f"Alias {alias_name} created in upstream pointing to {old_collection}")
 
         # Wait for setup to sync
-        logger.info(
-            f"Waiting for collections and alias setup to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for collections and alias setup to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_setup():
             try:
@@ -306,68 +267,43 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 downstream_aliases_result = downstream_client.list_aliases()
                 downstream_aliases = downstream_aliases_result.get("aliases", [])
                 has_alias = alias_name in downstream_aliases
-                logger.info(
-                    f"Downstream - has_old: {has_old}, has_new: {has_new}, has_alias: {has_alias}"
-                )
+                logger.info(f"Downstream - has_old: {has_old}, has_new: {has_new}, has_alias: {has_alias}")
                 return has_old and has_new and has_alias
             except Exception as e:
                 logger.warning(f"Error checking downstream setup: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_setup, sync_timeout, "setup collections and alias"
-        )
+        assert self.wait_for_sync(check_setup, sync_timeout, "setup collections and alias")
 
         # Alter alias to point to new collection
-        logger.info(
-            f"Altering alias {alias_name} to point to new collection {new_collection}"
-        )
+        logger.info(f"Altering alias {alias_name} to point to new collection {new_collection}")
         upstream_client.alter_alias(new_collection, alias_name)
-        logger.info(
-            f"Alias {alias_name} altered in upstream to point to {new_collection}"
-        )
+        logger.info(f"Alias {alias_name} altered in upstream to point to {new_collection}")
 
         # Verify alias alteration in upstream
-        logger.info(
-            f"Verifying alias {alias_name} now points to {new_collection} in upstream"
-        )
+        logger.info(f"Verifying alias {alias_name} now points to {new_collection} in upstream")
         upstream_alias_desc = upstream_client.describe_alias(alias_name)
         logger.info(f"Upstream alias description after alter: {upstream_alias_desc}")
         assert upstream_alias_desc.get("collection_name") == new_collection
-        logger.info(
-            f"Confirmed upstream alias {alias_name} now points to {new_collection}"
-        )
+        logger.info(f"Confirmed upstream alias {alias_name} now points to {new_collection}")
 
         # Wait for alter to sync
-        logger.info(
-            f"Waiting for alias alter to sync to downstream (timeout: {sync_timeout}s)"
-        )
+        logger.info(f"Waiting for alias alter to sync to downstream (timeout: {sync_timeout}s)")
 
         def check_alter():
             try:
                 # Check if alias still exists and points to correct collection after alter
                 downstream_aliases_result = downstream_client.list_aliases()
-                logger.info(
-                    f"Downstream aliases result after alter: {downstream_aliases_result}"
-                )
+                logger.info(f"Downstream aliases result after alter: {downstream_aliases_result}")
                 downstream_aliases = downstream_aliases_result.get("aliases", [])
                 if alias_name in downstream_aliases:
                     logger.info(f"Alias {alias_name} found in downstream after alter")
                     # Verify alias points to new collection
                     try:
-                        downstream_alias_desc = downstream_client.describe_alias(
-                            alias_name
-                        )
-                        logger.info(
-                            f"Downstream alias description after alter: {downstream_alias_desc}"
-                        )
-                        if (
-                            downstream_alias_desc.get("collection_name")
-                            == new_collection
-                        ):
-                            logger.info(
-                                f"Downstream alias {alias_name} correctly points to {new_collection}"
-                            )
+                        downstream_alias_desc = downstream_client.describe_alias(alias_name)
+                        logger.info(f"Downstream alias description after alter: {downstream_alias_desc}")
+                        if downstream_alias_desc.get("collection_name") == new_collection:
+                            logger.info(f"Downstream alias {alias_name} correctly points to {new_collection}")
                             return True
                         else:
                             logger.warning(
@@ -375,16 +311,12 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                             )
                             return False
                     except Exception as desc_e:
-                        logger.warning(
-                            f"Error describing downstream alias after alter: {desc_e}"
-                        )
+                        logger.warning(f"Error describing downstream alias after alter: {desc_e}")
                         return False
                 return False
             except Exception as e:
                 logger.warning(f"Error checking downstream aliases after alter: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_alter, sync_timeout, f"alter alias {alias_name}"
-        )
+        assert self.wait_for_sync(check_alter, sync_timeout, f"alter alias {alias_name}")
         logger.info("=== test_alter_alias completed successfully ===")

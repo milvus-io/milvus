@@ -12,6 +12,7 @@ query all data
 compare result
 
 """
+
 import time
 
 from loguru import logger
@@ -34,15 +35,15 @@ def get_collection_info(info, db_name, c_name):
     info[db_name][c_name] = {}
     c = Collection(c_name)
 
-    info[db_name][c_name]['name'] = c.name
+    info[db_name][c_name]["name"] = c.name
     # logger.info(c.num_entities)
-    info[db_name][c_name]['num_entities'] = c.num_entities
+    info[db_name][c_name]["num_entities"] = c.num_entities
     # logger.info(c.schema)
-    info[db_name][c_name]['schema'] = len([f.name for f in c.schema.fields])
+    info[db_name][c_name]["schema"] = len([f.name for f in c.schema.fields])
     # logger.info(c.indexes)
-    info[db_name][c_name]['indexes'] = sorted([x.index_name for x in c.indexes])
+    info[db_name][c_name]["indexes"] = sorted([x.index_name for x in c.indexes])
     # logger.info(c.partitions)
-    info[db_name][c_name]['partitions'] = sorted([p.name for p in c.partitions])
+    info[db_name][c_name]["partitions"] = sorted([p.name for p in c.partitions])
     try:
         replicas = len(c.get_replicas().groups)
     except Exception as e:
@@ -50,22 +51,22 @@ def get_collection_info(info, db_name, c_name):
         # logger.info(f"no replica for {db_name}.{c_name}")
         replicas = 0
     # logger.info(replicas)
-    info[db_name][c_name]['replicas'] = replicas
+    info[db_name][c_name]["replicas"] = replicas
     if replicas > 0:
         try:
             # logger.info(f"start query {db_name}.{c_name}")
             res = c.query(expr="", output_fields=["count(*)"], timeout=60)
             cnt = res[0]["count(*)"]
             # logger.info(cnt)
-            info[db_name][c_name]['cnt'] = cnt
+            info[db_name][c_name]["cnt"] = cnt
         except Exception as e:
             # logger.warning(f"failed to query {db_name}.{c_name}: {e}")
-            info[db_name][c_name]['cnt'] = -1
+            info[db_name][c_name]["cnt"] = -1
 
 
 def get_cluster_info(uri, token):
     try:
-        connections.disconnect(alias='default')
+        connections.disconnect(alias="default")
     except Exception as e:
         logger.warning(e)
     if token:
@@ -92,14 +93,14 @@ def get_cluster_info(uri, token):
     return info
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='connection info')
-    parser.add_argument('--upstream-uri', type=str, default='http://10.100.36.179:19530', help='milvus uri')
-    parser.add_argument('--downstream-uri', type=str, default='http://10.100.36.178:19530', help='milvus uri')
-    parser.add_argument('--upstream-token', type=str, default='root:Milvus', help='milvus token')
-    parser.add_argument('--downstream-token', type=str, default='root:Milvus', help='milvus token')
+    parser = argparse.ArgumentParser(description="connection info")
+    parser.add_argument("--upstream-uri", type=str, default="http://10.100.36.179:19530", help="milvus uri")
+    parser.add_argument("--downstream-uri", type=str, default="http://10.100.36.178:19530", help="milvus uri")
+    parser.add_argument("--upstream-token", type=str, default="root:Milvus", help="milvus token")
+    parser.add_argument("--downstream-token", type=str, default="root:Milvus", help="milvus token")
     args = parser.parse_args()
     diff_cnt = 0
     diff = None

@@ -3,20 +3,24 @@ from utils.util_log import test_log as log
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "BIN_FLAT", "BIN_IVF_FLAT"]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"nlist": 128}, {"nlist": 128}]
+default_index_params = [
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"M": 48, "efConstruction": 500},
+    {"nlist": 128},
+    {"nlist": 128},
+]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
+
 
 def gen_index_param(index_type):
     metric_type = "L2"
     if "BIN" in index_type:
         metric_type = "HAMMING"
-    index_param = {
-        "index_type": index_type,
-        "params": index_params_map[index_type],
-        "metric_type": metric_type
-    }
+    index_param = {"index_type": index_type, "params": index_params_map[index_type], "metric_type": metric_type}
     return index_param
 
 
@@ -53,6 +57,7 @@ def get_deploy_test_collections():
         log.error(f"get_all_collections error: {e}")
         return []
     return collections
+
 
 def get_chaos_test_collections():
     try:

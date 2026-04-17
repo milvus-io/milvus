@@ -8,6 +8,7 @@ Feature: collection-level property `query_mode: large_topk`
 Test Plan: tests/python_client/docs/test-plan-large-topk.md
 Issue: https://github.com/milvus-io/milvus/issues/48725
 """
+
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -16,13 +17,13 @@ from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType, MilvusException, AnnSearchRequest, RRFRanker
 
 prefix = "large_topk"
-default_nb = 3000          # > 1024 to trigger IVF index build
-default_dim = ct.default_dim   # 128
-default_nq = ct.default_nq     # 2
+default_nb = 3000  # > 1024 to trigger IVF index build
+default_dim = ct.default_dim  # 128
+default_nq = ct.default_nq  # 2
 default_limit = ct.default_limit  # 10
 vec_field = ct.default_float_vec_field_name  # "float_vector"
-large_topk_first = 16385   # first topk above the normal 16384 limit
-large_topk_total = 21000   # total rows in col_large_topk (> large_topk_first + default_nb for headroom)
+large_topk_first = 16385  # first topk above the normal 16384 limit
+large_topk_total = 21000  # total rows in col_large_topk (> large_topk_first + default_nb for headroom)
 
 
 @pytest.mark.xdist_group("TestLargeTopkShared")
@@ -48,8 +49,7 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
             schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
             schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
             query_mode_props = {"query_mode": "large_topk"} if enable_large_topk else None
-            self.create_collection(client, col_name, schema=schema,
-                                   properties=query_mode_props, force_teardown=False)
+            self.create_collection(client, col_name, schema=schema, properties=query_mode_props, force_teardown=False)
             index_params = self.prepare_index_params(client)[0]
             # FLAT: 100% recall, simplifies assertions
             index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
@@ -85,13 +85,15 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
         assert props.get("query_mode") == "large_topk", f"property not set: {props}"
 
         vectors = cf.gen_vectors(default_nq, default_dim)
-        self.search(client, self.col_large_topk, data=vectors,
-                    anns_field=vec_field, limit=100,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": 100,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            self.col_large_topk,
+            data=vectors,
+            anns_field=vec_field,
+            limit=100,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": 100, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("topk", [1, 100, 16384])
@@ -104,13 +106,15 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
         client = self._client()
         vectors = cf.gen_vectors(default_nq, default_dim)
         expected_limit = min(topk, large_topk_total)
-        self.search(client, self.col_large_topk, data=vectors,
-                    anns_field=vec_field, limit=topk,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": expected_limit,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            self.col_large_topk,
+            data=vectors,
+            anns_field=vec_field,
+            limit=topk,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": expected_limit, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_result_consistency(self):
@@ -122,10 +126,8 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
         client = self._client()
         vectors = cf.gen_vectors(1, default_dim)
 
-        res1 = client.search(self.col_large_topk, data=vectors,
-                             limit=50, anns_field=vec_field)
-        res2 = client.search(self.col_large_topk, data=vectors,
-                             limit=50, anns_field=vec_field)
+        res1 = client.search(self.col_large_topk, data=vectors, limit=50, anns_field=vec_field)
+        res2 = client.search(self.col_large_topk, data=vectors, limit=50, anns_field=vec_field)
 
         ids1 = [r["id"] for r in res1[0]]
         ids2 = [r["id"] for r in res2[0]]
@@ -145,8 +147,9 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
                   does not guarantee 100% recall, so returned count may be < topk.
         """
         client = self._client()
-        results = client.search(self.col_large_topk, data=cf.gen_vectors(default_nq, default_dim),
-                                anns_field=vec_field, limit=topk)
+        results = client.search(
+            self.col_large_topk, data=cf.gen_vectors(default_nq, default_dim), anns_field=vec_field, limit=topk
+        )
         for hits in results:
             assert len(hits) > 0, "Expected non-empty results"
             distances = [h["distance"] for h in hits]
@@ -165,21 +168,30 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nq, default_dim)
 
         # Normal topk limit works fine
-        self.search(client, self.col_normal, data=vectors,
-                    anns_field=vec_field, limit=16384,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": default_nb,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            self.col_normal,
+            data=vectors,
+            anns_field=vec_field,
+            limit=16384,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": default_nb, "metric": "L2"},
+        )
 
         # Above limit must be rejected
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"topk [{large_topk_first}] is invalid, it should be in range [1, 16384]"}
-        self.search(client, self.col_normal, data=vectors,
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: f"topk [{large_topk_first}] is invalid, it should be in range [1, 16384]",
+        }
+        self.search(
+            client,
+            self.col_normal,
+            data=vectors,
+            anns_field=vec_field,
+            limit=large_topk_first,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     # Note: search_iterator and query_iterator are NOT affected by query_mode=large_topk.
     # The SDK enforces batch_size <= 16384 client-side (ParamError, unrelated to large_topk).
@@ -200,8 +212,7 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
             output_fields=["id"],
             limit=large_topk_first,
         )
-        assert len(res) == large_topk_first, \
-            f"Expected {large_topk_first} results, got {len(res)}"
+        assert len(res) == large_topk_first, f"Expected {large_topk_first} results, got {len(res)}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_without_property_fails(self):
@@ -218,8 +229,7 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
                 output_fields=["id"],
                 limit=large_topk_first,
             )
-        assert str(large_topk_first) in str(exc_info.value), \
-            f"Expected topk error, got: {exc_info.value}"
+        assert str(large_topk_first) in str(exc_info.value), f"Expected topk error, got: {exc_info.value}"
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +248,7 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
         query_mode_props = {"query_mode": "large_topk"} if enable_large_topk else None
-        self.create_collection(client, col, schema=schema,
-                               properties=query_mode_props, force_teardown=True)
+        self.create_collection(client, col, schema=schema, properties=query_mode_props, force_teardown=True)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
         self.create_index(client, col, index_params)
@@ -267,8 +276,7 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.release_collection(client, col)
         self.drop_index(client, col, vec_field)
 
-        self.alter_collection_properties(client, col,
-                                         properties={"query_mode": "large_topk"})
+        self.alter_collection_properties(client, col, properties={"query_mode": "large_topk"})
 
         desc = client.describe_collection(col)
         assert desc.get("properties", {}).get("query_mode") == "large_topk"
@@ -278,11 +286,15 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
 
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=100,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq, "limit": 100, "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=100,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": 100, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_drop_collection_property(self):
@@ -304,21 +316,22 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.drop_collection_properties(client, col, property_keys=["query_mode"])
 
         desc = client.describe_collection(col)
-        assert "query_mode" not in desc.get("properties", {}), \
-            f"property still present: {desc.get('properties')}"
+        assert "query_mode" not in desc.get("properties", {}), f"property still present: {desc.get('properties')}"
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
 
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": default_limit, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alter_property_without_dropping_index_fails(self):
@@ -330,12 +343,10 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         client = self._client()
         col = self._setup_col(client, enable_large_topk=False, nb=0)
 
-        error = {ct.err_code: 702,
-                 ct.err_msg: "can not alter query_mode if the collection already has a vector index"}
-        self.alter_collection_properties(client, col,
-                                         properties={"query_mode": "large_topk"},
-                                         check_task=CheckTasks.err_res,
-                                         check_items=error)
+        error = {ct.err_code: 702, ct.err_msg: "can not alter query_mode if the collection already has a vector index"}
+        self.alter_collection_properties(
+            client, col, properties={"query_mode": "large_topk"}, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_drop_property_without_dropping_index_fails(self):
@@ -347,12 +358,10 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         client = self._client()
         col = self._setup_col(client, enable_large_topk=True, nb=0)
 
-        error = {ct.err_code: 702,
-                 ct.err_msg: "can not alter query_mode if the collection already has a vector index"}
-        self.drop_collection_properties(client, col,
-                                        property_keys=["query_mode"],
-                                        check_task=CheckTasks.err_res,
-                                        check_items=error)
+        error = {ct.err_code: 702, ct.err_msg: "can not alter query_mode if the collection already has a vector index"}
+        self.drop_collection_properties(
+            client, col, property_keys=["query_mode"], check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_empty_collection_search(self):
@@ -364,8 +373,9 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         client = self._client()
         col = self._setup_col(client, enable_large_topk=True, nb=0)
 
-        res = client.search(col, data=cf.gen_vectors(default_nq, default_dim),
-                            limit=default_limit, anns_field=vec_field)
+        res = client.search(
+            col, data=cf.gen_vectors(default_nq, default_dim), limit=default_limit, anns_field=vec_field
+        )
         for hits in res:
             assert len(hits) == 0, f"Empty collection should return 0 results, got {len(hits)}"
 
@@ -387,19 +397,20 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         # Phase 1: add property
         self.release_collection(client, col)
         self.drop_index(client, col, vec_field)
-        self.alter_collection_properties(client, col,
-                                         properties={"query_mode": "large_topk"})
+        self.alter_collection_properties(client, col, properties={"query_mode": "large_topk"})
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
-        self.search(client, col, data=vectors, anns_field=vec_field,
-                    limit=default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=vectors,
+            anns_field=vec_field,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": default_limit, "metric": "L2"},
+        )
 
         # Phase 2: drop property
         self.release_collection(client, col)
@@ -407,13 +418,15 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.drop_collection_properties(client, col, property_keys=["query_mode"])
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
-        self.search(client, col, data=vectors, anns_field=vec_field,
-                    limit=default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=vectors,
+            anns_field=vec_field,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": default_limit, "metric": "L2"},
+        )
 
         desc = client.describe_collection(col)
         assert "query_mode" not in desc.get("properties", {})
@@ -437,16 +450,19 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.load_collection(client, col)
 
         desc = client.describe_collection(col)
-        assert desc.get("properties", {}).get("query_mode") == "large_topk", \
+        assert desc.get("properties", {}).get("query_mode") == "large_topk", (
             f"property lost after reload: {desc.get('properties')}"
+        )
 
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": large_topk_first,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=large_topk_first,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": large_topk_first, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_large_topk_growing_segment(self):
@@ -466,13 +482,15 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.insert(client, col, rows)
         # No flush — data stays in growing segment
 
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=100,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": 100,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=100,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": 100, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_invalid_property_value(self):
@@ -487,12 +505,15 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
 
-        error = {ct.err_code: 65535,
-                 ct.err_msg: 'invalid query_mode value "invalid_mode", valid values: [large_topk]'}
-        self.create_collection(client, col, schema=schema,
-                               properties={"query_mode": "invalid_mode"},
-                               check_task=CheckTasks.err_res,
-                               check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: 'invalid query_mode value "invalid_mode", valid values: [large_topk]'}
+        self.create_collection(
+            client,
+            col,
+            schema=schema,
+            properties={"query_mode": "invalid_mode"},
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("value", ["LARGE_TOPK", "Large_TopK", "large_TOPK"])
@@ -512,8 +533,7 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         schema = self.create_schema(client)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, col, schema=schema,
-                               properties={"query_mode": value}, force_teardown=True)
+        self.create_collection(client, col, schema=schema, properties={"query_mode": value}, force_teardown=True)
 
         desc = client.describe_collection(col)
         stored = desc.get("properties", {}).get("query_mode")
@@ -528,13 +548,15 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.insert(client, col, rows)
         self.flush(client, col)
 
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq,
-                                 "limit": nb,
-                                 "metric": "L2"})
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=large_topk_first,
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True, "nq": default_nq, "limit": nb, "metric": "L2"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("key", ["QUERY_MODE", "Query_Mode", "query_MODE"])
@@ -554,14 +576,12 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         schema = self.create_schema(client)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, col, schema=schema,
-                               properties={key: "large_topk"}, force_teardown=True)
+        self.create_collection(client, col, schema=schema, properties={key: "large_topk"}, force_teardown=True)
 
         desc = client.describe_collection(col)
         props = desc.get("properties", {})
         assert key in props, f"key {key!r} not stored: {props}"
-        assert "query_mode" not in props, \
-            f"query_mode should not be recognized: {props}"
+        assert "query_mode" not in props, f"query_mode should not be recognized: {props}"
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
@@ -571,12 +591,19 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         self.insert(client, col, rows)
         self.flush(client, col)
 
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"topk [{large_topk_first}] is invalid, it should be in range [1, 16384]"}
-        self.search(client, col, data=cf.gen_vectors(default_nq, default_dim),
-                    anns_field=vec_field, limit=large_topk_first,
-                    check_task=CheckTasks.err_res,
-                    check_items=error)
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: f"topk [{large_topk_first}] is invalid, it should be in range [1, 16384]",
+        }
+        self.search(
+            client,
+            col,
+            data=cf.gen_vectors(default_nq, default_dim),
+            anns_field=vec_field,
+            limit=large_topk_first,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     # Note: search_iterator and query_iterator are NOT affected by query_mode=large_topk.
     # The SDK enforces batch_size <= 16384 client-side (ParamError code=1, regardless of property).
@@ -596,18 +623,17 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("vec2", DataType.FLOAT_VECTOR, dim=default_dim)
         query_mode_props = {"query_mode": "large_topk"} if enable_large_topk else None
-        self.create_collection(client, col, schema=schema,
-                               properties=query_mode_props, force_teardown=True)
+        self.create_collection(client, col, schema=schema, properties=query_mode_props, force_teardown=True)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(vec_field, index_type="IVF_FLAT", metric_type="L2",
-                               params={"nlist": 64})
-        index_params.add_index("vec2", index_type="IVF_FLAT", metric_type="L2",
-                               params={"nlist": 64})
+        index_params.add_index(vec_field, index_type="IVF_FLAT", metric_type="L2", params={"nlist": 64})
+        index_params.add_index("vec2", index_type="IVF_FLAT", metric_type="L2", params={"nlist": 64})
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
         if nb > 0:
-            rows = [{vec_field: cf.gen_vectors(1, default_dim)[0],
-                     "vec2": cf.gen_vectors(1, default_dim)[0]} for _ in range(nb)]
+            rows = [
+                {vec_field: cf.gen_vectors(1, default_dim)[0], "vec2": cf.gen_vectors(1, default_dim)[0]}
+                for _ in range(nb)
+            ]
             self.insert(client, col, rows)
             self.flush(client, col)
         return col
@@ -638,9 +664,7 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
                 limit=large_topk_first,
             ),
         ]
-        res, _ = self.hybrid_search(client, col,
-                                    reqs=req_list, ranker=RRFRanker(),
-                                    limit=large_topk_first)
+        res, _ = self.hybrid_search(client, col, reqs=req_list, ranker=RRFRanker(), limit=large_topk_first)
         assert len(res) == default_nq, f"Expected {default_nq} query results, got {len(res)}"
         for hits in res:
             assert len(hits) > 0, "Expected non-empty hybrid search results"
@@ -671,11 +695,16 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
             ),
         ]
         # hybrid_search uses "invalid max query result window" (not "topk [N] is invalid")
-        error = {ct.err_code: 65535,
-                 ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got {large_topk_first}"}
-        self.hybrid_search(client, col,
-                           reqs=req_list, ranker=RRFRanker(),
-                           limit=large_topk_first,
-                           check_task=CheckTasks.err_res,
-                           check_items=error)
-
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got {large_topk_first}",
+        }
+        self.hybrid_search(
+            client,
+            col,
+            reqs=req_list,
+            ranker=RRFRanker(),
+            limit=large_topk_first,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )

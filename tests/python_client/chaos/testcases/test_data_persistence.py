@@ -9,12 +9,11 @@ from utils.util_log import test_log as log
 
 
 class TestDataPersistence(TestcaseBase):
-    """ Test case of end to end"""
+    """Test case of end to end"""
 
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." %
-                 method.__name__)
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -60,12 +59,12 @@ class TestDataPersistence(TestcaseBase):
         if len(index_infos) == 0:
             log.info("collection {name} does not have index, create index for it")
             t0 = time.time()
-            index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                                 index_params=index_params,
-                                                 index_name=cf.gen_unique_str())
-            index, _ = collection_w.create_index(field_name=ct.default_string_field_name,
-                                                 index_params={},
-                                                 index_name=cf.gen_unique_str())
+            index, _ = collection_w.create_index(
+                field_name=ct.default_float_vec_field_name, index_params=index_params, index_name=cf.gen_unique_str()
+            )
+            index, _ = collection_w.create_index(
+                field_name=ct.default_string_field_name, index_params={}, index_name=cf.gen_unique_str()
+            )
             tt = time.time() - t0
             log.info(f"assert index: {tt}")
 
@@ -79,9 +78,9 @@ class TestDataPersistence(TestcaseBase):
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"ef": 64}}
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res_1, _ = collection_w.search(
+            data=search_vectors, anns_field=ct.default_float_vec_field_name, param=search_params, limit=1
+        )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
@@ -99,14 +98,14 @@ class TestDataPersistence(TestcaseBase):
         log.info(f"assert load: {tt}")
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res_1, _ = collection_w.search(
+            data=search_vectors, anns_field=ct.default_float_vec_field_name, param=search_params, limit=1
+        )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
+        term_expr = f"{ct.default_int64_field_name} in [1001,1201,4999,2999]"
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0

@@ -48,8 +48,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=256, nullable=True, warmup="disable")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # 2. describe_collection verify field warmup
@@ -68,12 +69,22 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # 4. search & query
         vectors_to_search = cf.gen_vectors(1, default_warmup_dim)
-        search_res = self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                                 output_fields=["int64_field", "varchar_field"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            limit=default_limit,
+            output_fields=["int64_field", "varchar_field"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=default_limit,
-                               output_fields=["pk", "int64_field", "float_field", "varchar_field"])[0]
+        query_res = self.query(
+            client,
+            collection_name,
+            filter="pk >= 0",
+            limit=default_limit,
+            output_fields=["pk", "int64_field", "float_field", "varchar_field"],
+        )[0]
         assert len(query_res) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -100,30 +111,53 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("double_1", DataType.DOUBLE, warmup=warmup, nullable=True)
         schema.add_field("varchar_1", DataType.VARCHAR, max_length=256, warmup=warmup, nullable=True)
         schema.add_field("bool_1", DataType.BOOL, warmup=warmup, nullable=True)
-        schema.add_field("array_int64_1", DataType.ARRAY, element_type=DataType.INT64,
-                         max_capacity=10, warmup=warmup, nullable=True)
-        schema.add_field("array_float_1", DataType.ARRAY, element_type=DataType.FLOAT,
-                         max_capacity=10, warmup=warmup, nullable=True)
-        schema.add_field("array_varchar_1", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_length=256, max_capacity=10, warmup=warmup, nullable=True)
+        schema.add_field(
+            "array_int64_1", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10, warmup=warmup, nullable=True
+        )
+        schema.add_field(
+            "array_float_1", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=10, warmup=warmup, nullable=True
+        )
+        schema.add_field(
+            "array_varchar_1",
+            DataType.ARRAY,
+            element_type=DataType.VARCHAR,
+            max_length=256,
+            max_capacity=10,
+            warmup=warmup,
+            nullable=True,
+        )
         schema.add_field("json_1", DataType.JSON, warmup=warmup, nullable=True)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec_float", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        index_params.add_index(field_name="vec_f16", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        index_params.add_index(field_name="vec_bf16", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        index_params.add_index(field_name="vec_sparse", index_type="SPARSE_INVERTED_INDEX",
-                               metric_type="IP")
+        index_params.add_index(
+            field_name="vec_float", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        index_params.add_index(
+            field_name="vec_f16", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        index_params.add_index(
+            field_name="vec_bf16", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        index_params.add_index(field_name="vec_sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # describe verify all fields
         res = self.describe_collection(client, collection_name)[0]
-        warmup_fields = ["vec_float", "vec_f16", "vec_bf16", "vec_sparse",
-                         "int64_1", "float_1", "double_1", "varchar_1", "bool_1",
-                         "array_int64_1", "array_float_1", "array_varchar_1", "json_1"]
+        warmup_fields = [
+            "vec_float",
+            "vec_f16",
+            "vec_bf16",
+            "vec_sparse",
+            "int64_1",
+            "float_1",
+            "double_1",
+            "varchar_1",
+            "bool_1",
+            "array_int64_1",
+            "array_float_1",
+            "array_varchar_1",
+            "json_1",
+        ]
         for field_name in warmup_fields:
             actual = cf.get_field_warmup(res, field_name)
             assert actual == warmup, f"field {field_name}: expected warmup='{warmup}', got '{actual}'"
@@ -135,15 +169,34 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 anns_field="vec_float",
-                                 output_fields=["int64_1", "varchar_1", "json_1", "array_int64_1"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, default_warmup_dim),
+            limit=default_limit,
+            anns_field="vec_float",
+            output_fields=["int64_1", "varchar_1", "json_1", "array_int64_1"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=5,
-                               output_fields=["pk", "int64_1", "float_1", "double_1",
-                                              "varchar_1", "bool_1", "json_1",
-                                              "array_int64_1", "array_float_1", "array_varchar_1"])[0]
+        query_res = self.query(
+            client,
+            collection_name,
+            filter="pk >= 0",
+            limit=5,
+            output_fields=[
+                "pk",
+                "int64_1",
+                "float_1",
+                "double_1",
+                "varchar_1",
+                "bool_1",
+                "json_1",
+                "array_int64_1",
+                "array_float_1",
+                "array_varchar_1",
+            ],
+        )[0]
         assert len(query_res) == 5
         for row in query_res:
             assert "int64_1" in row
@@ -166,13 +219,20 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup=invalid_val)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
 
         collection_name = cf.gen_collection_name_by_testcase_name()
         error = {ct.err_code: 1100, ct.err_msg: "invalid warmup policy"}
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               check_task=CheckTasks.err_res, check_items=error)
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_warmup_collection_level_create_describe(self):
@@ -191,16 +251,22 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
 
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={
-                                   "warmup.scalarField": "sync",
-                                   "warmup.scalarIndex": "disable",
-                                   "warmup.vectorField": "sync",
-                                   "warmup.vectorIndex": "disable"
-                               })
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={
+                "warmup.scalarField": "sync",
+                "warmup.scalarIndex": "disable",
+                "warmup.vectorField": "sync",
+                "warmup.vectorIndex": "disable",
+            },
+        )
 
         # describe verify collection properties
         res = self.describe_collection(client, collection_name)[0]
@@ -221,12 +287,18 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         vectors_to_search = cf.gen_vectors(1, default_warmup_dim)
-        search_res = self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                                 output_fields=["pk", "float_field"])[0]
+        search_res = self.search(
+            client, collection_name, vectors_to_search, limit=default_limit, output_fields=["pk", "float_field"]
+        )[0]
         assert len(search_res[0]) == default_limit
 
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=default_limit,
-                               output_fields=["pk", "float_field", "varchar_field"])[0]
+        query_res = self.query(
+            client,
+            collection_name,
+            filter="pk >= 0",
+            limit=default_limit,
+            output_fields=["pk", "float_field", "varchar_field"],
+        )[0]
         assert len(query_res) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -248,14 +320,17 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=256, nullable=True)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
 
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={
-                                   "warmup.scalarField": "disable",
-                                   "warmup.vectorField": "disable"
-                               })
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.scalarField": "disable", "warmup.vectorField": "disable"},
+        )
 
         # describe verify both levels
         res = self.describe_collection(client, collection_name)[0]
@@ -275,12 +350,22 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 output_fields=["int_field", "varchar_field"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, default_warmup_dim),
+            limit=default_limit,
+            output_fields=["int_field", "varchar_field"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=default_limit,
-                               output_fields=["pk", "int_field", "varchar_field"])[0]
+        query_res = self.query(
+            client,
+            collection_name,
+            filter="pk >= 0",
+            limit=default_limit,
+            output_fields=["pk", "int_field", "varchar_field"],
+        )[0]
         assert len(query_res) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -302,8 +387,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=256)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # initial state: no warmup
@@ -313,24 +399,23 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → set vec warmup=sync
         self.release_collection(client, collection_name)
-        self.alter_collection_field(client, collection_name,
-                                    field_name="vec", field_params={"warmup": "sync"})
+        self.alter_collection_field(client, collection_name, field_name="vec", field_params={"warmup": "sync"})
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "vec") == "sync"
         assert cf.get_field_warmup(res, "varchar_field") is None
 
         # set varchar_field warmup=disable
-        self.alter_collection_field(client, collection_name,
-                                    field_name="varchar_field", field_params={"warmup": "disable"})
+        self.alter_collection_field(
+            client, collection_name, field_name="varchar_field", field_params={"warmup": "disable"}
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "vec") == "sync"
         assert cf.get_field_warmup(res, "varchar_field") == "disable"
 
         # modify vec warmup sync → disable
-        self.alter_collection_field(client, collection_name,
-                                    field_name="vec", field_params={"warmup": "disable"})
+        self.alter_collection_field(client, collection_name, field_name="vec", field_params={"warmup": "disable"})
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "vec") == "disable"
@@ -342,8 +427,13 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 output_fields=["varchar_field"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, default_warmup_dim),
+            limit=default_limit,
+            output_fields=["varchar_field"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -361,8 +451,15 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # create collection & insert data
         self.create_collection(client, collection_name, default_warmup_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
-        rows = [{"id": i, "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
-                 "float": float(i), "varchar": str(i)} for i in range(default_warmup_nb)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
+                "float": float(i),
+                "varchar": str(i),
+            }
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -373,13 +470,16 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → alter 4 warmup properties
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(client, collection_name,
-                                         properties={
-                                             "warmup.vectorField": "sync",
-                                             "warmup.scalarField": "disable",
-                                             "warmup.vectorIndex": "disable",
-                                             "warmup.scalarIndex": "sync"
-                                         })
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={
+                "warmup.vectorField": "sync",
+                "warmup.scalarField": "disable",
+                "warmup.vectorIndex": "disable",
+                "warmup.scalarIndex": "sync",
+            },
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.vectorField") == "sync"
@@ -395,11 +495,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → partial modify (swap 2 keys)
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(client, collection_name,
-                                         properties={
-                                             "warmup.vectorField": "disable",
-                                             "warmup.scalarField": "sync"
-                                         })
+        self.alter_collection_properties(
+            client, collection_name, properties={"warmup.vectorField": "disable", "warmup.scalarField": "sync"}
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.vectorField") == "disable"
@@ -414,8 +512,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → drop partial warmup properties
         self.release_collection(client, collection_name)
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.vectorField", "warmup.scalarField"])
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["warmup.vectorField", "warmup.scalarField"]
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.vectorField") is None
@@ -424,8 +523,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         assert cf.get_collection_warmup(res, "warmup.scalarIndex") == "sync"
 
         # drop remaining warmup properties
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.vectorIndex", "warmup.scalarIndex"])
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["warmup.vectorIndex", "warmup.scalarIndex"]
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.vectorIndex") is None
@@ -454,8 +554,12 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200, "warmup": "disable"})
+        index_params.add_index(
+            field_name="vec",
+            index_type="HNSW",
+            metric_type="L2",
+            params={"M": 16, "efConstruction": 200, "warmup": "disable"},
+        )
         index_params.add_index(field_name="varchar_field", index_type="INVERTED")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
@@ -482,8 +586,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # release → alter vector index warmup to sync
         self.release_collection(client, collection_name)
         vec_idx_names = self.list_indexes(client, collection_name, field_name="vec")[0]
-        self.alter_index_properties(client, collection_name,
-                                    index_name=vec_idx_names[0], properties={"warmup": "sync"})
+        self.alter_index_properties(client, collection_name, index_name=vec_idx_names[0], properties={"warmup": "sync"})
 
         vec_idx_res = self.describe_index(client, collection_name, vec_idx_names[0])[0]
         assert cf.get_index_warmup(vec_idx_res) == "sync"
@@ -491,8 +594,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         assert vec_idx_res["M"] == "16"
 
         # alter scalar index warmup to disable
-        self.alter_index_properties(client, collection_name,
-                                    index_name=scalar_idx_names[0], properties={"warmup": "disable"})
+        self.alter_index_properties(
+            client, collection_name, index_name=scalar_idx_names[0], properties={"warmup": "disable"}
+        )
         scalar_idx_res = self.describe_index(client, collection_name, scalar_idx_names[0])[0]
         assert cf.get_index_warmup(scalar_idx_res) == "disable"
 
@@ -503,22 +607,21 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → modify vector warmup sync → disable
         self.release_collection(client, collection_name)
-        self.alter_index_properties(client, collection_name,
-                                    index_name=vec_idx_names[0], properties={"warmup": "disable"})
+        self.alter_index_properties(
+            client, collection_name, index_name=vec_idx_names[0], properties={"warmup": "disable"}
+        )
         vec_idx_res = self.describe_index(client, collection_name, vec_idx_names[0])[0]
         assert cf.get_index_warmup(vec_idx_res) == "disable"
 
         # drop vector index warmup
-        self.drop_index_properties(client, collection_name,
-                                   index_name=vec_idx_names[0], property_keys=["warmup"])
+        self.drop_index_properties(client, collection_name, index_name=vec_idx_names[0], property_keys=["warmup"])
         vec_idx_res = self.describe_index(client, collection_name, vec_idx_names[0])[0]
         assert cf.get_index_warmup(vec_idx_res) is None
         assert vec_idx_res["index_type"] == "HNSW"
         assert vec_idx_res["M"] == "16"
 
         # drop scalar index warmup
-        self.drop_index_properties(client, collection_name,
-                                   index_name=scalar_idx_names[0], property_keys=["warmup"])
+        self.drop_index_properties(client, collection_name, index_name=scalar_idx_names[0], property_keys=["warmup"])
         scalar_idx_res = self.describe_index(client, collection_name, scalar_idx_names[0])[0]
         assert cf.get_index_warmup(scalar_idx_res) is None
 
@@ -545,11 +648,12 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=256, nullable=True)
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={
-                                   "warmup.scalarField": "disable",
-                                   "warmup.vectorField": "disable"
-                               })
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={"warmup.scalarField": "disable", "warmup.vectorField": "disable"},
+        )
 
         # describe initial state
         res = self.describe_collection(client, collection_name)[0]
@@ -566,23 +670,35 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # build index after data is flushed
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 output_fields=["int32_field", "varchar_field"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, default_warmup_dim),
+            limit=default_limit,
+            output_fields=["int32_field", "varchar_field"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=default_limit,
-                               output_fields=["pk", "int32_field", "varchar_field"])[0]
+        query_res = self.query(
+            client,
+            collection_name,
+            filter="pk >= 0",
+            limit=default_limit,
+            output_fields=["pk", "int32_field", "varchar_field"],
+        )[0]
         assert len(query_res) == default_limit
 
         # release → alter field warmup
         self.release_collection(client, collection_name)
-        self.alter_collection_field(client, collection_name,
-                                    field_name="int32_field", field_params={"warmup": "disable"})
+        self.alter_collection_field(
+            client, collection_name, field_name="int32_field", field_params={"warmup": "disable"}
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "int32_field") == "disable"
@@ -595,8 +711,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → drop collection warmup
         self.release_collection(client, collection_name)
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.scalarField", "warmup.vectorField"])
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["warmup.scalarField", "warmup.vectorField"]
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.scalarField") is None
@@ -627,10 +744,16 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"warmup.vectorIndex": "disable"})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.vectorIndex": "disable"},
+        )
 
         # describe: collection level set
         res = self.describe_collection(client, collection_name)[0]
@@ -648,8 +771,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → alter index warmup=sync (override collection disable)
         self.release_collection(client, collection_name)
-        self.alter_index_properties(client, collection_name,
-                                    index_name=idx_names[0], properties={"warmup": "sync"})
+        self.alter_index_properties(client, collection_name, index_name=idx_names[0], properties={"warmup": "sync"})
 
         idx_res = self.describe_index(client, collection_name, idx_names[0])[0]
         assert cf.get_index_warmup(idx_res) == "sync"
@@ -664,8 +786,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # release → drop index warmup
         self.release_collection(client, collection_name)
-        self.drop_index_properties(client, collection_name,
-                                   index_name=idx_names[0], property_keys=["warmup"])
+        self.drop_index_properties(client, collection_name, index_name=idx_names[0], property_keys=["warmup"])
 
         idx_res = self.describe_index(client, collection_name, idx_names[0])[0]
         assert cf.get_index_warmup(idx_res) is None
@@ -697,85 +818,132 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # 11.1 alter_collection_field invalid warmup values
         invalid_values = ["invalid", "Sync", "DISABLE", "true"]
         for val in invalid_values:
-            self.alter_collection_field(client, collection_name,
-                                        field_name="vector", field_params={"warmup": val},
-                                        check_task=CheckTasks.err_res, check_items=invalid_warmup_error)
+            self.alter_collection_field(
+                client,
+                collection_name,
+                field_name="vector",
+                field_params={"warmup": val},
+                check_task=CheckTasks.err_res,
+                check_items=invalid_warmup_error,
+            )
 
         # 11.2 alter_collection_properties invalid values
         invalid_collection_error = {ct.err_code: 1100, ct.err_msg: "invalid warmup"}
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.vectorField": "invalid"},
-                                         check_task=CheckTasks.err_res, check_items=invalid_collection_error)
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.scalarIndex": "SYNC"},
-                                         check_task=CheckTasks.err_res, check_items=invalid_collection_error)
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"warmup.vectorField": "invalid"},
+            check_task=CheckTasks.err_res,
+            check_items=invalid_collection_error,
+        )
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"warmup.scalarIndex": "SYNC"},
+            check_task=CheckTasks.err_res,
+            check_items=invalid_collection_error,
+        )
 
         # 11.3 key level mismatch: field key "warmup" at collection level
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup": "sync"},
-                                         check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100, ct.err_msg: "warmup"})
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"warmup": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "warmup"},
+        )
 
         # 11.3 collection key at field level - server accepts arbitrary key names via
         # alter_collection_field, verify it doesn't affect the actual warmup setting
-        self.alter_collection_field(client, collection_name,
-                                    field_name="vector", field_params={"warmup.vectorField": "sync"})
+        self.alter_collection_field(
+            client, collection_name, field_name="vector", field_params={"warmup.vectorField": "sync"}
+        )
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "vector") is None  # warmup key not set via mismatched key
 
         # 11.4 non-existent field/index
-        self.alter_collection_field(client, collection_name,
-                                    field_name="not_exist_field", field_params={"warmup": "sync"},
-                                    check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100, ct.err_msg: "does not exist"})
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="not_exist_field",
+            field_params={"warmup": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "does not exist"},
+        )
 
-        self.alter_index_properties(client, collection_name,
-                                    index_name="not_exist_index", properties={"warmup": "sync"},
-                                    check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100, ct.err_msg: "not found"})
+        self.alter_index_properties(
+            client,
+            collection_name,
+            index_name="not_exist_index",
+            properties={"warmup": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "not found"},
+        )
 
         # 11.5 alter warmup on loaded collection
         self.load_collection(client, collection_name)
 
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.vectorField": "sync"},
-                                         check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100,
-                                                      ct.err_msg: "can not alter warmup properties if collection loaded"})
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"warmup.vectorField": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "can not alter warmup properties if collection loaded"},
+        )
 
-        self.alter_collection_field(client, collection_name,
-                                    field_name="vector", field_params={"warmup": "sync"},
-                                    check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100,
-                                                 ct.err_msg: "can not alter warmup if collection loaded"})
+        self.alter_collection_field(
+            client,
+            collection_name,
+            field_name="vector",
+            field_params={"warmup": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "can not alter warmup if collection loaded"},
+        )
 
         # 11.6 create_collection with invalid warmup
         bad_col = cf.gen_collection_name_by_testcase_name() + "_bad"
-        self.create_collection(client, bad_col, default_warmup_dim,
-                               properties={"warmup.vectorIndex": "invalid"},
-                               check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup"})
+        self.create_collection(
+            client,
+            bad_col,
+            default_warmup_dim,
+            properties={"warmup.vectorIndex": "invalid"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup"},
+        )
 
         # 11.7 create_index with invalid warmup
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, "vector")
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                               params={"M": 16, "efConstruction": 200, "warmup": "bad_value"})
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"})
+        index_params.add_index(
+            field_name="vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 200, "warmup": "bad_value"},
+        )
+        self.create_index(
+            client,
+            collection_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"},
+        )
 
         # 11.8 alter_index_properties invalid warmup
         index_params2 = self.prepare_index_params(client)[0]
-        index_params2.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                                params={"M": 16, "efConstruction": 200})
+        index_params2.add_index(
+            field_name="vector", index_type="HNSW", metric_type="COSINE", params={"M": 16, "efConstruction": 200}
+        )
         self.create_index(client, collection_name, index_params2)
         idx_names = self.list_indexes(client, collection_name, field_name="vector")[0]
-        self.alter_index_properties(client, collection_name,
-                                    index_name=idx_names[0], properties={"warmup": "invalid"},
-                                    check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"})
+        self.alter_index_properties(
+            client,
+            collection_name,
+            index_name=idx_names[0],
+            properties={"warmup": "invalid"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"},
+        )
 
         # verify no side effect after errors
         idx_res = self.describe_index(client, collection_name, idx_names[0])[0]
@@ -802,18 +970,33 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={
-                                   "warmup.scalarField": "sync", "warmup.scalarIndex": "sync",
-                                   "warmup.vectorField": "sync", "warmup.vectorIndex": "sync"
-                               })
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={
+                "warmup.scalarField": "sync",
+                "warmup.scalarIndex": "sync",
+                "warmup.vectorField": "sync",
+                "warmup.vectorIndex": "sync",
+            },
+        )
 
         # insert deterministic data
         rng = np.random.default_rng(seed=42)
-        rows = [{"pk": i, "float_field": float(i), "varchar_field": f"text_{i}",
-                 "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(default_warmup_nb)]
+        rows = [
+            {
+                "pk": i,
+                "float_field": float(i),
+                "varchar_field": f"text_{i}",
+                "vec": list(rng.random(default_warmup_dim).astype(np.float32)),
+            }
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -825,29 +1008,38 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # search + query under sync
         query_vec = [list(rng.random(default_warmup_dim).astype(np.float32))]
-        search_sync = self.search(client, collection_name, query_vec, limit=20,
-                                  output_fields=["pk", "float_field", "varchar_field"])[0]
+        search_sync = self.search(
+            client, collection_name, query_vec, limit=20, output_fields=["pk", "float_field", "varchar_field"]
+        )[0]
         assert len(search_sync[0]) == 20
 
-        query_sync = self.query(client, collection_name,
-                                filter="float_field >= 100 and float_field < 200",
-                                output_fields=["pk", "float_field", "varchar_field"])[0]
+        query_sync = self.query(
+            client,
+            collection_name,
+            filter="float_field >= 100 and float_field < 200",
+            output_fields=["pk", "float_field", "varchar_field"],
+        )[0]
         sync_query_pks = sorted([r["pk"] for r in query_sync])
 
-        retrieve_sync = self.query(client, collection_name, filter="pk >= 0 and pk < 5",
-                                   output_fields=["pk", "vec"])[0]
+        retrieve_sync = self.query(client, collection_name, filter="pk >= 0 and pk < 5", output_fields=["pk", "vec"])[0]
         sync_vectors = {r["pk"]: r["vec"] for r in retrieve_sync}
 
         # release → switch to all disable
         self.release_collection(client, collection_name)
         for field_name in ["vec", "float_field", "varchar_field"]:
-            self.alter_collection_field(client, collection_name,
-                                        field_name=field_name, field_params={"warmup": "disable"})
-        self.alter_collection_properties(client, collection_name,
-                                         properties={
-                                             "warmup.scalarField": "disable", "warmup.scalarIndex": "disable",
-                                             "warmup.vectorField": "disable", "warmup.vectorIndex": "disable"
-                                         })
+            self.alter_collection_field(
+                client, collection_name, field_name=field_name, field_params={"warmup": "disable"}
+            )
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={
+                "warmup.scalarField": "disable",
+                "warmup.scalarIndex": "disable",
+                "warmup.vectorField": "disable",
+                "warmup.vectorIndex": "disable",
+            },
+        )
 
         # verify disable state
         res = self.describe_collection(client, collection_name)[0]
@@ -857,17 +1049,22 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # reload & same operations under disable
         self.load_collection(client, collection_name)
 
-        search_disable = self.search(client, collection_name, query_vec, limit=20,
-                                     output_fields=["pk", "float_field", "varchar_field"])[0]
+        search_disable = self.search(
+            client, collection_name, query_vec, limit=20, output_fields=["pk", "float_field", "varchar_field"]
+        )[0]
         assert len(search_disable[0]) == 20  # search works under disable
 
-        query_disable = self.query(client, collection_name,
-                                   filter="float_field >= 100 and float_field < 200",
-                                   output_fields=["pk", "float_field", "varchar_field"])[0]
+        query_disable = self.query(
+            client,
+            collection_name,
+            filter="float_field >= 100 and float_field < 200",
+            output_fields=["pk", "float_field", "varchar_field"],
+        )[0]
         disable_query_pks = sorted([r["pk"] for r in query_disable])
 
-        retrieve_disable = self.query(client, collection_name, filter="pk >= 0 and pk < 5",
-                                      output_fields=["pk", "vec"])[0]
+        retrieve_disable = self.query(
+            client, collection_name, filter="pk >= 0 and pk < 5", output_fields=["pk", "vec"]
+        )[0]
         disable_vectors = {r["pk"]: r["vec"] for r in retrieve_disable}
 
         # deterministic operations (query/retrieve) should produce identical results
@@ -882,18 +1079,21 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index_type,vec_type,metric,extra_params", [
-        pytest.param("HNSW", DataType.FLOAT_VECTOR, "L2", {"M": 16, "efConstruction": 200}, id="HNSW"),
-        pytest.param("IVF_FLAT", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="IVF_FLAT"),
-        pytest.param("IVF_SQ8", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="IVF_SQ8"),
-        pytest.param("IVF_PQ", DataType.FLOAT_VECTOR, "L2", {"nlist": 128, "m": 16, "nbits": 8}, id="IVF_PQ"),
-        pytest.param("FLAT", DataType.FLOAT_VECTOR, "L2", {}, id="FLAT"),
-        pytest.param("SCANN", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="SCANN"),
-        pytest.param("DISKANN", DataType.FLOAT_VECTOR, "L2", {}, id="DISKANN"),
-        pytest.param("BIN_FLAT", DataType.BINARY_VECTOR, "HAMMING", {}, id="BIN_FLAT"),
-        pytest.param("BIN_IVF_FLAT", DataType.BINARY_VECTOR, "HAMMING", {"nlist": 128}, id="BIN_IVF_FLAT"),
-        pytest.param("AUTOINDEX", DataType.FLOAT_VECTOR, "L2", {}, id="AUTOINDEX"),
-    ])
+    @pytest.mark.parametrize(
+        "index_type,vec_type,metric,extra_params",
+        [
+            pytest.param("HNSW", DataType.FLOAT_VECTOR, "L2", {"M": 16, "efConstruction": 200}, id="HNSW"),
+            pytest.param("IVF_FLAT", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="IVF_FLAT"),
+            pytest.param("IVF_SQ8", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="IVF_SQ8"),
+            pytest.param("IVF_PQ", DataType.FLOAT_VECTOR, "L2", {"nlist": 128, "m": 16, "nbits": 8}, id="IVF_PQ"),
+            pytest.param("FLAT", DataType.FLOAT_VECTOR, "L2", {}, id="FLAT"),
+            pytest.param("SCANN", DataType.FLOAT_VECTOR, "L2", {"nlist": 128}, id="SCANN"),
+            pytest.param("DISKANN", DataType.FLOAT_VECTOR, "L2", {}, id="DISKANN"),
+            pytest.param("BIN_FLAT", DataType.BINARY_VECTOR, "HAMMING", {}, id="BIN_FLAT"),
+            pytest.param("BIN_IVF_FLAT", DataType.BINARY_VECTOR, "HAMMING", {"nlist": 128}, id="BIN_IVF_FLAT"),
+            pytest.param("AUTOINDEX", DataType.FLOAT_VECTOR, "L2", {}, id="AUTOINDEX"),
+        ],
+    )
     def test_warmup_vector_index_types(self, index_type, vec_type, metric, extra_params):
         """
         target: verify various vector index types work with warmup
@@ -921,8 +1121,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # build index after data is flushed
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type=index_type,
-                               metric_type=metric, params=extra_params)
+        index_params.add_index(field_name="vec", index_type=index_type, metric_type=metric, params=extra_params)
         self.create_index(client, collection_name, index_params)
 
         # load & search (warmup=disable)
@@ -934,8 +1133,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # release → alter index warmup=sync → describe_index → reload & search
         self.release_collection(client, collection_name)
         idx_names = self.list_indexes(client, collection_name, field_name="vec")[0]
-        self.alter_index_properties(client, collection_name,
-                                    index_name=idx_names[0], properties={"warmup": "sync"})
+        self.alter_index_properties(client, collection_name, index_name=idx_names[0], properties={"warmup": "sync"})
 
         idx_res = self.describe_index(client, collection_name, idx_names[0])[0]
         assert cf.get_index_warmup(idx_res) == "sync"
@@ -975,8 +1173,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         index_params.add_index(field_name="scalar_field", index_type=scalar_index_type)
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
@@ -987,27 +1186,33 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # insert data
         rng = np.random.default_rng(seed=19530)
         if scalar_type == DataType.VARCHAR:
-            rows = [{"pk": i, "scalar_field": f"val_{i}",
-                     "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(default_warmup_nb)]
+            rows = [
+                {"pk": i, "scalar_field": f"val_{i}", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+                for i in range(default_warmup_nb)
+            ]
             filter_expr = 'scalar_field like "val_1%"'
         else:
-            rows = [{"pk": i, "scalar_field": i,
-                     "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(default_warmup_nb)]
+            rows = [
+                {"pk": i, "scalar_field": i, "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+                for i in range(default_warmup_nb)
+            ]
             filter_expr = "scalar_field >= 100 and scalar_field < 200"
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # load & filtered search (warmup=disable)
         self.load_collection(client, collection_name)
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 filter=filter_expr)[0]
+        search_res = self.search(
+            client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit, filter=filter_expr
+        )[0]
         assert len(search_res[0]) > 0
 
         # release → alter scalar index warmup=sync → describe_index
         self.release_collection(client, collection_name)
         scalar_idx_names = self.list_indexes(client, collection_name, field_name="scalar_field")[0]
-        self.alter_index_properties(client, collection_name,
-                                    index_name=scalar_idx_names[0], properties={"warmup": "sync"})
+        self.alter_index_properties(
+            client, collection_name, index_name=scalar_idx_names[0], properties={"warmup": "sync"}
+        )
 
         idx_res = self.describe_index(client, collection_name, scalar_idx_names[0])[0]
         assert cf.get_index_warmup(idx_res) == "sync"
@@ -1019,16 +1224,17 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # reload & filtered search
         self.load_collection(client, collection_name)
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 filter=filter_expr)[0]
+        search_res = self.search(
+            client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit, filter=filter_expr
+        )[0]
         assert len(search_res[0]) > 0
 
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("warmup_val,mmap_val", [
-        ("sync", "true"), ("sync", "false"), ("disable", "true"), ("disable", "false")
-    ])
+    @pytest.mark.parametrize(
+        "warmup_val,mmap_val", [("sync", "true"), ("sync", "false"), ("disable", "true"), ("disable", "false")]
+    )
     def test_warmup_x_mmap(self, warmup_val, mmap_val):
         """
         target: verify warmup and mmap are orthogonal, all 4 combinations work correctly
@@ -1044,32 +1250,35 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # insert data
         rng = np.random.default_rng(seed=19530)
-        rows = [{"pk": i, "varchar_field": f"text_{i}",
-                 "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(default_warmup_nb)]
+        rows = [
+            {"pk": i, "varchar_field": f"text_{i}", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         query_vec = cf.gen_vectors(1, default_warmup_dim)
 
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.vectorField": warmup_val,
-                                                     "warmup.scalarField": warmup_val})
-        self.alter_collection_field(client, collection_name,
-                                    field_name="vec", field_params={"mmap.enabled": mmap_val})
-        self.alter_collection_field(client, collection_name,
-                                    field_name="varchar_field", field_params={"mmap.enabled": mmap_val})
+        self.alter_collection_properties(
+            client, collection_name, properties={"warmup.vectorField": warmup_val, "warmup.scalarField": warmup_val}
+        )
+        self.alter_collection_field(client, collection_name, field_name="vec", field_params={"mmap.enabled": mmap_val})
+        self.alter_collection_field(
+            client, collection_name, field_name="varchar_field", field_params={"mmap.enabled": mmap_val}
+        )
 
         idx_names = self.list_indexes(client, collection_name, field_name="vec")[0]
-        self.alter_index_properties(client, collection_name,
-                                    index_name=idx_names[0],
-                                    properties={"mmap.enabled": True, "warmup": warmup_val})
+        self.alter_index_properties(
+            client, collection_name, index_name=idx_names[0], properties={"mmap.enabled": True, "warmup": warmup_val}
+        )
 
         # describe_collection verify collection warmup
         res = self.describe_collection(client, collection_name)[0]
@@ -1082,8 +1291,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         assert idx_res.get("mmap.enabled") == "True"
 
         self.load_collection(client, collection_name)
-        search_res = self.search(client, collection_name, query_vec, limit=default_limit,
-                                 output_fields=["varchar_field"])[0]
+        search_res = self.search(
+            client, collection_name, query_vec, limit=default_limit, output_fields=["varchar_field"]
+        )[0]
         assert len(search_res[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -1104,8 +1314,9 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # describe verify
@@ -1118,10 +1329,14 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name="part_b")
 
         rng = np.random.default_rng(seed=19530)
-        rows_a = [{"pk": i, "category": "cat_a",
-                   "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(1000)]
-        rows_b = [{"pk": i + 1000, "category": "cat_b",
-                   "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(1000)]
+        rows_a = [
+            {"pk": i, "category": "cat_a", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+            for i in range(1000)
+        ]
+        rows_b = [
+            {"pk": i + 1000, "category": "cat_b", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows_a, partition_name="part_a")
         self.insert(client, collection_name, rows_b, partition_name="part_b")
         self.flush(client, collection_name)
@@ -1129,8 +1344,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         # load single partition → search
         self.load_partitions(client, collection_name, partition_names=["part_a"])
         query_vec = cf.gen_vectors(1, default_warmup_dim)
-        search_res = self.search(client, collection_name, query_vec, limit=default_limit,
-                                 partition_names=["part_a"])[0]
+        search_res = self.search(client, collection_name, query_vec, limit=default_limit, partition_names=["part_a"])[0]
         assert len(search_res[0]) == default_limit
         for hit in search_res[0]:
             assert hit["pk"] < 1000
@@ -1157,16 +1371,24 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"warmup.vectorField": "sync", "warmup.vectorIndex": "sync"})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.vectorField": "sync", "warmup.vectorIndex": "sync"},
+        )
 
         # insert in batches to produce multiple segments
         rng = np.random.default_rng(seed=19530)
         for batch in range(5):
-            rows = [{"pk": batch * 400 + i,
-                     "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(400)]
+            rows = [
+                {"pk": batch * 400 + i, "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+                for i in range(400)
+            ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
 
@@ -1187,8 +1409,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         assert len(search_after[0]) == 20  # search still works after compaction with warmup
 
         # query count - data integrity preserved after compaction
-        count_res = self.query(client, collection_name, filter="pk >= 0",
-                               output_fields=["count(*)"])[0]
+        count_res = self.query(client, collection_name, filter="pk >= 0", output_fields=["count(*)"])[0]
         assert count_res[0]["count(*)"] == 2000
 
         self.drop_collection(client, collection_name)
@@ -1208,15 +1429,18 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"warmup.vectorIndex": "sync"})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, properties={"warmup.vectorIndex": "sync"}
+        )
 
         # insert & flush
         rng = np.random.default_rng(seed=19530)
-        rows = [{"pk": i, "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
-                for i in range(default_warmup_nb)]
+        rows = [
+            {"pk": i, "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1251,14 +1475,22 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="disable")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               consistency_level="Strong",
-                               properties={
-                                   "warmup.scalarField": "disable", "warmup.scalarIndex": "disable",
-                                   "warmup.vectorField": "disable", "warmup.vectorIndex": "disable"
-                               })
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+            properties={
+                "warmup.scalarField": "disable",
+                "warmup.scalarIndex": "disable",
+                "warmup.vectorField": "disable",
+                "warmup.vectorIndex": "disable",
+            },
+        )
 
         # describe verify all disable
         res = self.describe_collection(client, collection_name)[0]
@@ -1268,25 +1500,28 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # insert initial data & flush & load
         rng = np.random.default_rng(seed=19530)
-        rows = [{"pk": i, "tag": "old", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
-                for i in range(1000)]
+        rows = [
+            {"pk": i, "tag": "old", "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
         # insert after load (growing segment)
-        new_rows = [{"pk": 1000 + i, "tag": "new",
-                     "vec": list(rng.random(default_warmup_dim).astype(np.float32))} for i in range(500)]
+        new_rows = [
+            {"pk": 1000 + i, "tag": "new", "vec": list(rng.random(default_warmup_dim).astype(np.float32))}
+            for i in range(500)
+        ]
         self.insert(client, collection_name, new_rows)
 
         # query new data
-        query_res = self.query(client, collection_name,
-                               filter='tag == "new"', limit=100, output_fields=["pk", "tag"])[0]
+        query_res = self.query(client, collection_name, filter='tag == "new"', limit=100, output_fields=["pk", "tag"])[
+            0
+        ]
         assert len(query_res) > 0
 
         # search includes old + new
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim),
-                                 limit=default_limit)[0]
+        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit)[0]
         assert len(search_res[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -1308,14 +1543,20 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec_c", DataType.FLOAT_VECTOR, dim=32)  # no warmup set
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec_a", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        index_params.add_index(field_name="vec_b", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        index_params.add_index(field_name="vec_c", index_type="IVF_FLAT", metric_type="L2",
-                               params={"nlist": 128})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"warmup.vectorField": "disable"})
+        index_params.add_index(
+            field_name="vec_a", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        index_params.add_index(
+            field_name="vec_b", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        index_params.add_index(field_name="vec_c", index_type="IVF_FLAT", metric_type="L2", params={"nlist": 128})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.vectorField": "disable"},
+        )
 
         # describe verify 3-level state
         res = self.describe_collection(client, collection_name)[0]
@@ -1326,25 +1567,27 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # insert & load
         rng = np.random.default_rng(seed=19530)
-        rows = [{"pk": i,
-                 "vec_a": list(rng.random(128).astype(np.float32)),
-                 "vec_b": list(rng.random(64).astype(np.float32)),
-                 "vec_c": list(rng.random(32).astype(np.float32))} for i in range(default_warmup_nb)]
+        rows = [
+            {
+                "pk": i,
+                "vec_a": list(rng.random(128).astype(np.float32)),
+                "vec_b": list(rng.random(64).astype(np.float32)),
+                "vec_c": list(rng.random(32).astype(np.float32)),
+            }
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
         # search each vector field
-        res_a = self.search(client, collection_name, cf.gen_vectors(1, 128), limit=default_limit,
-                            anns_field="vec_a")[0]
+        res_a = self.search(client, collection_name, cf.gen_vectors(1, 128), limit=default_limit, anns_field="vec_a")[0]
         assert len(res_a[0]) == default_limit
 
-        res_b = self.search(client, collection_name, cf.gen_vectors(1, 64), limit=default_limit,
-                            anns_field="vec_b")[0]
+        res_b = self.search(client, collection_name, cf.gen_vectors(1, 64), limit=default_limit, anns_field="vec_b")[0]
         assert len(res_b[0]) == default_limit
 
-        res_c = self.search(client, collection_name, cf.gen_vectors(1, 32), limit=default_limit,
-                            anns_field="vec_c")[0]
+        res_c = self.search(client, collection_name, cf.gen_vectors(1, 32), limit=default_limit, anns_field="vec_c")[0]
         assert len(res_c[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -1363,12 +1606,12 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         col1 = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, col1, default_warmup_dim, consistency_level="Strong")
         self.release_collection(client, col1)
-        self.alter_collection_field(client, col1, field_name="vector",
-                                    field_params={"warmup": "sync"})
+        self.alter_collection_field(client, col1, field_name="vector", field_params={"warmup": "sync"})
         self.drop_index(client, col1, "vector")
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                               params={"M": 8, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 200}
+        )
         self.create_index(client, col1, index_params)
         self.create_index(client, col1, index_params)  # idempotent
         assert len(self.list_indexes(client, col1, field_name="vector")[0]) == 1
@@ -1377,12 +1620,12 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         col2 = cf.gen_collection_name_by_testcase_name() + "_2"
         self.create_collection(client, col2, default_warmup_dim, consistency_level="Strong")
         self.release_collection(client, col2)
-        self.alter_collection_properties(client, col2,
-                                         properties={"warmup.vectorField": "sync"})
+        self.alter_collection_properties(client, col2, properties={"warmup.vectorField": "sync"})
         self.drop_index(client, col2, "vector")
         index_params2 = self.prepare_index_params(client)[0]
-        index_params2.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                                params={"M": 8, "efConstruction": 200})
+        index_params2.add_index(
+            field_name="vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 200}
+        )
         self.create_index(client, col2, index_params2)
         self.create_index(client, col2, index_params2)  # idempotent
         assert len(self.list_indexes(client, col2, field_name="vector")[0]) == 1
@@ -1394,13 +1637,20 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.release_collection(client, col3)
         self.drop_index(client, col3, "vector")
         index_params3 = self.prepare_index_params(client)[0]
-        index_params3.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                                params={"M": 8, "efConstruction": 200, "warmup": "sync"})
+        index_params3.add_index(
+            field_name="vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 200, "warmup": "sync"},
+        )
         self.create_index(client, col3, index_params3)
-        self.create_index(client, col3, index_params3,
-                          check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: "at most one distinct index is allowed per field"})
+        self.create_index(
+            client,
+            col3,
+            index_params3,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "at most one distinct index is allowed per field"},
+        )
         assert len(self.list_indexes(client, col3, field_name="vector")[0]) == 1
 
         self.drop_collection(client, col1)
@@ -1424,13 +1674,21 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("int_field", DataType.INT64, warmup="disable", nullable=True)
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={
-                                   "warmup.vectorField": "sync", "warmup.scalarField": "disable",
-                                   "warmup.vectorIndex": "disable", "warmup.scalarIndex": "sync"
-                               })
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={
+                "warmup.vectorField": "sync",
+                "warmup.scalarField": "disable",
+                "warmup.vectorIndex": "disable",
+                "warmup.scalarIndex": "sync",
+            },
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "vec") == "sync"
@@ -1452,13 +1710,19 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # insert & load & search
         rng = np.random.default_rng(seed=19530)
-        rows = [{"id": i, "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
-                 "float": float(i), "varchar": str(i)} for i in range(1000)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
+                "float": float(i),
+                "varchar": str(i),
+            }
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim),
-                                 limit=default_limit)[0]
+        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit)[0]
         assert len(search_res[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -1478,10 +1742,16 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="disable")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               properties={"warmup.scalarField": "disable"})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.scalarField": "disable"},
+        )
 
         # describe verify
         res = self.describe_collection(client, collection_name)[0]
@@ -1490,22 +1760,35 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         # insert with dynamic fields
         rng = np.random.default_rng(seed=19530)
-        rows = [{"pk": i, "vec": list(rng.random(default_warmup_dim).astype(np.float32)),
-                 "dynamic_str": f"dyn_{i}", "dynamic_int": i * 10} for i in range(default_warmup_nb)]
+        rows = [
+            {
+                "pk": i,
+                "vec": list(rng.random(default_warmup_dim).astype(np.float32)),
+                "dynamic_str": f"dyn_{i}",
+                "dynamic_int": i * 10,
+            }
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
         # query dynamic fields
-        query_res = self.query(client, collection_name, filter="pk >= 0", limit=5,
-                               output_fields=["pk", "dynamic_str", "dynamic_int"])[0]
+        query_res = self.query(
+            client, collection_name, filter="pk >= 0", limit=5, output_fields=["pk", "dynamic_str", "dynamic_int"]
+        )[0]
         assert len(query_res) == 5
         assert "dynamic_str" in query_res[0]
         assert "dynamic_int" in query_res[0]
 
         # search + output dynamic fields
-        search_res = self.search(client, collection_name, cf.gen_vectors(1, default_warmup_dim), limit=default_limit,
-                                 output_fields=["dynamic_str"])[0]
+        search_res = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, default_warmup_dim),
+            limit=default_limit,
+            output_fields=["dynamic_str"],
+        )[0]
         assert len(search_res[0]) == default_limit
 
         self.drop_collection(client, collection_name)
@@ -1522,8 +1805,15 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, default_warmup_dim, consistency_level="Strong")
         rng = np.random.default_rng(seed=19530)
-        rows = [{"id": i, "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
-                 "float": float(i), "varchar": str(i)} for i in range(default_warmup_nb)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
+                "float": float(i),
+                "varchar": str(i),
+            }
+            for i in range(default_warmup_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.release_collection(client, collection_name)
@@ -1532,18 +1822,17 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         for round_idx in range(5):
             policy = "sync" if round_idx % 2 == 0 else "disable"
 
-            self.alter_collection_properties(client, collection_name,
-                                             properties={"warmup.vectorField": policy,
-                                                         "warmup.scalarField": policy})
-            self.alter_collection_field(client, collection_name,
-                                        field_name="vector", field_params={"warmup": policy})
+            self.alter_collection_properties(
+                client, collection_name, properties={"warmup.vectorField": policy, "warmup.scalarField": policy}
+            )
+            self.alter_collection_field(client, collection_name, field_name="vector", field_params={"warmup": policy})
 
             # describe verify
             res = self.describe_collection(client, collection_name)[0]
-            assert cf.get_collection_warmup(res, "warmup.vectorField") == policy, \
+            assert cf.get_collection_warmup(res, "warmup.vectorField") == policy, (
                 f"round {round_idx}: collection warmup expected {policy}"
-            assert cf.get_field_warmup(res, "vector") == policy, \
-                f"round {round_idx}: field warmup expected {policy}"
+            )
+            assert cf.get_field_warmup(res, "vector") == policy, f"round {round_idx}: field warmup expected {policy}"
 
             # load & search
             self.load_collection(client, collection_name)
@@ -1571,10 +1860,16 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=default_warmup_dim, warmup="sync")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vec", index_type="HNSW", metric_type="L2",
-                               params={"M": 16, "efConstruction": 200})
-        self.create_collection(client, col1, schema=schema, index_params=index_params,
-                               properties={"warmup.vectorField": "sync", "warmup.scalarField": "sync"})
+        index_params.add_index(
+            field_name="vec", index_type="HNSW", metric_type="L2", params={"M": 16, "efConstruction": 200}
+        )
+        self.create_collection(
+            client,
+            col1,
+            schema=schema,
+            index_params=index_params,
+            properties={"warmup.vectorField": "sync", "warmup.scalarField": "sync"},
+        )
 
         res = self.describe_collection(client, col1)[0]
         assert cf.get_field_warmup(res, "vec") == "sync"
@@ -1598,19 +1893,26 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         self.create_collection(client, col2, default_warmup_dim, consistency_level="Strong")
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{"id": i, "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
-                 "float": float(i), "varchar": str(i)} for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_warmup_dim).astype(np.float32)),
+                "float": float(i),
+                "varchar": str(i),
+            }
+            for i in range(100)
+        ]
         self.insert(client, col2, rows)
         self.flush(client, col2)
 
         self.release_collection(client, col2)
-        self.alter_collection_properties(client, col2,
-                                         properties={"warmup.vectorIndex": "sync"})
+        self.alter_collection_properties(client, col2, properties={"warmup.vectorIndex": "sync"})
         self.drop_index(client, col2, "vector")
 
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="COSINE",
-                               params={"M": 8, "efConstruction": 200})
+        index_params.add_index(
+            field_name="vector", index_type="HNSW", metric_type="COSINE", params={"M": 8, "efConstruction": 200}
+        )
         self.create_index(client, col2, index_params)
         self.load_collection(client, col2)
 
@@ -1627,7 +1929,6 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
 
 @pytest.mark.skip(reason="Skip all async warmup tests")
 class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
-
     @property
     def all_vector_fields(self):
         return ["float_vector_1", "float16_vector_1", "bfloat16_vector_1", "sparse_float_vector_1"]
@@ -1635,11 +1936,23 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
     @property
     def all_scalar_fields(self):
         return [
-            "int8_1", "int16_1", "int32_1", "int64_1",
-            "float_1", "double_1",
-            "varchar_1", "bool_1",
-            "array_bool_1", "array_int8_1", "array_int16_1", "array_int32_1", "array_int64_1",
-            "array_float_1", "array_double_1", "array_varchar_1", "json_1",
+            "int8_1",
+            "int16_1",
+            "int32_1",
+            "int64_1",
+            "float_1",
+            "double_1",
+            "varchar_1",
+            "bool_1",
+            "array_bool_1",
+            "array_int8_1",
+            "array_int16_1",
+            "array_int32_1",
+            "array_int64_1",
+            "array_float_1",
+            "array_double_1",
+            "array_varchar_1",
+            "json_1",
         ]
 
     @classmethod
@@ -1657,7 +1970,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
     def get_default_search_params(self, client, collection_name, anns_field, limit):
         search_params = cf.get_search_params_according_to_index_params(
-            self.describe_index(client, collection_name, anns_field)[0], limit)
+            self.describe_index(client, collection_name, anns_field)[0], limit
+        )
         return search_params
 
     def make_ann_req(self, client, collection_name, schema, field, nq=10, limit=10):
@@ -1665,7 +1979,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             self.gen_dql_nq(schema=schema, field_name=field, nq=nq),
             field,
             self.get_default_search_params(client, collection_name, field, limit),
-            limit=limit)
+            limit=limit,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_warmup_async_schema_all_types(self):
@@ -1691,30 +2006,34 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         # field names use lowercase DataType prefix → type auto-inferred by gen_milvus_client_schema
         _extra_params = {"warmup": "async", "nullable": True}
-        self.create_collection(client, collection_name, schema=cf.gen_milvus_client_schema(
-            schema=self.create_schema(client, enable_dynamic_field=False)[0],
-            fields=all_fields,
-            field_params={
-                "int64_pk": FieldParams(is_primary=True).to_dict,
-                "float_vector_1": FieldParams(dim=128, warmup="async").to_dict,
-                "float16_vector_1": FieldParams(dim=16, **_extra_params).to_dict,
-                "bfloat16_vector_1": FieldParams(dim=32, **_extra_params).to_dict,
-                "sparse_float_vector_1": FieldParams(**_extra_params).to_dict,
-                **{k: FieldParams(**_extra_params).to_dict for k in all_scalar_fields},
-            },
-        ))
+        self.create_collection(
+            client,
+            collection_name,
+            schema=cf.gen_milvus_client_schema(
+                schema=self.create_schema(client, enable_dynamic_field=False)[0],
+                fields=all_fields,
+                field_params={
+                    "int64_pk": FieldParams(is_primary=True).to_dict,
+                    "float_vector_1": FieldParams(dim=128, warmup="async").to_dict,
+                    "float16_vector_1": FieldParams(dim=16, **_extra_params).to_dict,
+                    "bfloat16_vector_1": FieldParams(dim=32, **_extra_params).to_dict,
+                    "sparse_float_vector_1": FieldParams(**_extra_params).to_dict,
+                    **{k: FieldParams(**_extra_params).to_dict for k in all_scalar_fields},
+                },
+            ),
+        )
 
         schema_res = self.describe_collection(client, collection_name)[0]
         warmup_fields = all_vector_fields + all_scalar_fields
         for fn in warmup_fields:
-            assert cf.get_field_warmup(schema_res, fn) == "async", \
+            assert cf.get_field_warmup(schema_res, fn) == "async", (
                 f"field {fn} expected async, got {cf.get_field_warmup(schema_res, fn)}"
+            )
         assert cf.get_field_warmup(schema_res, "int64_pk") is None
 
         # int64_pk overridden for deterministic IDs; all other fields generated by schema
         insert_data = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
-            default_values={"int64_pk": list(range(nb))}
+            nb=nb, schema=schema_res, default_values={"int64_pk": list(range(nb))}
         )
         for d in cf.iter_mc_insert_list_data(insert_data, batch, nb):
             self.insert(client, collection_name, d)
@@ -1727,14 +2046,21 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             **DefaultVectorIndexParams.DISKANN("bfloat16_vector_1"),
             **DefaultVectorIndexParams.SPARSE_INVERTED_INDEX("sparse_float_vector_1"),
         }
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0], vector_index_map))
+        self.create_index(
+            client, collection_name, self.all_vector_index(self.prepare_index_params(client)[0], vector_index_map)
+        )
         self.load_collection(client, collection_name)
 
         # ── (1) query: sample rows with every column ──
-        self.query(client, collection_name, filter="int64_pk >= 0", output_fields=["*"], limit=100,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 100, "output_fields": all_fields})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            output_fields=["*"],
+            limit=100,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 100, "output_fields": all_fields},
+        )
 
         # ── (2) search each vector column ──
         for anns_field, nq, limit in [
@@ -1743,38 +2069,61 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             ("bfloat16_vector_1", 5, 15),
             ("sparse_float_vector_1", 20, 5),
         ]:
-            self.search(client, collection_name,
-                        self.gen_dql_nq(schema=schema_res, field_name=anns_field, nq=nq),
-                        anns_field=anns_field, limit=limit, output_fields=["*"],
-                        search_params=self.get_default_search_params(client, collection_name, anns_field, limit),
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": nq, "limit": limit, "output_fields": all_fields})
+            self.search(
+                client,
+                collection_name,
+                self.gen_dql_nq(schema=schema_res, field_name=anns_field, nq=nq),
+                anns_field=anns_field,
+                limit=limit,
+                output_fields=["*"],
+                search_params=self.get_default_search_params(client, collection_name, anns_field, limit),
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": nq, "limit": limit, "output_fields": all_fields},
+            )
 
         # ── (3) hybrid search ──
         hs_nq, hs_limit = 10, 10
         req_f32 = self.make_ann_req(client, collection_name, schema_res, "float_vector_1", nq=hs_nq, limit=hs_limit)
         req_f16 = self.make_ann_req(client, collection_name, schema_res, "float16_vector_1", nq=hs_nq, limit=hs_limit)
-        req_sparse = self.make_ann_req(client, collection_name, schema_res, "sparse_float_vector_1", nq=hs_nq,
-                                       limit=hs_limit)
+        req_sparse = self.make_ann_req(
+            client, collection_name, schema_res, "sparse_float_vector_1", nq=hs_nq, limit=hs_limit
+        )
 
         hs_check = {"nq": hs_nq, "limit": hs_limit, "output_fields": all_fields}
-        self.hybrid_search(client, collection_name, reqs=[req_f32, req_f16], ranker=WeightedRanker(0.6, 0.4),
-                           limit=hs_limit, output_fields=["*"],
-                           check_task=CheckTasks.check_search_results, check_items=hs_check)
-        self.hybrid_search(client, collection_name, reqs=[req_f32, req_sparse], ranker=RRFRanker(),
-                           limit=hs_limit, output_fields=["*"],
-                           check_task=CheckTasks.check_search_results, check_items=hs_check)
+        self.hybrid_search(
+            client,
+            collection_name,
+            reqs=[req_f32, req_f16],
+            ranker=WeightedRanker(0.6, 0.4),
+            limit=hs_limit,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items=hs_check,
+        )
+        self.hybrid_search(
+            client,
+            collection_name,
+            reqs=[req_f32, req_sparse],
+            ranker=RRFRanker(),
+            limit=hs_limit,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items=hs_check,
+        )
 
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("bad_val", [
-        pytest.param("ASYNC", id="upper_async"),
-        pytest.param("Async", id="title_async"),
-        pytest.param("SYNC", id="upper_sync"),
-        pytest.param("Disable", id="title_disable"),
-        pytest.param("DISABLE", id="upper_disable"),
-    ])
+    @pytest.mark.parametrize(
+        "bad_val",
+        [
+            pytest.param("ASYNC", id="upper_async"),
+            pytest.param("Async", id="title_async"),
+            pytest.param("SYNC", id="upper_sync"),
+            pytest.param("Disable", id="title_disable"),
+            pytest.param("DISABLE", id="upper_disable"),
+        ],
+    )
     def test_warmup_schema_invalid_async_case_sensitive(self, bad_val):
         """
         target: verify warmup values are case-sensitive; bad cases rejected with err_code=1100
@@ -1797,14 +2146,17 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
         bad_index_params = self.prepare_index_params(client)[0]
-        self.all_vector_index(bad_index_params,
-                              DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE))
-        self.create_collection(client, f"{collection_name}_create",
-                               schema=bad_schema,
-                               index_params=bad_index_params,
-                               check_task=CheckTasks.err_res,
-                               check_items={ct.err_code: 1100,
-                                            ct.err_msg: "invalid warmup policy"})
+        self.all_vector_index(
+            bad_index_params, DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE)
+        )
+        self.create_collection(
+            client,
+            f"{collection_name}_create",
+            schema=bad_schema,
+            index_params=bad_index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"},
+        )
 
         # Step 2: create a valid base collection for alter tests
         base_schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -1817,29 +2169,34 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
         base_index_params = self.prepare_index_params(client)[0]
-        self.all_vector_index(base_index_params,
-                              DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE))
+        self.all_vector_index(
+            base_index_params, DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE)
+        )
         base_col = f"{collection_name}_base"
         self.create_collection(client, base_col, schema=base_schema, index_params=base_index_params)
         self.release_collection(client, base_col)
 
         # alter_collection_field with bad_val should fail
-        self.alter_collection_field(client, base_col, field_name="float_vector_1",
-                                    field_params={"warmup": bad_val},
-                                    check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1100,
-                                                 ct.err_msg: "invalid warmup policy"})
+        self.alter_collection_field(
+            client,
+            base_col,
+            field_name="float_vector_1",
+            field_params={"warmup": bad_val},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup policy"},
+        )
 
         # alter_collection_properties with bad_val should fail
-        self.alter_collection_properties(client, base_col,
-                                         properties={"warmup.vectorField": bad_val},
-                                         check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100,
-                                                      ct.err_msg: "invalid warmup"})
+        self.alter_collection_properties(
+            client,
+            base_col,
+            properties={"warmup.vectorField": bad_val},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid warmup"},
+        )
 
         # Step 3: lowercase "async" sanity check succeeds
-        self.alter_collection_field(client, base_col, field_name="float_vector_1",
-                                    field_params={"warmup": "async"})
+        self.alter_collection_field(client, base_col, field_name="float_vector_1", field_params={"warmup": "async"})
         res = self.describe_collection(client, base_col)[0]
         assert cf.get_field_warmup(res, "float_vector_1") == "async"
 
@@ -1873,37 +2230,55 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.release_collection(client, collection_name)
 
         baseline = set(range(nb))
         for warmup_val in ["sync", "async", "disable"]:
-            self.alter_collection_field(client, collection_name, field_name="float_vector_1",
-                                        field_params={"warmup": warmup_val})
-            self.alter_collection_field(client, collection_name, field_name="float_1",
-                                        field_params={"warmup": warmup_val})
+            self.alter_collection_field(
+                client, collection_name, field_name="float_vector_1", field_params={"warmup": warmup_val}
+            )
+            self.alter_collection_field(
+                client, collection_name, field_name="float_1", field_params={"warmup": warmup_val}
+            )
             res = self.describe_collection(client, collection_name)[0]
             assert cf.get_field_warmup(res, "float_vector_1") == warmup_val
             assert cf.get_field_warmup(res, "float_1") == warmup_val
 
             self.load_collection(client, collection_name)
-            query_res = self.query(client, collection_name, filter="int64_pk >= 0",
-                                   output_fields=["int64_pk"], limit=nb,
-                                   check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_limit": nb, "output_fields": ["int64_pk"]})[0]
-            assert {r["int64_pk"] for r in query_res} == baseline, \
-                f"warmup={warmup_val}: data mismatch"
-            self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})
+            query_res = self.query(
+                client,
+                collection_name,
+                filter="int64_pk >= 0",
+                output_fields=["int64_pk"],
+                limit=nb,
+                check_task=CheckTasks.check_query_results,
+                check_items={"exp_limit": nb, "output_fields": ["int64_pk"]},
+            )[0]
+            assert {r["int64_pk"] for r in query_res} == baseline, f"warmup={warmup_val}: data mismatch"
+            self.search(
+                client,
+                collection_name,
+                cf.gen_vectors(1, 128),
+                limit=10,
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 10},
+            )
 
-            self.alter_collection_field(client, collection_name, field_name="float_vector_1",
-                                        field_params={"warmup": "sync"},
-                                        check_task=CheckTasks.err_res,
-                                        check_items={ct.err_code: 1100,
-                                                     ct.err_msg: "can not alter warmup if collection loaded"})
+            self.alter_collection_field(
+                client,
+                collection_name,
+                field_name="float_vector_1",
+                field_params={"warmup": "sync"},
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: "can not alter warmup if collection loaded"},
+            )
             self.release_collection(client, collection_name)
 
         self.drop_collection(client, collection_name)
@@ -1947,45 +2322,63 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE)))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0],
+                DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE),
+            ),
+        )
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.vectorField": "sync"},
-                                         check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1100,
-                                                      ct.err_msg: "can not alter warmup"})
+        self.alter_collection_properties(
+            client,
+            collection_name,
+            properties={"warmup.vectorField": "sync"},
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "can not alter warmup"},
+        )
 
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(client, collection_name,
-                                         properties={"warmup.scalarField": "sync"})
+        self.alter_collection_properties(client, collection_name, properties={"warmup.scalarField": "sync"})
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.scalarField") == "sync"
         assert cf.get_collection_warmup(res, "warmup.vectorIndex") == "async"
 
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.scalarField", "warmup.scalarIndex"])
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["warmup.scalarField", "warmup.scalarIndex"]
+        )
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_collection_warmup(res, "warmup.scalarField") is None
         assert cf.get_collection_warmup(res, "warmup.scalarIndex") is None
         assert cf.get_collection_warmup(res, "warmup.vectorField") == "async"
         assert cf.get_collection_warmup(res, "warmup.vectorIndex") == "async"
 
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.vectorField", "warmup.vectorIndex"])
+        self.drop_collection_properties(
+            client, collection_name, property_keys=["warmup.vectorField", "warmup.vectorIndex"]
+        )
         res = self.describe_collection(client, collection_name)[0]
         for key in ["warmup.vectorField", "warmup.scalarField", "warmup.vectorIndex", "warmup.scalarIndex"]:
             assert cf.get_collection_warmup(res, key) is None
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2015,15 +2408,22 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="float_vector_1", index_type="HNSW", metric_type="COSINE",
-                               params={"M": 16, "efConstruction": 200, "warmup": "async"})
+        index_params.add_index(
+            field_name="float_vector_1",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 200, "warmup": "async"},
+        )
         self.create_collection(client, col1, schema=schema, index_params=index_params)
 
         # second create_index with warmup param is treated as a different definition → expect error
-        self.create_index(client, col1, index_params=index_params,
-                          check_task=CheckTasks.err_res,
-                          check_items={ct.err_code: 65535,
-                                       ct.err_msg: "at most one distinct index is allowed per field"})
+        self.create_index(
+            client,
+            col1,
+            index_params=index_params,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 65535, ct.err_msg: "at most one distinct index is allowed per field"},
+        )
         idxs = self.list_indexes(client, col1)[0]
         assert len(idxs) == 1
 
@@ -2040,9 +2440,14 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         # wait for index build to complete so search operates on fully-indexed data
         self.wait_for_index_ready(client, col1, index_name="float_vector_1")
         self.load_collection(client, col1)
-        self.search(client, col1, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            col1,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.release_collection(client, col1)
         self.alter_index_properties(client, col1, index_name="float_vector_1", properties={"warmup": "sync"})
@@ -2054,9 +2459,14 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert idx_res.get("M") == "16"
 
         self.load_collection(client, col1)
-        self.search(client, col1, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            col1,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
         self.drop_collection(client, col1)
 
         # ── Phase 2: index-level async overrides collection-level sync ──
@@ -2071,10 +2481,10 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         )
         ip2 = self.prepare_index_params(client)[0]
         self.all_vector_index(ip2, DefaultVectorIndexParams.HNSW("float_vector_1"))
-        self.create_collection(client, col2, schema=schema2, index_params=ip2,
-                               properties={"warmup.vectorIndex": "sync"})
-        assert cf.get_collection_warmup(self.describe_collection(client, col2)[0],
-                                        "warmup.vectorIndex") == "sync"
+        self.create_collection(
+            client, col2, schema=schema2, index_params=ip2, properties={"warmup.vectorIndex": "sync"}
+        )
+        assert cf.get_collection_warmup(self.describe_collection(client, col2)[0], "warmup.vectorIndex") == "sync"
 
         self.release_collection(client, col2)
         self.alter_index_properties(client, col2, index_name="float_vector_1", properties={"warmup": "async"})
@@ -2091,18 +2501,28 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         # wait for index build to complete so search operates on fully-indexed data
         self.wait_for_index_ready(client, col2, index_name="float_vector_1")
         self.load_collection(client, col2)
-        self.search(client, col2, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            col2,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.release_collection(client, col2)
         self.drop_index_properties(client, col2, index_name="float_vector_1", property_keys=["warmup"])
         assert cf.get_index_warmup(self.describe_index(client, col2, index_name="float_vector_1")[0]) is None
 
         self.load_collection(client, col2)
-        self.search(client, col2, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            col2,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
         self.drop_collection(client, col2)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2146,11 +2566,17 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # build index after data is flushed, then set index-level warmup=disable
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE)))
-        self.alter_index_properties(client, collection_name, index_name="float_vector_1",
-                                    properties={"warmup": "disable"})
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0],
+                DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE),
+            ),
+        )
+        self.alter_index_properties(
+            client, collection_name, index_name="float_vector_1", properties={"warmup": "disable"}
+        )
 
         col_res = self.describe_collection(client, collection_name)[0]
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
@@ -2159,20 +2585,30 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert cf.get_index_warmup(idx_res) == "disable"
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
-        self.query(client, collection_name, filter="int64_pk >= 0", limit=10,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            limit=10,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 10},
+        )
 
         # Phase 3: set field-level warmup to disable → index-level disable takes effect
         # Note: Milvus does not support dropping field-level warmup via None; use "disable" instead
         self.release_collection(client, collection_name)
-        self.alter_collection_field(client, collection_name, field_name="float_vector_1",
-                                    field_params={"warmup": "disable"})
-        self.alter_collection_field(client, collection_name, field_name="int64_1",
-                                    field_params={"warmup": "disable"})
+        self.alter_collection_field(
+            client, collection_name, field_name="float_vector_1", field_params={"warmup": "disable"}
+        )
+        self.alter_collection_field(client, collection_name, field_name="int64_1", field_params={"warmup": "disable"})
         col_res = self.describe_collection(client, collection_name)[0]
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
         assert cf.get_field_warmup(col_res, "float_vector_1") == "disable"
@@ -2180,29 +2616,40 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert cf.get_index_warmup(idx_res) == "disable"
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # Phase 4: drop index-level warmup → collection sync takes effect
         self.release_collection(client, collection_name)
-        self.drop_index_properties(client, collection_name, index_name="float_vector_1",
-                                   property_keys=["warmup"])
+        self.drop_index_properties(client, collection_name, index_name="float_vector_1", property_keys=["warmup"])
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
         col_res = self.describe_collection(client, collection_name)[0]
         assert cf.get_index_warmup(idx_res) is None
         assert cf.get_collection_warmup(col_res, "warmup.vectorIndex") == "sync"
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # Phase 5: drop all collection-level → global default
         self.release_collection(client, collection_name)
-        self.drop_collection_properties(client, collection_name,
-                                        property_keys=["warmup.vectorField", "warmup.scalarField",
-                                                       "warmup.vectorIndex", "warmup.scalarIndex"])
+        self.drop_collection_properties(
+            client,
+            collection_name,
+            property_keys=["warmup.vectorField", "warmup.scalarField", "warmup.vectorIndex", "warmup.scalarIndex"],
+        )
         col_res = self.describe_collection(client, collection_name)[0]
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
         for key in ["warmup.vectorField", "warmup.scalarField", "warmup.vectorIndex", "warmup.scalarIndex"]:
@@ -2212,12 +2659,22 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert cf.get_index_warmup(idx_res) is None
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
-        self.query(client, collection_name, filter="int64_pk >= 0", limit=10,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            limit=10,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2265,32 +2722,50 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # build index after data is flushed so index covers all segments
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # verify Column Group: both fields retrievable via output_fields (rawdata path)
-        q = self.query(client, collection_name, filter="int64_pk >= 0",
-                       output_fields=["int64_pk", "int64_1", "int64_2"], limit=100,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 100, "output_fields": ["int64_pk", "int64_1", "int64_2"]})[0]
-        assert all("int64_1" in r and "int64_2" in r for r in q), \
+        q = self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            output_fields=["int64_pk", "int64_1", "int64_2"],
+            limit=100,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 100, "output_fields": ["int64_pk", "int64_1", "int64_2"]},
+        )[0]
+        assert all("int64_1" in r and "int64_2" in r for r in q), (
             "Column Group fields should be retrievable regardless of warmup combination"
+        )
 
         # search with output_fields to exercise rawdata column path for both fields
-        s = self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        limit=10, output_fields=["int64_1", "int64_2"],
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})[0]
+        s = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            output_fields=["int64_1", "int64_2"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         for hit in s[0]:
-            assert "int64_1" in hit["entity"], \
-                f"int64_1 missing in search result entity (warmup={field_a_warmup})"
-            assert "int64_2" in hit["entity"], \
-                f"int64_2 missing in search result entity (warmup={field_b_warmup})"
+            assert "int64_1" in hit["entity"], f"int64_1 missing in search result entity (warmup={field_a_warmup})"
+            assert "int64_2" in hit["entity"], f"int64_2 missing in search result entity (warmup={field_b_warmup})"
 
         self.drop_collection(client, collection_name)
 
@@ -2316,25 +2791,34 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "varchar_1": FieldParams(max_length=256, nullable=True, warmup="async").to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={k: "async" for k in ["warmup.vectorIndex", "warmup.scalarIndex",
-                                                                "warmup.vectorField", "warmup.scalarField"]})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={
+                k: "async"
+                for k in ["warmup.vectorIndex", "warmup.scalarIndex", "warmup.vectorField", "warmup.scalarField"]
+            },
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=res,
+            nb=nb,
+            schema=res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "varchar_1": [f"prefix_{i % 100}" for i in range(nb)],
-            }
+            },
         )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
 
         # build indexes after data is flushed
-        index_params = self.all_vector_index(self.prepare_index_params(client)[0],
-                                             DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE))
+        index_params = self.all_vector_index(
+            self.prepare_index_params(client)[0],
+            DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE),
+        )
         index_params.add_index(field_name="varchar_1", index_type="INVERTED")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
@@ -2342,9 +2826,10 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, index_name="float_vector_1")
         new_vec_idx = self.prepare_index_params(client)[0]
-        self.all_vector_index(new_vec_idx,
-                              DefaultVectorIndexParams.HNSW("float_vector_1", m=32, efConstruction=400,
-                                                            metric_type=MetricType.COSINE))
+        self.all_vector_index(
+            new_vec_idx,
+            DefaultVectorIndexParams.HNSW("float_vector_1", m=32, efConstruction=400, metric_type=MetricType.COSINE),
+        )
         self.create_index(client, collection_name, index_params=new_vec_idx)
 
         self.drop_index(client, collection_name, index_name="varchar_1")
@@ -2353,13 +2838,23 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=new_scalar_idx)
 
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
-        q = self.query(client, collection_name, filter='varchar_1 like "prefix%"',
-                       output_fields=["int64_pk", "varchar_1"], limit=500,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 500, "output_fields": ["int64_pk", "varchar_1"]})[0]
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
+        q = self.query(
+            client,
+            collection_name,
+            filter='varchar_1 like "prefix%"',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=500,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 500, "output_fields": ["int64_pk", "varchar_1"]},
+        )[0]
         for r in q:
             assert str(r["varchar_1"]).startswith("prefix_")
 
@@ -2370,23 +2865,29 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         "idx_type,warmup_props",
         [
             # hasRawData=True: vectors read directly from index
-            pytest.param("FLAT",     {"warmup.vectorIndex": "async"}, id="flat_vectorIndex"),
+            pytest.param("FLAT", {"warmup.vectorIndex": "async"}, id="flat_vectorIndex"),
             pytest.param("IVF_FLAT", {"warmup.vectorIndex": "async"}, id="ivf_flat_vectorIndex"),
-            pytest.param("HNSW",     {"warmup.vectorIndex": "async"}, id="hnsw_vectorIndex"),
+            pytest.param("HNSW", {"warmup.vectorIndex": "async"}, id="hnsw_vectorIndex"),
             # hasRawData=False: vectors read from column store (scalar-quantized / product-quantized)
-            pytest.param("IVF_SQ8",  {"warmup.vectorIndex": "async"}, id="ivf_sq8_vectorIndex"),
-            pytest.param("IVF_PQ",   {"warmup.vectorIndex": "async"}, id="ivf_pq_vectorIndex"),
+            pytest.param("IVF_SQ8", {"warmup.vectorIndex": "async"}, id="ivf_sq8_vectorIndex"),
+            pytest.param("IVF_PQ", {"warmup.vectorIndex": "async"}, id="ivf_pq_vectorIndex"),
             # dual warmup (vectorIndex + vectorField) variants
-            pytest.param("IVF_FLAT", {"warmup.vectorIndex": "async", "warmup.vectorField": "async"},
-                         id="ivf_flat_dual"),
-            pytest.param("IVF_PQ",   {"warmup.vectorIndex": "async", "warmup.vectorField": "async"},
-                         id="ivf_pq_dual"),
-            pytest.param("IVF_SQ8",  {"warmup.vectorIndex": "async", "warmup.vectorField": "async"},
-                         id="ivf_sq8_dual"),
+            pytest.param(
+                "IVF_FLAT", {"warmup.vectorIndex": "async", "warmup.vectorField": "async"}, id="ivf_flat_dual"
+            ),
+            pytest.param("IVF_PQ", {"warmup.vectorIndex": "async", "warmup.vectorField": "async"}, id="ivf_pq_dual"),
+            pytest.param("IVF_SQ8", {"warmup.vectorIndex": "async", "warmup.vectorField": "async"}, id="ivf_sq8_dual"),
             # DISKANN (hasRawData=True for L2): all-async warmup
-            pytest.param("DISKANN", {"warmup.vectorIndex": "async", "warmup.vectorField": "async",
-                                     "warmup.scalarIndex": "async", "warmup.scalarField": "async"},
-                         id="diskann_all_async"),
+            pytest.param(
+                "DISKANN",
+                {
+                    "warmup.vectorIndex": "async",
+                    "warmup.vectorField": "async",
+                    "warmup.scalarIndex": "async",
+                    "warmup.scalarField": "async",
+                },
+                id="diskann_all_async",
+            ),
         ],
     )
     def test_warmup_async_output_vec_correctness(self, idx_type, warmup_props):
@@ -2406,20 +2907,20 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         """
         # index and search params per index type
         _index_params = {
-            "FLAT":     DefaultVectorIndexParams.FLAT("float_vector_1"),
+            "FLAT": DefaultVectorIndexParams.FLAT("float_vector_1"),
             "IVF_FLAT": DefaultVectorIndexParams.IVF_FLAT("float_vector_1", nlist=128),
-            "IVF_SQ8":  DefaultVectorIndexParams.IVF_SQ8("float_vector_1", nlist=128),
-            "IVF_PQ":   DefaultVectorIndexParams.IVF_PQ("float_vector_1", nlist=128, m=8, nbits=8),
-            "HNSW":     DefaultVectorIndexParams.HNSW("float_vector_1"),
-            "DISKANN":  DefaultVectorIndexParams.DISKANN("float_vector_1"),
+            "IVF_SQ8": DefaultVectorIndexParams.IVF_SQ8("float_vector_1", nlist=128),
+            "IVF_PQ": DefaultVectorIndexParams.IVF_PQ("float_vector_1", nlist=128, m=8, nbits=8),
+            "HNSW": DefaultVectorIndexParams.HNSW("float_vector_1"),
+            "DISKANN": DefaultVectorIndexParams.DISKANN("float_vector_1"),
         }
         _search_params = {
-            "FLAT":     DefaultVectorSearchParams.FLAT(),
+            "FLAT": DefaultVectorSearchParams.FLAT(),
             "IVF_FLAT": DefaultVectorSearchParams.IVF_FLAT(nprobe=16),
-            "IVF_SQ8":  DefaultVectorSearchParams.IVF_SQ8(nprobe=16),
-            "IVF_PQ":   DefaultVectorSearchParams.IVF_PQ(nprobe=16),
-            "HNSW":     DefaultVectorSearchParams.HNSW(),
-            "DISKANN":  DefaultVectorSearchParams.DISKANN(),
+            "IVF_SQ8": DefaultVectorSearchParams.IVF_SQ8(nprobe=16),
+            "IVF_PQ": DefaultVectorSearchParams.IVF_PQ(nprobe=16),
+            "HNSW": DefaultVectorSearchParams.HNSW(),
+            "DISKANN": DefaultVectorSearchParams.DISKANN(),
         }
 
         client = self._client()
@@ -2440,7 +2941,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         schema_res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={"int64_pk": list(range(nb))},
         )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
@@ -2455,18 +2957,25 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         # search 8 times; verify each hit returns 10 results and vec field is present
         for search_idx, qv in enumerate(cf.gen_vectors(8, dim)):
-            hits = self.search(client, collection_name, [qv], anns_field="float_vector_1",
-                               limit=10, output_fields=output_fields,
-                               search_params=_search_params[idx_type])[0][0]
-            assert len(hits) == 10, \
-                f"[{idx_type}] search {search_idx}: expected 10 hits, got {len(hits)}"
+            hits = self.search(
+                client,
+                collection_name,
+                [qv],
+                anns_field="float_vector_1",
+                limit=10,
+                output_fields=output_fields,
+                search_params=_search_params[idx_type],
+            )[0][0]
+            assert len(hits) == 10, f"[{idx_type}] search {search_idx}: expected 10 hits, got {len(hits)}"
             for hit in hits:
                 ent = hit["entity"]
                 returned_vec = ent.get("float_vector_1")
-                assert returned_vec is not None, \
+                assert returned_vec is not None, (
                     f"[{idx_type}] search {search_idx} pk={ent.get('int64_pk')}: float_vector_1 is None"
-                assert len(returned_vec) == dim, \
+                )
+                assert len(returned_vec) == dim, (
                     f"[{idx_type}] search {search_idx} pk={ent.get('int64_pk')}: wrong dim {len(returned_vec)}"
+                )
 
         self.drop_collection(client, collection_name)
 
@@ -2510,23 +3019,36 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
-        q = self.query(client, collection_name, filter="int64_pk >= 0",
-                       output_fields=["int64_pk"], limit=5000,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": nb, "output_fields": ["int64_pk"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            output_fields=["int64_pk"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": nb, "output_fields": ["int64_pk"]},
+        )[0]
         result_pks = {r["int64_pk"] for r in q}
         expected_pks = set(range(nb))
-        assert result_pks == expected_pks, \
-            f"warmup={warmup_val} mmap={mmap_enabled}: pk set differs from baseline"
+        assert result_pks == expected_pks, f"warmup={warmup_val} mmap={mmap_enabled}: pk set differs from baseline"
 
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2550,39 +3072,54 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_pk": FieldParams(is_primary=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.vectorIndex": "async"})
 
         self.create_partition(client, collection_name, "part_a")
         self.create_partition(client, collection_name, "part_b")
 
         schema_res = self.describe_collection(client, collection_name)[0]
-        rows_a = cf.gen_row_data_by_schema_with_defaults(nb=nb // 2, schema=schema_res,
-                                                         default_values={"int64_pk": list(range(nb // 2))})
-        rows_b = cf.gen_row_data_by_schema_with_defaults(nb=nb // 2, schema=schema_res,
-                                                         default_values={"int64_pk": list(range(nb // 2, nb))})
+        rows_a = cf.gen_row_data_by_schema_with_defaults(
+            nb=nb // 2, schema=schema_res, default_values={"int64_pk": list(range(nb // 2))}
+        )
+        rows_b = cf.gen_row_data_by_schema_with_defaults(
+            nb=nb // 2, schema=schema_res, default_values={"int64_pk": list(range(nb // 2, nb))}
+        )
         for d in cf.iter_mc_insert_list_data(rows_a, batch, nb // 2):
             self.insert(client, collection_name, d, partition_name="part_a")
         for d in cf.iter_mc_insert_list_data(rows_b, batch, nb // 2):
             self.insert(client, collection_name, d, partition_name="part_b")
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
         self.load_partitions(client, collection_name, partition_names=["part_a"])
-        s = self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        partition_names=["part_a"], limit=10,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})[0]
+        s = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            partition_names=["part_a"],
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         for hit in s[0]:
             assert hit["int64_pk"] < 2500, f"PK {hit['int64_pk']} not in part_a"
 
         self.load_partitions(client, collection_name, partition_names=["part_b"])
-        self.search(client, collection_name, cf.gen_vectors(1, 128),
-                    partition_names=["part_a", "part_b"], limit=20,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 20})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            partition_names=["part_a", "part_b"],
+            limit=20,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 20},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2609,9 +3146,12 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "float_vector_2": FieldParams(dim=128, warmup="async").to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorField": "disable",
-                                           "warmup.vectorIndex": "async"})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={"warmup.vectorField": "disable", "warmup.vectorIndex": "async"},
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "float_vector_1") == "async"
@@ -2624,18 +3164,30 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         # build indexes after data is flushed
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                {**DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE),
-                                                 **DefaultVectorIndexParams.HNSW("float_vector_2", metric_type=MetricType.COSINE),
-                                                 **DefaultVectorIndexParams.HNSW("float_vector_3", metric_type=MetricType.COSINE)}))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0],
+                {
+                    **DefaultVectorIndexParams.HNSW("float_vector_1", metric_type=MetricType.COSINE),
+                    **DefaultVectorIndexParams.HNSW("float_vector_2", metric_type=MetricType.COSINE),
+                    **DefaultVectorIndexParams.HNSW("float_vector_3", metric_type=MetricType.COSINE),
+                },
+            ),
+        )
         self.load_collection(client, collection_name)
 
         for anns_f in ["float_vector_1", "float_vector_2", "float_vector_3"]:
-            self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        anns_field=anns_f, limit=10,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})
+            self.search(
+                client,
+                collection_name,
+                cf.gen_vectors(1, 128),
+                anns_field=anns_f,
+                limit=10,
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 10},
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -2659,37 +3211,45 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_pk": FieldParams(is_primary=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.vectorIndex": "async"})
 
         schema_res = self.describe_collection(client, collection_name)[0]
         rows_sealed = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb // 2, schema=schema_res,
+            nb=nb // 2,
+            schema=schema_res,
             default_values={"int64_pk": list(range(nb // 2)), "tag": "sealed"},
         )
         for d in cf.iter_mc_insert_list_data(rows_sealed, batch, nb // 2):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
         rows_growing = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb // 2, schema=schema_res,
+            nb=nb // 2,
+            schema=schema_res,
             default_values={"int64_pk": list(range(nb // 2, nb)), "tag": "new"},
         )
         for d in cf.iter_mc_insert_list_data(rows_growing, batch, nb // 2):
             self.insert(client, collection_name, d)
 
-        q = self.query(client, collection_name, filter="",
-                       output_fields=["count(*)"])[0]
-        assert q[0]["count(*)"] == nb, \
-            f"expected {nb} rows (sealed+growing), got {q[0]['count(*)']}"
+        q = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert q[0]["count(*)"] == nb, f"expected {nb} rows (sealed+growing), got {q[0]['count(*)']}"
 
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2714,34 +3274,47 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "float_vector_1": FieldParams(dim=128, warmup="async").to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.vectorIndex": "async"})
 
         schema_res = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema_with_defaults(nb=nb, schema=schema_res, default_values={
-            "int64_pk": list(range(nb)),
-            "dyn_str": [f"str_{i}" for i in range(nb)],
-            "dyn_int": [i * 2 for i in range(nb)],
-        })
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=nb,
+            schema=schema_res,
+            default_values={
+                "int64_pk": list(range(nb)),
+                "dyn_str": [f"str_{i}" for i in range(nb)],
+                "dyn_int": [i * 2 for i in range(nb)],
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
         # dyn_int = int64_pk * 2; dyn_int < 100 → int64_pk < 50 → 50 rows
-        q = self.query(client, collection_name, filter="dyn_int < 100",
-                       output_fields=["int64_pk", "dyn_str", "dyn_int"], limit=100)[0]
+        q = self.query(
+            client, collection_name, filter="dyn_int < 100", output_fields=["int64_pk", "dyn_str", "dyn_int"], limit=100
+        )[0]
         assert len(q) == 50, f"dyn_int<100: expected 50 rows, got {len(q)}"
         for r in q:
             assert r["dyn_int"] == r["int64_pk"] * 2
 
-        s = self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        output_fields=["dyn_str", "dyn_int"], limit=10,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})[0]
+        s = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            output_fields=["dyn_str", "dyn_int"],
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         assert all("dyn_str" in hit["entity"] for hit in s[0])
 
         self.drop_collection(client, collection_name)
@@ -2769,8 +3342,9 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             field_params={
                 "int64_pk": FieldParams(is_primary=True).to_dict,
                 "float_vector_1": FieldParams(dim=128, warmup="async").to_dict,
-                "varchar_1": FieldParams(max_length=1024, nullable=True, warmup="async",
-                                         enable_analyzer=True, enable_match=True).to_dict,
+                "varchar_1": FieldParams(
+                    max_length=1024, nullable=True, warmup="async", enable_analyzer=True, enable_match=True
+                ).to_dict,
             },
         )
         self.create_collection(client, collection_name, schema=schema)
@@ -2779,31 +3353,47 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert cf.get_field_warmup(res, "varchar_1") == "async"
 
         keywords = ["apple", "banana", "cherry", "date", "elderberry"]
-        rows = cf.gen_row_data_by_schema_with_defaults(nb=nb, schema=res, default_values={
-            "int64_pk": list(range(nb)),
-            "varchar_1": [f"{keywords[i % len(keywords)]} is a fruit number {i}" for i in range(nb)],
-        })
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=nb,
+            schema=res,
+            default_values={
+                "int64_pk": list(range(nb)),
+                "varchar_1": [f"{keywords[i % len(keywords)]} is a fruit number {i}" for i in range(nb)],
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
-        q = self.query(client, collection_name,
-                       filter='TEXT_MATCH(varchar_1, "apple")',
-                       output_fields=["int64_pk", "varchar_1"], limit=2000,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "varchar_1"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter='TEXT_MATCH(varchar_1, "apple")',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=2000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "varchar_1"]},
+        )[0]
         for r in q:
             assert "apple" in r["varchar_1"], "TEXT_MATCH false positive"
 
         # 1000/5000 rows have "banana"; with limit=10 and enough candidates → 10 hits
-        s = self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        anns_field="float_vector_1",
-                        filter='TEXT_MATCH(varchar_1, "banana")',
-                        limit=10)[0]
+        s = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            anns_field="float_vector_1",
+            filter='TEXT_MATCH(varchar_1, "banana")',
+            limit=10,
+        )[0]
         assert len(s[0]) == 10, f"search with TEXT_MATCH filter should return 10 hits, got {len(s[0])}"
 
         # rebuild INVERTED index and reload; TEXT_MATCH should still work
@@ -2814,11 +3404,15 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=new_idx)
         self.load_collection(client, collection_name)
 
-        self.query(client, collection_name,
-                   filter='TEXT_MATCH(varchar_1, "apple")',
-                   output_fields=["int64_pk"], limit=2000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 1000, "output_fields": ["int64_pk"]})
+        self.query(
+            client,
+            collection_name,
+            filter='TEXT_MATCH(varchar_1, "apple")',
+            output_fields=["int64_pk"],
+            limit=2000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 1000, "output_fields": ["int64_pk"]},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -2853,30 +3447,40 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "json_1") == "async"
 
-        rows = cf.gen_row_data_by_schema_with_defaults(nb=nb, schema=res, default_values={
-            "int64_pk": list(range(nb)),
-            "json_1": [{"category": i % 10, "score": float(i) / 100, "tag": f"group_{i % 5}"}
-                       for i in range(nb)],
-        })
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=nb,
+            schema=res,
+            default_values={
+                "int64_pk": list(range(nb)),
+                "json_1": [{"category": i % 10, "score": float(i) / 100, "tag": f"group_{i % 5}"} for i in range(nb)],
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
-        q = self.query(client, collection_name,
-                       filter="json_1['category'] == 3",
-                       output_fields=["int64_pk", "json_1"], limit=1000,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 500, "output_fields": ["int64_pk", "json_1"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter="json_1['category'] == 3",
+            output_fields=["int64_pk", "json_1"],
+            limit=1000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 500, "output_fields": ["int64_pk", "json_1"]},
+        )[0]
         for r in q:
             assert r["json_1"]["category"] == 3
 
         # score = float(i)/100; score < 10.0 → i < 1000 → 1000 candidates, limit=10 → 10 hits
-        s = self.search(client, collection_name, cf.gen_vectors(1, 128),
-                        filter="json_1['score'] < 10.0", limit=10)[0]
+        s = self.search(client, collection_name, cf.gen_vectors(1, 128), filter="json_1['score'] < 10.0", limit=10)[0]
         assert len(s[0]) == 10, f"search with JSON filter should return 10 hits, got {len(s[0])}"
 
         # compact and reload; JSON path filter should still return the same results
@@ -2889,11 +3493,15 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         time.sleep(15)
 
         self.load_collection(client, collection_name)
-        q = self.query(client, collection_name,
-                       filter="json_1['category'] == 3",
-                       output_fields=["int64_pk", "json_1"], limit=1000,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 500, "output_fields": ["int64_pk", "json_1"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter="json_1['category'] == 3",
+            output_fields=["int64_pk", "json_1"],
+            limit=1000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 500, "output_fields": ["int64_pk", "json_1"]},
+        )[0]
         for r in q:
             assert r["json_1"]["category"] == 3
 
@@ -2930,44 +3538,62 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows_old, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
-        self.add_collection_field(client, collection_name, "int64_new",
-                                  DataType.INT64, nullable=True, warmup="async")
+        self.add_collection_field(client, collection_name, "int64_new", DataType.INT64, nullable=True, warmup="async")
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "int64_new") == "async"
 
         rows_new = cf.gen_row_data_by_schema_with_defaults(
-            nb=1000, schema=res,
+            nb=1000,
+            schema=res,
             default_values={
                 "int64_pk": list(range(5000, 6000)),
                 "int64_new": list(range(1000)),
-            }
+            },
         )
         self.insert(client, collection_name, rows_new)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        q_old = self.query(client, collection_name, filter="int64_pk < 5000",
-                           output_fields=["int64_pk", "int64_new"], limit=5000,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_limit": 5000, "output_fields": ["int64_pk", "int64_new"]})[0]
+        q_old = self.query(
+            client,
+            collection_name,
+            filter="int64_pk < 5000",
+            output_fields=["int64_pk", "int64_new"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 5000, "output_fields": ["int64_pk", "int64_new"]},
+        )[0]
         for r in q_old:
-            assert r["int64_new"] is None, \
-                f"historical row int64_pk={r['int64_pk']} int64_new should be null"
+            assert r["int64_new"] is None, f"historical row int64_pk={r['int64_pk']} int64_new should be null"
 
-        q_new = self.query(client, collection_name, filter="int64_pk >= 5000",
-                           output_fields=["int64_pk", "int64_new"], limit=1000,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "int64_new"]})[0]
+        q_new = self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 5000",
+            output_fields=["int64_pk", "int64_new"],
+            limit=1000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "int64_new"]},
+        )[0]
         for r in q_new:
             assert r["int64_new"] == r["int64_pk"] - 5000
 
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -3004,16 +3630,26 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows_old, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
-        self.add_collection_field(client, collection_name, "varchar_1",
-                                  DataType.VARCHAR, max_length=1024,
-                                  nullable=True, warmup="async",
-                                  enable_analyzer=True, enable_match=True)
-        self.add_collection_field(client, collection_name, "json_1",
-                                  DataType.JSON, nullable=True, warmup="async")
+        self.add_collection_field(
+            client,
+            collection_name,
+            "varchar_1",
+            DataType.VARCHAR,
+            max_length=1024,
+            nullable=True,
+            warmup="async",
+            enable_analyzer=True,
+            enable_match=True,
+        )
+        self.add_collection_field(client, collection_name, "json_1", DataType.JSON, nullable=True, warmup="async")
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "varchar_1") == "async"
@@ -3024,46 +3660,68 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=new_idx)
 
         rows_new = cf.gen_row_data_by_schema_with_defaults(
-            nb=1000, schema=res,
+            nb=1000,
+            schema=res,
             default_values={
                 "int64_pk": list(range(5000, 6000)),
                 "varchar_1": [f"apple fruit {i}" for i in range(1000)],
                 "json_1": [{"level": i % 5, "value": float(i)} for i in range(1000)],
-            }
+            },
         )
         self.insert(client, collection_name, rows_new)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        self.query(client, collection_name,
-                   filter="int64_pk < 5000 and varchar_1 is null",
-                   output_fields=["int64_pk"], limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 5000, "output_fields": ["int64_pk"]})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk < 5000 and varchar_1 is null",
+            output_fields=["int64_pk"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 5000, "output_fields": ["int64_pk"]},
+        )
 
-        self.query(client, collection_name,
-                   filter="int64_pk < 5000 and json_1 is null",
-                   output_fields=["int64_pk"], limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 5000, "output_fields": ["int64_pk"]})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk < 5000 and json_1 is null",
+            output_fields=["int64_pk"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 5000, "output_fields": ["int64_pk"]},
+        )
 
         # all 1000 new rows have varchar_1 = "apple fruit {i}", TEXT_MATCH("apple") hits all 1000
-        q_new_text = self.query(client, collection_name,
-                                filter='int64_pk >= 5000 and TEXT_MATCH(varchar_1, "apple")',
-                                output_fields=["int64_pk", "varchar_1"], limit=1000)[0]
+        q_new_text = self.query(
+            client,
+            collection_name,
+            filter='int64_pk >= 5000 and TEXT_MATCH(varchar_1, "apple")',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=1000,
+        )[0]
         assert len(q_new_text) == 1000, f"TEXT_MATCH apple: expected 1000 new rows, got {len(q_new_text)}"
 
-        q_new_json = self.query(client, collection_name,
-                                filter="int64_pk >= 5000 and json_1['level'] == 2",
-                                output_fields=["int64_pk", "json_1"], limit=500,
-                                check_task=CheckTasks.check_query_results,
-                                check_items={"exp_limit": 200, "output_fields": ["int64_pk", "json_1"]})[0]
+        q_new_json = self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 5000 and json_1['level'] == 2",
+            output_fields=["int64_pk", "json_1"],
+            limit=500,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 200, "output_fields": ["int64_pk", "json_1"]},
+        )[0]
         for r in q_new_json:
             assert r["json_1"]["level"] == 2
 
-        self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, 128),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -3073,34 +3731,46 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         [
             # FloatVector
             pytest.param(DataType.FLOAT_VECTOR, 128, "FLAT", "L2", {}, id="FloatVec_FLAT"),
-            pytest.param(DataType.FLOAT_VECTOR, 128, "HNSW", "L2", {"M": 16, "efConstruction": 200},
-                         id="FloatVec_HNSW"),
+            pytest.param(
+                DataType.FLOAT_VECTOR, 128, "HNSW", "L2", {"M": 16, "efConstruction": 200}, id="FloatVec_HNSW"
+            ),
             pytest.param(DataType.FLOAT_VECTOR, 128, "IVF_FLAT", "L2", {"nlist": 128}, id="FloatVec_IVF_FLAT"),
             pytest.param(DataType.FLOAT_VECTOR, 128, "IVF_SQ8", "L2", {"nlist": 128}, id="FloatVec_IVF_SQ8"),
-            pytest.param(DataType.FLOAT_VECTOR, 128, "IVF_PQ", "L2", {"nlist": 128, "m": 8, "nbits": 8},
-                         id="FloatVec_IVF_PQ"),
+            pytest.param(
+                DataType.FLOAT_VECTOR, 128, "IVF_PQ", "L2", {"nlist": 128, "m": 8, "nbits": 8}, id="FloatVec_IVF_PQ"
+            ),
             # Float16Vector
             pytest.param(DataType.FLOAT16_VECTOR, 128, "FLAT", "COSINE", {}, id="F16Vec_FLAT"),
-            pytest.param(DataType.FLOAT16_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200},
-                         id="F16Vec_HNSW"),
+            pytest.param(
+                DataType.FLOAT16_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200}, id="F16Vec_HNSW"
+            ),
             pytest.param(DataType.FLOAT16_VECTOR, 128, "IVF_FLAT", "COSINE", {"nlist": 128}, id="F16Vec_IVF_FLAT"),
             pytest.param(DataType.FLOAT16_VECTOR, 128, "SCANN", "COSINE", {"nlist": 128}, id="F16Vec_SCANN"),
             # BFloat16Vector
             pytest.param(DataType.BFLOAT16_VECTOR, 128, "FLAT", "COSINE", {}, id="BF16Vec_FLAT"),
-            pytest.param(DataType.BFLOAT16_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200},
-                         id="BF16Vec_HNSW"),
+            pytest.param(
+                DataType.BFLOAT16_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200}, id="BF16Vec_HNSW"
+            ),
             pytest.param(DataType.BFLOAT16_VECTOR, 128, "IVF_FLAT", "COSINE", {"nlist": 128}, id="BF16Vec_IVF_FLAT"),
             pytest.param(DataType.BFLOAT16_VECTOR, 128, "SCANN", "COSINE", {"nlist": 128}, id="BF16Vec_SCANN"),
             # Int8Vector (only HNSW supported currently)
-            pytest.param(DataType.INT8_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200},
-                         id="Int8Vec_HNSW"),
+            pytest.param(
+                DataType.INT8_VECTOR, 128, "HNSW", "COSINE", {"M": 16, "efConstruction": 200}, id="Int8Vec_HNSW"
+            ),
             # BinaryVector
             pytest.param(DataType.BINARY_VECTOR, 128, "BIN_FLAT", "HAMMING", {}, id="BinVec_BIN_FLAT"),
-            pytest.param(DataType.BINARY_VECTOR, 128, "BIN_IVF_FLAT", "HAMMING", {"nlist": 128},
-                         id="BinVec_BIN_IVF_FLAT"),
+            pytest.param(
+                DataType.BINARY_VECTOR, 128, "BIN_IVF_FLAT", "HAMMING", {"nlist": 128}, id="BinVec_BIN_IVF_FLAT"
+            ),
             # SparseFloatVector (no fixed dim)
-            pytest.param(DataType.SPARSE_FLOAT_VECTOR, None, "SPARSE_INVERTED_INDEX", "IP", {},
-                         id="SparseVec_SPARSE_INVERTED_INDEX"),
+            pytest.param(
+                DataType.SPARSE_FLOAT_VECTOR,
+                None,
+                "SPARSE_INVERTED_INDEX",
+                "IP",
+                {},
+                id="SparseVec_SPARSE_INVERTED_INDEX",
+            ),
             pytest.param(DataType.SPARSE_FLOAT_VECTOR, None, "SPARSE_WAND", "IP", {}, id="SparseVec_SPARSE_WAND"),
             # DISKANN (hasRawData=True for L2) — verifies async warmup on index-internal raw path
             pytest.param(DataType.FLOAT_VECTOR, 128, "DISKANN", "L2", {}, id="FloatVec_DISKANN"),
@@ -3136,30 +3806,40 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         # build index after data is flushed so index covers actual segments
         index_params_obj = self.prepare_index_params(client)[0]
-        index_params_obj.add_index(field_name="vec_field", index_type=idx_type,
-                                   metric_type=metric, params=dict(idx_params))
+        index_params_obj.add_index(
+            field_name="vec_field", index_type=idx_type, metric_type=metric, params=dict(idx_params)
+        )
         self.create_index(client, collection_name, index_params_obj)
         self.load_collection(client, collection_name)
 
         search_vecs = cf.gen_row_data_by_schema(nb=1, schema=res)
         # (1) plain search — exercises vector index data
-        self.search(client, collection_name,
-                    [search_vecs[0]["vec_field"]],
-                    anns_field="vec_field", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            [search_vecs[0]["vec_field"]],
+            anns_field="vec_field",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # (2) search with output_fields=["vec_field"] — exercises raw vector column data
         #     field-level warmup covers rawdata; verify each hit carries the vec value
-        s_with_vec = self.search(client, collection_name,
-                                 [search_vecs[0]["vec_field"]],
-                                 anns_field="vec_field", limit=10,
-                                 output_fields=["vec_field"],
-                                 check_task=CheckTasks.check_search_results,
-                                 check_items={"nq": 1, "limit": 10})[0]
+        s_with_vec = self.search(
+            client,
+            collection_name,
+            [search_vecs[0]["vec_field"]],
+            anns_field="vec_field",
+            limit=10,
+            output_fields=["vec_field"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         for hit in s_with_vec[0]:
-            assert hit["entity"].get("vec_field") is not None, \
+            assert hit["entity"].get("vec_field") is not None, (
                 f"{vec_type.name}+{idx_type}: raw vec missing in output_fields result"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -3188,29 +3868,66 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             # Bool × BITMAP (STL_SORT not supported for Bool)
             pytest.param(DataType.BOOL, {}, "BITMAP", "scalar_field == true", None, id="BOOL_BITMAP"),
             # VarChar × STL_SORT / INVERTED / BITMAP / TRIE
-            pytest.param(DataType.VARCHAR, {"max_length": 256}, "STL_SORT", 'scalar_field == "prefix_0"',
-                         None, id="VARCHAR_STL_SORT"),
-            pytest.param(DataType.VARCHAR, {"max_length": 256}, "INVERTED", 'scalar_field == "prefix_0"',
-                         None, id="VARCHAR_INVERTED"),
-            pytest.param(DataType.VARCHAR, {"max_length": 256}, "BITMAP", 'scalar_field == "prefix_0"',
-                         None, id="VARCHAR_BITMAP"),
-            pytest.param(DataType.VARCHAR, {"max_length": 256}, "TRIE", 'scalar_field == "prefix_0"',
-                         None, id="VARCHAR_TRIE"),
+            pytest.param(
+                DataType.VARCHAR,
+                {"max_length": 256},
+                "STL_SORT",
+                'scalar_field == "prefix_0"',
+                None,
+                id="VARCHAR_STL_SORT",
+            ),
+            pytest.param(
+                DataType.VARCHAR,
+                {"max_length": 256},
+                "INVERTED",
+                'scalar_field == "prefix_0"',
+                None,
+                id="VARCHAR_INVERTED",
+            ),
+            pytest.param(
+                DataType.VARCHAR, {"max_length": 256}, "BITMAP", 'scalar_field == "prefix_0"', None, id="VARCHAR_BITMAP"
+            ),
+            pytest.param(
+                DataType.VARCHAR, {"max_length": 256}, "TRIE", 'scalar_field == "prefix_0"', None, id="VARCHAR_TRIE"
+            ),
             # Array(INT64) × INVERTED / BITMAP
-            pytest.param(DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 10},
-                         "INVERTED", "array_contains(scalar_field, 5)", None, id="ARRAY_INT64_INVERTED"),
-            pytest.param(DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 10},
-                         "BITMAP", "array_contains(scalar_field, 5)", None, id="ARRAY_INT64_BITMAP"),
+            pytest.param(
+                DataType.ARRAY,
+                {"element_type": DataType.INT64, "max_capacity": 10},
+                "INVERTED",
+                "array_contains(scalar_field, 5)",
+                None,
+                id="ARRAY_INT64_INVERTED",
+            ),
+            pytest.param(
+                DataType.ARRAY,
+                {"element_type": DataType.INT64, "max_capacity": 10},
+                "BITMAP",
+                "array_contains(scalar_field, 5)",
+                None,
+                id="ARRAY_INT64_BITMAP",
+            ),
             # JSON × INVERTED (json_cast_type) — requires separate create_index call; hasRawData=false path
-            pytest.param(DataType.JSON, {}, "JSON_INVERTED", "scalar_field['category'] == 3.0",
-                         {"index_type": "INVERTED",
-                          "params": {"json_cast_type": "double", "json_path": "scalar_field['category']"}},
-                         id="JSON_INVERTED"),
+            pytest.param(
+                DataType.JSON,
+                {},
+                "JSON_INVERTED",
+                "scalar_field['category'] == 3.0",
+                {
+                    "index_type": "INVERTED",
+                    "params": {"json_cast_type": "double", "json_path": "scalar_field['category']"},
+                },
+                id="JSON_INVERTED",
+            ),
             # VARCHAR × NGRAM (gram params) — requires separate create_index call
-            pytest.param(DataType.VARCHAR, {"max_length": 256}, "VARCHAR_NGRAM",
-                         'scalar_field like "%ello%"',
-                         {"index_type": "NGRAM", "params": {"min_gram": 2, "max_gram": 3}},
-                         id="VARCHAR_NGRAM"),
+            pytest.param(
+                DataType.VARCHAR,
+                {"max_length": 256},
+                "VARCHAR_NGRAM",
+                'scalar_field like "%ello%"',
+                {"index_type": "NGRAM", "params": {"min_gram": 2, "max_gram": 3}},
+                id="VARCHAR_NGRAM",
+            ),
         ],
     )
     def test_warmup_async_scalar_type(self, scalar_type, field_kwargs, idx_type, filter_expr, create_idx_params):
@@ -3232,8 +3949,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("float_vector_1", DataType.FLOAT_VECTOR, dim=128)
         schema.add_field("scalar_field", scalar_type, nullable=True, **field_kwargs)
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.scalarIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.scalarIndex": "async"})
 
         schema_res = self.describe_collection(client, collection_name)[0]
         if scalar_type == DataType.BOOL:
@@ -3255,19 +3971,21 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             scalar_values = [i % 100 for i in range(nb)]
 
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "scalar_field": scalar_values,
-            }
+            },
         )
 
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # build indexes after data is flushed so index covers actual segments
-        index_params_obj = self.all_vector_index(self.prepare_index_params(client)[0],
-                                                 DefaultVectorIndexParams.HNSW("float_vector_1"))
+        index_params_obj = self.all_vector_index(
+            self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+        )
         if create_idx_params is None:
             # simple index types: pass index_type string directly
             index_params_obj.add_index(field_name="scalar_field", index_type=idx_type)
@@ -3282,11 +4000,15 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         # (1) filter on scalar_field — exercises scalar index data (scalarIndex warmup target)
         # (2) output_fields=["scalar_field"] — exercises raw scalar column data
-        q = self.query(client, collection_name, filter=filter_expr,
-                       output_fields=["int64_pk", "scalar_field"], limit=100)[0]
-        assert len(q) == 100, f"{scalar_type.name}+{idx_type}: query with '{filter_expr}' returned {len(q)} rows (expected 100)"
-        assert all("scalar_field" in r for r in q), \
+        q = self.query(
+            client, collection_name, filter=filter_expr, output_fields=["int64_pk", "scalar_field"], limit=100
+        )[0]
+        assert len(q) == 100, (
+            f"{scalar_type.name}+{idx_type}: query with '{filter_expr}' returned {len(q)} rows (expected 100)"
+        )
+        assert all("scalar_field" in r for r in q), (
             f"{scalar_type.name}+{idx_type}: scalar_field missing in output_fields result"
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -3320,38 +4042,56 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "float_vector_1": FieldParams(dim=dim).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.vectorIndex": "async"})
 
         res = self.describe_collection(client, collection_name)[0]
         rows_large = cf.gen_row_data_by_schema_with_defaults(nb=nb, schema=res)
         for d in cf.iter_mc_insert_list_data(rows_large, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")),
-                          timeout=600)
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+            timeout=600,
+        )
 
         # phase 1: async load returns before prefetch finishes; data must be accessible immediately
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # phase 2 cycle 1: release (cancel warmup mid-flight) → reload → search
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # phase 2 cycle 2: repeat to verify stability
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -3381,10 +4121,14 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             for d in cf.iter_mc_insert_list_data(rows, batch, nb):
                 self.insert(client, name, d)
             self.flush(client, name)
-            self.create_index(client, name,
-                              self.all_vector_index(self.prepare_index_params(client)[0],
-                                                    DefaultVectorIndexParams.HNSW("float_vector_1")),
-                              timeout=240)
+            self.create_index(
+                client,
+                name,
+                self.all_vector_index(
+                    self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+                ),
+                timeout=240,
+            )
 
         base = cf.gen_collection_name_by_testcase_name()
 
@@ -3406,28 +4150,38 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         build_col(name_sync, plain_schema, {"warmup.vectorIndex": "sync"})
         build_col(name_async, plain_schema, {"warmup.vectorIndex": "async"})
 
-        t0 = time.time();
-        self.load_collection(client, name_sync);
+        t0 = time.time()
+        self.load_collection(client, name_sync)
         t_sync = time.time() - t0
-        t0 = time.time();
-        self.load_collection(client, name_async);
+        t0 = time.time()
+        self.load_collection(client, name_async)
         t_async = time.time() - t0
         log.info(f"phase1 load — sync: {t_sync:.3f}s, async: {t_async:.3f}s")
         # Timing assertion only holds when tiered storage is active (data on disk).
         # Require both loads to exceed 1s AND a minimum gap of 0.5s to avoid noise.
         if t_sync >= 1.0 and t_async >= 1.0 and abs(t_sync - t_async) >= 0.5:
-            assert t_sync > t_async, (
-                f"sync ({t_sync:.3f}s) should be slower than async ({t_async:.3f}s)"
-            )
+            assert t_sync > t_async, f"sync ({t_sync:.3f}s) should be slower than async ({t_async:.3f}s)"
         else:
-            log.info("phase1 timing skipped — loads too fast or difference too small "
-                     f"(sync={t_sync:.3f}s async={t_async:.3f}s)")
-        self.search(client, name_sync, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
-        self.search(client, name_async, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+            log.info(
+                "phase1 timing skipped — loads too fast or difference too small "
+                f"(sync={t_sync:.3f}s async={t_async:.3f}s)"
+            )
+        self.search(
+            client,
+            name_sync,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
+        self.search(
+            client,
+            name_async,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
         self.drop_collection(client, name_sync)
         self.drop_collection(client, name_async)
 
@@ -3446,41 +4200,50 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         # field=sync + collection=disable → sync warmup active (field wins)
         name_fs = base + "_field_sync"
-        build_col(name_fs, lambda: schema_with_field_warmup("sync"),
-                  {"warmup.vectorField": "disable"})
+        build_col(name_fs, lambda: schema_with_field_warmup("sync"), {"warmup.vectorField": "disable"})
         res_fs = self.describe_collection(client, name_fs)[0]
         assert cf.get_field_warmup(res_fs, "float_vector_1") == "sync"
         assert cf.get_collection_warmup(res_fs, "warmup.vectorField") == "disable"
 
         # field=disable + collection=sync → no warmup (field wins)
         name_fd = base + "_field_disable"
-        build_col(name_fd, lambda: schema_with_field_warmup("disable"),
-                  {"warmup.vectorField": "sync"})
+        build_col(name_fd, lambda: schema_with_field_warmup("disable"), {"warmup.vectorField": "sync"})
         res_fd = self.describe_collection(client, name_fd)[0]
         assert cf.get_field_warmup(res_fd, "float_vector_1") == "disable"
         assert cf.get_collection_warmup(res_fd, "warmup.vectorField") == "sync"
 
-        t0 = time.time();
-        self.load_collection(client, name_fs);
+        t0 = time.time()
+        self.load_collection(client, name_fs)
         t_field_sync = time.time() - t0
-        t0 = time.time();
-        self.load_collection(client, name_fd);
+        t0 = time.time()
+        self.load_collection(client, name_fd)
         t_field_disable = time.time() - t0
         log.info(f"phase2 load — field=sync: {t_field_sync:.3f}s, field=disable: {t_field_disable:.3f}s")
         if t_field_sync >= 1.0 and t_field_disable >= 1.0 and abs(t_field_sync - t_field_disable) >= 0.5:
             assert t_field_sync > t_field_disable, (
-                f"field=sync ({t_field_sync:.3f}s) should be slower than "
-                f"field=disable ({t_field_disable:.3f}s)"
+                f"field=sync ({t_field_sync:.3f}s) should be slower than field=disable ({t_field_disable:.3f}s)"
             )
         else:
-            log.info("phase2 timing skipped — loads too fast or difference too small "
-                     f"(field_sync={t_field_sync:.3f}s field_disable={t_field_disable:.3f}s)")
-        self.search(client, name_fs, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
-        self.search(client, name_fd, cf.gen_vectors(1, dim), limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+            log.info(
+                "phase2 timing skipped — loads too fast or difference too small "
+                f"(field_sync={t_field_sync:.3f}s field_disable={t_field_disable:.3f}s)"
+            )
+        self.search(
+            client,
+            name_fs,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
+        self.search(
+            client,
+            name_fd,
+            cf.gen_vectors(1, dim),
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
         self.drop_collection(client, name_fs)
         self.drop_collection(client, name_fd)
 
@@ -3521,19 +4284,24 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
 
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorField": "async", "warmup.scalarField": "async"})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={"warmup.vectorField": "async", "warmup.scalarField": "async"},
+        )
 
         # generate all rows upfront so expected counts are derived from actual inserted data;
         # int64_1 and varchar_1 use deterministic patterns for filter verification
         schema_res = self.describe_collection(client, collection_name)[0]
         all_rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb)),
-                "int64_1":  [i % 100 for i in range(nb)],
+                "int64_1": [i % 100 for i in range(nb)],
                 "varchar_1": [f"group_{i % 10}" for i in range(nb)],
-            }
+            },
         )
         pk_to_row = {r["int64_pk"]: r for r in all_rows}
 
@@ -3541,163 +4309,243 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(all_rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                {**DefaultVectorIndexParams.HNSW("float_vector_1"),
-                                                 **DefaultVectorIndexParams.HNSW("float_vector_2", metric_type=MetricType.COSINE)}))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0],
+                {
+                    **DefaultVectorIndexParams.HNSW("float_vector_1"),
+                    **DefaultVectorIndexParams.HNSW("float_vector_2", metric_type=MetricType.COSINE),
+                },
+            ),
+        )
         self.load_collection(client, collection_name)
 
         # --- Query coverage ---
         # 1. equality filter on async int64_1
         exp_int64_1_eq_42 = sum(1 for r in all_rows if r["int64_1"] == 42)
-        q1 = self.query(client, collection_name, filter="int64_1 == 42",
-                        output_fields=["int64_pk", "int64_1"], limit=nb,
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_limit": exp_int64_1_eq_42, "output_fields": ["int64_pk", "int64_1"]})[0]
+        q1 = self.query(
+            client,
+            collection_name,
+            filter="int64_1 == 42",
+            output_fields=["int64_pk", "int64_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": exp_int64_1_eq_42, "output_fields": ["int64_pk", "int64_1"]},
+        )[0]
         for r in q1:
             assert r["int64_1"] == 42
-            assert pk_to_row[r["int64_pk"]]["int64_1"] == 42, \
-                f"int64_1 source mismatch for pk={r['int64_pk']}"
+            assert pk_to_row[r["int64_pk"]]["int64_1"] == 42, f"int64_1 source mismatch for pk={r['int64_pk']}"
 
         # 2. range filter on async int64_1
         exp_int64_1_range = sum(1 for r in all_rows if 10 <= r["int64_1"] < 20)
-        q2 = self.query(client, collection_name, filter="int64_1 >= 10 and int64_1 < 20",
-                        output_fields=["int64_pk", "int64_1"], limit=nb,
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_limit": exp_int64_1_range})[0]
+        q2 = self.query(
+            client,
+            collection_name,
+            filter="int64_1 >= 10 and int64_1 < 20",
+            output_fields=["int64_pk", "int64_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": exp_int64_1_range},
+        )[0]
         for r in q2:
             assert 10 <= r["int64_1"] < 20
-            assert r["int64_1"] == pk_to_row[r["int64_pk"]]["int64_1"], \
-                f"int64_1 mismatch for pk={r['int64_pk']}"
+            assert r["int64_1"] == pk_to_row[r["int64_pk"]]["int64_1"], f"int64_1 mismatch for pk={r['int64_pk']}"
 
         # 3. string filter on async varchar_1
         exp_varchar_group3 = sum(1 for r in all_rows if r["varchar_1"] == "group_3")
-        q3 = self.query(client, collection_name, filter='varchar_1 == "group_3"',
-                        output_fields=["int64_pk", "varchar_1"], limit=nb,
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_limit": exp_varchar_group3, "output_fields": ["int64_pk", "varchar_1"]})[0]
+        q3 = self.query(
+            client,
+            collection_name,
+            filter='varchar_1 == "group_3"',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": exp_varchar_group3, "output_fields": ["int64_pk", "varchar_1"]},
+        )[0]
         for r in q3:
             assert r["varchar_1"] == "group_3"
-            assert r["varchar_1"] == pk_to_row[r["int64_pk"]]["varchar_1"], \
-                f"varchar_1 mismatch for pk={r['int64_pk']}"
+            assert r["varchar_1"] == pk_to_row[r["int64_pk"]]["varchar_1"], f"varchar_1 mismatch for pk={r['int64_pk']}"
 
         # 4. composite filter on async scalar fields
         exp_q4 = sum(1 for r in all_rows if r["int64_1"] < 50 and r["varchar_1"] != "")
-        q4 = self.query(client, collection_name, filter='int64_1 < 50 and varchar_1 != ""',
-                        output_fields=["int64_pk", "int64_1", "varchar_1"], limit=nb,
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_limit": exp_q4})[0]
+        q4 = self.query(
+            client,
+            collection_name,
+            filter='int64_1 < 50 and varchar_1 != ""',
+            output_fields=["int64_pk", "int64_1", "varchar_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": exp_q4},
+        )[0]
         for r in q4:
             assert r["int64_1"] < 50
-            assert r["int64_1"] == pk_to_row[r["int64_pk"]]["int64_1"], \
-                f"int64_1 mismatch for pk={r['int64_pk']}"
-            assert r["varchar_1"] == pk_to_row[r["int64_pk"]]["varchar_1"], \
-                f"varchar_1 mismatch for pk={r['int64_pk']}"
+            assert r["int64_1"] == pk_to_row[r["int64_pk"]]["int64_1"], f"int64_1 mismatch for pk={r['int64_pk']}"
+            assert r["varchar_1"] == pk_to_row[r["int64_pk"]]["varchar_1"], f"varchar_1 mismatch for pk={r['int64_pk']}"
 
         # 5. output_fields includes async vector and scalar columns; verify values match inserted data
         exp_pk_lt10 = sum(1 for r in all_rows if r["int64_pk"] < 10)
-        q5 = self.query(client, collection_name, filter="int64_pk < 10",
-                        output_fields=["int64_pk", "float_vector_1", "int64_1", "varchar_1"], limit=10,
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_limit": exp_pk_lt10, "output_fields": ["int64_pk", "float_vector_1", "int64_1", "varchar_1"]})[0]
+        q5 = self.query(
+            client,
+            collection_name,
+            filter="int64_pk < 10",
+            output_fields=["int64_pk", "float_vector_1", "int64_1", "varchar_1"],
+            limit=10,
+            check_task=CheckTasks.check_query_results,
+            check_items={
+                "exp_limit": exp_pk_lt10,
+                "output_fields": ["int64_pk", "float_vector_1", "int64_1", "varchar_1"],
+            },
+        )[0]
         for r in q5:
             expected = pk_to_row[r["int64_pk"]]
-            assert r.get("float_vector_1") is not None, \
-                f"float_vector_1 missing for pk={r['int64_pk']}"
-            assert len(r["float_vector_1"]) == dim, \
-                f"float_vector_1 wrong dim for pk={r['int64_pk']}"
-            assert r["int64_1"] == expected["int64_1"], \
-                f"int64_1 mismatch for pk={r['int64_pk']}"
-            assert r["varchar_1"] == expected["varchar_1"], \
-                f"varchar_1 mismatch for pk={r['int64_pk']}"
+            assert r.get("float_vector_1") is not None, f"float_vector_1 missing for pk={r['int64_pk']}"
+            assert len(r["float_vector_1"]) == dim, f"float_vector_1 wrong dim for pk={r['int64_pk']}"
+            assert r["int64_1"] == expected["int64_1"], f"int64_1 mismatch for pk={r['int64_pk']}"
+            assert r["varchar_1"] == expected["varchar_1"], f"varchar_1 mismatch for pk={r['int64_pk']}"
 
         # 6. various limit values
         for lim in [1, 100, 1000]:
-            self.query(client, collection_name, filter="int64_pk >= 0", limit=lim,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": lim})
+            self.query(
+                client,
+                collection_name,
+                filter="int64_pk >= 0",
+                limit=lim,
+                check_task=CheckTasks.check_query_results,
+                check_items={"exp_limit": lim},
+            )
 
         # --- Search coverage ---
         query_vec_1 = cf.gen_vectors(1, dim)
         query_vec_2 = cf.gen_vectors(1, dim)
 
         # 1. plain search on async float_vector_1 (L2)
-        self.search(client, collection_name, query_vec_1, anns_field="float_vector_1", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            query_vec_1,
+            anns_field="float_vector_1",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # 2. search with scalar filter on async varchar_1; exp_varchar_group0 >> limit=20, always full
         exp_varchar_group0 = sum(1 for r in all_rows if r["varchar_1"] == "group_0")
-        s2 = self.search(client, collection_name, query_vec_1, anns_field="float_vector_1",
-                         filter='varchar_1 == "group_0"', limit=20,
-                         output_fields=["varchar_1"],
-                         check_task=CheckTasks.check_search_results,
-                         check_items={"nq": 1, "limit": min(20, exp_varchar_group0)})[0]
+        s2 = self.search(
+            client,
+            collection_name,
+            query_vec_1,
+            anns_field="float_vector_1",
+            filter='varchar_1 == "group_0"',
+            limit=20,
+            output_fields=["varchar_1"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": min(20, exp_varchar_group0)},
+        )[0]
         for hit in s2[0]:
             assert hit["entity"]["varchar_1"] == "group_0"
-            assert hit["entity"]["varchar_1"] == pk_to_row[hit["int64_pk"]]["varchar_1"], \
+            assert hit["entity"]["varchar_1"] == pk_to_row[hit["int64_pk"]]["varchar_1"], (
                 f"varchar_1 mismatch for pk={hit['int64_pk']}"
+            )
 
         # 3. search with output_fields including async columns; verify values match inserted data
-        s3 = self.search(client, collection_name, query_vec_1, anns_field="float_vector_1",
-                         output_fields=["int64_1", "varchar_1", "float_vector_1"], limit=10,
-                         check_task=CheckTasks.check_search_results,
-                         check_items={"nq": 1, "limit": 10})[0]
+        s3 = self.search(
+            client,
+            collection_name,
+            query_vec_1,
+            anns_field="float_vector_1",
+            output_fields=["int64_1", "varchar_1", "float_vector_1"],
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         for hit in s3[0]:
             expected = pk_to_row[hit["int64_pk"]]
-            assert hit["entity"]["int64_1"] == expected["int64_1"], \
-                f"int64_1 mismatch for pk={hit['int64_pk']}"
-            assert hit["entity"]["varchar_1"] == expected["varchar_1"], \
-                f"varchar_1 mismatch for pk={hit['int64_pk']}"
-            assert hit["entity"].get("float_vector_1") is not None, \
-                f"float_vector_1 missing for pk={hit['int64_pk']}"
-            assert len(hit["entity"]["float_vector_1"]) == dim, \
-                f"float_vector_1 wrong dim for pk={hit['int64_pk']}"
+            assert hit["entity"]["int64_1"] == expected["int64_1"], f"int64_1 mismatch for pk={hit['int64_pk']}"
+            assert hit["entity"]["varchar_1"] == expected["varchar_1"], f"varchar_1 mismatch for pk={hit['int64_pk']}"
+            assert hit["entity"].get("float_vector_1") is not None, f"float_vector_1 missing for pk={hit['int64_pk']}"
+            assert len(hit["entity"]["float_vector_1"]) == dim, f"float_vector_1 wrong dim for pk={hit['int64_pk']}"
 
         # 4. search on async float_vector_2 (COSINE)
-        self.search(client, collection_name, query_vec_2, anns_field="float_vector_2", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            query_vec_2,
+            anns_field="float_vector_2",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # 5. limit boundary: limit=1
-        self.search(client, collection_name, query_vec_1, anns_field="float_vector_1", limit=1,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 1})
+        self.search(
+            client,
+            collection_name,
+            query_vec_1,
+            anns_field="float_vector_1",
+            limit=1,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 1},
+        )
 
         # --- Hybrid search coverage ---
-        req_a = AnnSearchRequest(query_vec_1, "float_vector_1",
-                                 self.get_default_search_params(client, collection_name, "float_vector_1", 20), limit=20)
-        req_b = AnnSearchRequest(query_vec_2, "float_vector_2",
-                                 self.get_default_search_params(client, collection_name, "float_vector_2", 20), limit=20)
+        req_a = AnnSearchRequest(
+            query_vec_1,
+            "float_vector_1",
+            self.get_default_search_params(client, collection_name, "float_vector_1", 20),
+            limit=20,
+        )
+        req_b = AnnSearchRequest(
+            query_vec_2,
+            "float_vector_2",
+            self.get_default_search_params(client, collection_name, "float_vector_2", 20),
+            limit=20,
+        )
 
         # 1. hybrid search with WeightedRanker; 10K rows >> limit=10, always returns exactly 10
-        hs1 = self.hybrid_search(client, collection_name, [req_a, req_b],
-                                 WeightedRanker(0.5, 0.5), limit=10)[0]
+        hs1 = self.hybrid_search(client, collection_name, [req_a, req_b], WeightedRanker(0.5, 0.5), limit=10)[0]
         assert len(hs1[0]) == 10, "hybrid search should return exactly 10 results"
 
         # 2. hybrid search with RRFRanker
-        hs2 = self.hybrid_search(client, collection_name, [req_a, req_b],
-                                 RRFRanker(), limit=10)[0]
+        hs2 = self.hybrid_search(client, collection_name, [req_a, req_b], RRFRanker(), limit=10)[0]
         assert len(hs2[0]) == 10, "hybrid search with RRFRanker should return exactly 10 results"
 
         # 3. hybrid search with scalar filter on async int64_1; exp_int64_1_lt50 >> limit=10
         exp_int64_1_lt50 = sum(1 for r in all_rows if r["int64_1"] < 50)
-        req_a_filtered = AnnSearchRequest(query_vec_1, "float_vector_1",
-                                          self.get_default_search_params(client, collection_name, "float_vector_1", 20),
-                                          limit=20, expr="int64_1 < 50")
-        req_b_filtered = AnnSearchRequest(query_vec_2, "float_vector_2",
-                                          self.get_default_search_params(client, collection_name, "float_vector_2", 20),
-                                          limit=20, expr="int64_1 < 50")
-        hs3 = self.hybrid_search(client, collection_name, [req_a_filtered, req_b_filtered],
-                                 WeightedRanker(0.5, 0.5), limit=10,
-                                 output_fields=["int64_1"])[0]
-        assert len(hs3[0]) == min(10, exp_int64_1_lt50), \
+        req_a_filtered = AnnSearchRequest(
+            query_vec_1,
+            "float_vector_1",
+            self.get_default_search_params(client, collection_name, "float_vector_1", 20),
+            limit=20,
+            expr="int64_1 < 50",
+        )
+        req_b_filtered = AnnSearchRequest(
+            query_vec_2,
+            "float_vector_2",
+            self.get_default_search_params(client, collection_name, "float_vector_2", 20),
+            limit=20,
+            expr="int64_1 < 50",
+        )
+        hs3 = self.hybrid_search(
+            client,
+            collection_name,
+            [req_a_filtered, req_b_filtered],
+            WeightedRanker(0.5, 0.5),
+            limit=10,
+            output_fields=["int64_1"],
+        )[0]
+        assert len(hs3[0]) == min(10, exp_int64_1_lt50), (
             f"hybrid search int64_1<50: expected {min(10, exp_int64_1_lt50)} hits, got {len(hs3[0])}"
+        )
         for hit in hs3[0]:
-            assert hit["entity"]["int64_1"] < 50, \
+            assert hit["entity"]["int64_1"] < 50, (
                 f"hybrid search filter int64_1 < 50 violated: {hit['entity']['int64_1']}"
-            assert hit["entity"]["int64_1"] == pk_to_row[hit["int64_pk"]]["int64_1"], \
+            )
+            assert hit["entity"]["int64_1"] == pk_to_row[hit["int64_pk"]]["int64_1"], (
                 f"int64_1 mismatch for pk={hit['int64_pk']}"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -3729,8 +4577,12 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
 
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorField": "async", "warmup.scalarField": "async"})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={"warmup.vectorField": "async", "warmup.scalarField": "async"},
+        )
 
         # ── Phase 1: insert 10K rows ──
         schema_res = self.describe_collection(client, collection_name)[0]
@@ -3738,100 +4590,163 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for d in cf.iter_mc_insert_list_data(rows_phase1, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
-        self.query(client, collection_name, filter="int64_pk >= 0", limit=16384,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": nb})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            limit=16384,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": nb},
+        )
 
-        self.search(client, collection_name, cf.gen_vectors(1, dim),
-                    anns_field="float_vector_1", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            anns_field="float_vector_1",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # ── Phase 2: insert 2K more rows (int64_pk=10000~11999) ──
         rows_new = cf.gen_row_data_by_schema_with_defaults(
-            nb=2000, schema=schema_res,
+            nb=2000,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(10000, 12000)),
                 "float_1": [float(10000 + i) for i in range(2000)],
                 "varchar_1": "inserted",
-            }
+            },
         )
         self.insert(client, collection_name, rows_new)
         self.flush(client, collection_name)
 
-        self.query(client, collection_name, filter='varchar_1 == "inserted"',
-                   output_fields=["int64_pk", "varchar_1"], limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 2000, "output_fields": ["int64_pk", "varchar_1"]})
+        self.query(
+            client,
+            collection_name,
+            filter='varchar_1 == "inserted"',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 2000, "output_fields": ["int64_pk", "varchar_1"]},
+        )
 
-        self.query(client, collection_name, filter="int64_pk >= 0", limit=16384,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 12000})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            limit=16384,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 12000},
+        )
 
-        self.search(client, collection_name, cf.gen_vectors(1, dim),
-                    anns_field="float_vector_1", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            anns_field="float_vector_1",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # ── Phase 3: upsert (1K update existing int64_pk=0~999, 1K new int64_pk=20000~20999) ──
         rows_upsert_update = cf.gen_row_data_by_schema_with_defaults(
-            nb=1000, schema=schema_res,
+            nb=1000,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(1000)),
                 "float_1": [float(i) + 9999.0 for i in range(1000)],
                 "varchar_1": "updated",
-            }
+            },
         )
         rows_upsert_new = cf.gen_row_data_by_schema_with_defaults(
-            nb=1000, schema=schema_res,
+            nb=1000,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(20000, 21000)),
                 "float_1": [float(20000 + i) for i in range(1000)],
                 "varchar_1": "upserted_new",
-            }
+            },
         )
         self.upsert(client, collection_name, rows_upsert_update + rows_upsert_new)
         self.flush(client, collection_name)
 
-        q_updated = self.query(client, collection_name, filter='varchar_1 == "updated"',
-                               output_fields=["int64_pk", "float_1", "varchar_1"], limit=5000,
-                               check_task=CheckTasks.check_query_results,
-                               check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "float_1", "varchar_1"]})[0]
+        q_updated = self.query(
+            client,
+            collection_name,
+            filter='varchar_1 == "updated"',
+            output_fields=["int64_pk", "float_1", "varchar_1"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "float_1", "varchar_1"]},
+        )[0]
         for r in q_updated:
-            assert r["float_1"] == float(r["int64_pk"]) + 9999.0, \
+            assert r["float_1"] == float(r["int64_pk"]) + 9999.0, (
                 f"phase3: upserted float_1 mismatch int64_pk={r['int64_pk']} float_1={r['float_1']}"
+            )
 
-        self.query(client, collection_name, filter='varchar_1 == "upserted_new"',
-                   output_fields=["int64_pk", "varchar_1"], limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "varchar_1"]})
+        self.query(
+            client,
+            collection_name,
+            filter='varchar_1 == "upserted_new"',
+            output_fields=["int64_pk", "varchar_1"],
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 1000, "output_fields": ["int64_pk", "varchar_1"]},
+        )
 
-        self.search(client, collection_name, cf.gen_vectors(1, dim),
-                    anns_field="float_vector_1", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            anns_field="float_vector_1",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # ── Phase 4: delete by pk (500 rows: int64_pk=0~499) ──
         self.delete(client, collection_name, ids=list(range(500)))
-        self.query(client, collection_name, filter="int64_pk < 500", limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 0})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk < 500",
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 0},
+        )
 
         # ── Phase 4b: delete by expr (varchar_1 == "inserted") ──
         self.delete(client, collection_name, filter='varchar_1 == "inserted"')
-        self.query(client, collection_name, filter='varchar_1 == "inserted"', limit=5000,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 0})
+        self.query(
+            client,
+            collection_name,
+            filter='varchar_1 == "inserted"',
+            limit=5000,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 0},
+        )
 
-        self.search(client, collection_name, cf.gen_vectors(1, dim),
-                    anns_field="float_vector_1", limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            anns_field="float_vector_1",
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         # ── Final verification: total count after all DML ──
         # phase1: 10K (pk 0~9999)
@@ -3839,9 +4754,14 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         # phase3 upsert-update: pk 0~999 overwritten (net 0 new); upsert-new: +1K (pk 20000~20999) → 13K
         # phase4a: delete pk 0~499 → -500 → 12500
         # phase4b: delete varchar_1="inserted" (pk 10000~11999) → -2K → 10500
-        self.query(client, collection_name, filter="int64_pk >= 0", limit=16384,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_limit": 10500})
+        self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            limit=16384,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 10500},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -3874,25 +4794,36 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_1": FieldParams(nullable=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={k: "async" for k in [
-                                   "warmup.vectorIndex", "warmup.vectorField",
-                                   "warmup.scalarIndex", "warmup.scalarField"]})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={
+                k: "async"
+                for k in ["warmup.vectorIndex", "warmup.vectorField", "warmup.scalarIndex", "warmup.scalarField"]
+            },
+        )
 
         schema_res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "int64_1": [i % 100 for i in range(nb)],
-            })
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
 
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
         baseline = set(range(nb))
         query_vec = cf.gen_vectors(1, dim)
@@ -3900,32 +4831,47 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         for cycle in range(8):
             self.load_collection(client, collection_name)
             # search immediately — async warmup may still be running in background
-            self.search(client, collection_name, query_vec, limit=10,
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})
+            self.search(
+                client,
+                collection_name,
+                query_vec,
+                limit=10,
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 10},
+            )
 
-            q = self.query(client, collection_name, filter="int64_pk >= 0",
-                           output_fields=["int64_pk"], limit=nb,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_limit": nb, "output_fields": ["int64_pk"]})[0]
+            q = self.query(
+                client,
+                collection_name,
+                filter="int64_pk >= 0",
+                output_fields=["int64_pk"],
+                limit=nb,
+                check_task=CheckTasks.check_query_results,
+                check_items={"exp_limit": nb, "output_fields": ["int64_pk"]},
+            )[0]
             actual = {r["int64_pk"] for r in q}
             assert actual == baseline, (
-                f"cycle {cycle}: pk set corrupted — "
-                f"missing={baseline - actual}, extra={actual - baseline}"
+                f"cycle {cycle}: pk set corrupted — missing={baseline - actual}, extra={actual - baseline}"
             )
             self.release_collection(client, collection_name)
 
         # final cycle: deeper field-level verification
         self.load_collection(client, collection_name)
         # int64_1 = int64_pk % 100; int64_1 < 10 → int64_pk % 100 < 10 → 500 rows (0,10,20,...×50)
-        q_filter = self.query(client, collection_name, filter="int64_1 < 10",
-                              output_fields=["int64_pk", "int64_1"], limit=nb,
-                              check_task=CheckTasks.check_query_results,
-                              check_items={"exp_limit": 500, "output_fields": ["int64_pk", "int64_1"]})[0]
+        q_filter = self.query(
+            client,
+            collection_name,
+            filter="int64_1 < 10",
+            output_fields=["int64_pk", "int64_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 500, "output_fields": ["int64_pk", "int64_1"]},
+        )[0]
         for r in q_filter:
             assert r["int64_1"] < 10, f"filter violated: int64_pk={r['int64_pk']} int64_1={r['int64_1']}"
-            assert r["int64_1"] == r["int64_pk"] % 100, \
+            assert r["int64_1"] == r["int64_pk"] % 100, (
                 f"value corrupted: int64_pk={r['int64_pk']} expected int64_1={r['int64_pk'] % 100} got {r['int64_1']}"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -3959,45 +4905,57 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             },
         )
         # collection-level sync should be overridden by field-level disable
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.scalarField": "sync"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.scalarField": "sync"})
 
         schema_res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "int64_1": list(range(nb)),
                 "int64_2": [i * 2 for i in range(nb)],
-            })
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
 
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
         # verify priority chain in describe
         res = self.describe_collection(client, collection_name)[0]
-        assert cf.get_field_warmup(res, "int64_2") == "disable", \
+        assert cf.get_field_warmup(res, "int64_2") == "disable", (
             "field-level disable should override collection-level sync"
+        )
         assert cf.get_field_warmup(res, "int64_1") == "async"
 
         # int64_2 has no index → filter reads raw column data (cold read path)
         # int64_2 = int64_pk * 2; int64_2 < 100 → int64_pk < 50 → exactly 50 rows
-        q = self.query(client, collection_name, filter="int64_2 < 100",
-                       output_fields=["int64_pk", "int64_2", "int64_1"], limit=nb,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 50, "output_fields": ["int64_pk", "int64_2", "int64_1"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter="int64_2 < 100",
+            output_fields=["int64_pk", "int64_2", "int64_1"],
+            limit=nb,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 50, "output_fields": ["int64_pk", "int64_2", "int64_1"]},
+        )[0]
         for r in q:
-            assert r["int64_2"] < 100, \
-                f"filter violated: int64_pk={r['int64_pk']} int64_2={r['int64_2']}"
-            assert r["int64_2"] == r["int64_pk"] * 2, \
+            assert r["int64_2"] < 100, f"filter violated: int64_pk={r['int64_pk']} int64_2={r['int64_2']}"
+            assert r["int64_2"] == r["int64_pk"] * 2, (
                 f"value corrupted: int64_pk={r['int64_pk']} expected {r['int64_pk'] * 2} got {r['int64_2']}"
-            assert r["int64_1"] == r["int64_pk"], \
+            )
+            assert r["int64_1"] == r["int64_pk"], (
                 f"int64_1 corrupted: int64_pk={r['int64_pk']} expected {r['int64_pk']} got {r['int64_1']}"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -4027,54 +4985,77 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_1": FieldParams(nullable=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={k: "async" for k in [
-                                   "warmup.vectorIndex", "warmup.vectorField",
-                                   "warmup.scalarIndex", "warmup.scalarField"]})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={
+                k: "async"
+                for k in ["warmup.vectorIndex", "warmup.vectorField", "warmup.scalarIndex", "warmup.scalarField"]
+            },
+        )
 
         insert_batch = 5000
         schema_res = self.describe_collection(client, collection_name)[0]
         rows_base = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb_base, schema=schema_res,
+            nb=nb_base,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb_base)),
                 "int64_1": [0] * nb_base,
-            })
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows_base, insert_batch, nb_base):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
 
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
 
         # insert extra rows immediately after async load — warmup is running concurrently
         extra = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb_extra, schema=schema_res,
+            nb=nb_extra,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb_base, nb_base + nb_extra)),
                 "int64_1": [1] * nb_extra,
-            })
+            },
+        )
         self.insert(client, collection_name, extra)
 
         # strong consistency — must reflect all inserts including growing segment
-        q = self.query(client, collection_name, filter="int64_pk >= 0",
-                       output_fields=["int64_pk", "int64_1"], limit=nb_base + nb_extra,
-                       consistency_level="Strong",
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": nb_base + nb_extra, "output_fields": ["int64_pk", "int64_1"]})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter="int64_pk >= 0",
+            output_fields=["int64_pk", "int64_1"],
+            limit=nb_base + nb_extra,
+            consistency_level="Strong",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": nb_base + nb_extra, "output_fields": ["int64_pk", "int64_1"]},
+        )[0]
 
         new_rows = [r for r in q if r["int64_1"] == 1]
-        assert len(new_rows) == nb_extra, \
-            f"expected {nb_extra} int64_1=1 rows, got {len(new_rows)}"
+        assert len(new_rows) == nb_extra, f"expected {nb_extra} int64_1=1 rows, got {len(new_rows)}"
         new_pks = {r["int64_pk"] for r in new_rows}
-        assert new_pks == set(range(nb_base, nb_base + nb_extra)), \
+        assert new_pks == set(range(nb_base, nb_base + nb_extra)), (
             f"new pk set mismatch: {new_pks ^ set(range(nb_base, nb_base + nb_extra))}"
+        )
 
-        self.search(client, collection_name, [extra[0]["float_vector_1"]], limit=10,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": 1, "limit": 10})
+        self.search(
+            client,
+            collection_name,
+            [extra[0]["float_vector_1"]],
+            limit=10,
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )
 
         self.drop_collection(client, collection_name)
 
@@ -4109,45 +5090,60 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_1": FieldParams(nullable=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={k: "sync" for k in [
-                                   "warmup.vectorIndex", "warmup.vectorField",
-                                   "warmup.scalarIndex", "warmup.scalarField"]})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={
+                k: "sync"
+                for k in ["warmup.vectorIndex", "warmup.vectorField", "warmup.scalarIndex", "warmup.scalarField"]
+            },
+        )
         schema_res = self.describe_collection(client, collection_name)[0]
         all_rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=schema_res,
+            nb=nb,
+            schema=schema_res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "int64_1": [i % 100 for i in range(nb)],
-            })
+            },
+        )
         for d in cf.iter_mc_insert_list_data(all_rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
 
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
         # ── Round 1: sync warmup ──
         self.load_collection(client, collection_name)
-        sync_search = [{h["int64_pk"] for h in self.search(client, collection_name, [qv], limit=20)[0][0]}
-                       for qv in query_vecs]
-        sync_filter = [{r["int64_pk"] for r in self.query(client, collection_name,
-                                                    filter=expr, limit=500)[0]} for expr in filter_exprs]
+        sync_search = [
+            {h["int64_pk"] for h in self.search(client, collection_name, [qv], limit=20)[0][0]} for qv in query_vecs
+        ]
+        sync_filter = [
+            {r["int64_pk"] for r in self.query(client, collection_name, filter=expr, limit=500)[0]}
+            for expr in filter_exprs
+        ]
         self.release_collection(client, collection_name)
 
         # alter ALL warmup properties to async on the same collection (same index unchanged)
-        for prop in ["warmup.vectorIndex", "warmup.vectorField",
-                     "warmup.scalarIndex", "warmup.scalarField"]:
-            self.alter_collection_properties(client, collection_name,
-                                             properties={prop: "async"})
+        for prop in ["warmup.vectorIndex", "warmup.vectorField", "warmup.scalarIndex", "warmup.scalarField"]:
+            self.alter_collection_properties(client, collection_name, properties={prop: "async"})
 
         # ── Round 2: async warmup (same index, same data) ──
         self.load_collection(client, collection_name)
-        async_search = [{h["int64_pk"] for h in self.search(client, collection_name, [qv], limit=20)[0][0]}
-                        for qv in query_vecs]
-        async_filter = [{r["int64_pk"] for r in self.query(client, collection_name,
-                                                     filter=expr, limit=500)[0]} for expr in filter_exprs]
+        async_search = [
+            {h["int64_pk"] for h in self.search(client, collection_name, [qv], limit=20)[0][0]} for qv in query_vecs
+        ]
+        async_filter = [
+            {r["int64_pk"] for r in self.query(client, collection_name, filter=expr, limit=500)[0]}
+            for expr in filter_exprs
+        ]
 
         # same index → results must be bit-identical regardless of warmup mode
         for idx, (s_pks, a_pks) in enumerate(zip(sync_search, async_search)):
@@ -4197,17 +5193,18 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "float_vector_2": FieldParams(dim=dim, warmup="async").to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async",
-                                           "warmup.vectorField": "async"})
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            properties={"warmup.vectorIndex": "async", "warmup.vectorField": "async"},
+        )
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "float_vector_1") == "async"
         assert cf.get_field_warmup(res, "float_vector_2") == "async"
 
-        rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=res,
-            default_values={"int64_pk": list(range(nb))})
+        rows = cf.gen_row_data_by_schema_with_defaults(nb=nb, schema=res, default_values={"int64_pk": list(range(nb))})
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
@@ -4229,33 +5226,40 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
             ("float_vector_1", DefaultVectorSearchParams.HNSW(metric_type=MetricType.L2)),
             ("float_vector_2", DefaultVectorSearchParams.IVF_PQ(metric_type=MetricType.L2, nprobe=16)),
         ]:
-            s = self.search(client, collection_name, qv, anns_field=anns_field,
-                            limit=10, output_fields=["*"],
-                            search_params=sp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 10})[0]
+            s = self.search(
+                client,
+                collection_name,
+                qv,
+                anns_field=anns_field,
+                limit=10,
+                output_fields=["*"],
+                search_params=sp,
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 10},
+            )[0]
             for hit in s[0]:
-                assert hit["entity"].get(anns_field) is not None, \
+                assert hit["entity"].get(anns_field) is not None, (
                     f"search({anns_field}): vec is None (async warmup raw read failed)"
+                )
 
         # (2) hybrid_search: HNSW (hasRawData=True) + IVF_PQ (hasRawData=False) simultaneously
         req_hnsw = AnnSearchRequest(
-            qv, "float_vector_1",
-            DefaultVectorSearchParams.HNSW(metric_type=MetricType.L2), limit=10)
+            qv, "float_vector_1", DefaultVectorSearchParams.HNSW(metric_type=MetricType.L2), limit=10
+        )
         req_ivf_pq = AnnSearchRequest(
-            qv, "float_vector_2",
-            DefaultVectorSearchParams.IVF_PQ(metric_type=MetricType.L2, nprobe=16), limit=10)
-        h = self.hybrid_search(client, collection_name,
-                               reqs=[req_hnsw, req_ivf_pq],
-                               ranker=RRFRanker(),
-                               limit=10,
-                               output_fields=["*"])[0]
+            qv, "float_vector_2", DefaultVectorSearchParams.IVF_PQ(metric_type=MetricType.L2, nprobe=16), limit=10
+        )
+        h = self.hybrid_search(
+            client, collection_name, reqs=[req_hnsw, req_ivf_pq], ranker=RRFRanker(), limit=10, output_fields=["*"]
+        )[0]
         assert len(h[0]) == 10, f"hybrid_search: expected 10 hits, got {len(h[0])}"
         for hit in h[0]:
-            assert hit["entity"].get("float_vector_1") is not None, \
+            assert hit["entity"].get("float_vector_1") is not None, (
                 "hybrid_search: float_vector_1 missing in entity (HNSW raw path)"
-            assert hit["entity"].get("float_vector_2") is not None, \
+            )
+            assert hit["entity"].get("float_vector_2") is not None, (
                 "hybrid_search: float_vector_2 missing in entity (IVF_PQ column store path)"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -4292,16 +5296,17 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "json_1": FieldParams(nullable=True, warmup="async").to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.scalarField": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.scalarField": "async"})
 
         res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema_with_defaults(
-            nb=nb, schema=res,
+            nb=nb,
+            schema=res,
             default_values={
                 "int64_pk": list(range(nb)),
                 "json_1": [{"score": i % 100, "tag": "warmup_test"} for i in range(nb)],
-            })
+            },
+        )
         for d in cf.iter_mc_insert_list_data(rows, batch, nb):
             self.insert(client, collection_name, d)
         self.flush(client, collection_name)
@@ -4314,29 +5319,38 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # (1) JSON path filter — full-scan reads raw JSON column (scalarField warmup target)
-        q = self.query(client, collection_name,
-                       filter='json_1["score"] == 0',
-                       output_fields=["*"], limit=200,
-                       check_task=CheckTasks.check_query_results,
-                       check_items={"exp_limit": 50})[0]
+        q = self.query(
+            client,
+            collection_name,
+            filter='json_1["score"] == 0',
+            output_fields=["*"],
+            limit=200,
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_limit": 50},
+        )[0]
         for r in q:
-            assert "json_1" in r and r["json_1"] is not None, \
+            assert "json_1" in r and r["json_1"] is not None, (
                 "json_1 missing or None in query output_fields=['*'] (scalarField async warmup failed)"
-            assert r["json_1"]["score"] == 0, \
-                f"json_1 score mismatch: {r['json_1']}"
+            )
+            assert r["json_1"]["score"] == 0, f"json_1 score mismatch: {r['json_1']}"
 
         # (2) search with output_fields=['*'] — verify all columns including JSON are retrievable
-        s = self.search(client, collection_name,
-                        cf.gen_vectors(1, dim),
-                        anns_field="float_vector_1", limit=10,
-                        search_params=DefaultVectorSearchParams.HNSW(metric_type=MetricType.L2),
-                        output_fields=["*"],
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": 1, "limit": 10})[0]
+        s = self.search(
+            client,
+            collection_name,
+            cf.gen_vectors(1, dim),
+            anns_field="float_vector_1",
+            limit=10,
+            search_params=DefaultVectorSearchParams.HNSW(metric_type=MetricType.L2),
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"nq": 1, "limit": 10},
+        )[0]
         assert len(s[0]) == 10, f"search: expected 10 hits, got {len(s[0])}"
         for hit in s[0]:
-            assert "json_1" in hit["entity"], \
+            assert "json_1" in hit["entity"], (
                 "json_1 missing from search output_fields=['*'] (scalarField async warmup failed)"
+            )
 
         self.drop_collection(client, collection_name)
 
@@ -4390,8 +5404,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
         res = self.describe_collection(client, collection_name)[0]
         if override_type == "none":
-            for key in ["warmup.vectorField", "warmup.scalarField",
-                        "warmup.vectorIndex", "warmup.scalarIndex"]:
+            for key in ["warmup.vectorField", "warmup.scalarField", "warmup.vectorIndex", "warmup.scalarIndex"]:
                 assert cf.get_collection_warmup(res, key) is None
             assert cf.get_field_warmup(res, "float_vector_1") is None
         elif override_type == "collection":
@@ -4404,9 +5417,13 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=5000, schema=res)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
         assert len(self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10)[0][0]) == 10
 
@@ -4414,7 +5431,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.skip(
-        reason="requires tiered storage config in milvus.yaml (warmup.vectorIndex=async and all other fields=async)")
+        reason="requires tiered storage config in milvus.yaml (warmup.vectorIndex=async and all other fields=async)"
+    )
     def test_warmup_global_async_index_sync_drop_fallback(self):
         """
         target: verify global all-async config + index-level sync override; after drop index warmup, falls back to global async
@@ -4442,13 +5460,16 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=5000, schema=res)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.release_collection(client, collection_name)
 
-        self.alter_index_properties(client, collection_name, index_name="float_vector_1",
-                                    properties={"warmup": "sync"})
+        self.alter_index_properties(client, collection_name, index_name="float_vector_1", properties={"warmup": "sync"})
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
         assert cf.get_index_warmup(idx_res) == "sync"
 
@@ -4456,8 +5477,7 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         assert len(self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10)[0][0]) == 10
 
         self.release_collection(client, collection_name)
-        self.drop_index_properties(client, collection_name, index_name="float_vector_1",
-                                   property_keys=["warmup"])
+        self.drop_index_properties(client, collection_name, index_name="float_vector_1", property_keys=["warmup"])
         idx_res = self.describe_index(client, collection_name, index_name="float_vector_1")[0]
         assert cf.get_index_warmup(idx_res) is None
 
@@ -4498,9 +5518,13 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=5000, schema=res)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
         self.load_collection(client, collection_name)
         assert len(self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10)[0][0]) == 10
 
@@ -4511,7 +5535,8 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.skip(
-        reason="requires tiered storage config in milvus.yaml (common.threadCoreCoefficient.lowPriority=0)")
+        reason="requires tiered storage config in milvus.yaml (common.threadCoreCoefficient.lowPriority=0)"
+    )
     def test_warmup_async_prefetch_thread_pool_zero(self):
         """
         target: verify when prefetch thread pool=0 (lowPriority=0), async degrades to sync;
@@ -4533,20 +5558,22 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                 "int64_pk": FieldParams(is_primary=True).to_dict,
             },
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               properties={"warmup.vectorIndex": "async"})
+        self.create_collection(client, collection_name, schema=schema, properties={"warmup.vectorIndex": "async"})
 
         res = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=5000, schema=res)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        self.create_index(client, collection_name,
-                          self.all_vector_index(self.prepare_index_params(client)[0],
-                                                DefaultVectorIndexParams.HNSW("float_vector_1")))
+        self.create_index(
+            client,
+            collection_name,
+            self.all_vector_index(
+                self.prepare_index_params(client)[0], DefaultVectorIndexParams.HNSW("float_vector_1")
+            ),
+        )
 
         self.load_collection(client, collection_name)
 
         assert len(self.search(client, collection_name, cf.gen_vectors(1, 128), limit=10)[0][0]) == 10
 
         self.drop_collection(client, collection_name)
-

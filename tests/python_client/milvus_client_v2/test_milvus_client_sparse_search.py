@@ -17,6 +17,7 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
     Data: 4000 rows
     Index: SPARSE_INVERTED_INDEX / IP
     """
+
     shared_alias = "TestSparseSearchShared"
 
     def setup_class(self):
@@ -34,13 +35,15 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         self.flush(client, self.collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type="SPARSE_INVERTED_INDEX", metric_type="IP", params={})
+        idx.add_index(
+            field_name=ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="IP", params={}
+        )
         self.create_index(client, self.collection_name, index_params=idx)
         self.load_collection(client, self.collection_name)
 
         def teardown():
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -53,19 +56,24 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        self.search(client, self.collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=ct.default_sparse_search_params,
-                    limit=default_limit,
-                    output_fields=[ct.default_sparse_vec_field_name],
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name,
-                                 "output_fields": [ct.default_sparse_vec_field_name]})
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            output_fields=[ct.default_sparse_vec_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+                "output_fields": [ct.default_sparse_vec_field_name],
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_sparse_search_with_filter(self):
@@ -80,24 +88,30 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         search_vectors = cf.gen_sparse_vectors(default_nq)
         filter_limit = 100
         expr = f"{ct.default_int64_field_name} < {filter_limit}"
-        search_res, _ = self.search(client, self.collection_name,
-                                    data=search_vectors,
-                                    anns_field=ct.default_sparse_vec_field_name,
-                                    search_params=ct.default_sparse_search_params,
-                                    limit=default_limit,
-                                    filter=expr,
-                                    output_fields=[ct.default_int64_field_name],
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": default_nq,
-                                                 "limit": default_limit,
-                                                 "metric": "IP",
-                                                 "enable_milvus_client_api": True,
-                                                 "pk_name": ct.default_int64_field_name,
-                                                 "output_fields": [ct.default_int64_field_name]})
+        search_res, _ = self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            filter=expr,
+            output_fields=[ct.default_int64_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+                "output_fields": [ct.default_int64_field_name],
+            },
+        )
         for hits in search_res:
             for hit in hits:
-                assert hit[ct.default_int64_field_name] < filter_limit, \
+                assert hit[ct.default_int64_field_name] < filter_limit, (
                     f"filter not effective: got {ct.default_int64_field_name}={hit[ct.default_int64_field_name]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_sparse_search_output_field(self):
@@ -109,20 +123,24 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        self.search(client, self.collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=ct.default_sparse_search_params,
-                    limit=default_limit,
-                    output_fields=[ct.default_float_field_name, ct.default_sparse_vec_field_name],
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name,
-                                 "output_fields": [ct.default_float_field_name,
-                                                   ct.default_sparse_vec_field_name]})
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            output_fields=[ct.default_float_field_name, ct.default_sparse_vec_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+                "output_fields": [ct.default_float_field_name, ct.default_sparse_vec_field_name],
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("batch_size", [10, 100, 500])
@@ -136,14 +154,17 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_sparse_vectors(1)
-        self.search_iterator(client, self.collection_name,
-                             data=search_vectors,
-                             batch_size=batch_size,
-                             limit=500,
-                             anns_field=ct.default_sparse_vec_field_name,
-                             search_params=ct.default_sparse_search_params,
-                             check_task=CheckTasks.check_search_iterator,
-                             check_items={"batch_size": batch_size})
+        self.search_iterator(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            batch_size=batch_size,
+            limit=500,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            check_task=CheckTasks.check_search_iterator,
+            check_items={"batch_size": batch_size},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE"])
@@ -157,15 +178,19 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_sparse_vectors(1)
         search_params = {"metric_type": metric_type, "params": {}}
-        self.search(client, self.collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=search_params,
-                    limit=default_limit,
-                    check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 1100,
-                                 ct.err_msg: f"metric type not match: invalid parameter"
-                                             f"[expected=IP][actual={metric_type}]"})
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items={
+                ct.err_code: 1100,
+                ct.err_msg: f"metric type not match: invalid parameter[expected=IP][actual={metric_type}]",
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [1, 100])
@@ -178,17 +203,22 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
         """
         client = self._client(alias=self.shared_alias)
         search_vectors = cf.gen_sparse_vectors(nq)
-        self.search(client, self.collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=ct.default_sparse_search_params,
-                    limit=default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name})
+        self.search(
+            client,
+            self.collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )
 
 
 class TestSparseSearchIndependent(TestMilvusClientV2Base):
@@ -222,8 +252,7 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         params = cf.get_index_params_params(index)
         params.update({"inverted_index_algo": inverted_index_algo})
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type=index, metric_type="IP", params=params)
+        idx.add_index(field_name=ct.default_sparse_vec_field_name, index_type=index, metric_type="IP", params=params)
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
@@ -232,19 +261,24 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         _params.update({"dim_max_score_ratio": 1.05})
         search_params = {"metric_type": "IP", "params": _params}
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        self.search(client, collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=search_params,
-                    limit=default_limit,
-                    output_fields=[ct.default_sparse_vec_field_name],
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name,
-                                 "output_fields": [ct.default_sparse_vec_field_name]})
+        self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            output_fields=[ct.default_sparse_vec_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+                "output_fields": [ct.default_sparse_vec_field_name],
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.sparse_supported_index_types)
@@ -277,24 +311,28 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         # create sparse index
         params = cf.get_index_params_params(index)
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type=index, metric_type="IP", params=params)
+        idx.add_index(field_name=ct.default_sparse_vec_field_name, index_type=index, metric_type="IP", params=params)
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
         # search
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        self.search(client, collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=ct.default_sparse_search_params,
-                    limit=default_limit,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name})
+        self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+            },
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.sparse_supported_index_types)
@@ -324,22 +362,20 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         params = cf.get_index_params_params(index)
         params.update({"inverted_index_algo": inverted_index_algo})
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type=index, metric_type="IP", params=params)
+        idx.add_index(field_name=ct.default_sparse_vec_field_name, index_type=index, metric_type="IP", params=params)
         self.create_index(client, collection_name, index_params=idx)
 
         # enable mmap on collection
-        self.alter_collection_properties(client, collection_name, properties={'mmap.enabled': True})
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         desc, _ = self.describe_collection(client, collection_name)
-        assert desc.get("properties", {}).get("mmap.enabled") == 'True'
+        assert desc.get("properties", {}).get("mmap.enabled") == "True"
 
         # enable mmap on index
-        self.alter_index_properties(client, collection_name,
-                                    index_name=ct.default_sparse_vec_field_name,
-                                    properties={'mmap.enabled': True})
-        index_info, _ = self.describe_index(client, collection_name,
-                                            index_name=ct.default_sparse_vec_field_name)
-        assert index_info.get("mmap.enabled") == 'True'
+        self.alter_index_properties(
+            client, collection_name, index_name=ct.default_sparse_vec_field_name, properties={"mmap.enabled": True}
+        )
+        index_info, _ = self.describe_index(client, collection_name, index_name=ct.default_sparse_vec_field_name)
+        assert index_info.get("mmap.enabled") == "True"
 
         # insert second batch
         second_nb = ct.default_nb
@@ -352,25 +388,29 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         _search_params = cf.get_search_params_params(index)
         search_params = {"metric_type": "IP", "params": _search_params}
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        self.search(client, collection_name,
-                    data=search_vectors,
-                    anns_field=ct.default_sparse_vec_field_name,
-                    search_params=search_params,
-                    limit=default_limit,
-                    output_fields=[ct.default_sparse_vec_field_name],
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"nq": default_nq,
-                                 "limit": default_limit,
-                                 "metric": "IP",
-                                 "enable_milvus_client_api": True,
-                                 "pk_name": ct.default_int64_field_name,
-                                 "output_fields": [ct.default_sparse_vec_field_name]})
+        self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            output_fields=[ct.default_sparse_vec_field_name],
+            check_task=CheckTasks.check_search_results,
+            check_items={
+                "nq": default_nq,
+                "limit": default_limit,
+                "metric": "IP",
+                "enable_milvus_client_api": True,
+                "pk_name": ct.default_int64_field_name,
+                "output_fields": [ct.default_sparse_vec_field_name],
+            },
+        )
 
         # query to verify data from both batches
         expr_id_list = [0, 1, 10, 100]
-        term_expr = f'{ct.default_int64_field_name} in {expr_id_list}'
-        res, _ = self.query(client, collection_name, filter=term_expr,
-                            output_fields=[ct.default_int64_field_name])
+        term_expr = f"{ct.default_int64_field_name} in {expr_id_list}"
+        res, _ = self.query(client, collection_name, filter=term_expr, output_fields=[ct.default_int64_field_name])
         assert len(res) == len(expr_id_list)
         returned_ids = sorted([r[ct.default_int64_field_name] for r in res])
         assert returned_ids == sorted(expr_id_list)
@@ -402,9 +442,12 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
 
         # create sparse index with drop_ratio_build
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type=index, metric_type="IP",
-                      params={"drop_ratio_build": drop_ratio_build})
+        idx.add_index(
+            field_name=ct.default_sparse_vec_field_name,
+            index_type=index,
+            metric_type="IP",
+            params={"drop_ratio_build": drop_ratio_build},
+        )
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
@@ -418,31 +461,37 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
         for dim_max_score_ratio in [0.5, 0.99, 1, 1.3]:
             _params.update({"dim_max_score_ratio": dim_max_score_ratio})
             search_params = {"metric_type": "IP", "params": _params}
-            search_res, _ = self.search(client, collection_name,
-                                        data=search_vectors,
-                                        anns_field=ct.default_sparse_vec_field_name,
-                                        search_params=search_params,
-                                        limit=default_limit)
+            search_res, _ = self.search(
+                client,
+                collection_name,
+                data=search_vectors,
+                anns_field=ct.default_sparse_vec_field_name,
+                search_params=search_params,
+                limit=default_limit,
+            )
             assert len(search_res) == default_nq
             for hits in search_res:
                 assert len(hits) > 0, f"no results for dim_max_score_ratio={dim_max_score_ratio}"
-                distances = [hit['distance'] for hit in hits]
-                assert distances == sorted(distances, reverse=True), \
+                distances = [hit["distance"] for hit in hits]
+                assert distances == sorted(distances, reverse=True), (
                     f"distances not sorted descending for IP with ratio={dim_max_score_ratio}"
+                )
 
         # search with invalid dim_max_score_ratio values
-        error = {ct.err_code: 999,
-                 ct.err_msg: "should be in range [0.500000, 1.300000]"}
+        error = {ct.err_code: 999, ct.err_msg: "should be in range [0.500000, 1.300000]"}
         for invalid_ratio in [0.49, 1.4]:
             _params.update({"dim_max_score_ratio": invalid_ratio})
             search_params = {"metric_type": "IP", "params": _params}
-            self.search(client, collection_name,
-                        data=search_vectors,
-                        anns_field=ct.default_sparse_vec_field_name,
-                        search_params=search_params,
-                        limit=default_limit,
-                        check_task=CheckTasks.err_res,
-                        check_items=error)
+            self.search(
+                client,
+                collection_name,
+                data=search_vectors,
+                anns_field=ct.default_sparse_vec_field_name,
+                search_params=search_params,
+                limit=default_limit,
+                check_task=CheckTasks.err_res,
+                check_items=error,
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.sparse_supported_index_types)
@@ -468,8 +517,7 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
 
         params = cf.get_index_params_params(index)
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_sparse_vec_field_name,
-                      index_type=index, metric_type="IP", params=params)
+        idx.add_index(field_name=ct.default_sparse_vec_field_name, index_type=index, metric_type="IP", params=params)
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
@@ -480,16 +528,20 @@ class TestSparseSearchIndependent(TestMilvusClientV2Base):
 
         # search and verify deleted PKs not in results
         search_vectors = cf.gen_sparse_vectors(default_nq)
-        search_res, _ = self.search(client, collection_name,
-                                    data=search_vectors,
-                                    anns_field=ct.default_sparse_vec_field_name,
-                                    search_params=ct.default_sparse_search_params,
-                                    limit=default_limit,
-                                    output_fields=[ct.default_int64_field_name])
+        search_res, _ = self.search(
+            client,
+            collection_name,
+            data=search_vectors,
+            anns_field=ct.default_sparse_vec_field_name,
+            search_params=ct.default_sparse_search_params,
+            limit=default_limit,
+            output_fields=[ct.default_int64_field_name],
+        )
         assert len(search_res) == default_nq
         deleted_set = set(delete_ids)
         for hits in search_res:
             assert len(hits) > 0
             for hit in hits:
-                assert hit[ct.default_int64_field_name] not in deleted_set, \
+                assert hit[ct.default_int64_field_name] not in deleted_set, (
                     f"deleted PK {hit[ct.default_int64_field_name]} found in search results"
+                )

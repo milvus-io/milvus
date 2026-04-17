@@ -18,7 +18,6 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 
 class TestIndexNodeScale:
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_expand_index_node(self):
         """
@@ -31,33 +30,33 @@ class TestIndexNodeScale:
         """
         release_name = "expand-index"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         init_replicas = 1
         expand_replicas = 2
         data_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'spec.mode': 'cluster',
-            'metadata.name': release_name,
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.indexNode.replicas': init_replicas,
-            'spec.components.dataNode.replicas': 2,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "spec.mode": "cluster",
+            "metadata.name": release_name,
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.indexNode.replicas": init_replicas,
+            "spec.components.dataNode.replicas": 2,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(data_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
             # If deploy failed and want to uninsatll mic
             # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
             # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             # connect
             connections.add_connection(default={"host": host, "port": 19530})
-            connections.connect(alias='default')
+            connections.connect(alias="default")
 
             # create collection
             c_name = "index_scale_one"
@@ -77,14 +76,14 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
-            log.info(f'Create index on {init_replicas} indexNode cost t0: {t0}')
+            log.info(f"Create index on {init_replicas} indexNode cost t0: {t0}")
 
             # drop index
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
 
             # expand indexNode
-            mic.upgrade(release_name, {'spec.components.indexNode.replicas': expand_replicas}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.indexNode.replicas": expand_replicas}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
@@ -93,16 +92,16 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
-            log.info(f'Create index on {expand_replicas} indexNode cost t1: {t1}')
+            log.info(f"Create index on {expand_replicas} indexNode cost t1: {t1}")
             collection_w.drop_index()
 
             start = datetime.datetime.now()
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t2 = datetime.datetime.now() - start
-            log.info(f'Create index on {expand_replicas} indexNode cost t2: {t2}')
+            log.info(f"Create index on {expand_replicas} indexNode cost t2: {t2}")
 
-            log.debug(f't2 is {t2}, t0 is {t0}, t0/t2 is {t0 / t2}')
+            log.debug(f"t2 is {t2}, t0 is {t0}, t0/t2 is {t0 / t2}")
             # assert round(t0 / t2) == 2
 
         except Exception as e:
@@ -110,7 +109,7 @@ class TestIndexNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
@@ -126,28 +125,28 @@ class TestIndexNodeScale:
         """
         release_name = "shrink-index"
         image_tag = get_latest_tag()
-        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+        image = f"{constants.IMAGE_REPOSITORY}:{image_tag}"
         data_config = {
-            'metadata.namespace': constants.NAMESPACE,
-            'metadata.name': release_name,
-            'spec.mode': 'cluster',
-            'spec.components.image': image,
-            'spec.components.proxy.serviceType': 'LoadBalancer',
-            'spec.components.indexNode.replicas': 2,
-            'spec.components.dataNode.replicas': 2,
-            'spec.config.common.retentionDuration': 60
+            "metadata.namespace": constants.NAMESPACE,
+            "metadata.name": release_name,
+            "spec.mode": "cluster",
+            "spec.components.image": image,
+            "spec.components.proxy.serviceType": "LoadBalancer",
+            "spec.components.indexNode.replicas": 2,
+            "spec.components.dataNode.replicas": 2,
+            "spec.config.common.retentionDuration": 60,
         }
         mic = MilvusOperator()
         mic.install(data_config)
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
-            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f'Milvus healthy timeout 1800s')
+            raise MilvusException(message=f"Milvus healthy timeout 1800s")
 
         try:
             # connect
             connections.add_connection(default={"host": host, "port": 19530})
-            connections.connect(alias='default')
+            connections.connect(alias="default")
 
             data = cf.gen_default_dataframe_data(nb)
 
@@ -168,13 +167,13 @@ class TestIndexNodeScale:
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
 
-            log.info(f'Create index on 2 indexNode cost t0: {t0}')
+            log.info(f"Create index on 2 indexNode cost t0: {t0}")
 
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
 
             # shrink indexNode from 2 to 1
-            mic.upgrade(release_name, {'spec.components.indexNode.replicas': 1}, constants.NAMESPACE)
+            mic.upgrade(release_name, {"spec.components.indexNode.replicas": 1}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
@@ -182,7 +181,7 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
-            log.info(f'Create index on 1 indexNode cost t1: {t1}')
+            log.info(f"Create index on 1 indexNode cost t1: {t1}")
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
 
@@ -190,10 +189,10 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t2 = datetime.datetime.now() - start
-            log.info(f'Create index on 1 indexNode cost t2: {t2}')
+            log.info(f"Create index on 1 indexNode cost t2: {t2}")
 
-            log.debug(f'one indexNode: {t2}')
-            log.debug(f't2 is {t2}, t0 is {t0}, t2/t0 is {t2 / t0}')
+            log.debug(f"one indexNode: {t2}")
+            log.debug(f"t2 is {t2}, t0 is {t0}, t2/t0 is {t2 / t0}")
             # assert round(t2 / t0) == 2
 
         except Exception as e:
@@ -201,6 +200,6 @@ class TestIndexNodeScale:
 
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
-            log.info('Start to export milvus pod logs')
+            log.info("Start to export milvus pod logs")
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
