@@ -8,8 +8,8 @@ package proxypb
 
 import (
 	context "context"
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
