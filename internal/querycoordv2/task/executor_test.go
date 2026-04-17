@@ -19,7 +19,6 @@ package task
 import (
 	"context"
 	"fmt"
-	"math"
 	"testing"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func init() {
@@ -66,6 +66,7 @@ func newNodeWithStats(nodeID int64, cpuNum int64, memCapMB float64, usedMemMB fl
 }
 
 // segmentGateAllows checks the segment pool gate logic without spawning a goroutine.
+// IMPORTANT: this must stay in sync with the gate logic in Execute().
 func segmentGateAllows(ex *Executor, task *SegmentTask) bool {
 	nodeInfo := ex.nodeMgr.Get(ex.nodeID)
 	if nodeInfo == nil {
@@ -74,16 +75,16 @@ func segmentGateAllows(ex *Executor, task *SegmentTask) bool {
 
 	pendingCount, pendingMem := ex.pendingSnapshot()
 
+	// Memory gate: reject if task doesn't fit in remaining capacity
 	pendingFactor := Params.QueryCoordCfg.PendingMemoryFactor.GetAsFloat()
 	effectiveUsedMB := nodeInfo.UsedMemory() + float64(pendingMem)*pendingFactor/(1024*1024)
 	remainingMB := nodeInfo.MemCapacity() - effectiveUsedMB
-	if remainingMB > 0 {
-		taskMB := float64(task.SegmentSize()) / (1024 * 1024)
-		if taskMB > 0 && taskMB > remainingMB {
-			return false
-		}
+	taskMB := float64(task.SegmentSize()) / (1024 * 1024)
+	if taskMB > 0 && taskMB > remainingMB {
+		return false
 	}
 
+	// CPU gate: reject if pending count at capacity
 	if pendingCount >= ex.getSegmentPoolCap() {
 		return false
 	}
@@ -191,6 +192,18 @@ func TestExecutor_MemoryGate_ZeroSegmentSize(t *testing.T) {
 	assert.True(t, segmentGateAllows(ex, task), "zero size → memory gate skipped")
 }
 
+func TestExecutor_MemoryGate_RejectsWhenOverCommitted(t *testing.T) {
+	nodeID := int64(1)
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(newNodeWithStats(nodeID, 64, 8192, 9000)) // usedMemory > capacity → remainingMB < 0
+	defer nodeMgr.Remove(nodeID)
+	ex := NewExecutor(nodeID, nil, nil, nil, nil, nil, nodeMgr)
+
+	task := newTestSegmentTask(t, nodeID, 1000)
+	task.SetSegmentSize(1 * 1024 * 1024) // 1 MB — even tiny tasks should be rejected
+	assert.False(t, segmentGateAllows(ex, task), "should reject when node is over-committed (remainingMB < 0)")
+}
+
 // =============================================================================
 // Segment Pool CPU Gate Tests
 // =============================================================================
@@ -279,7 +292,22 @@ func TestExecutor_ResetPending(t *testing.T) {
 	assert.Equal(t, int32(2), count)
 	assert.Equal(t, int64(3000), mem)
 
-	ex.ResetPending()
+	// ResetPending with loaded segments only clears matching entries
+	ex.pendingMu.Lock()
+	ex.pendingSet["a"] = pendingTaskInfo{segmentID: 100, memoryBytes: 1000}
+	ex.pendingSet["b"] = pendingTaskInfo{segmentID: 200, memoryBytes: 2000}
+	ex.pendingMu.Unlock()
+
+	loaded := typeutil.NewSet[int64]()
+	loaded.Insert(100) // only segment 100 confirmed
+	ex.ResetPending(loaded)
+	count, mem = ex.pendingSnapshot()
+	assert.Equal(t, int32(1), count) // only "b" (segment 200) remains
+	assert.Equal(t, int64(2000), mem)
+
+	// Reset with all loaded clears everything
+	loaded.Insert(200)
+	ex.ResetPending(loaded)
 	count, mem = ex.pendingSnapshot()
 	assert.Equal(t, int32(0), count)
 	assert.Equal(t, int64(0), mem)
@@ -350,5 +378,4 @@ func TestExecutor_PoolCapacity(t *testing.T) {
 	assert.True(t, channelCap+segmentCap >= total,
 		"channel(%d) + segment(%d) should cover total(%d)", channelCap, segmentCap, total)
 
-	_ = math.Ceil(0) // keep import
 }

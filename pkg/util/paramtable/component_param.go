@@ -2642,6 +2642,10 @@ type queryCoordConfig struct {
 
 	PendingMemoryFactor ParamItem `refreshable:"true"`
 
+	SegmentTaskCapFactor           ParamItem `refreshable:"true"`
+	StoppingBalanceSegmentFactor   ParamItem `refreshable:"true"`
+	NormalBalanceSegmentFactor     ParamItem `refreshable:"true"`
+
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
@@ -3342,6 +3346,33 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.PendingMemoryFactor.Init(base.mgr)
+
+	p.SegmentTaskCapFactor = ParamItem{
+		Key:          "queryCoord.segmentTaskCapFactor",
+		Version:      "2.6.13",
+		DefaultValue: "16",
+		Doc:          "Per-node factor for computing the global segment task cap (cap = activeNodes × factor). Limits total segment tasks in the scheduler to prevent unbounded queue growth.",
+		Export:       true,
+	}
+	p.SegmentTaskCapFactor.Init(base.mgr)
+
+	p.StoppingBalanceSegmentFactor = ParamItem{
+		Key:          "queryCoord.stoppingBalanceSegmentFactor",
+		Version:      "2.6.13",
+		DefaultValue: "4",
+		Doc:          "Per-node factor for stopping balance segment batch size (batch = activeNodes × factor). Controls how many segments are moved per stopping-balance round.",
+		Export:       true,
+	}
+	p.StoppingBalanceSegmentFactor.Init(base.mgr)
+
+	p.NormalBalanceSegmentFactor = ParamItem{
+		Key:          "queryCoord.normalBalanceSegmentFactor",
+		Version:      "2.6.13",
+		DefaultValue: "2",
+		Doc:          "Per-node factor for normal balance segment batch size (batch = activeNodes × factor). Controls how many segments are moved per normal-balance round.",
+		Export:       true,
+	}
+	p.NormalBalanceSegmentFactor.Init(base.mgr)
 
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",

@@ -151,10 +151,14 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
 
-		// Reset executor's local pending counters since QN's report is now authoritative.
-		// Only reset when stats were actually updated — if dist was skipped (lastModifyTs unchanged),
-		// the node's usedMemory is stale and pending compensation must be preserved.
-		dh.scheduler.ResetExecutorPending(dh.nodeID)
+		// Reconcile executor's pending set: remove entries for segments QN has confirmed loaded.
+		// Entries for in-flight segments not yet in the dist response are preserved to prevent
+		// over-scheduling between dist pulls.
+		loadedSegments := typeutil.NewSet[int64]()
+		for _, s := range resp.GetSegments() {
+			loadedSegments.Insert(s.GetID())
+		}
+		dh.scheduler.ResetExecutorPending(dh.nodeID, loadedSegments)
 	}
 
 	if dispatchTask {

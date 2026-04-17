@@ -289,7 +289,7 @@ type Scheduler interface {
 	Dispatch(node int64)
 	RemoveByNode(node int64)
 	HasTaskForNode(nodeID int64) bool
-	ResetExecutorPending(nodeID int64)
+	ResetExecutorPending(nodeID int64, loadedSegments Set[int64])
 	GetChannelTaskNum(filters ...TaskFilter) int
 	GetSegmentTaskNum(filters ...TaskFilter) int
 	GetTasksJSON() string
@@ -815,10 +815,10 @@ func (scheduler *taskScheduler) HasTaskForNode(nodeID int64) bool {
 	return hasTask
 }
 
-func (scheduler *taskScheduler) ResetExecutorPending(nodeID int64) {
+func (scheduler *taskScheduler) ResetExecutorPending(nodeID int64, loadedSegments Set[int64]) {
 	executor, ok := scheduler.executors.Get(nodeID)
 	if ok {
-		executor.ResetPending()
+		executor.ResetPending(loadedSegments)
 	}
 }
 

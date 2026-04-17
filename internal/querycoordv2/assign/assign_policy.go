@@ -66,7 +66,7 @@ type AssignPolicy interface {
 
 	// AssignChannel assigns channels to nodes based on the policy
 	// Returns a list of channel assignment plans
-	AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan
+	AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
 }
 
 // ScoreAwareAssignPolicy extends AssignPolicy with score-based node conversion

@@ -69,7 +69,7 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.ctx = context.Background()
 
 	suite.scheduler.EXPECT().HasTaskForNode(mock.Anything).Return(false).Maybe()
-	suite.scheduler.EXPECT().ResetExecutorPending(mock.Anything).Maybe()
+	suite.scheduler.EXPECT().ResetExecutorPending(mock.Anything, mock.Anything).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()

@@ -527,10 +527,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}()
 
-	// Skip all balance when recovery (grow) tasks exist to avoid wasting QN resources
-	if b.scheduler.GetSegmentTaskNum(task.WithTaskTypeFilter(task.TaskTypeGrow)) > 0 {
-		return nil
-	}
+	hasGrowTasks := b.scheduler.GetSegmentTaskNum(task.WithTaskTypeFilter(task.TaskTypeGrow)) > 0
 
 	// Load current configuration to respect dynamic parameter changes
 	config := b.loadBalanceConfig()
@@ -542,6 +539,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// Phase 1: Process stopping balance first (higher priority)
+	// Stopping balance (node draining) must always run, even during recovery.
 	// Batch size = activeQN × StoppingBalanceSegmentFactor
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 		stoppingConfig := config
@@ -571,6 +569,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// Phase 2: Process normal balance if no stopping balance was needed
+	// Skip normal balance when recovery (grow) tasks exist to avoid wasting QN resources.
+	// Stopping balance above is exempt because node-draining is high priority.
+	if hasGrowTasks {
+		return nil
+	}
 	// Batch size = activeQN × NormalBalanceSegmentFactor
 	if paramtable.Get().QueryCoordCfg.AutoBalance.GetAsBool() {
 		// Respect the auto balance interval to prevent too frequent operations

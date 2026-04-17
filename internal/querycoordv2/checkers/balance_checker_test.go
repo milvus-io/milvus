@@ -1978,7 +1978,7 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
 	paramtable.Init()
 
-	t.Run("SkipsAllBalance_WhenGrowTasksExist", func(t *testing.T) {
+	t.Run("SkipsNormalBalance_WhenGrowTasksExist", func(t *testing.T) {
 		checker := createTestBalanceChecker()
 		ctx := context.Background()
 
@@ -1994,25 +1994,22 @@ func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
 		}).Build()
 		defer mockGetSegmentTaskNum.UnPatch()
 
-		// processBalanceQueue should NOT be called at all
-		processQueueCalled := false
-		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
-			func(ctx context.Context,
-				balancer balance.Balance,
-				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *assign.PriorityQueue,
-				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
-				isStoppingBalance bool,
-			) (int, int) {
-				processQueueCalled = true
-				return 0, 0
-			}).Build()
-		defer mockProcessQueue.UnPatch()
+		// Disable stopping balance so we test normal balance path
+		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		defer mockParamGet.UnPatch()
+		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+		defer mockGetAsBool.UnPatch()
+
+		mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(balanceConfig{
+			segmentBatchSize: 5,
+			channelBatchSize: 5,
+		}).Build()
+		defer mockLoadConfig.UnPatch()
 
 		result := checker.Check(ctx)
 
-		assert.Nil(t, result, "Should return nil")
-		assert.False(t, processQueueCalled, "processBalanceQueue should NOT be called when recovery tasks exist")
+		// hasGrowTasks=true, stopping balance disabled → skips normal balance → returns nil
+		assert.Nil(t, result, "Should return nil when grow tasks exist and stopping balance is disabled")
 	})
 
 	t.Run("RunsBalance_WhenNoGrowTasks", func(t *testing.T) {
@@ -2049,7 +2046,7 @@ func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
 		assert.Nil(t, result)
 	})
 
-	t.Run("SkipsStoppingBalance_WhenGrowTasksExist", func(t *testing.T) {
+	t.Run("AllowsStoppingBalance_WhenGrowTasksExist", func(t *testing.T) {
 		checker := createTestBalanceChecker()
 		ctx := context.Background()
 
@@ -2066,8 +2063,21 @@ func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
 		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockGetAsBool.UnPatch()
 
-		// processBalanceQueue should NOT be called
-		processQueueCalled := false
+		mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(4).Build()
+		defer mockGetAsInt.UnPatch()
+
+		mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(balanceConfig{
+			segmentBatchSize: 5,
+			channelBatchSize: 5,
+		}).Build()
+		defer mockLoadConfig.UnPatch()
+
+		// Mock global balancer factory to return non-nil balancer
+		mockStoppingBalancer := mockey.Mock((*balance.BalancerFactory).GetStoppingBalancer).Return(nil).Build()
+		defer mockStoppingBalancer.UnPatch()
+
+		// processBalanceQueue SHOULD be called for stopping balance even with grow tasks
+		stoppingBalanceCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
 				balancer balance.Balance,
@@ -2076,15 +2086,17 @@ func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 				isStoppingBalance bool,
 			) (int, int) {
-				processQueueCalled = true
+				if isStoppingBalance {
+					stoppingBalanceCalled = true
+				}
 				return 0, 0
 			}).Build()
 		defer mockProcessQueue.UnPatch()
 
 		result := checker.Check(ctx)
 		assert.Nil(t, result)
-		assert.False(t, processQueueCalled,
-			"Even stopping balance should be skipped when recovery tasks exist")
+		assert.True(t, stoppingBalanceCalled,
+			"Stopping balance should still run when recovery tasks exist (node draining is high priority)")
 	})
 }
 

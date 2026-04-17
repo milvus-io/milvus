@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -106,9 +105,9 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -119,8 +118,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.HandleNodeUp(ctx, 1)
-	checker.meta.HandleNodeUp(ctx, 2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -191,9 +190,9 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -204,8 +203,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.HandleNodeUp(ctx, 1)
-	checker.meta.HandleNodeUp(ctx, 2)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -244,9 +243,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
 	channels := []*datapb.VchannelInfo{
@@ -294,9 +293,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -368,9 +367,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
 	ctx := context.Background()
 	checker := suite.checker
 	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -433,9 +432,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	checker := suite.checker
 	// segment3 is compacted from segment2, and node2 has growing segments 2 and 3. checker should generate
 	// 2 tasks to reduce segment 2 and 3.
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -459,11 +458,11 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
-	growingSegments[2].StartPosition = &msgpb.MsgPosition{Timestamp: 2}
+	growingSegments[2].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 2}
 	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
-	growingSegments[3].StartPosition = &msgpb.MsgPosition{Timestamp: 3}
+	growingSegments[3].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 3}
 	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
-	growingSegments[4].StartPosition = &msgpb.MsgPosition{Timestamp: 11}
+	growingSegments[4].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 11}
 
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -521,9 +520,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 	ctx := context.Background()
 	checker := suite.checker
 
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -549,7 +548,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 	growingSegments := make(map[int64]*meta.Segment)
 	// segment start pos after chekcpoint
 	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
-	growingSegments[4].StartPosition = &msgpb.MsgPosition{Timestamp: 11}
+	growingSegments[4].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 11}
 
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -594,9 +593,9 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	ctx := context.Background()
 	checker := suite.checker
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{}
 	channels := []*datapb.VchannelInfo{
@@ -614,7 +613,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
-	growingSegments[2].StartPosition = &msgpb.MsgPosition{Timestamp: 2}
+	growingSegments[2].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 2}
 
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -708,7 +707,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 		CollectionID: collectionID,
 		Nodes:        []int64{1, 2},
 	}, commonpb.LoadPriority_LOW)
-	suite.meta.Put(ctx, replica)
+	suite.meta.ReplicaManager.Put(ctx, replica)
 
 	// prepare segments
 	segment1 := &datapb.SegmentInfo{
@@ -799,7 +798,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
 
 	// Create a collection with Loaded status to simulate handoff scenario
 	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded)
-	suite.meta.PutCollection(ctx, collection)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
 
 	// prepare replica with HIGH priority (to verify handoff overrides it to LOW)
 	replica := meta.NewReplicaWithPriority(&querypb.Replica{
@@ -807,7 +806,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
 		CollectionID: collectionID,
 		Nodes:        []int64{1, 2},
 	}, commonpb.LoadPriority_HIGH)
-	suite.meta.Put(ctx, replica)
+	suite.meta.ReplicaManager.Put(ctx, replica)
 
 	// prepare segments
 	segment1 := &datapb.SegmentInfo{
@@ -894,7 +893,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityUserLoad() {
 
 	// Create a collection with Loading status to simulate user-initiated load
 	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loading)
-	suite.meta.PutCollection(ctx, collection)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
 
 	// prepare replica with HIGH priority
 	replica := meta.NewReplicaWithPriority(&querypb.Replica{
@@ -902,7 +901,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityUserLoad() {
 		CollectionID: collectionID,
 		Nodes:        []int64{1, 2},
 	}, commonpb.LoadPriority_HIGH)
-	suite.meta.Put(ctx, replica)
+	suite.meta.ReplicaManager.Put(ctx, replica)
 
 	// prepare a new segment (not in currentTarget)
 	segment := &datapb.SegmentInfo{
@@ -951,12 +950,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
 
 	// Create a collection with Loaded status
 	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded)
-	suite.meta.PutCollection(ctx, collection)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
 
 	// Set refresh notifier to simulate refresh in progress (e.g., after import)
 	// This makes IsRefreshed() return false
 	refreshNotifier := make(chan struct{})
-	suite.meta.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(refreshNotifier))
+	suite.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(refreshNotifier))
 
 	// prepare replica with HIGH priority
 	replica := meta.NewReplicaWithPriority(&querypb.Replica{
@@ -964,7 +963,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
 		CollectionID: collectionID,
 		Nodes:        []int64{1, 2},
 	}, commonpb.LoadPriority_HIGH)
-	suite.meta.Put(ctx, replica)
+	suite.meta.ReplicaManager.Put(ctx, replica)
 
 	// prepare a new segment (not in currentTarget) - simulates imported segment
 	segment := &datapb.SegmentInfo{
@@ -1125,8 +1124,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	channel := "test-insert-channel"
 
 	// Setup meta data
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
 
 	// Create test replica
 	replica := utils.CreateTestReplica(1, collectionID, []int64{nodeID1, nodeID2})
@@ -1249,7 +1248,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	suite.Len(result, 0, "Should release all segments when any delegator hasn't updated")
 
 	// Test case 6: Partition is nil - should release all segments (no partition info)
-	checker.meta.RemovePartition(ctx, partitionID)
+	checker.meta.CollectionManager.RemovePartition(ctx, partitionID)
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when partition is nil")

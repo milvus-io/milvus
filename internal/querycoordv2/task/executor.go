@@ -57,6 +57,7 @@ var segmentsVersion = semver.Version{
 
 // pendingTaskInfo records the memory footprint of a dispatched-but-not-yet-reported task.
 type pendingTaskInfo struct {
+	segmentID   int64
 	memoryBytes int64
 }
 
@@ -176,50 +177,60 @@ func (ex *Executor) Execute(task Task, step int) bool {
 			return false
 		}
 	} else {
-		// Segment pool: pendingSet with memory + CPU gate (query nodes)
-		var taskMem int64
+		// Only SegmentTasks go through the memory/CPU gate and are tracked in pendingSet.
+		// LeaderAction and DropIndexAction are lightweight RPCs that should not compete
+		// with segment load for memory/CPU budget.
 		if segTask, ok := task.(*SegmentTask); ok {
-			taskMem = segTask.SegmentSize()
-		}
+			taskMem := segTask.SegmentSize()
 
-		nodeInfo := ex.nodeMgr.Get(ex.nodeID)
-		if nodeInfo != nil {
-			ex.pendingMu.Lock()
-			var pendingCount int32
-			var pendingMem int64
-			for _, info := range ex.pendingSet {
-				pendingCount++
-				pendingMem += info.memoryBytes
-			}
+			nodeInfo := ex.nodeMgr.Get(ex.nodeID)
+			if nodeInfo != nil {
+				ex.pendingMu.Lock()
+				var pendingCount int32
+				var pendingMem int64
+				for _, info := range ex.pendingSet {
+					pendingCount++
+					pendingMem += info.memoryBytes
+				}
 
-			// Memory gate: remaining = capacity - (QN.usedMemory + pendingMemory × factor)
-			pendingFactor := Params.QueryCoordCfg.PendingMemoryFactor.GetAsFloat()
-			effectiveUsedMB := nodeInfo.UsedMemory() + float64(pendingMem)*pendingFactor/(1024*1024)
-			remainingMB := nodeInfo.MemCapacity() - effectiveUsedMB
-			if remainingMB > 0 {
+				// Memory gate: remaining = capacity - (QN.usedMemory + pendingMemory × factor)
 				taskMB := float64(taskMem) / (1024 * 1024)
+				pendingFactor := Params.QueryCoordCfg.PendingMemoryFactor.GetAsFloat()
+				effectiveUsedMB := nodeInfo.UsedMemory() + float64(pendingMem)*pendingFactor/(1024*1024)
+				remainingMB := nodeInfo.MemCapacity() - effectiveUsedMB
 				if taskMB > 0 && taskMB > remainingMB {
 					ex.pendingMu.Unlock()
 					ex.executingTasks.Remove(task.Index())
+					log.RatedDebug(10, "segment task rejected by memory gate",
+						zap.Int64("nodeID", ex.nodeID),
+						zap.Float64("taskMB", taskMB),
+						zap.Float64("remainingMB", remainingMB))
 					return false
 				}
-			}
 
-			// CPU gate: pendingCount >= segment pool cap
-			if pendingCount >= ex.getSegmentPoolCap() {
+				// CPU gate: pendingCount >= segment pool cap
+				segPoolCap := ex.getSegmentPoolCap()
+				if pendingCount >= segPoolCap {
+					ex.pendingMu.Unlock()
+					ex.executingTasks.Remove(task.Index())
+					log.RatedDebug(10, "segment task rejected by CPU gate",
+						zap.Int64("nodeID", ex.nodeID),
+						zap.Int32("pendingCount", pendingCount),
+						zap.Int32("segPoolCap", segPoolCap))
+					return false
+				}
+
+				// Gate passed — insert into pending set while still holding the lock
+				segID := task.(*SegmentTask).SegmentID()
+				ex.pendingSet[task.Index()] = pendingTaskInfo{segmentID: segID, memoryBytes: taskMem}
 				ex.pendingMu.Unlock()
-				ex.executingTasks.Remove(task.Index())
-				return false
+			} else {
+				// No node info — no gate, but still track pending
+				segID := task.(*SegmentTask).SegmentID()
+				ex.pendingMu.Lock()
+				ex.pendingSet[task.Index()] = pendingTaskInfo{segmentID: segID, memoryBytes: taskMem}
+				ex.pendingMu.Unlock()
 			}
-
-			// Gate passed — insert into pending set while still holding the lock
-			ex.pendingSet[task.Index()] = pendingTaskInfo{memoryBytes: taskMem}
-			ex.pendingMu.Unlock()
-		} else {
-			// No node info — no gate, but still track pending
-			ex.pendingMu.Lock()
-			ex.pendingSet[task.Index()] = pendingTaskInfo{memoryBytes: taskMem}
-			ex.pendingMu.Unlock()
 		}
 	}
 
@@ -264,12 +275,18 @@ func (ex *Executor) removePending(index string) {
 	ex.pendingMu.Unlock()
 }
 
-// ResetPending clears the pending task set.
-// Called by dist_handler after receiving fresh QN data, since QN's report
-// is now authoritative and includes all tasks we previously dispatched.
-func (ex *Executor) ResetPending() {
+// ResetPending reconciles the pending task set against segments reported by QN.
+// Entries whose segments now appear in the dist response (loadedSegments) are removed
+// because QN's usedMemory already accounts for them — keeping them would double-count.
+// Entries for segments not yet reported are preserved so the gate continues to protect
+// against over-scheduling until the next dist pull confirms them.
+func (ex *Executor) ResetPending(loadedSegments typeutil.Set[int64]) {
 	ex.pendingMu.Lock()
-	ex.pendingSet = make(map[string]pendingTaskInfo)
+	for key, info := range ex.pendingSet {
+		if loadedSegments.Contain(info.segmentID) {
+			delete(ex.pendingSet, key)
+		}
+	}
 	ex.pendingMu.Unlock()
 }
 
@@ -284,7 +301,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 	ex.executingTasks.Remove(task.Index())
 	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
 		ex.channelTaskNum.Dec()
-	} else {
+	} else if _, isSegment := task.(*SegmentTask); isSegment {
 		ex.removePending(task.Index())
 	}
 }
