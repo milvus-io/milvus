@@ -206,13 +206,13 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Fields: lo.Filter(c.schema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic && field.Name != common.NamespaceFieldName
 		}),
-		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),
-		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
-		Properties:         c.schema.CollectionSchema.Properties,
-		Functions:          c.schema.CollectionSchema.Functions,
-		DbName:             c.schema.CollectionSchema.DbName,
-		ExternalSource:     c.schema.CollectionSchema.ExternalSource,
-		ExternalSpec:       c.schema.CollectionSchema.ExternalSpec,
+		StructArrayFields:  cloneStructArrayFields(c.schema.StructArrayFields),
+		EnableDynamicField: c.schema.EnableDynamicField,
+		Properties:         c.schema.Properties,
+		Functions:          c.schema.Functions,
+		DbName:             c.schema.DbName,
+		ExternalSource:     c.schema.ExternalSource,
+		ExternalSpec:       c.schema.ExternalSpec,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
