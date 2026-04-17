@@ -154,14 +154,14 @@ func TestOnEvent(t *testing.T) {
 	}, time.Second*5, time.Second)
 
 	ctx := context.Background()
-	client.KV.Put(ctx, "test/config/a/b", "bbb")
+	client.Put(ctx, "test/config/a/b", "bbb")
 
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
 		return err == nil && value == "bbb"
 	}, time.Second*5, time.Second)
 
-	client.KV.Put(ctx, "test/config/a/b", "ccc")
+	client.Put(ctx, "test/config/a/b", "ccc")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
 		return err == nil && value == "ccc"
@@ -173,7 +173,7 @@ func TestOnEvent(t *testing.T) {
 		return err == nil && value == "ccc"
 	}, time.Second*5, time.Second)
 
-	client.KV.Delete(ctx, "test/config/a/b")
+	client.Delete(ctx, "test/config/a/b")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
 		return err == nil && value == "ddd"
@@ -286,7 +286,7 @@ func TestCachedConfig(t *testing.T) {
 		assert.True(t, exist)
 
 		// after refresh, the cached value should be reset
-		client.KV.Put(t.Context(), "test/config/c/d", "www")
+		client.Put(t.Context(), "test/config/c/d", "www")
 		assert.Eventually(t, func() bool {
 			// make sure the config is refreshed
 			_, value, err := mgr.GetConfig("cd")

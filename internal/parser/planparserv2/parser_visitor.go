@@ -237,11 +237,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := true
-
-	if leftValueExpr == nil {
-		reverse = false
-	}
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
@@ -330,11 +326,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := true
-
-	if leftValueExpr == nil {
-		reverse = false
-	}
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
@@ -507,7 +499,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 	}
 
 	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
-		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
+		(!typeutil.IsArrayType(leftExpr.dataType) || !typeutil.IsStringType(column.GetElementType())) {
 		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
@@ -970,7 +962,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	lowerInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserLE
 	upperInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserLE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !(lowerInclusive && upperInclusive) {
+		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
@@ -1057,7 +1049,7 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	lowerInclusive := ctx.GetOp2().GetTokenType() == parser.PlanParserGE
 	upperInclusive := ctx.GetOp1().GetTokenType() == parser.PlanParserGE
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
-		if !(lowerInclusive && upperInclusive) {
+		if !lowerInclusive || !upperInclusive {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}

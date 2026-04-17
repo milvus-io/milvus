@@ -554,14 +554,15 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 		taskType := GetTaskType(task)
-		if taskType == TaskTypeGrow {
+		switch taskType {
+		case TaskTypeGrow:
 			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
 			nodesWithChannel := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
 			replicaNodeMap := utils.GroupNodesByReplica(task.ctx, scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
-		} else if taskType == TaskTypeMove {
+		case TaskTypeMove:
 			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
 			_, ok := lo.Find(delegatorList, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
 			if !ok {
@@ -609,7 +610,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
-	replica := scheduler.meta.ReplicaManager.Get(scheduler.ctx, replicaID)
+	replica := scheduler.meta.Get(scheduler.ctx, replicaID)
 	if replica == nil {
 		return nil
 	}
@@ -1136,7 +1137,7 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
 	var replica *meta.Replica
 	if task.ReplicaID() != -1 {
-		replica = scheduler.meta.ReplicaManager.Get(scheduler.ctx, task.ReplicaID())
+		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
 		if replica == nil {
 			log.Warn("task stale due to replica not found")
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())

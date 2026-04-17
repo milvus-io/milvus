@@ -85,9 +85,9 @@ func (suite *LeaderCheckerTestSuite) TearDownTest() {
 func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -185,9 +185,9 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 func (suite *LeaderCheckerTestSuite) TestActivation() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -249,10 +249,10 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
 	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
-	observer.meta.ReplicaManager.Put(ctx, replica)
+	observer.meta.Put(ctx, replica)
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -288,7 +288,7 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 
 	mutableReplica := replica.CopyForWrite()
 	mutableReplica.AddRONode(2)
-	observer.meta.ReplicaManager.Put(ctx, mutableReplica.IntoReplica())
+	observer.meta.Put(ctx, mutableReplica.IntoReplica())
 
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 0)
@@ -297,9 +297,9 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -358,10 +358,10 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 2))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(2, 1, []int64{3, 4}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 2))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.Put(ctx, utils.CreateTestReplica(2, 1, []int64{3, 4}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -437,9 +437,9 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -484,9 +484,9 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 	ctx := context.Background()
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -537,9 +537,9 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	testChannel := "test-insert-channel"
 	// leaderID := int64(2)
 	observer := suite.checker
-	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	observer.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,

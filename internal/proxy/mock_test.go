@@ -109,7 +109,7 @@ func (m *mockTask) CanSkipAllocTimestamp() bool {
 }
 
 func (m *mockTask) TraceCtx() context.Context {
-	return m.TaskCondition.ctx
+	return m.ctx
 }
 
 func (m *mockTask) ID() UniqueID {

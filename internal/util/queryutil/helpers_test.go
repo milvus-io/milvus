@@ -2279,11 +2279,12 @@ func TestCalcFieldElementSize_RemainingBranches(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := calcFieldElementSize(tt.fd, tt.rowIdx)
-			if tt.name == "vector_array" {
+			switch tt.name {
+			case "vector_array":
 				assert.True(t, result > 0, "vector_array size should be > 0")
-			} else if tt.name == "array_data" {
+			case "array_data":
 				assert.True(t, result > 0, "array_data size should be > 0")
-			} else {
+			default:
 				assert.Equal(t, tt.expected, result)
 			}
 		})

@@ -136,7 +136,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 			result := results[mutableMsg.VChannel()]
 			immutableMsg := mutableMsg.WithTimeTick(result.TimeTick).WithLastConfirmed(result.LastConfirmedMessageID).IntoImmutableMessage(result.MessageID)
 			wg.Add(1)
-			go func() {
+			go func() { //nolint:gosec // context.Background is intentional for retries in test
 				defer wg.Done()
 				retry.Do(context.Background(), func() error {
 					return registry.CallMessageAckOnceCallbacks(context.Background(), immutableMsg)

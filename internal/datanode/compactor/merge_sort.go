@@ -29,7 +29,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	binlogs []*datapb.CompactionSegmentBinlogs,
 	tr *timerecord.TimeRecorder,
 	currentTime time.Time,
-	collectionTtl int64,
+	collectionTTL int64,
 	compactionParams compaction.Params,
 	sortByFields []int64,
 ) ([]*datapb.CompactionSegment, error) {
@@ -93,7 +93,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTtl, currentTime)
+		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTTL, currentTime)
 	}
 
 	defer func() {

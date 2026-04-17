@@ -44,7 +44,7 @@ type QueryNodeSuite struct {
 	dim               int
 	numCollections    int
 	rowsPerCollection int
-	waitTimeInSec     time.Duration
+	waitTime          time.Duration
 	prefix            string
 }
 
@@ -53,7 +53,7 @@ func (s *QueryNodeSuite) setupParam() {
 	s.dim = 128
 	s.numCollections = 2
 	s.rowsPerCollection = 100
-	s.waitTimeInSec = time.Second * 10
+	s.waitTime = time.Second * 10
 }
 
 func (s *QueryNodeSuite) loadCollection(collectionName string, dim int) {
@@ -237,7 +237,7 @@ func (s *QueryNodeSuite) setupData() {
 	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, s.dim)
 	log.Info("=========================Search finished=========================")
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	s.checkCollections()
 	log.Info(fmt.Sprintf("=========================start to search2 %s=========================", searchName))
 	s.search(searchName, s.dim)
@@ -275,9 +275,9 @@ func (s *QueryNodeSuite) checkQNRestarts() {
 	s.Cluster.AddQueryNode()
 	s.Cluster.AddQueryNode()
 
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	for i := 0; i < 1000; i++ {
-		time.Sleep(s.waitTimeInSec)
+		time.Sleep(s.waitTime)
 		if s.checkCollections() {
 			break
 		}
@@ -290,12 +290,12 @@ func (s *QueryNodeSuite) TestSwapQN() {
 	s.setupData()
 	// Test case with one query node stopped
 	go s.Cluster.DefaultQueryNode().Stop()
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	s.checkAllCollectionsReady()
 	// Test case with new Query nodes added
 	s.Cluster.AddQueryNode()
 	s.Cluster.AddQueryNode()
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	s.checkAllCollectionsReady()
 
 	// Test case with all query nodes replaced

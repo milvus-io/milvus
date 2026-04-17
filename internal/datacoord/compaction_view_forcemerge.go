@@ -153,7 +153,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 
 func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 	targetSizePerSegment, targetCount := v.calculateTargetSizeCount()
-	groups := adaptiveGroupSegments(v.segments, float64(targetSizePerSegment))
+	groups := adaptiveGroupSegments(v.segments, targetSizePerSegment)
 
 	results := make([]CompactionView, 0, len(groups))
 	for _, group := range groups {

@@ -352,7 +352,7 @@ func pkEqualMatchesTarget(seg PKFilterTarget, value storage.PrimaryKey, batchHit
 	if !ok {
 		return true
 	}
-	return !(minPk.GT(value) || maxPk.LT(value))
+	return minPk.LE(value) && maxPk.GE(value)
 }
 
 func pkUnaryRangeMatchesTarget(seg PKFilterTarget, op planpb.OpType, value storage.PrimaryKey) bool {

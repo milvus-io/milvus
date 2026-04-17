@@ -801,7 +801,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of vector")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of vector")
 	})
 
 	t.Run("struct array field - nested array", func(t *testing.T) {
@@ -829,7 +829,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Nested array is not supported")
+		assert.Contains(t, err.Error(), "nested array is not supported")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {
@@ -1569,7 +1569,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		fileResourceObserver := NewMockFileResourceObserver(t)
 		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
-		task.Core.fileResourceObserver = fileResourceObserver
+		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 

@@ -232,11 +232,12 @@ func (s *RerankModelExprTestSuite) TestExecute_MultipleChunks() {
 		rerankFunc: func(ctx context.Context, query string, docs []string) ([]float32, error) {
 			callCount++
 			scores := make([]float32, len(docs))
-			if query == "query1" {
+			switch query {
+			case "query1":
 				for i := range docs {
 					scores[i] = float32(i) + 1.0
 				}
-			} else if query == "query2" {
+			case "query2":
 				for i := range docs {
 					scores[i] = float32(i) + 10.0
 				}

@@ -419,13 +419,14 @@ func TestGetChannelDistJSON(t *testing.T) {
 	assert.Equal(t, 2, len(channels))
 
 	checkResult := func(channel *metricsinfo.DmChannel) {
-		if channel.NodeID == 1 {
+		switch channel.NodeID {
+		case 1:
 			assert.Equal(t, "channel-1", channel.ChannelName)
 			assert.Equal(t, int64(100), channel.CollectionID)
-		} else if channel.NodeID == 2 {
+		case 2:
 			assert.Equal(t, "channel-2", channel.ChannelName)
 			assert.Equal(t, int64(200), channel.CollectionID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected node id", "unexpected node id %d", channel.NodeID)
 		}
 	}

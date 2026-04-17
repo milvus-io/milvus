@@ -100,8 +100,8 @@ func (fs *FileSource) SetManager(m ConfigManager) {
 }
 
 func (fs *FileSource) SetEventHandler(eh EventHandler) {
-	fs.RWMutex.Lock()
-	defer fs.RWMutex.Unlock()
+	fs.Lock()
+	defer fs.Unlock()
 	fs.configRefresher.SetEventHandler(eh)
 }
 
@@ -135,7 +135,7 @@ func (fs *FileSource) loadFromFile() error {
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("Unsupported Config Type: %s", ext)
+			return fmt.Errorf("unsupported Config Type: %s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)

@@ -78,7 +78,7 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 
 // NewMsgStream is used to generate a new Msgstream object
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
+	timeout := f.RequestTimeout
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
@@ -108,7 +108,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
+	timeout := f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
 			return nil, errors.New("context timeout when NewTtMsgStream")

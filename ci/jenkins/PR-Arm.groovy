@@ -61,7 +61,7 @@ pipeline {
                             set +a  # stop automatically
 
 
-                            docker run --net=host -v /root/.conan:/root/.conan -v \$(pwd):/root/milvus -w /root/milvus milvusdb/milvus-env:ubuntu20.04-\${DATE_VERSION} sh -c "make clean && make mode=RelWithDebInfo install"
+                            docker run --net=host -v /root/.conan2:/root/.conan2 -v \$(pwd):/root/milvus -w /root/milvus milvusdb/milvus-env:ubuntu20.04-\${DATE_VERSION} sh -c "make clean && make mode=RelWithDebInfo install"
                             """
 
                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){

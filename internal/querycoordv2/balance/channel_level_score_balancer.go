@@ -85,7 +85,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	if streamingutil.IsStreamingServiceEnabled() {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
-		channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica)
+		channelPlan := b.balanceChannels(ctx, br, replica)
 		// If the channelPlan is not empty, do it directly, don't do the segment balance.
 		if len(channelPlan) > 0 {
 			return nil, channelPlan

@@ -158,7 +158,7 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 		}
 	}
 
-	if !(expr.GetLowerInclusive() && expr.GetUpperInclusive()) {
+	if !expr.GetLowerInclusive() || !expr.GetUpperInclusive() {
 		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 			return errors.New("invalid range: lowerbound is greater than upperbound")
 		}
