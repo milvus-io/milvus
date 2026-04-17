@@ -60,9 +60,9 @@ etcd:
   data:
     dir: default.etcd # Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/
   auth:
-    enabled: false # Whether to enable authentication
-    userName:  # username for etcd authentication
-    password:  # password for etcd authentication
+    enabled: true # Whether to enable authentication
+    userName: etcdadmin # username for etcd authentication
+    password: etcdadmin # password for etcd authentication
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]

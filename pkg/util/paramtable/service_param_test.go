@@ -68,15 +68,38 @@ func TestServiceParam(t *testing.T) {
 		assert.NotEmpty(t, Params.EtcdTLSMinVersion.GetValue())
 		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion.GetValue())
 
-		// test UseEmbedEtcd
+		// test etcd auth default values
+		assert.Equal(t, "etcdadmin", Params.EtcdAuthUserName.GetValue())
+		assert.Equal(t, "etcdadmin", Params.EtcdAuthPassword.GetValue())
+		assert.True(t, Params.EtcdEnableAuth.GetAsBool())
+
+		// test UseEmbedEtcd with auth enabled — should auto-disable auth, not panic
 		t.Setenv("etcd.use.embed", "true")
-		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+		assert.NotPanics(t, func() {
+			NewBaseTable()
+		})
+
+		// test etcd auth enabled with empty credentials should panic
+		t.Setenv("etcd.use.embed", "false")
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv("etcd.auth.userName", "")
+		t.Setenv("etcd.auth.password", "")
 		assert.Panics(t, func() {
 			NewBaseTable()
 		})
 
+		// test etcd auth enabled with valid credentials should not panic
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv("etcd.auth.userName", "milvus")
+		t.Setenv("etcd.auth.password", "milvuspass")
+		assert.NotPanics(t, func() {
+			NewBaseTable()
+		})
+
+		t.Setenv("etcd.auth.enabled", "false")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
-		t.Setenv("etcd.use.embed", "false")
 		SParams.init(bt)
 	})
 
