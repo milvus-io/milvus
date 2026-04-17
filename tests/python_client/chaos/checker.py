@@ -675,7 +675,7 @@ class Checker:
         partition_name = self.p_name if partition_name is None else partition_name
         data = cf.gen_row_data_by_schema(nb=nb, schema=self.get_schema())
         ts_data = []
-        for i in range(nb):
+        for _i in range(nb):
             time.sleep(0.001)
             offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)
@@ -1414,7 +1414,7 @@ class InsertChecker(Checker):
         data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         rows = len(data)
         ts_data = []
-        for i in range(constants.DELTA_PER_INS):
+        for _i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
             offset_ts = int(time.time() * self.scale)
             ts_data.append(offset_ts)

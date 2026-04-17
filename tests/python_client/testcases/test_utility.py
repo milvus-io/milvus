@@ -1374,7 +1374,7 @@ class TestUtilityAdvanced(TestcaseBase):
         c_names = []
         num = 5
 
-        for i in range(thread_num * num):
+        for _i in range(thread_num * num):
             c_name = cf.gen_unique_str(prefix)
             self.init_collection_wrap(c_name)
             c_names.append(c_name)

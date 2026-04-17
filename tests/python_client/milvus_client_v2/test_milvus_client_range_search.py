@@ -257,7 +257,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             log.debug(f"test_range_search_with_expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
-            for i, row in enumerate(query_res):
+            for _i, row in enumerate(query_res):
                 float_val = row.get(ct.default_float_field_name)
                 local_vars = {
                     "int64": row[ct.default_int64_field_name],

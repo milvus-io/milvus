@@ -178,7 +178,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         for consistency_level in consistency_levels:
             log.debug(f"start to search/query with {consistency_level}")
             # Poll until search returns results (search visibility may lag behind query)
-            for i in range(15):
+            for _i in range(15):
                 res = self.search(
                     client,
                     collection_name,

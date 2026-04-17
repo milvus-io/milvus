@@ -800,7 +800,7 @@ class TestReplicasManagement(TestcaseBase):
         log.info(f"milvus build version: {mil.build_version}")
         # create  two rg with request node_num=4, limit node_num=6
         resource_groups = []
-        for i in range(3):
+        for _i in range(3):
             name = cf.gen_unique_str("rg")
             self.utility = utility
             self.utility.create_resource_group(
@@ -1018,7 +1018,7 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         )
         # create rg
         resource_groups = []
-        for i in range(2):
+        for _i in range(2):
             name = cf.gen_unique_str("rg")
             self.utility = utility
             self.utility.create_resource_group(

@@ -116,7 +116,7 @@ class TestCreateImportJob(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -214,7 +214,7 @@ class TestCreateImportJob(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -314,7 +314,7 @@ class TestCreateImportJob(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -398,7 +398,7 @@ class TestCreateImportJob(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -497,7 +497,7 @@ class TestCreateImportJob(TestBase):
             "partitionName": partition_name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -3971,7 +3971,7 @@ class TestCreateImportJobNegative(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -4309,7 +4309,7 @@ class TestCreateImportJobNegative(TestBase):
             "collectionName": name,
             "files": [[file_name]],
         }
-        for i in range(import_task_num):
+        for _i in range(import_task_num):
             rsp = self.import_job_client.create_import_jobs(payload)
         # list import job
         payload = {
@@ -4412,7 +4412,7 @@ class TestListImportJob(TestBase):
                 "collectionName": name,
                 "files": [[file_name]],
             }
-            for i in range(import_task_num):
+            for _i in range(import_task_num):
                 rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
         # list import job
         payload = {}
@@ -4488,7 +4488,7 @@ class TestGetImportJobProgress(TestBase):
                 "collectionName": name,
                 "files": [[file_name]],
             }
-            for i in range(import_task_num):
+            for _i in range(import_task_num):
                 rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
                 job_id_list.append(rsp["data"]["jobId"])
         time.sleep(5)

@@ -102,7 +102,7 @@ class TestOperations(TestBase):
         log.info("start a thread to reset health_checkers when standby is activated")
         for _i in range(10):
             sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
         if is_check:
             assert_statistic(self.health_checkers, succ_rate_threshold=0.99)

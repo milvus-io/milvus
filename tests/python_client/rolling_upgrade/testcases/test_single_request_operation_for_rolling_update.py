@@ -124,11 +124,11 @@ class TestOperations(TestBase):
         request_duration = eval(request_duration)
         for _i in range(10):
             sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
+            for _k, v in self.health_checkers.items():
                 v.check_result()
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.pause()
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.check_result()
         for k, v in self.health_checkers.items():
             log.info(f"{k} failed request: {v.fail_records}")
@@ -169,7 +169,7 @@ class TestOperations(TestBase):
             #     self.health_checkers[Op.insert].verify_data_completeness()
 
         #
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.reset()
 
         # wait all pod running
@@ -183,7 +183,7 @@ class TestOperations(TestBase):
         cc.start_monitor_threads(self.health_checkers)
         sleep(120)
         log.info("check succ rate after rolling update finished")
-        for k, v in self.health_checkers.items():
+        for _k, v in self.health_checkers.items():
             v.check_result()
         for k, v in self.health_checkers.items():
             log.info(f"{k} failed request: {v.fail_records}")

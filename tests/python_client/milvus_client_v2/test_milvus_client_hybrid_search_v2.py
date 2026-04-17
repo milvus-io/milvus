@@ -883,7 +883,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         vector_field_names = [self.float_vector_field_name1, self.sparse_vector_field_name2]
         search_data_list = [search_data1, search_data2]
         id_list_nq = []
-        for i in range(nq):
+        for _i in range(nq):
             id_list_nq.append([])
         # search the data1 and data2 separately
         for i in range(len(vector_field_names)):
@@ -2167,7 +2167,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
         req_list = []
         vectors_list = []
         # 3. generate vectors
-        for i in range(len(vector_name_list)):
+        for _i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(dim)] for _ in range(1)]
             vectors_list.append(vectors)
         # 4. prepare search params for each vector field

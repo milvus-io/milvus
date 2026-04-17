@@ -124,7 +124,7 @@ class TestOperations(TestBase):
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
-        for i in range(10):
+        for _i in range(10):
             sleep(request_duration // 10)
             for checker in all_checkers:
                 for _k, v in checker.items():

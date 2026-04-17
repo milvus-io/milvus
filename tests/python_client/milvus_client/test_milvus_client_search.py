@@ -8604,7 +8604,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         # 4. insert data with all null documents
         rows = []
         data_size = 100
-        for i in range(data_size):
+        for _i in range(data_size):
             row = {"document": None, "dense": [random.random() for _ in range(768)]}
             rows.append(row)
         client.insert(collection_name, rows)

@@ -2662,7 +2662,7 @@ class TestQueryTextMatch(TestcaseBase):
 
         df_new = cf.split_dataframes(df, fields=text_fields)
         log.info(f"new df \n{df_new}")
-        for i in range(2):
+        for _i in range(2):
             query, text_match_expr, pandas_expr = cf.generate_random_query_from_freq_dict(
                 wf_map, min_freq=3, max_terms=5, p_not=0.2
             )

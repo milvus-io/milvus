@@ -3596,7 +3596,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             log.debug(f"test_milvus_client_query_with_expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
-            for i, row in enumerate(rows):
+            for _i, row in enumerate(rows):
                 row[ct.default_int64_field_name]
                 row[ct.default_float_field_name]
                 if not expr or eval(expr):
@@ -3649,7 +3649,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             log.debug(f"test_milvus_client_query_pagination_with_expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
-            for i, row in enumerate(rows):
+            for _i, row in enumerate(rows):
                 row[ct.default_int64_field_name]
                 row[ct.default_float_field_name]
                 if not expr or eval(expr):
@@ -3773,7 +3773,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             log.debug(f"expr: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
-            for i, row in enumerate(rows):
+            for _i, row in enumerate(rows):
                 if enable_dynamic_field:
                     row[ct.default_int64_field_name]
                     row[ct.default_float_field_name]
@@ -6566,7 +6566,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             # Calculate expected count by filtering the data manually
             filter_ids = []
-            for i, row in enumerate(rows):
+            for _i, row in enumerate(rows):
                 # Set up variables that match the expression field names
                 row[ct.default_int64_field_name]
                 row[ct.default_float_field_name]
@@ -6670,7 +6670,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             # Calculate expected count by filtering the data manually
             filter_ids = []
-            for i, row in enumerate(rows):
+            for _i, row in enumerate(rows):
                 row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])

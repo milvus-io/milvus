@@ -1125,14 +1125,14 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
         idx_params.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, self.collection_name, index_params=idx_params)
 
-        for dtype, group in field_groups.items():
+        for _dtype, group in field_groups.items():
             for fname, idx_type in group:
                 if idx_type != "no_index":
                     ip = self.prepare_index_params(client)[0]
                     ip.add_index(fname, index_type=idx_type)
                     self.create_index(client, self.collection_name, index_params=ip)
 
-        for elem_dtype, group in array_field_groups.items():
+        for _elem_dtype, group in array_field_groups.items():
             for fname, idx_type in group:
                 if idx_type != "no_index":
                     ip = self.prepare_index_params(client)[0]
@@ -1155,7 +1155,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
         failures = []
         for tmpl in templates:
             results = {}
-            for fname, idx_type in group:
+            for fname, _idx_type in group:
                 expr = tmpl.replace("{f}", fname)
                 try:
                     res = self.query(

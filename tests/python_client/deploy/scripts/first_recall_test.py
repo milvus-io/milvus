@@ -141,7 +141,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
     current_search_params = gen_search_param(index_type)
 
     # define output_fields of search result
-    for i in range(3):
+    for _i in range(3):
         t0 = time.time()
         logger.info("Search...")
         res = collection.search(
