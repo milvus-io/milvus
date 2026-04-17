@@ -13,6 +13,7 @@
 
 #include <cxxabi.h>
 #include <fmt/core.h>
+#include <folly/ScopeGuard.h>
 #include <folly/Try.h>
 #include <simdjson.h>
 #include <algorithm>
@@ -95,6 +96,7 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/packed/chunk_manager.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -126,6 +128,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "storage/FileManager.h"
+#include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -706,38 +709,127 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     }
 }
 
-std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
-parse_parquet_statistics(
-    const std::vector<std::shared_ptr<parquet::FileMetaData>>& file_metas,
-    const std::map<int64_t, milvus_storage::ColumnOffset>& field_id_mapping,
-    int64_t field_id) {
-    ChunkedSegmentSealedImpl::ParquetStatistics statistics;
-    if (file_metas.size() == 0) {
-        return std::nullopt;
-    }
-    auto it = field_id_mapping.find(field_id);
-    AssertInfo(it != field_id_mapping.end(),
-               "field id {} not found in field id mapping",
-               field_id);
-    auto offset = it->second;
+namespace {
 
-    for (auto& file_meta : file_metas) {
-        auto num_row_groups = file_meta->num_row_groups();
-        for (auto i = 0; i < num_row_groups; i++) {
-            auto row_group = file_meta->RowGroup(i);
-            auto column_chunk = row_group->ColumnChunk(offset.col_index);
-            if (!column_chunk->is_stats_set()) {
-                AssertInfo(statistics.size() == 0,
-                           "Statistics is not set for some column chunks "
-                           "for field {}",
-                           field_id);
+struct FileMetadataLoadResult {
+    milvus_storage::RowGroupMetadataVector row_group_meta;
+    // per field_id → per-row-group statistics; nullptr entry means the row
+    // group had no statistics set for this field.
+    std::map<int64_t, std::vector<std::shared_ptr<parquet::Statistics>>>
+        per_field_row_group_stats;
+};
+
+}  // namespace
+
+LoadedGroupChunkMetadata
+LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
+                       const std::vector<FieldId>& field_ids_for_stats,
+                       const std::string& debug_key) {
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+
+    std::vector<std::future<FileMetadataLoadResult>> futures;
+    futures.reserve(insert_files.size());
+    for (const auto& file : insert_files) {
+        // Futures are always joined below before this function returns, so
+        // capturing loader inputs by reference is safe here.
+        futures.push_back(pool.Submit([&fs,
+                                       file,
+                                       &field_ids_for_stats,
+                                       &debug_key]() {
+            auto result = milvus_storage::FileRowGroupReader::Make(
+                fs,
+                file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties());
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
+
+            auto reader = result.ValueOrDie();
+            FileMetadataLoadResult load_result;
+            auto file_metadata = reader->file_metadata();
+            load_result.row_group_meta =
+                file_metadata->GetRowGroupMetadataVector();
+
+            if (!field_ids_for_stats.empty()) {
+                auto field_id_mapping = file_metadata->GetFieldIDMapping();
+                auto parquet_metadata = file_metadata->GetParquetMetadata();
+                auto num_row_groups = parquet_metadata->num_row_groups();
+                for (const auto& field_id : field_ids_for_stats) {
+                    auto it = field_id_mapping.find(field_id.get());
+                    AssertInfo(it != field_id_mapping.end(),
+                               "field id {} not found in field id mapping",
+                               field_id.get());
+                    auto& per_rg =
+                        load_result.per_field_row_group_stats[field_id.get()];
+                    per_rg.reserve(num_row_groups);
+                    for (int i = 0; i < num_row_groups; ++i) {
+                        auto column_chunk =
+                            parquet_metadata->RowGroup(i)->ColumnChunk(
+                                it->second.col_index);
+                        per_rg.push_back(column_chunk->is_stats_set()
+                                             ? column_chunk->statistics()
+                                             : nullptr);
+                    }
+                }
+            }
+
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "[StorageV2] metadata loader {} failed to close "
+                       "file reader for {} with error {}",
+                       debug_key,
+                       file,
+                       status.ToString());
+            return load_result;
+        }));
+    }
+
+    auto futures_guard = folly::makeGuard([&futures]() {
+        for (auto& future : futures) {
+            if (future.valid()) {
+                try {
+                    future.get();
+                } catch (...) {
+                }
+            }
+        }
+    });
+
+    LoadedGroupChunkMetadata metadata;
+    metadata.row_group_meta_list.reserve(insert_files.size());
+
+    for (auto& future : futures) {
+        auto load_result = future.get();
+        metadata.row_group_meta_list.push_back(
+            std::move(load_result.row_group_meta));
+        // Walk files in order and replicate the original single-threaded
+        // semantics: once any row group has reported stats for a field, every
+        // subsequent row group (in this file or any later file) must also
+        // report stats; otherwise fail.
+        for (const auto& field_id : field_ids_for_stats) {
+            auto& stats_vec = metadata.parquet_stats_by_field[field_id.get()];
+            auto it =
+                load_result.per_field_row_group_stats.find(field_id.get());
+            if (it == load_result.per_field_row_group_stats.end()) {
                 continue;
             }
-            auto stats = column_chunk->statistics();
-            statistics.push_back(stats);
+            for (auto& stat : it->second) {
+                if (stat == nullptr) {
+                    AssertInfo(stats_vec.empty(),
+                               "Statistics is not set for some column chunks "
+                               "for field {}",
+                               field_id.get());
+                    continue;
+                }
+                stats_vec.push_back(std::move(stat));
+            }
         }
     }
-    return statistics;
+
+    return metadata;
 }
 
 void
@@ -801,6 +893,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
+        auto metadata = LoadGroupChunkMetadata(
+            insert_files,
+            ENABLE_PARQUET_STATS_SKIP_INDEX ? milvus_field_ids
+                                            : std::vector<FieldId>{},
+            fmt::format(
+                "seg_{}_cg_{}", get_segment_id(), column_group_id.get()));
+        auto parquet_stats_by_field =
+            std::move(metadata.parquet_stats_by_field);
 
         auto translator =
             std::make_unique<storagev2translator::GroupChunkTranslator>(
@@ -808,15 +908,13 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                insert_files,
+                std::move(insert_files),
+                std::move(metadata.row_group_meta_list),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
                 info.warmup_policy);
-
-        auto file_metas = translator->parquet_file_metas();
-        auto field_id_mapping = translator->field_id_mapping();
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -828,8 +926,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             auto data_type = field_meta.get_data_type();
             std::optional<ParquetStatistics> statistics_opt;
             if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
-                statistics_opt = parse_parquet_statistics(
-                    file_metas, field_id_mapping, field_id.get());
+                auto it = parquet_stats_by_field.find(field_id.get());
+                AssertInfo(it != parquet_stats_by_field.end(),
+                           "parquet statistics for field {} not found",
+                           field_id.get());
+                statistics_opt = std::move(it->second);
             }
 
             load_field_data_common(
