@@ -552,13 +552,13 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 }
 
 func assertExternalSource(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSource string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, expectedSource, coll.ExternalSource)
 }
 
 func assertExternalSpec(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSpec string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, expectedSpec, coll.ExternalSpec)
 }

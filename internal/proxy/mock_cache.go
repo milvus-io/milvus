@@ -940,7 +940,7 @@ func (_c *MockCache_RemovePartition_Call) Return() *MockCache_RemovePartition_Ca
 	return _c
 }
 
-func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, string, string, uint64)) *MockCache_RemovePartition_Call {
+func (_c *MockCache_RemovePartition_Call) RunAndReturn(run func(context.Context, string, UniqueID, string, string, uint64)) *MockCache_RemovePartition_Call {
 	_c.Run(run)
 	return _c
 }
