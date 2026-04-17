@@ -1354,7 +1354,12 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY, ts); err != nil {
 				return err
 			}
-			mt.collID2Meta[collectionID].Partitions[idx] = clone
+			// Copy-on-write so snapshots returned by ShallowClone never observe
+			// in-place updates through a shared partitions backing array.
+			newPartitions := make([]*model.Partition, len(coll.Partitions))
+			copy(newPartitions, coll.Partitions)
+			newPartitions[idx] = clone
+			mt.collID2Meta[collectionID].Partitions = newPartitions
 
 			// Remove from partition name index when dropping
 			if mt.partitionName2ID[collectionID] != nil {
