@@ -2536,14 +2536,13 @@ class SnapshotChecker(Checker):
         try:
             # 1. Create snapshot
             self.snapshot_name = cf.gen_unique_str("snapshot_")
-            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            self.milvus_client.create_snapshot(self.snapshot_name, self.c_name)
             log.info(f"[SnapshotChecker] Created snapshot {self.snapshot_name} for {self.c_name}")
 
             # 2. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
             job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection,
-                source_collection_name=self.c_name
+                self.snapshot_name, self.c_name, self.restored_collection
             )
             log.info(f"[SnapshotChecker] Started restore job {job_id}")
 
@@ -2770,14 +2769,13 @@ class SnapshotRestoreChecker(Checker):
 
             # 3. Create snapshot
             self.snapshot_name = cf.gen_unique_str("snapshot_")
-            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            self.milvus_client.create_snapshot(self.snapshot_name, self.c_name)
             log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
 
             # 4. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
             job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection,
-                source_collection_name=self.c_name
+                self.snapshot_name, self.c_name, self.restored_collection
             )
             log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
 

@@ -3127,7 +3127,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
             try:
                 # Directly call client method to bypass ResponseChecker framework
                 # This allows us to capture the real MilvusException with original error message
-                client.create_snapshot(collection_name, snapshot_name)
+                client.create_snapshot(snapshot_name, collection_name)
                 results.append("success")
             except Exception as e:
                 errors.append(str(e))
