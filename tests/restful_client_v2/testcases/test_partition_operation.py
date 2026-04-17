@@ -1,10 +1,12 @@
 import random
-from sklearn import preprocessing
+
 import numpy as np
-from utils.utils import gen_collection_name
 import pytest
-from base.testbase import TestBase
 from pymilvus import Collection
+from sklearn import preprocessing
+
+from base.testbase import TestBase
+from utils.utils import gen_collection_name
 
 
 @pytest.mark.L0

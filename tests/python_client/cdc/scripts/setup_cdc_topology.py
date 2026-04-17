@@ -1,5 +1,6 @@
-from pymilvus import MilvusClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from pymilvus import MilvusClient
 
 
 def setup_cdc_topology(

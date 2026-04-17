@@ -1,15 +1,17 @@
+import random
+import threading
+
+import numpy as np
+import pandas as pd
 import pytest
+from pymilvus import Function, FunctionType
+
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-import pandas as pd
-import numpy as np
-import random
-from pymilvus import Function, FunctionType
-import threading
 
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
@@ -88,7 +90,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         ]
         self.insert(client, collection_name, rows)
         # 3. query using ids
-        error = {ct.err_code: 65535, ct.err_msg: f"empty expression should be used with limit"}
+        error = {ct.err_code: 65535, ct.err_msg: "empty expression should be used with limit"}
         self.query(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -478,7 +480,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 3. query with invalid output_fields wildcard
-        error = {ct.err_code: 65535, ct.err_msg: f"parse output field name failed"}
+        error = {ct.err_code: 65535, ct.err_msg: "parse output field name failed"}
         self.query(
             client,
             collection_name,
@@ -553,7 +555,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_partitions(client, collection_name, partition_name1)
         # 3. query on partition without loading
-        error = {ct.err_code: 65535, ct.err_msg: f"partition not loaded"}
+        error = {ct.err_code: 65535, ct.err_msg: "partition not loaded"}
         self.query(
             client,
             collection_name,
@@ -920,7 +922,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. query with invalid limit value
         error = {
             ct.err_code: 65535,
-            ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900",
+            ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384], but got 67900",
         }
         if limit == -1:
             error = {
@@ -4435,7 +4437,7 @@ class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         pks = [i for i in range(default_nb)]
         # 3. get first primary key
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name"}
+        error = {ct.err_code: 1100, ct.err_msg: "Invalid collection name"}
         self.get(client, name, ids=pks[0:1], check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -4496,7 +4498,7 @@ class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
         ]
         self.insert(client, collection_name, rows)
         # 3. get first primary key
-        error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression"}
+        error = {ct.err_code: 1100, ct.err_msg: "cannot parse expression"}
         self.get(client, collection_name, ids=invalid_ids, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 

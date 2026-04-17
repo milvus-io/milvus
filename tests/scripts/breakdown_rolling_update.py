@@ -1,7 +1,7 @@
-import psutil
 import time
-from loguru import logger
 
+import psutil
+from loguru import logger
 
 if __name__ == "__main__":
     import argparse

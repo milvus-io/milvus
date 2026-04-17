@@ -1,13 +1,15 @@
-from datetime import datetime
-import time
-from pymilvus import utility
 import sys
+import time
+from datetime import datetime
+
+from pymilvus import utility
 
 sys.path.append("..")
-from check.func_check import ResponseChecker
-from utils.api_request import api_request
 from pymilvus import BulkInsertState
 from pymilvus.orm.role import Role
+
+from check.func_check import ResponseChecker
+from utils.api_request import api_request
 from utils.util_log import test_log as log
 
 TIMEOUT = 20
@@ -235,10 +237,10 @@ class ApiUtilityWrapper:
             index_states, _ = self.index_building_progress(collection_name)
             log.debug(f"index states: {index_states}")
             if index_states["total_rows"] == index_states["indexed_rows"]:
-                log.info(f"index build completed")
+                log.info("index build completed")
                 return True
             end = time.time()
-        log.info(f"index build timeout")
+        log.info("index build timeout")
         return False
 
     def get_query_segment_info(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):

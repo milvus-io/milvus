@@ -1,13 +1,11 @@
 import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from common.constants import *
-from pymilvus import DataType
+from utils.util_pymilvus import *
 
 prefix = "client_search"
 partition_prefix = "client_partition"
@@ -72,7 +70,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create database
         db_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 802, ct.err_msg: f"the length of a database name must be less than 255 characters"}
+        error = {ct.err_code: 802, ct.err_msg: "the length of a database name must be less than 255 characters"}
         self.create_database(client, db_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -140,7 +138,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create database
         db_name = cf.gen_unique_str(db_prefix)
-        error = {ct.err_code: 1, ct.err_msg: f""}
+        error = {ct.err_code: 1, ct.err_msg: ""}
         self.create_database(client, db_name, properties=properties, check_task=CheckTasks.err_res, check_items=error)
         self.drop_database(client, db_name)
 
@@ -172,7 +170,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        error = {ct.err_code: 802, ct.err_msg: f""}
+        error = {ct.err_code: 802, ct.err_msg: ""}
         self.drop_database(client, db_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -253,7 +251,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.create_database(client, db_name)
         dbs = self.list_databases(client)[0]
         assert db_name in dbs
-        error = {ct.err_code: 1, ct.err_msg: f"'str' object has no attribute 'items'"}
+        error = {ct.err_code: 1, ct.err_msg: "'str' object has no attribute 'items'"}
         self.alter_database_properties(client, db_name, properties, check_task=CheckTasks.err_res, check_items=error)
         self.drop_database(client, db_name)
 
@@ -313,8 +311,8 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         assert db_name in dbs
         error = {
             ct.err_code: 65535,
-            ct.err_msg: f"alter database with empty properties and delete keys, "
-            f"expected to set either properties or delete keys",
+            ct.err_msg: "alter database with empty properties and delete keys, "
+            "expected to set either properties or delete keys",
         }
         self.drop_database_properties(
             client, db_name, property_keys=properties, check_task=CheckTasks.err_res, check_items=error

@@ -1,15 +1,16 @@
 import json
-import numpy as np
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import FieldSchema, CollectionSchema, DataType
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_v2_base import TestMilvusClientV2Base
 import random
+
+import numpy as np
 import pytest
+from pymilvus import AnnSearchRequest, CollectionSchema, DataType, FieldSchema, RRFRanker, WeightedRanker
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 epsilon = 0.001
 
@@ -569,7 +570,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
         limit = 1
         error = {ct.err_code: 999, ct.err_msg: f"unsupported data type {grpby_unsupported_field} for group by operator"}
         if grpby_unsupported_field == ct.default_float_vec_field_name:
-            error = {ct.err_code: 999, ct.err_msg: f"unsupported data type VECTOR_FLOAT for group by operator"}
+            error = {ct.err_code: 999, ct.err_msg: "unsupported data type VECTOR_FLOAT for group by operator"}
         self.search(
             client,
             self.collection_name,
@@ -1026,7 +1027,7 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
         search_params = {"metric_type": self.float_vector_metric}
         search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # verify
-        error = {ct.err_code: 1700, ct.err_msg: f"groupBy field not found in schema"}
+        error = {ct.err_code: 1700, ct.err_msg: "groupBy field not found in schema"}
         self.search(
             client,
             self.collection_name,
@@ -1155,7 +1156,7 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         if metric == "L2":
             # For L2, smaller is better
             assert groupby_top_distance <= normal_top_distance + epsilon, (
-                f"GroupBy search should return result with distance <= normal search for L2 metric"
+                "GroupBy search should return result with distance <= normal search for L2 metric"
             )
         else:
             # For IP/COSINE, larger is better

@@ -1,14 +1,14 @@
-from common.common_type import CaseLabel
-from common.phrase_match_generator import PhraseMatchTestGenerator
-import pytest
-import pandas as pd
-from pymilvus import FieldSchema, CollectionSchema, DataType
-
-from common.common_type import CheckTasks
-from utils.util_log import test_log as log
-from common import common_func as cf
-from base.client_base import TestcaseBase
 import time
+
+import pandas as pd
+import pytest
+from pymilvus import CollectionSchema, DataType, FieldSchema
+
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from common.phrase_match_generator import PhraseMatchTestGenerator
+from utils.util_log import test_log as log
 
 prefix = "phrase_match"
 

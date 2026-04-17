@@ -1,25 +1,26 @@
-import pytest
 import threading
 from time import sleep
+
+import pytest
 from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
     CollectionCreateChecker,
-    InsertChecker,
-    FlushChecker,
-    SearchChecker,
-    QueryChecker,
-    IndexCreateChecker,
     DeleteChecker,
+    FlushChecker,
+    IndexCreateChecker,
+    InsertChecker,
     Op,
+    QueryChecker,
+    SearchChecker,
 )
-from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
-from chaos.chaos_commons import assert_statistic
-from chaos import constants
-from delayed_assert import assert_expectations
-from utils.util_k8s import get_milvus_instance_name, get_milvus_deploy_tool, record_time_when_standby_activated
+from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, record_time_when_standby_activated
+from utils.util_log import test_log as log
 
 
 class TestBase:

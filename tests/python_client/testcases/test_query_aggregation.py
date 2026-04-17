@@ -12,15 +12,16 @@ PR: #44394
 Issue: #36380
 """
 
-import pytest
-import pandas as pd
 import numpy as np
-from base.client_v2_base import TestMilvusClientV2Base
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
+import pandas as pd
+import pytest
 from pymilvus import DataType
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 prefix = "query_aggregation"
 default_nb = 3000
@@ -328,8 +329,8 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             assert isinstance(result["avg(c2)"], (float, np.floating)), (
                 f"avg(c2) should be float type, got {type(result['avg(c2)'])}"
             )
-            assert isinstance(result["avg(c3)"], (float, np.floating)), f"avg(c3) should be float type"
-            assert isinstance(result["avg(c4)"], (float, np.floating)), f"avg(c4) should be float type"
+            assert isinstance(result["avg(c3)"], (float, np.floating)), "avg(c3) should be float type"
+            assert isinstance(result["avg(c4)"], (float, np.floating)), "avg(c4) should be float type"
 
             # Verify values (allow small floating point errors)
             assert abs(result["avg(c2)"] - expected["avg_c2"]) < 0.01, f"AVG(c2) mismatch for c1={c1_value}"
@@ -421,7 +422,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             # avg should be >= 50 since we filtered c2 >= 50
             assert result["avg(c2)"] >= 50, f"avg(c2) should be >= 50 after filter, got {result['avg(c2)']}"
 
-        log.info(f"test_group_by_with_limit passed: limit and filter+limit scenarios verified")
+        log.info("test_group_by_with_limit passed: limit and filter+limit scenarios verified")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_varchar_min_max(self):
@@ -1107,7 +1108,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Try SUM on VarChar field
-        error = {ct.err_code: 65535, ct.err_msg: f"aggregation operator sum does not support data type VarChar"}
+        error = {ct.err_code: 65535, ct.err_msg: "aggregation operator sum does not support data type VarChar"}
         self.query(
             client,
             self.collection_name,

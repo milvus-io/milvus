@@ -1,23 +1,25 @@
-import pytest
 import time
-from pymilvus import connections, utility, Collection
-from utils.util_log import test_log as log
+
+import pytest
+from pymilvus import Collection, connections, utility
+
 from base.client_base import TestcaseBase
-from chaos.checker import InsertChecker, FlushChecker, UpsertChecker, DeleteChecker, Op, ResultAnalyzer
 from chaos import chaos_commons as cc
-from common import common_func as cf
-from utils.util_k8s import get_querynode_id_pod_pairs
-from utils.util_birdwatcher import BirdWatcher
-from customize.milvus_operator import MilvusOperator
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
+from chaos.checker import DeleteChecker, FlushChecker, InsertChecker, Op, ResultAnalyzer, UpsertChecker
+from common import common_func as cf
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from customize.milvus_operator import MilvusOperator
+from utils.util_birdwatcher import BirdWatcher
+from utils.util_k8s import get_querynode_id_pod_pairs
+from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
 
-from rich.table import Table
 from rich.console import Console
+from rich.table import Table
 
 
 def display_segment_distribution_info(collection_name, release_name, segment_info=None):
@@ -70,7 +72,7 @@ def display_channel_on_qn_distribution_info(collection_name, release_name, segme
                     m[node_id] = {"node_name": "", "channel": [], "segment_id": []}
                 m[node_id]["segment_id"].append(r.segmentID)
     # get channel info
-    for node_id in m.keys():
+    for node_id in m:
         for seg in m[node_id]["segment_id"]:
             if segment_info and str(seg) in segment_info:
                 m[node_id]["channel"].append(segment_info[str(seg)]["Insert Channel"])
@@ -78,7 +80,7 @@ def display_channel_on_qn_distribution_info(collection_name, release_name, segme
     # get node name
     label = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/component=querynode"
     querynode_id_pod_pair = get_querynode_id_pod_pairs("chaos-testing", label)
-    for node_id in m.keys():
+    for node_id in m:
         m[node_id]["node_name"] = querynode_id_pod_pair.get(node_id)
 
     table = Table(title=f"{collection_name} Channel Distribution Info")

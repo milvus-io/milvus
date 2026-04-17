@@ -1,13 +1,13 @@
-import time
 import json
 import os
-from collections import defaultdict
+
 import pytest
 from pymilvus import Collection
+
 from base.client_base import TestcaseBase
-from deploy.common import get_chaos_test_collections
 from chaos import constants
 from common.common_type import CaseLabel
+from deploy.common import get_chaos_test_collections
 from utils.util_log import test_log as log
 
 

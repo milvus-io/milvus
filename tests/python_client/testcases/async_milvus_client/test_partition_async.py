@@ -1,16 +1,12 @@
-import random
-import time
+import asyncio
+
 import numpy as np
 import pytest
-import asyncio
-from pymilvus.client.types import LoadState, DataType
-from pymilvus import AnnSearchRequest, RRFRanker
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 
 pytestmark = pytest.mark.asyncio
 prefix = "async"
@@ -362,7 +358,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 1100, ct.err_msg: "partition not found"}
         await async_client.load_partitions(collection_name, name, check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
@@ -382,7 +378,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 1100, ct.err_msg: "partition not found"}
         await async_client.load_partitions(
             collection_name, partition_name, check_task=CheckTasks.err_res, check_items=error
         )
@@ -404,7 +400,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 1100, ct.err_msg: "partition not found"}
         await async_client.load_partitions(
             collection_name, partition_name, check_task=CheckTasks.err_res, check_items=error
         )
@@ -515,7 +511,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partitions
-        error = {ct.err_code: 65535, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 65535, ct.err_msg: "partition not found"}
         await async_client.release_partitions(
             collection_name, partition_name, check_task=CheckTasks.err_res, check_items=error
         )
@@ -537,7 +533,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partition
         partition_name = ["12-s"]
-        error = {ct.err_code: 65535, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 65535, ct.err_msg: "partition not found"}
         await async_client.release_partitions(
             collection_name, partition_name, check_task=CheckTasks.err_res, check_items=error
         )
@@ -559,7 +555,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partition
-        error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
+        error = {ct.err_code: 999, ct.err_msg: "invalid parameter[expected=any partition][actual=empty partition list"}
         await async_client.release_partitions(
             collection_name, partition_names, check_task=CheckTasks.err_res, check_items=error
         )

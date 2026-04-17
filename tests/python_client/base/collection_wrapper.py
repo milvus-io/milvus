@@ -1,16 +1,15 @@
 import sys
-import time
-from numpy import NaN
 
+from numpy import NaN
 from pymilvus import Collection
 
 sys.path.append("..")
+from pymilvus.orm.types import CONSISTENCY_STRONG
+
 from check.func_check import ResponseChecker
+from common.common_func import param_info
 from utils.api_request import api_request
 from utils.wrapper import trace
-from utils.util_log import test_log as log
-from pymilvus.orm.types import CONSISTENCY_STRONG
-from common.common_func import param_info
 
 TIMEOUT = 180
 INDEX_NAME = ""

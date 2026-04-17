@@ -1,11 +1,13 @@
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
 import random
+
 import pytest
+
+from base.client_base import TestcaseBase
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 
 class TestIssues(TestcaseBase):

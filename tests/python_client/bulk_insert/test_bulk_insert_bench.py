@@ -1,30 +1,27 @@
+import json
 import logging
 import time
-import pytest
-from pymilvus import DataType
-import numpy as np
+import uuid
 from pathlib import Path
+
+import pytest
+import requests
+from pymilvus import DataType
+
 from base.client_base import TestcaseBase
 from common import common_func as cf
-from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 from common.bulk_insert_data import (
-    prepare_bulk_insert_json_files,
+    DataField as df,
+)
+from common.bulk_insert_data import (
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
-    prepare_bulk_insert_csv_files,
-    DataField as df,
 )
-import json
-import requests
-import time
-import uuid
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from utils.util_log import test_log as log
 from utils.util_log import test_log as logger
-from minio import Minio
-from minio.error import S3Error
 
 
 def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):

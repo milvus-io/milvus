@@ -1,31 +1,31 @@
+import datetime
 import random
 import threading
 import time
 from time import sleep
 
 import pytest
-import datetime
-
 from pymilvus import connections
+
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, start_monitor_threads
 from chaos.checker import (
-    Op,
     CollectionCreateChecker,
-    InsertFlushChecker,
     IndexCreateChecker,
-    SearchChecker,
+    InsertFlushChecker,
+    Op,
     QueryChecker,
+    SearchChecker,
 )
-from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common import common_func as cf
 from common import common_type as ct
-from chaos import chaos_commons as cc
-from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, start_monitor_threads
 from common.common_type import CaseLabel, CheckTasks
-from chaos import constants
-from utils.util_log import test_log as log
+from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_k8s import get_querynode_id_pod_pairs
+from utils.util_log import test_log as log
 
 
 def apply_memory_stress(chaos_yaml):
@@ -362,7 +362,7 @@ class TestMemoryStressReplica:
                 ct.default_limit,
                 timeout=120,
             )
-            assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+            assert len(search_res) == 1 and ct.default_limit == len(search_res[0])
             collection_w.release()
 
         except Exception as e:
@@ -476,7 +476,7 @@ class TestMemoryStressReplica:
             ct.default_limit,
             timeout=120,
         )
-        assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+        assert len(search_res) == 1 and ct.default_limit == len(search_res[0])
 
         collection_w.release()
         collection_w.load(replica_number=2)
@@ -487,7 +487,7 @@ class TestMemoryStressReplica:
             ct.default_limit,
             timeout=120,
         )
-        assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+        assert len(search_res) == 1 and ct.default_limit == len(search_res[0])
 
 
 @pytest.mark.tags(CaseLabel.L3)
@@ -582,7 +582,7 @@ class TestMemoryStressReplicaLoadBalance:
             ct.default_limit,
             timeout=120,
         )
-        assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+        assert len(search_res) == 1 and ct.default_limit == len(search_res[0])
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16965")
     def test_memory_stress_replicas_cross_group_load_balance(self, prepare_collection):
@@ -644,7 +644,7 @@ class TestMemoryStressReplicaLoadBalance:
             ct.default_limit,
             timeout=120,
         )
-        assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+        assert len(search_res) == 1 and ct.default_limit == len(search_res[0])
 
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/16995")
     @pytest.mark.tags(CaseLabel.L3)
@@ -699,4 +699,4 @@ class TestMemoryStressReplicaLoadBalance:
             ct.default_limit,
             timeout=120,
         )
-        assert 1 == len(search_res) and ct.default_limit == len(search_res[0])
+        assert len(search_res) == 1 and ct.default_limit == len(search_res[0])

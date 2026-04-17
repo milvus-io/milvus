@@ -1,16 +1,16 @@
-import pytest
 import time
 
+import pytest
+from milvus_operator import MilvusOperator
 from pymilvus import connections
-from utils.util_log import test_log as log
+
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from common import common_func as cf
 from common import common_type as ct
-from milvus_operator import MilvusOperator
-from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel
-
+from common.milvus_sys import MilvusSys
+from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 

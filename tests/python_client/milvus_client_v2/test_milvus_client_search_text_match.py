@@ -1,11 +1,12 @@
-import pytest
 import pandas as pd
-from pymilvus import DataType
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_v2_base import TestMilvusClientV2Base
+import pytest
 from faker import Faker
+from pymilvus import DataType
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 Faker.seed(19530)
 fake_en = Faker("en_US")

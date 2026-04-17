@@ -1,24 +1,26 @@
-import pytest
-from time import sleep
 from collections import defaultdict
-from pymilvus import connections
-from chaos.checker import (
-    InsertChecker,
-    UpsertChecker,
-    FlushChecker,
-    SearchChecker,
-    QueryChecker,
-    IndexCreateChecker,
-    DeleteChecker,
-    Op,
-)
-from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from chaos.chaos_commons import assert_statistic
-from common.common_type import CaseLabel
-from chaos import constants
-from utils.util_common import get_collections
+from time import sleep
+
+import pytest
 from delayed_assert import assert_expectations
+from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
+from chaos.checker import (
+    DeleteChecker,
+    FlushChecker,
+    IndexCreateChecker,
+    InsertChecker,
+    Op,
+    QueryChecker,
+    SearchChecker,
+    UpsertChecker,
+)
+from common.common_type import CaseLabel
+from utils.util_common import get_collections
+from utils.util_log import test_log as log
 
 
 class TestBase:

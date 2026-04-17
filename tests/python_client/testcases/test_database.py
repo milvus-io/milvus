@@ -2,10 +2,10 @@ import pandas as pd
 import pytest
 
 from base.client_base import TestcaseBase
-from common.common_type import CheckTasks, CaseLabel
-from common.common_func import param_info
 from common import common_func as cf
 from common import common_type as ct
+from common.common_func import param_info
+from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 
 prefix = "db"

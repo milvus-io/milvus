@@ -1,6 +1,7 @@
-from collections import defaultdict
-import json
 import argparse
+import json
+from collections import defaultdict
+
 from pymilvus import connections, list_collections
 
 TIMEOUT = 120

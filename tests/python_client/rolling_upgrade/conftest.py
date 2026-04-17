@@ -1,6 +1,5 @@
 import pytest
 
-
 timeout = 60
 dimension = 128
 delete_timeout = 60

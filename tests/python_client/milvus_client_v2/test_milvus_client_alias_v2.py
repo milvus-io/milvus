@@ -1,6 +1,6 @@
 import pytest
-
 from pymilvus import DataType
+
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct

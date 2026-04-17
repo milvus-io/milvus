@@ -1,15 +1,16 @@
 import datetime
 import logging
+import threading
 import time
-from utils.util_log import test_log as logger
-from utils.utils import gen_collection_name, gen_vector
+
 import pytest
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema
+
 from api.milvus import CollectionClient
 from base.testbase import TestBase
-import threading
-from utils.utils import get_data_by_payload
 from utils.constant import default_nb
-from pymilvus import FieldSchema, CollectionSchema, DataType, Collection
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name, gen_vector, get_data_by_payload
 
 
 @pytest.mark.L0
@@ -809,7 +810,7 @@ class TestCreateCollectionNegative(TestBase):
         assert rsp["code"] == 1801
 
     @pytest.mark.parametrize(
-        "name", [" ", "test_collection_" * 100, "test collection", "test/collection", "test\collection"]
+        "name", [" ", "test_collection_" * 100, "test collection", "test/collection", r"test\collection"]
     )
     def test_create_collections_with_invalid_collection_name(self, name):
         """

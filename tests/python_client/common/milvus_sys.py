@@ -1,7 +1,8 @@
-import ujson
 import json
-from pymilvus.grpc_gen import milvus_pb2 as milvus_types
+
+import ujson
 from pymilvus import connections
+from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 
 # from utils.util_log import test_log as log
 sys_info_req = ujson.dumps({"metric_type": "system_info"})
@@ -70,7 +71,7 @@ class MilvusSys:
         """get all query nodes in Milvus deployment"""
         query_nodes = []
         for node in self.nodes:
-            if "querynode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "querynode":
                 query_nodes.append(node)
         return query_nodes
 
@@ -79,7 +80,7 @@ class MilvusSys:
         """get all data nodes in Milvus deployment"""
         data_nodes = []
         for node in self.nodes:
-            if "datanode" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "datanode":
                 data_nodes.append(node)
         return data_nodes
 
@@ -88,7 +89,7 @@ class MilvusSys:
         """get all proxy nodes in Milvus deployment"""
         proxy_nodes = []
         for node in self.nodes:
-            if "proxy" == node.get("infos").get("type"):
+            if node.get("infos").get("type") == "proxy":
                 proxy_nodes.append(node)
         return proxy_nodes
 

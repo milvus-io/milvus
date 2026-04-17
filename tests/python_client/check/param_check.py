@@ -1,15 +1,14 @@
 import sys
-import operator
+
 from common import common_type as ct
 
 sys.path.append("..")
-from utils.util_log import test_log as log
+from collections.abc import Iterable
 
 import numpy as np
-from collections.abc import Iterable
-import json
-from datetime import datetime
 from deepdiff import DeepDiff
+
+from utils.util_log import test_log as log
 
 epsilon = ct.epsilon
 

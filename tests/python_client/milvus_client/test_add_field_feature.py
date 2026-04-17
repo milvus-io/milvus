@@ -2,16 +2,16 @@ import random
 import time
 import uuid as uuid_module
 
+import numpy as np
 import pytest
+from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus.orm.types import CONSISTENCY_STRONG
+
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import DataType
-from utils.util_log import test_log as log
-from pymilvus import AnnSearchRequest, RRFRanker
-from pymilvus.orm.types import CONSISTENCY_STRONG
-import numpy as np
 
 prefix = "add_field"
 default_vector_field_name = "vector"
@@ -572,7 +572,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter=f"field_new is null",
+            filter="field_new is null",
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -586,7 +586,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter=f"field_new=='field_new'",
+            filter="field_new=='field_new'",
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -661,7 +661,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter=f"field_new is null",
+            filter="field_new is null",
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -675,7 +675,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter=f"field_new=='default'",
+            filter="field_new=='default'",
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -1092,7 +1092,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, default_new_field_name
-        error = {ct.err_code: 999, ct.err_msg: f"Adding vector field to existing collection requires nullable=True"}
+        error = {ct.err_code: 999, ct.err_msg: "Adding vector field to existing collection requires nullable=True"}
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
@@ -1117,7 +1117,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
         # try to add vector field with default value
-        error = {ct.err_code: 999, ct.err_msg: f"Default value unsupported data type: 999"}
+        error = {ct.err_code: 999, ct.err_msg: "Default value unsupported data type: 999"}
         self.add_collection_field(
             client,
             collection_name,
@@ -1170,7 +1170,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, default_new_field_name
-        error = {ct.err_code: 1, ct.err_msg: f"The auto_id can only be specified on the primary key field"}
+        error = {ct.err_code: 1, ct.err_msg: "The auto_id can only be specified on the primary key field"}
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
@@ -1349,7 +1349,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         dim, field_name = 8, default_new_field_name
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"The number of fields has reached the maximum value 64: invalid parameter",
+            ct.err_msg: "The number of fields has reached the maximum value 64: invalid parameter",
         }
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]

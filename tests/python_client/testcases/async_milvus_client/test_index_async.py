@@ -1,16 +1,12 @@
-import random
-import time
+import asyncio
+
 import numpy as np
 import pytest
-import asyncio
-from pymilvus.client.types import LoadState, DataType
-from pymilvus import AnnSearchRequest, RRFRanker
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 
 pytestmark = pytest.mark.asyncio
 prefix = "async"
@@ -195,7 +191,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
 
         # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"vector index cannot be dropped on loaded collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "vector index cannot be dropped on loaded collection"}
         await async_client.drop_index(collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)

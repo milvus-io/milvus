@@ -1,20 +1,21 @@
-import threading
-import pytest
+import logging as log
 import time
-from time import sleep
 from pathlib import Path
+from time import sleep
+
+import constants
+import pytest
 from pymilvus import connections
+
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
-import logging as log
+from utils.util_common import gen_experiment_config, update_key_name
 from utils.util_k8s import (
-    wait_pods_ready,
-    get_milvus_instance_name,
-    get_milvus_deploy_tool,
     find_activate_standby_coord_pod,
+    get_milvus_deploy_tool,
+    get_milvus_instance_name,
+    wait_pods_ready,
 )
-from utils.util_common import update_key_value, update_key_name, gen_experiment_config
-import constants
 
 
 class TestChaosApply:

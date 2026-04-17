@@ -1,45 +1,47 @@
-import time
-import pytest
 import json
+import time
 from time import sleep
+
+import pytest
+from delayed_assert import assert_expectations
 from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
-    InsertChecker,
-    UpsertChecker,
-    FlushChecker,
-    SearchChecker,
-    FullTextSearchChecker,
-    MinHashSearchChecker,
-    HybridSearchChecker,
-    QueryChecker,
-    TextMatchChecker,
-    PhraseMatchChecker,
-    JsonQueryChecker,
-    GeoQueryChecker,
-    DeleteChecker,
     AddFieldChecker,
+    AddVectorFieldChecker,
+    DeleteChecker,
+    FlushChecker,
+    FullTextSearchChecker,
+    GeoQueryChecker,
+    HybridSearchChecker,
+    InsertChecker,
+    JsonQueryChecker,
+    MinHashSearchChecker,
+    NullVectorQueryChecker,
+    NullVectorSearchChecker,
+    Op,
+    PhraseMatchChecker,
+    QueryChecker,
+    ResultAnalyzer,
+    SearchChecker,
     SnapshotChecker,
     SnapshotRestoreChecker,
-    NullVectorSearchChecker,
-    NullVectorQueryChecker,
-    AddVectorFieldChecker,
-    Op,
-    ResultAnalyzer,
+    TextMatchChecker,
+    UpsertChecker,
 )
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
-from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
 from common import common_func as cf
-from common.milvus_sys import MilvusSys
-from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
-from chaos import constants
-from delayed_assert import assert_expectations
+from common.milvus_sys import MilvusSys
+from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
+from utils.util_log import test_log as log
 
 
 def get_all_collections():
     try:
-        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json") as f:
             data = json.load(f)
             all_collections = data["all"]
             log.info(f"all_collections: {all_collections}")

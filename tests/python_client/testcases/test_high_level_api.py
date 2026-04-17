@@ -1,12 +1,11 @@
 import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from common.constants import *
+from utils.util_pymilvus import *
 
 prefix = "high_level_api"
 epsilon = ct.epsilon
@@ -61,7 +60,7 @@ class TestHighLevelApi(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
+        error = {ct.err_code: 1, ct.err_msg: "Param id_type must be int or string"}
         self.create_collection(
             client,
             collection_name,

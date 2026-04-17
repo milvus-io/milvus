@@ -1,13 +1,14 @@
-import sys
 import copy
+import sys
 import time
-from loguru import logger
+
 import pymilvus
+from loguru import logger
 from pymilvus import (
-    FieldSchema,
+    Collection,
     CollectionSchema,
     DataType,
-    Collection,
+    FieldSchema,
     list_collections,
 )
 
@@ -271,7 +272,7 @@ def load_and_search(prefix, replicas=1):
         logger.info(search_params)
         # search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         start_time = time.time()
-        logger.info(f"\nSearch...")
+        logger.info("\nSearch...")
         # define output_fields of search result
         v_search = vectors[:1]
         res = c.search(

@@ -1,24 +1,20 @@
 import random
-from sklearn import preprocessing
-import numpy as np
-import sys
-import json
 import time
-from utils import constant
+
+import numpy as np
+import pytest
+from faker import Faker
+from pymilvus import Collection
+from sklearn import preprocessing
+
+from base.testbase import TestBase
+from utils.util_log import test_log as logger
 from utils.utils import (
-    gen_collection_name,
-    get_sorted_distance,
-    patch_faker_text,
     en_vocabularies_distribution,
+    gen_collection_name,
+    patch_faker_text,
     zh_vocabularies_distribution,
 )
-from utils.util_log import test_log as logger
-import pytest
-from base.testbase import TestBase
-from utils.utils import gen_unique_str, get_data_by_payload, get_common_fields_by_data, gen_vector, analyze_documents
-from pymilvus import FieldSchema, CollectionSchema, DataType, Collection, utility
-from faker import Faker
-import re
 
 Faker.seed(19530)
 fake_en = Faker("en_US")

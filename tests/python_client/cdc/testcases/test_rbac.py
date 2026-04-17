@@ -3,8 +3,11 @@ CDC sync tests for RBAC operations.
 """
 
 import time
+
 import pytest
+
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase, logger
 
 

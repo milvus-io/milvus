@@ -1,20 +1,22 @@
-import pytest
 import os
-import time
 import threading
+import time
 from pathlib import Path
 from time import sleep
+
+import pytest
+from delayed_assert import assert_expectations, expect
 from minio import Minio
 from pymilvus import connections
-from chaos.checker import BulkInsertChecker, Op
-from common.milvus_sys import MilvusSys
-from utils.util_log import test_log as log
-from utils.util_k8s import get_milvus_deploy_tool, get_pod_ip_name_pairs, get_milvus_instance_name
+
 from chaos import chaos_commons as cc
-from common.common_type import CaseLabel
-from common import common_func as cf
 from chaos import constants
-from delayed_assert import expect, assert_expectations
+from chaos.checker import BulkInsertChecker, Op
+from common import common_func as cf
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get_pod_ip_name_pairs
+from utils.util_log import test_log as log
 
 
 def assert_statistic(checkers, expectations={}):

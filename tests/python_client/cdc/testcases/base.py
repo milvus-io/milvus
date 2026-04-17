@@ -2,13 +2,15 @@
 Base class for CDC sync tests with common utilities.
 """
 
-import time
+import logging
 import random
 import string
-import logging
+import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Dict, List, Callable
-from pymilvus import MilvusClient, DataType
+from typing import Any
+
+from pymilvus import DataType, MilvusClient
 
 # Configure logging
 logging.basicConfig(
@@ -316,7 +318,7 @@ class TestCDCSyncBase:
         return schema
 
     @staticmethod
-    def generate_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data for insert operations."""
         return [
             {
@@ -330,7 +332,7 @@ class TestCDCSyncBase:
         ]
 
     @staticmethod
-    def generate_test_data_with_id(count: int = 100, start_id: int = 0) -> List[Dict[str, Any]]:
+    def generate_test_data_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate test data with manual IDs for upsert operations."""
         return [
             {
@@ -344,7 +346,7 @@ class TestCDCSyncBase:
         ]
 
     @staticmethod
-    def generate_comprehensive_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate comprehensive test data with all data types using standard vector generation."""
 
         # Generate vectors using standard method
@@ -393,7 +395,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_comprehensive_test_data_alt(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data_alt(count: int = 100) -> list[dict[str, Any]]:
         """Generate comprehensive test data with alternative vector types (BFLOAT16 + INT8)."""
 
         # Generate vectors using standard method - alternative set
@@ -442,7 +444,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_comprehensive_test_data_alt_with_id(count: int = 100, start_id: int = 0) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data_alt_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs and alternative vector types (BFLOAT16 + INT8)."""
 
         # Generate vectors using standard method - alternative set
@@ -536,7 +538,7 @@ class TestCDCSyncBase:
         return vectors
 
     @staticmethod
-    def generate_comprehensive_test_data_with_id(count: int = 100, start_id: int = 0) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs for upsert operations using standard vector generation."""
 
         # Generate vectors using standard method
@@ -586,7 +588,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_bfloat16_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_bfloat16_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data with BFLOAT16_VECTOR for index testing using standard method."""
 
         # Generate bfloat16 vectors using standard method
@@ -602,7 +604,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_int8_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_int8_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data with INT8_VECTOR for index testing using standard method."""
 
         # Generate int8 vectors using standard method

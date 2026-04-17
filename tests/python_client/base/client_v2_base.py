@@ -1,15 +1,16 @@
 import sys
 import time
-from typing import Optional
-from pymilvus import MilvusClient, DataType
+
+from pymilvus import DataType, MilvusClient
 
 sys.path.append("..")
-from check.func_check import ResponseChecker
-from utils.api_request import api_request
-from utils.wrapper import trace
-from utils.util_log import test_log as log
-from common import common_func as cf, common_type as ct
 from base.client_base import Base
+from check.func_check import ResponseChecker
+from common import common_func as cf
+from common import common_type as ct
+from utils.api_request import api_request
+from utils.util_log import test_log as log
+from utils.wrapper import trace
 
 TIMEOUT = 120
 INDEX_NAME = ""
@@ -622,7 +623,7 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def create_database(
-        self, client, db_name, properties: Optional[dict] = None, check_task=None, check_items=None, **kwargs
+        self, client, db_name, properties: dict | None = None, check_task=None, check_items=None, **kwargs
     ):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.create_database, db_name, properties], **kwargs)

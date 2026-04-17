@@ -1,12 +1,14 @@
 import random
+
 import pytest
 from pymilvus import DataType
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
+
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq
@@ -85,11 +87,11 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         if invalid_vectors in [[" "], ["a"]]:
             pytest.skip("['a'] and [' '] is valid now")
         client = self._client(alias=self.shared_alias)
-        log.info("test_search_param_invalid_vectors: searching with invalid vectors: {}".format(invalid_vectors))
+        log.info(f"test_search_param_invalid_vectors: searching with invalid vectors: {invalid_vectors}")
         if invalid_vectors is None:
             err_msg = "Either ids or data must be provided"
         else:
-            err_msg = "`search_data` value {} is illegal".format(invalid_vectors)
+            err_msg = f"`search_data` value {invalid_vectors} is illegal"
         self.search(
             client,
             self.collection_name,
@@ -136,7 +138,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         if invalid_field_name in [None, ""]:
             pytest.skip("None is legal")
         client = self._client(alias=self.shared_alias)
-        error = {"err_code": 999, "err_msg": f"failed to create query plan: failed to get field schema by name"}
+        error = {"err_code": 999, "err_msg": "failed to create query plan: failed to get field schema by name"}
         self.search(
             client,
             self.collection_name,
@@ -343,7 +345,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        err_msg = "`partition_name_array` value {} is illegal".format(invalid_partitions)
+        err_msg = f"`partition_name_array` value {invalid_partitions} is illegal"
         self.search(
             client,
             self.collection_name,
@@ -414,7 +416,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        err_msg = f"field non_existing not exist"
+        err_msg = "field non_existing not exist"
         self.search(
             client,
             self.collection_name,
@@ -847,7 +849,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2", "params": invalid_search_param["search_params"]}
-                log.info("search_params: {}".format(search_params))
+                log.info(f"search_params: {search_params}")
                 self.search(
                     client,
                     collection_name,

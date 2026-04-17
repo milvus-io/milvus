@@ -1,20 +1,22 @@
-import random
+import csv
 import json
+import random
 import subprocess
 import time
-from sklearn import preprocessing
 from pathlib import Path
+from uuid import uuid4
+
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import numpy as np
-import csv
-from pymilvus import Collection, utility
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
 import pytest
+from pymilvus import Collection, utility
+from sklearn import preprocessing
+
 from base.testbase import TestBase
-from uuid import uuid4
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 IMPORT_TIMEOUT = 360
 
@@ -3947,7 +3949,7 @@ class TestCreateImportJobNegative(TestBase):
             if not auto_id:
                 tmp["book_id"] = i
             if enable_dynamic_field:
-                tmp.update({f"$meta": {"dynamic_key": i + 1}})
+                tmp.update({"$meta": {"dynamic_key": i + 1}})
             data.append(tmp)
         # dump data to file
         file_name = f"bulk_insert_data_{uuid4()}.json"
@@ -4067,7 +4069,7 @@ class TestCreateImportJobNegative(TestBase):
             "collectionName": name,
             "files": [
                 [
-                    f"invalid_bucket/invalid_root_path/insert_log/invalid_id/",
+                    "invalid_bucket/invalid_root_path/insert_log/invalid_id/",
                 ]
             ],
             "options": {"backup": "true"},

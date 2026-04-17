@@ -1,16 +1,18 @@
+import copy
 import json
 import random
 import string
 import threading
-import traceback
 import time
-import copy
+import traceback
+
 import numpy as np
 import requests
+from pymilvus import DataType, MilvusClient
 from sklearn import preprocessing
-from pymilvus import MilvusClient, DataType
-from utils.util_log import test_log as log
+
 from utils.util_k8s import init_k8s_client_config
+from utils.util_log import test_log as log
 
 # __all__ controls what `from utils.util_pymilvus import *` exposes and
 # lets pyflakes/ruff verify symbol usage in consumers (eliminating F405).
@@ -877,7 +879,7 @@ def assert_equal_vector(v1, v2):
 def restart_server(helm_release_name):
     res = True
     timeout = 120
-    from kubernetes import client, config
+    from kubernetes import client
 
     client.rest.logger.setLevel(log.WARNING)
 
@@ -910,9 +912,7 @@ def restart_server(helm_release_name):
         for i in pods.items:
             pod_name_tmp = i.metadata.name
             log.error(pod_name_tmp)
-            if pod_name_tmp == pod_name:
-                continue
-            elif pod_name_tmp.find(helm_release_name) == -1:
+            if pod_name_tmp == pod_name or pod_name_tmp.find(helm_release_name) == -1:
                 continue
             else:
                 status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty="true")

@@ -1,12 +1,13 @@
 import random
 
 import pytest
+from pymilvus import DataType
+
+from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from pymilvus import DataType
-from base.client_v2_base import TestMilvusClientV2Base
 
 prefix = "milvus_client_api_search_iterator"
 
@@ -217,7 +218,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         # 3. search
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"search_iterator_v2 does not support processing multiple vectors simultaneously",
+            ct.err_msg: "search_iterator_v2 does not support processing multiple vectors simultaneously",
         }
         self.search_iterator(
             client, collection_name, data, batch_size=5, check_task=CheckTasks.err_res, check_items=error
@@ -259,7 +260,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
-        error = {ct.err_code: 1, ct.err_msg: f"The vector data for search cannot be empty"}
+        error = {ct.err_code: 1, ct.err_msg: "The vector data for search cannot be empty"}
         self.search_iterator(
             client, collection_name, data, batch_size=5, check_task=CheckTasks.err_res, check_items=error
         )
@@ -304,7 +305,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: f"batch size cannot be less than zero"}
+        error = {ct.err_code: 1, ct.err_msg: "batch size cannot be less than zero"}
         self.search_iterator(
             client,
             collection_name,
@@ -353,8 +354,8 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: invalidexpr, "
-            f"data type: JSON: invalid parameter",
+            ct.err_msg: "failed to create query plan: predicate is not a boolean expression: invalidexpr, "
+            "data type: JSON: invalid parameter",
         }
         self.search_iterator(
             client,
@@ -514,7 +515,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # 3. search
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 1, ct.err_msg: f"'str' object has no attribute 'get'"}
+        error = {ct.err_code: 1, ct.err_msg: "'str' object has no attribute 'get'"}
         self.search_iterator(
             client,
             collection_name,

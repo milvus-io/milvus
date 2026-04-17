@@ -10,11 +10,12 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 
-import random
-import numpy as np
-import time
 import argparse
-from pymilvus import connections, list_collections, FieldSchema, CollectionSchema, DataType, Collection
+import random
+import time
+
+import numpy as np
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, list_collections
 
 TIMEOUT = 120
 
@@ -25,7 +26,7 @@ def hello_milvus(host="127.0.0.1"):
     # create connection
     connections.connect(host=host, port="19530")
 
-    print(f"\nList collections...")
+    print("\nList collections...")
     print(list_collections())
 
     # create collection
@@ -38,10 +39,10 @@ def hello_milvus(host="127.0.0.1"):
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
 
-    print(f"\nCreate collection...")
+    print("\nCreate collection...")
     collection = Collection(name="hello_milvus", schema=default_schema)
 
-    print(f"\nList collections...")
+    print("\nList collections...")
     print(list_collections())
 
     #  insert data
@@ -55,7 +56,7 @@ def hello_milvus(host="127.0.0.1"):
     print(f"\nInsert {nb} vectors cost {t1 - t0:.4f} seconds")
 
     t0 = time.time()
-    print(f"\nGet collection entities...")
+    print("\nGet collection entities...")
     collection.flush()
     print(collection.num_entities)
     t1 = time.time()
@@ -72,7 +73,7 @@ def hello_milvus(host="127.0.0.1"):
 
     # create index and load table
     default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
-    print(f"\nCreate index...")
+    print("\nCreate index...")
     t0 = time.time()
 
     collection.release()
@@ -80,7 +81,7 @@ def hello_milvus(host="127.0.0.1"):
     collection.create_index(field_name="float_vector", index_params=default_index)
     t1 = time.time()
     print(f"\nCreate index cost {t1 - t0:.4f} seconds")
-    print(f"\nload collection...")
+    print("\nload collection...")
     t0 = time.time()
     collection.load(replica_number=replica_number)
     t1 = time.time()
@@ -90,7 +91,7 @@ def hello_milvus(host="127.0.0.1"):
     topK = 5
     search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
     t0 = time.time()
-    print(f"\nSearch...")
+    print("\nSearch...")
     # define output_fields of search result
     res = collection.search(
         vectors[-2:],

@@ -1,23 +1,25 @@
-import pytest
-import time
-from time import sleep
-from pathlib import Path
-from datetime import datetime
 import json
+import logging as log
+import time
+from datetime import datetime
+from pathlib import Path
+from time import sleep
+
+import constants
+import pytest
 from pymilvus import connections
+
+from chaos import chaos_commons as cc
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
-from chaos import chaos_commons as cc
-import logging as log
-from utils.util_k8s import (
-    wait_pods_ready,
-    get_milvus_instance_name,
-    get_milvus_deploy_tool,
-    get_etcd_leader,
-    get_etcd_followers,
-)
 from utils.util_common import wait_signal_to_apply_chaos
-import constants
+from utils.util_k8s import (
+    get_etcd_followers,
+    get_etcd_leader,
+    get_milvus_deploy_tool,
+    get_milvus_instance_name,
+    wait_pods_ready,
+)
 
 
 class TestChaosApply:

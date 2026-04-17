@@ -1,6 +1,8 @@
-import pytest
-from typing import Any, List, Dict, Protocol, cast
 import uuid
+from typing import Any, Protocol, cast
+
+import pytest
+
 from base.client_v2_base import TestMilvusClientV2Base
 from common.common_type import CaseLabel
 from common.text_generator import generate_text_by_analyzer
@@ -9,7 +11,7 @@ from common.text_generator import generate_text_by_analyzer
 class AnalyzerResult(Protocol):
     """Protocol for analyzer result to help with type inference"""
 
-    tokens: List[Dict[str, Any]]
+    tokens: list[dict[str, Any]]
 
 
 class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
@@ -18,8 +20,9 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         """
         Generate expected tokens using jieba library based on analyzer parameters
         """
-        import jieba
         import importlib
+
+        import jieba
 
         importlib.reload(jieba)
         tokenizer_config = analyzer_params.get("tokenizer", {})

@@ -14,9 +14,9 @@ Generates two report formats:
 - test_report.html: Human-readable HTML report with color-coded logs
 """
 
-import os
-import logging
 import json
+import logging
+import os
 from datetime import datetime
 
 import pytest
@@ -291,7 +291,7 @@ class ConditionalLogHandler(logging.Handler):
 
             for worker_file in worker_files:
                 try:
-                    with open(worker_file, "r", encoding="utf-8") as f:
+                    with open(worker_file, encoding="utf-8") as f:
                         worker_data = json.load(f)
 
                     # Merge data
@@ -625,11 +625,11 @@ class ConditionalLogHandler(logging.Handler):
                     f.write('    <div class="test-section">\n')
                     f.write("        <h2>❌ Failed Tests</h2>\n")
                     for test_info in self.test_stats["failed"]:
-                        f.write(f"        <details open>\n")
-                        f.write(f'            <summary class="test-item failed">\n')
+                        f.write("        <details open>\n")
+                        f.write('            <summary class="test-item failed">\n')
                         f.write(f'                <span class="test-name">{test_info["nodeid"]}</span>\n')
                         f.write(f'                <span class="duration"> ({test_info["duration"]:.2f}s)</span>\n')
-                        f.write(f"            </summary>\n")
+                        f.write("            </summary>\n")
 
                         # Error information - use data from test_info['error']
                         error_info = test_info.get("error", {})
@@ -676,21 +676,21 @@ class ConditionalLogHandler(logging.Handler):
                     f.write('    <div class="test-section">\n')
                     f.write("        <h2>⚠️ XPass Tests (Unexpected Passes)</h2>\n")
                     for test_info in self.test_stats["xpass"]:
-                        f.write(f"        <details open>\n")
-                        f.write(f'            <summary class="test-item xpass">\n')
+                        f.write("        <details open>\n")
+                        f.write('            <summary class="test-item xpass">\n')
                         f.write(f'                <span class="test-name">{test_info["nodeid"]}</span>\n')
                         f.write(f'                <span class="duration"> ({test_info["duration"]:.2f}s)</span>\n')
-                        f.write(f"            </summary>\n")
+                        f.write("            </summary>\n")
 
                         # XFail reason
                         xfail_reason = test_info.get("xfail_reason", "Unknown")
                         if xfail_reason:
                             reason_text = str(xfail_reason).replace("<", "&lt;").replace(">", "&gt;")
                             f.write(
-                                f'            <div style="margin:10px 0;padding:10px;background:#fdf4ff;border:1px solid #ec4899;border-radius:4px;">\n'
+                                '            <div style="margin:10px 0;padding:10px;background:#fdf4ff;border:1px solid #ec4899;border-radius:4px;">\n'
                             )
                             f.write(f"                <strong>Expected to fail:</strong> {reason_text}\n")
-                            f.write(f"            </div>\n")
+                            f.write("            </div>\n")
 
                         # Captured logs
                         logs = test_info.get("logs", {})
@@ -720,7 +720,7 @@ class ConditionalLogHandler(logging.Handler):
                     f.write('    <div class="test-section">\n')
                     f.write("        <h2>📋 XFail Tests (Expected Failures)</h2>\n")
                     for test in self.test_stats["xfail"]:
-                        f.write(f'        <div class="test-item xfail">\n')
+                        f.write('        <div class="test-item xfail">\n')
                         f.write(f'            <span class="test-name">{test["nodeid"]}</span>\n')
                         f.write(f'            <span class="duration"> ({test["duration"]:.2f}s)</span>\n')
                         xfail_reason = test.get("xfail_reason", "Unknown")
@@ -729,7 +729,7 @@ class ConditionalLogHandler(logging.Handler):
                             f.write(
                                 f'            <div style="margin-top:5px;color:#6b7280;font-size:12px;">Expected: {reason_text}</div>\n'
                             )
-                        f.write(f"        </div>\n")
+                        f.write("        </div>\n")
                     f.write("    </div>\n")
 
                 # Passed tests section
@@ -737,10 +737,10 @@ class ConditionalLogHandler(logging.Handler):
                     f.write('    <div class="test-section">\n')
                     f.write("        <h2>✅ Passed Tests</h2>\n")
                     for test in self.test_stats["passed"]:
-                        f.write(f'        <div class="test-item passed">\n')
+                        f.write('        <div class="test-item passed">\n')
                         f.write(f'            <span class="test-name">{test["nodeid"]}</span>\n')
                         f.write(f'            <span class="duration"> ({test["duration"]:.2f}s)</span>\n')
-                        f.write(f"        </div>\n")
+                        f.write("        </div>\n")
                     f.write("    </div>\n")
 
                 # Skipped tests section
@@ -748,7 +748,7 @@ class ConditionalLogHandler(logging.Handler):
                     f.write('    <div class="test-section">\n')
                     f.write("        <h2>⊘ Skipped Tests</h2>\n")
                     for test in self.test_stats["skipped"]:
-                        f.write(f'        <div class="test-item skipped">\n')
+                        f.write('        <div class="test-item skipped">\n')
                         f.write(f'            <span class="test-name">{test["nodeid"]}</span>\n')
                         f.write(f'            <span class="duration"> ({test["duration"]:.2f}s)</span>\n')
                         if "reason" in test:
@@ -756,7 +756,7 @@ class ConditionalLogHandler(logging.Handler):
                             f.write(
                                 f'            <div style="margin-top:5px;color:#6b7280;font-size:12px;">Reason: {reason}</div>\n'
                             )
-                        f.write(f"        </div>\n")
+                        f.write("        </div>\n")
                     f.write("    </div>\n")
 
                 f.write("""

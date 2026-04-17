@@ -1,15 +1,13 @@
 import pytest
+from pymilvus import AnnSearchRequest, DataType, WeightedRanker
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from common.constants import *
-from pymilvus import DataType
-from pymilvus import AnnSearchRequest
-from pymilvus import WeightedRanker
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 prefix = "client_hybrid_search"
 epsilon = ct.epsilon
@@ -119,7 +117,7 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. hybrid search
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection=1]"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found[database=default][collection=1]"}
         self.hybrid_search(
             client, collection_name, reqs, ranker, limit=default_limit, check_task=CheckTasks.err_res, check_items=error
         )
@@ -143,7 +141,7 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         sub_search1 = AnnSearchRequest(vectors_to_search, "embeddings", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection=1]"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found[database=default][collection=1]"}
         self.hybrid_search(
             client,
             collection_name,

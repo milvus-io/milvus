@@ -1,8 +1,6 @@
 import pytest
-import numpy as np
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -572,7 +570,7 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
             schema=schema,
             desired_field_names=[default_primary_key_field_name, default_string_field_name],
         )
-        error = {ct.err_code: 101, ct.err_msg: f"failed to query: collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "failed to query: collection not loaded"}
         self.upsert(
             client, collection_name, new_row, partial_update=True, check_task=CheckTasks.err_res, check_items=error
         )

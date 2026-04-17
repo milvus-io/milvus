@@ -1,14 +1,16 @@
-import pytest
 import threading
 from time import sleep
-from pymilvus import connections, DataType, FieldSchema, CollectionSchema
-from chaos.checker import BulkInsertChecker, Op
-from utils.util_log import test_log as log
+
+import pytest
+from delayed_assert import assert_expectations, expect
+from pymilvus import CollectionSchema, DataType, FieldSchema, connections
+
 from chaos import chaos_commons as cc
-from common.common_type import CaseLabel
-from common import common_func as cf
 from chaos import constants
-from delayed_assert import expect, assert_expectations
+from chaos.checker import BulkInsertChecker, Op
+from common import common_func as cf
+from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 
 def assert_statistic(checkers, expectations={}):

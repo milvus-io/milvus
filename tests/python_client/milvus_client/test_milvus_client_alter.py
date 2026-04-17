@@ -1,15 +1,14 @@
-import pytest
 import numbers
-import time
+
+import numpy as np
+import pytest
+
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams, FieldParams, MetricType
+from utils.util_log import test_log as log
 from utils.util_pymilvus import DataType
-from pymilvus import AnnSearchRequest, WeightedRanker, RRFRanker
-import numpy as np
 
 prefix = "alter"
 default_vector_field_name = "vector"
@@ -447,9 +446,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         res = self.query(
             client,
             collection_name,
-            filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(
-                default_dynamic_field_name, default_dynamic_field_name, default_value
-            ),
+            filter=f'$meta["{default_dynamic_field_name}"]["a"]["b"] >= 0 and {default_dynamic_field_name} == {default_value}',
             output_fields=[default_dynamic_field_name, f'$meta["{default_dynamic_field_name}"]'],
             check_task=CheckTasks.check_query_results,
             check_items={exp_res: [{"id": item["id"], default_dynamic_field_name: default_value} for item in rows_new]},
@@ -462,9 +459,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(
-                default_dynamic_field_name, default_dynamic_field_name, default_value
-            ),
+            filter=f'$meta["{default_dynamic_field_name}"]["a"]["b"] >= 0 and {default_dynamic_field_name} == {default_value}',
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -548,7 +543,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                 }
                 for i in range(100)
             ]
-        error = {ct.err_code: 999, ct.err_msg: f"more fieldData has pass in"}
+        error = {ct.err_code: 999, ct.err_msg: "more fieldData has pass in"}
         self.insert(client, collection_name, rows_with_pk, check_task=CheckTasks.err_res, check_items=error)
 
         rows_without_pk = cf.gen_row_data_by_schema(nb=100, schema=schema)
@@ -716,7 +711,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         self.alter_collection_field(
             client, collection_name, field_name=array_field_name, field_params={"max_capacity": 20}
         )
-        error = {ct.err_code: 999, ct.err_msg: f"can not modify the maxlength for non-string types"}
+        error = {ct.err_code: 999, ct.err_msg: "can not modify the maxlength for non-string types"}
         self.alter_collection_field(
             client,
             collection_name,

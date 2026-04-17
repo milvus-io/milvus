@@ -1,19 +1,19 @@
+import logging
 import random
 import time
-import logging
-from typing import List, Dict, Optional, Tuple
+
 import pandas as pd
 from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    Collection,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    Collection,
+    MilvusClient,
     connections,
 )
-from pymilvus import MilvusClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,8 @@ class FTSMultiAnalyzerChecker:
         collection_name: str,
         language_field_name: str,
         text_field_name: str,
-        multi_analyzer_params: Optional[Dict] = None,
-        client: Optional[MilvusClient] = None,
+        multi_analyzer_params: dict | None = None,
+        client: MilvusClient | None = None,
     ):
         self.collection_name = collection_name
         self.mock_collection_name = collection_name + "_mock"
@@ -141,7 +141,7 @@ class FTSMultiAnalyzerChecker:
             logger.error(f"collection init failed: {e}")
             raise
 
-    def get_tokens_by_analyzer(self, text: str, analyzer_params: dict) -> List[str]:
+    def get_tokens_by_analyzer(self, text: str, analyzer_params: dict) -> list[str]:
         """
         Tokenize text according to analyzer parameters.
         Args:
@@ -158,7 +158,7 @@ class FTSMultiAnalyzerChecker:
             logger.error(f"Tokenization failed: {e}")
             return []
 
-    def generate_test_data(self, num_rows: int = 3000, lang_list: Optional[List[str]] = None) -> List[Dict]:
+    def generate_test_data(self, num_rows: int = 3000, lang_list: list[str] | None = None) -> list[dict]:
         """
         Generate test data according to the schema, row count and language list.
         Each row will contain language, article content and other fields.
@@ -192,7 +192,7 @@ class FTSMultiAnalyzerChecker:
             data.append(row)
         return data
 
-    def tokenize_data_by_multi_analyzer(self, data_list: List[Dict], verbose: bool = False) -> List[Dict]:
+    def tokenize_data_by_multi_analyzer(self, data_list: list[dict], verbose: bool = False) -> list[dict]:
         """
         Tokenize data according to multi-analyzer parameters.
         Args:
@@ -223,7 +223,7 @@ class FTSMultiAnalyzerChecker:
             logger.info(f"Tokenized data:\n{tokenized_data}")
         return data_list_tokenized
 
-    def insert_data(self, data: List[Dict], verbose: bool = False) -> Tuple[List[Dict], List[Dict]]:
+    def insert_data(self, data: list[dict], verbose: bool = False) -> tuple[list[dict], list[dict]]:
         """
         Insert test data and return original and tokenized data.
         Args:
@@ -265,7 +265,7 @@ class FTSMultiAnalyzerChecker:
                 logger.error(f"Failed to create index: {e}")
                 raise
 
-    def search(self, origin_query: str, tokenized_query: str, language: str, limit: int = 10) -> Tuple[list, list]:
+    def search(self, origin_query: str, tokenized_query: str, language: str, limit: int = 10) -> tuple[list, list]:
         """
         Search interface, perform BM25 search on main and mock collections respectively.
         Args:

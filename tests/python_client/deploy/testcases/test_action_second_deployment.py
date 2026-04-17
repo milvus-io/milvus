@@ -1,15 +1,17 @@
-import pytest
 import re
 import time
+
 import pymilvus
+import pytest
+
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
-from utils.util_pymilvus import *
 from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param, get_deploy_test_collections
 from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq

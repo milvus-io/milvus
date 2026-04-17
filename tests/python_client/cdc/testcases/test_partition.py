@@ -3,8 +3,11 @@ CDC sync tests for partition operations.
 """
 
 import time
+
 import pytest
+
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase
 
 
@@ -173,7 +176,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                     collection_name=collection_name, partition_name=partition_name
                 )
                 print(f"DEBUG: partition load state in check_load: {load_state['state']}")
-                return "Loaded" == str(load_state["state"])
+                return str(load_state["state"]) == "Loaded"
             except Exception as e:
                 print(f"DEBUG: get_load_state exception in check_load: {e}")
                 return False

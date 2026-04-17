@@ -1,23 +1,25 @@
 import json
 import sys
-import pytest
 import time
 import uuid
-from pymilvus import connections, db, MilvusClient
-from utils.util_log import test_log as logger
+
+import pytest
+from pymilvus import connections, db
+
 from api.milvus import (
-    VectorClient,
-    CollectionClient,
-    PartitionClient,
-    IndexClient,
     AliasClient,
-    UserClient,
-    RoleClient,
-    ImportJobClient,
-    StorageClient,
-    Requests,
+    CollectionClient,
     DatabaseClient,
+    ImportJobClient,
+    IndexClient,
+    PartitionClient,
+    Requests,
+    RoleClient,
+    StorageClient,
+    UserClient,
+    VectorClient,
 )
+from utils.util_log import test_log as logger
 from utils.utils import get_data_by_payload
 
 

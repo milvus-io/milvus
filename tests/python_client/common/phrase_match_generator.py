@@ -1,10 +1,10 @@
-import re
-import jieba
-from faker import Faker
-from tantivy import SchemaBuilder, Document, Index, Query
-from typing import List, Dict
-import numpy as np
 import random
+import re
+
+import jieba
+import numpy as np
+from faker import Faker
+from tantivy import Document, Index, Query, SchemaBuilder
 
 
 class PhraseMatchTestGenerator:
@@ -163,7 +163,7 @@ class PhraseMatchTestGenerator:
         self.connectors = self.zh_connectors if language == "zh" else self.en_connectors
         self.modifiers = self.zh_modifiers if language == "zh" else self.en_modifiers
 
-    def tokenize_text(self, text: str) -> List[str]:
+    def tokenize_text(self, text: str) -> list[str]:
         """Tokenize text using jieba tokenizer"""
         text = text.strip()
         text = re.sub(r"[^\w\s]", " ", text)
@@ -174,7 +174,7 @@ class PhraseMatchTestGenerator:
         else:
             return list(text.split())
 
-    def generate_embedding(self, dim: int) -> List[float]:
+    def generate_embedding(self, dim: int) -> list[float]:
         """Generate random embedding vector"""
         return list(np.random.random(dim))
 
@@ -194,7 +194,7 @@ class PhraseMatchTestGenerator:
         ]
         return random.choice(patterns)()
 
-    def generate_test_data(self, num_documents: int, dim: int) -> List[Dict]:
+    def generate_test_data(self, num_documents: int, dim: int) -> list[dict]:
         """
         Generate test documents with text and embeddings
 
@@ -242,7 +242,7 @@ class PhraseMatchTestGenerator:
 
         return self.documents
 
-    def _generate_random_word(self, exclude_words: List[str]) -> str:
+    def _generate_random_word(self, exclude_words: list[str]) -> str:
         """
         Generate a random word that is not in the exclude_words list using Faker
         """
@@ -252,7 +252,7 @@ class PhraseMatchTestGenerator:
             if word not in exclude_words:
                 return word
 
-    def generate_pattern_documents(self, patterns: List[tuple], dim: int, num_docs_per_pattern: int = 1) -> List[Dict]:
+    def generate_pattern_documents(self, patterns: list[tuple], dim: int, num_docs_per_pattern: int = 1) -> list[dict]:
         """
         Generate documents that match specific test patterns with their corresponding slop values
 
@@ -305,7 +305,7 @@ class PhraseMatchTestGenerator:
 
         return new_pattern_documents
 
-    def generate_test_queries(self, num_queries: int) -> List[Dict]:
+    def generate_test_queries(self, num_queries: int) -> list[dict]:
         """
         Generate test queries with varying slop values
 
@@ -334,7 +334,7 @@ class PhraseMatchTestGenerator:
 
         return queries
 
-    def get_query_results(self, query: str, slop: int) -> List[Dict]:
+    def get_query_results(self, query: str, slop: int) -> list[dict]:
         """
         Get all documents that match the phrase query
 

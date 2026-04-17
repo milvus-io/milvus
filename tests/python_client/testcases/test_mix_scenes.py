@@ -1,26 +1,22 @@
 import random
 import re
-import math  # do not remove `math`
-import pytest
-import random
-import numpy as np
-import pandas as pd
-from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
 
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
+import pytest
+from pymilvus import AnnSearchRequest, DataType, RRFRanker
+
+from base.client_base import TestcaseBase, TestCaseClassBase
 from common import common_func as cf
-from common import common_params as cp
+from common import common_type as ct
 from common.code_mapping import QueryErrorMessage as qem
 from common.common_params import (
+    AlterIndexParams,
+    DefaultScalarIndexParams,
+    DefaultVectorIndexParams,
+    Expr,
     FieldParams,
     MetricType,
-    DefaultVectorIndexParams,
-    DefaultScalarIndexParams,
-    Expr,
-    AlterIndexParams,
 )
-from base.client_base import TestcaseBase, TestCaseClassBase
+from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
 
 

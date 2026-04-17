@@ -1,23 +1,24 @@
 import random
-import uuid
+
+import numpy as np
+import pandas as pd
+import pytest
+from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    AnnSearchRequest,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    AnnSearchRequest,
     WeightedRanker,
 )
-from common.common_type import CaseLabel, CheckTasks
-from common import common_func as cf
-from utils.util_log import test_log as log
+
 from base.client_base import TestcaseBase
-import numpy as np
-import pytest
-import pandas as pd
-from faker import Faker
-from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from common.mock_tei_server import MockTEIServer, get_docker_host, get_local_ip
+from utils.util_log import test_log as log
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")

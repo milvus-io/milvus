@@ -2,21 +2,18 @@ import threading
 import time
 
 import pytest
-from pymilvus import DefaultConfig
 from pymilvus.exceptions import MilvusException
+from pymilvus.grpc_gen.common_pb2 import SegmentState
+
 from base.client_base import TestcaseBase
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
-from common.common_params import FieldParams, DefaultVectorIndexParams, DefaultVectorSearchParams
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams, FieldParams
 from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
-from pymilvus.grpc_gen.common_pb2 import SegmentState
-import random
-from pymilvus.client.types import ResourceGroupConfig
-import copy
+from utils.util_log import test_log as log
 
 prefix = "utility"
 default_schema = cf.gen_default_collection_schema()
@@ -278,7 +275,7 @@ class TestUtilityParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
         self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
+        error = {ct.err_code: 1, ct.err_msg: f"Invalid collection name: {invalid_c_name}"}
         self.utility_wrap.loading_progress(invalid_c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -327,7 +324,7 @@ class TestUtilityParams(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, nb=10)[0]
         collection_w.load()
-        err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
+        err_msg = {ct.err_code: 15, ct.err_msg: "partition not found"}
         self.utility_wrap.loading_progress(
             collection_w.name, partition_names, check_task=CheckTasks.err_res, check_items=err_msg
         )
@@ -346,7 +343,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 100,
-                ct.err_msg: "collection not found[database=default][collection={}]".format(c_name),
+                ct.err_msg: f"collection not found[database=default][collection={c_name}]",
             },
         )
 
@@ -397,7 +394,7 @@ class TestUtilityParams(TestcaseBase):
                 invalid_vector,
                 invalid_vector,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 1, "err_msg": "vectors_left value {} is illegal".format(invalid_vector)},
+                check_items={"err_code": 1, "err_msg": f"vectors_left value {invalid_vector} is illegal"},
             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -415,7 +412,7 @@ class TestUtilityParams(TestcaseBase):
                 invalid_vector,
                 invalid_vector,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 1, "err_msg": "vectors_left value {} is illegal".format(invalid_vector)},
+                check_items={"err_code": 1, "err_msg": f"vectors_left value {invalid_vector} is illegal"},
             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -435,7 +432,7 @@ class TestUtilityParams(TestcaseBase):
                 op_l,
                 invalid_vector,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 1, "err_msg": "vectors_right value {} is illegal".format(invalid_vector)},
+                check_items={"err_code": 1, "err_msg": f"vectors_right value {invalid_vector} is illegal"},
             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -455,7 +452,7 @@ class TestUtilityParams(TestcaseBase):
                 op_l,
                 invalid_vector,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 1, "err_msg": "vectors_right value {} is illegal".format(invalid_vector)},
+                check_items={"err_code": 1, "err_msg": f"vectors_right value {invalid_vector} is illegal"},
             )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -475,7 +472,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 999,
-                "err_msg": "`collection_name` value {} is illegal".format(old_collection_name),
+                "err_msg": f"`collection_name` value {old_collection_name} is illegal",
             },
         )
 
@@ -512,7 +509,7 @@ class TestUtilityParams(TestcaseBase):
             old_collection_name,
             new_collection_name,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1, "err_msg": "`collection_name` value {} is illegal".format(new_collection_name)},
+            check_items={"err_code": 1, "err_msg": f"`collection_name` value {new_collection_name} is illegal"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -606,7 +603,7 @@ class TestUtilityParams(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 1,
-                "err_msg": "unsupported use an alias to rename collection, alias:{}".format(alias),
+                "err_msg": f"unsupported use an alias to rename collection, alias:{alias}",
             },
         )
 
@@ -834,7 +831,7 @@ class TestUtilityBase(TestcaseBase):
             if 0 < res["indexed_rows"] <= nb:
                 break
             if time.time() - start > 5:
-                raise MilvusException(1, f"Index build completed in more than 5s")
+                raise MilvusException(1, "Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_collection_not_existed(self):
@@ -929,7 +926,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.load(_async=True)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         loading_int = cf.percent_to_int(res[loading_progress])
-        if -1 != loading_int:
+        if loading_int != -1:
             assert 0 <= loading_int <= 100
         else:
             log.info("The output of loading progress is not a string or a percentage")
@@ -1913,7 +1910,7 @@ class TestUtilityAdvanced(TestcaseBase):
             if len(segment_infos) == 1 and segment_infos[0].state == SegmentState.Sealed:
                 break
             if time.time() - start > 20:
-                raise MilvusException(1, f"Get query segment info after handoff cost more than 20s")
+                raise MilvusException(1, "Get query segment info after handoff cost more than 20s")
 
         # query and search from handoff segments
         collection_w.query(
@@ -2134,7 +2131,7 @@ class TestUtilityFlushAll(TestcaseBase):
                 2. flush_all while inserting and deleting
         expected:
         """
-        from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+        from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 
         collection_num = 5
         collection_names = []

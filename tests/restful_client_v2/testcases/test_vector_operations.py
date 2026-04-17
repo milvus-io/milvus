@@ -1,25 +1,31 @@
+import json
 import random
-from sklearn import preprocessing
+import re
+import sys
+import time
+
 import numpy as np
 import pandas as pd
-import sys
-import json
-import time
-from utils.constant import default_nb, MAX_SUM_OFFSET_AND_LIMIT
+import pytest
+from faker import Faker
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, utility
+from sklearn import preprocessing
+
+from base.testbase import TestBase
+from utils.constant import MAX_SUM_OFFSET_AND_LIMIT, default_nb
+from utils.util_log import test_log as logger
 from utils.utils import (
+    analyze_documents,
+    en_vocabularies_distribution,
     gen_collection_name,
+    gen_unique_str,
+    gen_vector,
+    get_common_fields_by_data,
+    get_data_by_payload,
     get_sorted_distance,
     patch_faker_text,
-    en_vocabularies_distribution,
     zh_vocabularies_distribution,
 )
-from utils.util_log import test_log as logger
-import pytest
-from base.testbase import TestBase
-from utils.utils import gen_unique_str, get_data_by_payload, get_common_fields_by_data, gen_vector, analyze_documents
-from pymilvus import FieldSchema, CollectionSchema, DataType, Collection, utility
-from faker import Faker
-import re
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -2444,7 +2450,7 @@ class TestSearchVector(TestBase):
         distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
         r1, r2 = (
             distance_sorted[0][nb // 2],
-            distance_sorted[0][nb // 2 + limit + int((0.5 * limit))],
+            distance_sorted[0][nb // 2 + limit + int(0.5 * limit)],
         )  # recall is not 100% so add 50% to make sure the range is more than limit
         if metric_type == "L2":
             r1, r2 = r2, r1
@@ -2501,7 +2507,7 @@ class TestSearchVector(TestBase):
         distance_sorted = get_sorted_distance(training_data, [vector_to_search], metric_type)
         r1, r2 = (
             distance_sorted[0][nb // 2],
-            distance_sorted[0][nb // 2 + limit + int((0.2 * limit))],
+            distance_sorted[0][nb // 2 + limit + int(0.2 * limit)],
         )  # recall is not 100% so add 20% to make sure the range is correct
         if metric_type == "L2":
             r1, r2 = r2, r1

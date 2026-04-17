@@ -1,8 +1,9 @@
 import pytest
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
+
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq

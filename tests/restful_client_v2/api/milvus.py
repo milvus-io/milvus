@@ -1,14 +1,16 @@
 import json
-import requests
 import time
-import uuid
-from utils.util_log import test_log as logger
-from minio import Minio
-from minio.error import S3Error
-from minio.commonconfig import CopySource
-from tenacity import retry, retry_if_exception_type, stop_after_attempt
-from requests.exceptions import ConnectionError
 import urllib.parse
+import uuid
+
+import requests
+from minio import Minio
+from minio.commonconfig import CopySource
+from minio.error import S3Error
+from requests.exceptions import ConnectionError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+
+from utils.util_log import test_log as logger
 
 REQUEST_TIMEOUT = "120"
 

@@ -1,8 +1,10 @@
 import glob
-import time
-from yaml import full_load
 import json
+import time
+
 import pandas as pd
+from yaml import full_load
+
 from utils.util_log import test_log as log
 
 
@@ -58,7 +60,7 @@ def update_key_name(node, modify_k, modify_k_new):
 
 def get_collections(file_name="all_collections.json"):
     try:
-        with open(f"/tmp/ci_logs/{file_name}", "r") as f:
+        with open(f"/tmp/ci_logs/{file_name}") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
@@ -69,7 +71,7 @@ def get_collections(file_name="all_collections.json"):
 
 def get_deploy_test_collections():
     try:
-        with open("/tmp/ci_logs/deploy_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/deploy_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
@@ -80,7 +82,7 @@ def get_deploy_test_collections():
 
 def get_chaos_test_collections():
     try:
-        with open("/tmp/ci_logs/chaos_test_all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/chaos_test_all_collections.json") as f:
             data = json.load(f)
             collections = data["all"]
     except Exception as e:
@@ -99,7 +101,7 @@ def wait_signal_to_apply_chaos():
         while True and (time.time() - t0 < timeout):
             try:
                 records = []
-                with open(f, "r") as file:
+                with open(f) as file:
                     for line in file:
                         line = line.strip()
                         if line:

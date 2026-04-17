@@ -1,40 +1,41 @@
+import functools
+import json
 import math
-import pytest
-import unittest
-from enum import Enum
 import random
 import re
-import time
 import threading
+import time
+import unittest
 import uuid
-import json
-import pandas as pd
-from datetime import datetime, timezone
-from prettytable import PrettyTable
-import functools
 from collections import Counter
+from datetime import datetime, timezone
+from enum import Enum
 from time import sleep
+
+import pandas as pd
+import pytest
+from faker import Faker
+from prettytable import PrettyTable
 from pymilvus import (
     AnnSearchRequest,
-    RRFRanker,
-    MilvusClient,
-    DataType,
     CollectionSchema,
-    connections,
+    DataType,
     LexicalHighlighter,
+    MilvusClient,
+    RRFRanker,
+    connections,
 )
-from pymilvus.milvus_client.index import IndexParams
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
 from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.milvus_client.index import IndexParams
+
+from chaos import constants
 from common import common_func as cf
 from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from chaos import constants
-from faker import Faker
-
 from common.common_type import CheckTasks
-from utils.util_log import test_log as log
+from common.milvus_sys import MilvusSys
 from utils.api_request import Error
+from utils.util_log import test_log as log
 
 event_lock = threading.Lock()
 request_lock = threading.Lock()
@@ -42,7 +43,7 @@ request_lock = threading.Lock()
 
 def get_chaos_info():
     try:
-        with open(constants.CHAOS_INFO_SAVE_PATH, "r") as f:
+        with open(constants.CHAOS_INFO_SAVE_PATH) as f:
             chaos_info = json.load(f)
     except Exception as e:
         log.warning(f"get_chaos_info error: {e}")
@@ -75,7 +76,7 @@ class EventRecords(metaclass=Singleton):
         with event_lock:
             try:
                 records = []
-                with open(self.file_name, "r") as f:
+                with open(self.file_name) as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -128,7 +129,7 @@ class RequestRecords(metaclass=Singleton):
         with request_lock:
             try:
                 records = []
-                with open(self.file_name, "r") as f:
+                with open(self.file_name) as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -3177,7 +3178,7 @@ class AddVectorFieldChecker(Checker):
         except Exception as e:
             # When vector field limit is reached, fallback to insert only
             if "maximum vector field" in str(e):
-                log.info(f"[AddVectorFieldChecker] vector field limit reached, fallback to insert only")
+                log.info("[AddVectorFieldChecker] vector field limit reached, fallback to insert only")
                 try:
                     _, insert_result = self.insert_data()
                     return None, insert_result
@@ -3224,7 +3225,8 @@ class EntityTTLChecker(Checker):
             collection_name = cf.gen_unique_str("EntityTTLChecker_")
 
         # Build TTL-specific schema
-        from pymilvus import CollectionSchema as CS, FieldSchema
+        from pymilvus import CollectionSchema as CS
+        from pymilvus import FieldSchema
 
         schema = CS(
             fields=[

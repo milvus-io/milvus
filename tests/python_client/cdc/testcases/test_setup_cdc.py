@@ -3,8 +3,11 @@ CDC topology setup and configuration test cases.
 """
 
 import time
+
 import pytest
+
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase
 
 

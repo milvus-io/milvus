@@ -1,39 +1,40 @@
 import time
+from time import sleep
 
 import pytest
-from time import sleep
+from delayed_assert import assert_expectations
 from pymilvus import connections, db
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
-    DatabaseCreateChecker,
-    DatabaseDropChecker,
     CollectionCreateChecker,
     CollectionDropChecker,
-    PartitionCreateChecker,
-    PartitionDropChecker,
     CollectionLoadChecker,
     CollectionReleaseChecker,
-    PartitionLoadChecker,
-    PartitionReleaseChecker,
+    DatabaseCreateChecker,
+    DatabaseDropChecker,
+    DeleteChecker,
+    EventRecords,
+    FlushChecker,
     IndexCreateChecker,
     IndexDropChecker,
     InsertChecker,
-    UpsertChecker,
-    DeleteChecker,
-    FlushChecker,
-    SearchChecker,
-    QueryChecker,
     Op,
-    EventRecords,
+    PartitionCreateChecker,
+    PartitionDropChecker,
+    PartitionLoadChecker,
+    PartitionReleaseChecker,
+    QueryChecker,
     ResultAnalyzer,
+    SearchChecker,
+    UpsertChecker,
 )
-from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
-from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
-from chaos.chaos_commons import assert_statistic
-from chaos import constants
-from delayed_assert import assert_expectations
+from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
+from utils.util_log import test_log as log
 
 
 class TestBase:

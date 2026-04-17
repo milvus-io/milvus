@@ -1,16 +1,18 @@
-from pprint import pformat
-from pathlib import Path
 import subprocess
-import pytest
-from time import sleep
-import yaml
-from datetime import datetime
-from utils.util_log import test_log as log
-from common.common_type import CaseLabel
-from chaos import constants
-from common.cus_resource_opts import CustomResourceOperations as CusResource
 import time
+from datetime import datetime
+from pathlib import Path
+from pprint import pformat
+from time import sleep
+
+import pytest
+import yaml
 from kubernetes import client, config
+
+from chaos import constants
+from common.common_type import CaseLabel
+from common.cus_resource_opts import CustomResourceOperations as CusResource
+from utils.util_log import test_log as log
 
 
 class TestBase:
@@ -180,7 +182,7 @@ class TestOperations(TestBase):
         paused_duration = int(paused_duration)
         origin_file_path = f"{str(Path(__file__).parent)}/milvus_crd.yaml"
         log.info(f"origin_file_path: {origin_file_path}")
-        with open(origin_file_path, "r") as f:
+        with open(origin_file_path) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
         log.info(f"config: {pformat(config['spec']['components'])}")
         target_image = f"{new_image_repo}:{new_image_tag}"
@@ -202,7 +204,7 @@ class TestOperations(TestBase):
         for component in components:
             prefix = f"[update image for {component}]"
             # load config and update
-            with open(modified_file_path, "r") as f:
+            with open(modified_file_path) as f:
                 config = yaml.load(f, Loader=yaml.FullLoader)
             if isinstance(component, list):
                 for c in component:

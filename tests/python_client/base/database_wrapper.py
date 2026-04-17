@@ -2,8 +2,8 @@ import sys
 
 from pymilvus import db
 
-from utils.api_request import api_request
 from check.func_check import ResponseChecker
+from utils.api_request import api_request
 
 
 class ApiDatabaseWrapper:

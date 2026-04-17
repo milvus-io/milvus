@@ -1,46 +1,47 @@
 import time
-
-import pytest
 from time import sleep
+
 import pymilvus
+import pytest
+from delayed_assert import assert_expectations
 from pymilvus import connections, utility
-from chaos.checker import (
-    CollectionCreateChecker,
-    InsertChecker,
-    BulkInsertChecker,
-    UpsertChecker,
-    PartialUpdateChecker,
-    FlushChecker,
-    SearchChecker,
-    FullTextSearchChecker,
-    MinHashSearchChecker,
-    HybridSearchChecker,
-    QueryChecker,
-    TextMatchChecker,
-    PhraseMatchChecker,
-    JsonQueryChecker,
-    GeoQueryChecker,
-    IndexCreateChecker,
-    DeleteChecker,
-    CollectionDropChecker,
-    AlterCollectionChecker,
-    AddFieldChecker,
-    CollectionRenameChecker,
-    TensorSearchChecker,
-    SnapshotRestoreChecker,
-    EntityTTLChecker,
-    Op,
-    EventRecords,
-    ResultAnalyzer,
-)
-from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name
+
 from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
+from chaos.checker import (
+    AddFieldChecker,
+    AlterCollectionChecker,
+    BulkInsertChecker,
+    CollectionCreateChecker,
+    CollectionDropChecker,
+    CollectionRenameChecker,
+    DeleteChecker,
+    EntityTTLChecker,
+    EventRecords,
+    FlushChecker,
+    FullTextSearchChecker,
+    GeoQueryChecker,
+    HybridSearchChecker,
+    IndexCreateChecker,
+    InsertChecker,
+    JsonQueryChecker,
+    MinHashSearchChecker,
+    Op,
+    PartialUpdateChecker,
+    PhraseMatchChecker,
+    QueryChecker,
+    ResultAnalyzer,
+    SearchChecker,
+    SnapshotRestoreChecker,
+    TensorSearchChecker,
+    TextMatchChecker,
+    UpsertChecker,
+)
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
-from chaos.chaos_commons import assert_statistic
-from chaos import constants
-from delayed_assert import assert_expectations
+from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
+from utils.util_log import test_log as log
 
 
 class TestBase:

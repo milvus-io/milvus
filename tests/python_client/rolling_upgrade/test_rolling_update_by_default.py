@@ -1,12 +1,14 @@
-from pprint import pformat
-from pathlib import Path
 import subprocess
-import pytest
+from pathlib import Path
+from pprint import pformat
 from time import sleep
+
+import pytest
 import yaml
-from utils.util_log import test_log as log
-from common.common_type import CaseLabel
+
 from chaos import constants
+from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 
 class TestBase:
@@ -36,7 +38,7 @@ class TestOperations(TestBase):
     def test_operations(self, new_image_repo, new_image_tag):
         log.info("*********************Rolling Update Start**********************")
         origin_file_path = f"{str(Path(__file__).parent)}/milvus_crd.yaml"
-        with open(origin_file_path, "r") as f:
+        with open(origin_file_path) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
         target_image = f"{new_image_repo}:{new_image_tag}"
         config["spec"]["components"]["image"] = target_image

@@ -1,12 +1,13 @@
+import glob
 import os
 import threading
 import time
-import glob
-from chaos import constants
-from yaml import full_load
-from utils.util_log import test_log as log
-from delayed_assert import expect
+
 import pytest
+from yaml import full_load
+
+from chaos import constants
+from utils.util_log import test_log as log
 
 
 def check_config(chaos_config):

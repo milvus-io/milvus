@@ -1,14 +1,16 @@
-import pytest
 import time
 from datetime import datetime, timedelta, timezone
-from common.common_type import CaseLabel, CheckTasks
+
+import pytest
+from pymilvus import AnnSearchRequest, DataType, WeightedRanker
+from pymilvus.orm.types import CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY, CONSISTENCY_SESSION, CONSISTENCY_STRONG
+
+from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from base.client_v2_base import TestMilvusClientV2Base
-from pymilvus import DataType, AnnSearchRequest, WeightedRanker
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 
 default_nb = ct.default_nb
 default_dim = ct.default_dim
@@ -1521,7 +1523,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(
             client,
             collection_name,
-            filter=f"id >= 0 and id < 5",
+            filter="id >= 0 and id < 5",
             output_fields=[default_primary_key_field_name, "ttl", "varchar_field"],
             consistency_level=CONSISTENCY_STRONG,
         )[0]

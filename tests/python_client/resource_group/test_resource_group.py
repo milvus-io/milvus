@@ -1,39 +1,38 @@
-import pytest
 import time
-from typing import Union, List
-from pymilvus import connections, utility, Collection
+
+import pytest
+from pymilvus import connections, utility
 from pymilvus.client.constants import DEFAULT_RESOURCE_GROUP
 from pymilvus.client.types import ResourceGroupConfig, ResourceGroupInfo
-from utils.util_log import test_log as log
+
 from base.client_base import TestcaseBase
-from chaos.checker import (
-    InsertChecker,
-    UpsertChecker,
-    SearchChecker,
-    HybridSearchChecker,
-    QueryChecker,
-    DeleteChecker,
-    Op,
-    ResultAnalyzer,
-)
 from chaos import chaos_commons as cc
-from common import common_func as cf
-from utils.util_k8s import get_querynode_id_pod_pairs
-from common import common_type as ct
-from customize.milvus_operator import MilvusOperator
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
-from delayed_assert import assert_expectations
+from chaos.checker import (
+    DeleteChecker,
+    HybridSearchChecker,
+    InsertChecker,
+    Op,
+    QueryChecker,
+    ResultAnalyzer,
+    SearchChecker,
+    UpsertChecker,
+)
+from common import common_func as cf
+from common.common_type import CaseLabel
+from common.milvus_sys import MilvusSys
+from customize.milvus_operator import MilvusOperator
+from utils.util_k8s import get_querynode_id_pod_pairs
+from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
 
-from rich.table import Table
 from rich.console import Console
+from rich.table import Table
 
 
-def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGroupInfo]]):
+def display_resource_group_info(info: ResourceGroupInfo | list[ResourceGroupInfo]):
     table = Table(title="Resource Group Info")
     table.width = 200
     table.add_column("Name", style="cyan")

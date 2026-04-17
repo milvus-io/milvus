@@ -1,16 +1,12 @@
-import random
-import time
+import asyncio
+
 import numpy as np
 import pytest
-import asyncio
-from pymilvus.client.types import LoadState, DataType
-from pymilvus import AnnSearchRequest, RRFRanker
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
 
 pytestmark = pytest.mark.asyncio
 prefix = "async"
@@ -74,7 +70,7 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
 
         # 1. create collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         await async_client.create_collection(
             collection_name, default_dim, check_task=CheckTasks.err_res, check_items=error
         )
@@ -125,7 +121,7 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
 
         # 1. release collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         await async_client.release_collection(collection_name, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -203,7 +199,7 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
         # 6. release collection
         await async_client.release_collection(collection_name)
         # 7. search
-        error = {ct.err_code: 101, ct.err_msg: f"collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         await async_client.search(collection_name, vectors_to_search, check_task=CheckTasks.err_res, check_items=error)
         # 8. query
         await async_client.query(

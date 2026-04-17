@@ -1,13 +1,13 @@
-import pytest
 import numpy as np
+import pytest
+from pymilvus import Function, FunctionType
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from pymilvus import FunctionType, Function
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -2479,7 +2479,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
             schema=schema,
             desired_field_names=[default_primary_key_field_name, default_string_field_name],
         )
-        error = {ct.err_code: 101, ct.err_msg: f"failed to query: collection not loaded"}
+        error = {ct.err_code: 101, ct.err_msg: "failed to query: collection not loaded"}
         self.upsert(
             client, collection_name, new_row, partial_update=True, check_task=CheckTasks.err_res, check_items=error
         )
@@ -2557,7 +2557,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         schema.add_field("int32_field", DataType.INT32, nullable=True)
 
         bm25_function = Function(
-            name=f"text",
+            name="text",
             function_type=FunctionType.BM25,
             input_field_names=["text"],
             output_field_names=["text_sparse_emb"],

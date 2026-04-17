@@ -1,33 +1,29 @@
-import random
-from time import sleep
-
-import numpy as np
-import pytest
 import copy
+import random
+
+import pytest
+from pymilvus import DataType
+from pymilvus.exceptions import MilvusException
 
 from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
-from base.collection_wrapper import ApiCollectionWrapper
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import IndexErrorMessage as iem
 from common.common_params import (
-    IndexName,
-    FieldParams,
-    IndexPrams,
-    DefaultVectorIndexParams,
-    DefaultScalarIndexParams,
-    MetricType,
     AlterIndexParams,
+    DefaultScalarIndexParams,
+    DefaultVectorIndexParams,
+    FieldParams,
+    IndexName,
+    IndexPrams,
+    MetricType,
 )
-
-from utils.util_pymilvus import *
+from common.common_type import CaseLabel, CheckTasks
 from common.constants import *
-from pymilvus.exceptions import MilvusException
-from pymilvus import DataType
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -1292,7 +1288,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_float_vec_field_name,
             index_params=scalar_index_params,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: f"invalid index params"},
+            check_items={ct.err_code: 1100, ct.err_msg: "invalid index params"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1404,7 +1400,7 @@ class TestIndexInvalid(TestcaseBase):
             "random_index_345",
             {"mmap.enabled": True},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: f"index not found"},
+            check_items={ct.err_code: 65535, ct.err_msg: "index not found"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1427,7 +1423,7 @@ class TestIndexInvalid(TestcaseBase):
             binary_field_name,
             {"mmap.enabled": True},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 104, ct.err_msg: f"can't alter index on loaded collection"},
+            check_items={ct.err_code: 104, ct.err_msg: "can't alter index on loaded collection"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1471,7 +1467,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_index_name,
             {"mmap.enabled": "error_value"},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 65535, ct.err_msg: f"invalid mmap.enabled value"},
+            check_items={ct.err_code: 65535, ct.err_msg: "invalid mmap.enabled value"},
         )
         collection_w.alter_index(
             ct.default_index_name,
@@ -1483,7 +1479,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_index_name,
             ["error_param_type"],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: f"Unexpected error"},
+            check_items={ct.err_code: 1, ct.err_msg: "Unexpected error"},
         )
         collection_w.alter_index(
             ct.default_index_name,
@@ -1495,7 +1491,7 @@ class TestIndexInvalid(TestcaseBase):
             ct.default_index_name,
             1000,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: f"<'int' object has no attribute 'items'"},
+            check_items={ct.err_code: 1, ct.err_msg: "<'int' object has no attribute 'items'"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2185,7 +2181,7 @@ class TestIndexDiskann(TestcaseBase):
             ct.default_index_name,
             {"mmap.enabled": True},
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 104, ct.err_msg: f"index type DISKANN does not support mmap"},
+            check_items={ct.err_code: 104, ct.err_msg: "index type DISKANN does not support mmap"},
         )
 
 
@@ -2384,7 +2380,7 @@ class TestInvertedIndexValid(TestcaseBase):
             if 0 < res["indexed_rows"] <= default_nb:
                 break
             if time.time() - start > 5:
-                raise MilvusException(1, f"Index build completed in more than 5s")
+                raise MilvusException(1, "Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_multiple_inverted_index(self):

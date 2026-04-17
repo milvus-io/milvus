@@ -1,31 +1,23 @@
-import threading
-import pytest
 import json
+import threading
 from time import sleep
+
+import pytest
 from minio import Minio
 from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
 from chaos.checker import (
-    CollectionCreateChecker,
-    InsertChecker,
-    FlushChecker,
-    SearchChecker,
-    QueryChecker,
-    IndexCreateChecker,
-    DeleteChecker,
-    CompactChecker,
-    CollectionDropChecker,
     LoadBalanceChecker,
-    BulkInsertChecker,
     Op,
 )
+from common import common_func as cf
+from common.common_type import CaseLabel
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
+from utils.util_k8s import get_milvus_instance_name, get_pod_ip_name_pairs
 from utils.util_log import test_log as log
-from utils.util_k8s import get_pod_ip_name_pairs, get_milvus_instance_name
-from chaos import chaos_commons as cc
-from common.common_type import CaseLabel
-from common import common_func as cf
-from chaos import constants
 
 
 class TestChaosBase:

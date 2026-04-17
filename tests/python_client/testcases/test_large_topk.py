@@ -10,11 +10,12 @@ Issue: https://github.com/milvus-io/milvus/issues/48725
 """
 
 import pytest
+from pymilvus import AnnSearchRequest, DataType, MilvusException, RRFRanker
+
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType, MilvusException, AnnSearchRequest, RRFRanker
 
 prefix = "large_topk"
 default_nb = 3000  # > 1024 to trigger IVF index build

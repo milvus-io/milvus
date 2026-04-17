@@ -1,12 +1,13 @@
 import random
-import pytest
-import numpy as np
-from sklearn import preprocessing
-from base.testbase import TestBase
-from utils.utils import gen_collection_name, generate_wkt_by_type
-from utils.util_log import test_log as logger
-from utils.constant import default_nb
 
+import numpy as np
+import pytest
+from sklearn import preprocessing
+
+from base.testbase import TestBase
+from utils.constant import default_nb
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name, generate_wkt_by_type
 
 default_dim = 128
 

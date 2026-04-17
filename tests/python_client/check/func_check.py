@@ -1,17 +1,16 @@
+import numpy as np
 import pandas.core.frame
-from pymilvus.client.types import CompactionPlans
-from pymilvus import Role
-
-from utils.util_log import test_log as log
-from common import common_type as ct
-from common import common_func as cf
-from common.common_type import CheckTasks, Connect_Object_Name
+from ml_dtypes import bfloat16
 
 # from common.code_mapping import ErrorCode, ErrorMessage
-from pymilvus import Collection, Partition, ResourceGroupInfo, DataType
+from pymilvus import Collection, DataType, Partition, ResourceGroupInfo, Role
+from pymilvus.client.types import CompactionPlans
+
 import check.param_check as pc
-import numpy as np
-from ml_dtypes import bfloat16
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CheckTasks
+from utils.util_log import test_log as log
 
 
 class Error:
@@ -211,7 +210,7 @@ class ResponseChecker:
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
         if func_name != exp_func_name and func_name != exp_func_name_2:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if isinstance(res, Collection):
             collection = res
         elif isinstance(res, tuple):
@@ -247,7 +246,7 @@ class ResponseChecker:
         """
         exp_func_name = "describe_collection"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         if check_items.get("collection_name", None) is not None:
@@ -318,7 +317,7 @@ class ResponseChecker:
         """
         exp_func_name = "describe_collection"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         if check_items.get("collection_name", None) is not None:
@@ -344,7 +343,7 @@ class ResponseChecker:
         """
         exp_func_name = "describe_database"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         if check_items.get("db_name", None) is not None:
@@ -373,7 +372,7 @@ class ResponseChecker:
     def check_partition_property(partition, func_name, check_items):
         exp_func_name = "init_partition"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if not isinstance(partition, Partition):
             raise Exception("The result to check isn't partition type object")
         if len(check_items) == 0:
@@ -392,7 +391,7 @@ class ResponseChecker:
     def check_rg_property(rg, func_name, check_items):
         exp_func_name = "describe_resource_group"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if not isinstance(rg, ResourceGroupInfo):
             raise Exception("The result to check isn't ResourceGroupInfo type object")
         if len(check_items) == 0:
@@ -581,7 +580,7 @@ class ResponseChecker:
             assert count == query_res[0].get("count(*)", None)
             return True
         if exp_limit is None and exp_res is None and check_items.get("output_fields") is None:
-            raise Exception(f"No expected values would be checked in the check task")
+            raise Exception("No expected values would be checked in the check task")
         if exp_limit is not None:
             assert len(query_res) == exp_limit
         output_fields = check_items.get("output_fields", None)
@@ -619,8 +618,8 @@ class ResponseChecker:
                     assert pc.compare_lists_with_epsilon_ignore_dict_order_deepdiff(a=query_res, b=exp_res)
                 else:
                     assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res), (
-                        f"there exists different values between query_results and expected_results, "
-                        f"use debug_mode in check_items to print the difference entity by entity(but it is slow)"
+                        "there exists different values between query_results and expected_results, "
+                        "use debug_mode in check_items to print the difference entity by entity(but it is slow)"
                     )
             else:
                 log.error(f"Query result {query_res} is not list")
@@ -730,7 +729,7 @@ class ResponseChecker:
         """
         to_check_func = "get_compaction_plans"
         if func_name != to_check_func:
-            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+            log.warning(f"The function name is {func_name} rather than {to_check_func}")
         if not isinstance(compaction_plans, CompactionPlans):
             raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
 
@@ -757,7 +756,7 @@ class ResponseChecker:
         """
         to_check_func = "get_compaction_plans"
         if func_name != to_check_func:
-            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+            log.warning(f"The function name is {func_name} rather than {to_check_func}")
         if not isinstance(compaction_plans, CompactionPlans):
             raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
 
@@ -770,7 +769,7 @@ class ResponseChecker:
     def check_role_property(role, func_name, check_items):
         exp_func_name = "create_role"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if not isinstance(role, Role):
             raise Exception("The result to check isn't role type object")
         if check_items is None:
@@ -829,7 +828,7 @@ class ResponseChecker:
         """
         exp_func_name = "describe_index"
         if func_name != exp_func_name:
-            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+            log.warning(f"The function name is {func_name} rather than {exp_func_name}")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         if check_items.get("json_cast_type", None) is not None:

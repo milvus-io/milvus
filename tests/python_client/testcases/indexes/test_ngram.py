@@ -1,12 +1,11 @@
-import logging
-import time
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
 from idx_ngram import NGRAM
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_pymilvus import *
 
 index_type = "NGRAM"
 success = "success"
@@ -447,10 +446,10 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         assert res_ngram == res_no_index
 
         # Test query with Mixed Wildcard Match
-        filter_expr = f'content_ngram LIKE "%st_d_um%"'
+        filter_expr = 'content_ngram LIKE "%st_d_um%"'
         res_ngram = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_ngram) >= insert_times * default_nb // len(content_keywords)
-        filter_expr = f'content_no_index LIKE "%st_d_um%"'
+        filter_expr = 'content_no_index LIKE "%st_d_um%"'
         res_no_index = self.query(client, collection_name, filter=filter_expr, output_fields=["id", "content_ngram"])[0]
         assert len(res_no_index) >= insert_times * default_nb // len(content_keywords)
         assert res_ngram == res_no_index

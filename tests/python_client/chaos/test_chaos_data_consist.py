@@ -1,18 +1,19 @@
-import pytest
 import datetime
 from time import sleep
 
+import pytest
 from pymilvus import connections, utility
+
 from base.collection_wrapper import ApiCollectionWrapper
-from common.cus_resource_opts import CustomResourceOperations as CusResource
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, reconnect
 from common import common_func as cf
 from common import common_type as ct
-from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, reconnect
 from common.common_type import CaseLabel
-from chaos import constants
-from utils.util_log import test_log as log
+from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_k8s import wait_pods_ready
-from chaos import chaos_commons as cc
+from utils.util_log import test_log as log
 
 
 def reboot_pod(chaos_yaml):

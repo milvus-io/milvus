@@ -1,15 +1,16 @@
 import random
 import time
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import pytest
+from pymilvus.grpc_gen.common_pb2 import SegmentState
 
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus.grpc_gen.common_pb2 import SegmentState
+from utils.util_log import test_log as log
 
 prefix = "delete"
 half_nb = ct.default_nb // 2

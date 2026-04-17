@@ -1,14 +1,15 @@
-import pytest
-import numpy
-import time
 import threading
+import time
+
+import numpy
+import pytest
+from pymilvus.client.types import LoadState
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from pymilvus.client.types import LoadState
 
 prefix = "client_collection"
 epsilon = ct.epsilon
@@ -85,7 +86,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.create_collection(client, collection_name, default_dim, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -117,9 +118,9 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         elif isinstance(invalid_dim, int) and (invalid_dim < 2):  # range errors: 1, -32
             expected_msg = f"invalid dimension: {invalid_dim}. should be in range 2 ~ 32768"
         elif isinstance(invalid_dim, str):  # type conversion errors: "vii", "十六"
-            expected_msg = f"wrong type of argument [dimension], expected type: [int], got type: [str]"
+            expected_msg = "wrong type of argument [dimension], expected type: [int], got type: [str]"
         elif isinstance(invalid_dim, float):  # type conversion errors: 32.1
-            expected_msg = f"wrong type of argument [dimension], expected type: [int], got type: [float]"
+            expected_msg = "wrong type of argument [dimension], expected type: [int], got type: [float]"
         # Try to create collection and expect error
         error = {ct.err_code: 65535, ct.err_msg: expected_msg}
         self.create_collection(client, collection_name, invalid_dim, check_task=CheckTasks.err_res, check_items=error)
@@ -135,7 +136,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
+        error = {ct.err_code: 1, ct.err_msg: "Param id_type must be int or string"}
         self.create_collection(
             client, collection_name, default_dim, id_type="invalid", check_task=CheckTasks.err_res, check_items=error
         )
@@ -2261,7 +2262,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         index = self.list_indexes(client, new_name)[0]
         assert index == ["vector"]
         # load_state = self.get_load_state(collection_name)[0]
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.load_partitions(client, old_name, "_default", check_task=CheckTasks.err_res, check_items=error)
         self.load_partitions(client, new_name, "_default")
         self.release_partitions(client, new_name, "_default")
@@ -2299,7 +2300,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         index = self.list_indexes(client, new_name)[0]
         assert index == ["vector"]
         # load_state = self.get_load_state(collection_name)[0]
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found"}
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.load_partitions(client, old_name, "_default", check_task=CheckTasks.err_res, check_items=error)
         self.load_partitions(client, new_name, "_default")
         self.release_partitions(client, new_name, "_default")
@@ -2690,7 +2691,7 @@ class TestMilvusClientReleaseCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create collection
         collection_name = "a".join("a" for i in range(256))
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.release_collection(client, collection_name, default_dim, check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -4471,7 +4472,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 1100, ct.err_msg: f"collection name or database name should be different"}
+        error = {ct.err_code: 1100, ct.err_msg: "collection name or database name should be different"}
         self.rename_collection(
             client, collection_name, collection_name, check_task=CheckTasks.err_res, check_items=error
         )
@@ -4657,7 +4658,7 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
             check_task=CheckTasks.check_describe_collection_property,
             check_items={"collection_name": collection_name, "dim": default_dim, "consistency_level": 0},
         )
-        error = {ct.err_code: 1100, ct.err_msg: f"no properties or delete keys provided"}
+        error = {ct.err_code: 1100, ct.err_msg: "no properties or delete keys provided"}
         self.drop_collection_properties(
             client, collection_name, property_keys, check_task=CheckTasks.err_res, check_items=error
         )
@@ -4823,7 +4824,7 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
             schema.add_field("vector", vector_type, default_value=10)
         else:
             schema.add_field("vector", vector_type, dim=default_dim, default_value=10)
-        error = {ct.err_code: 1100, ct.err_msg: f"type not support default_value"}
+        error = {ct.err_code: 1100, ct.err_msg: "type not support default_value"}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

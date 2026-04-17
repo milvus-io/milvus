@@ -1,13 +1,12 @@
-import threading
+import copy
+import time
+from pathlib import Path
+
 import h5py
 import numpy as np
-import time
-import sys
-import copy
-from pathlib import Path
-from loguru import logger
 import pymilvus
-from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Collection, utility
+from loguru import logger
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
 
 pymilvus_version = pymilvus.__version__
 
@@ -101,7 +100,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
     logger.info(f"Insert {nb} vectors cost {t1 - t0:.4f} seconds")
 
     t0 = time.time()
-    logger.info(f"Get collection entities...")
+    logger.info("Get collection entities...")
     if pymilvus_version >= "2.2.0":
         collection.flush()
     else:
@@ -112,7 +111,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
 
     # create index
     default_index = gen_index_params(index_type)
-    logger.info(f"Create index...")
+    logger.info("Create index...")
     t0 = time.time()
     collection.create_index(field_name="float_vector", index_params=default_index)
     t1 = time.time()
@@ -120,7 +119,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
 
     # load collection
     replica_number = 1
-    logger.info(f"load collection...")
+    logger.info("load collection...")
     t0 = time.time()
     collection.load(replica_number=replica_number)
     t1 = time.time()
@@ -131,7 +130,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
     for segment in res:
         cnt += segment.num_rows
     assert cnt == collection.num_entities
-    logger.info(f"wait for loading complete...")
+    logger.info("wait for loading complete...")
     time.sleep(30)
     res = utility.get_query_segment_info(name)
     logger.info(f"segments info: {res}")
@@ -144,7 +143,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
     # define output_fields of search result
     for i in range(3):
         t0 = time.time()
-        logger.info(f"Search...")
+        logger.info("Search...")
         res = collection.search(
             test[:nq], "float_vector", current_search_params, topK, output_fields=["int64"], timeout=TIMEOUT
         )
@@ -160,7 +159,7 @@ def milvus_recall_test(host="127.0.0.1", index_type="HNSW"):
         # calculate recall
         true_ids = neighbors[:nq, :topK]
         sum_radio = 0.0
-        logger.info(f"Calculate recall...")
+        logger.info("Calculate recall...")
         for index, item in enumerate(result_ids):
             # tmp = set(item).intersection(set(flat_id_list[index]))
             assert len(item) == len(true_ids[index])

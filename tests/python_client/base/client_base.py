@@ -1,24 +1,24 @@
 import sys
-from typing import Dict, List
+
 from pymilvus import DefaultConfig
 
 from base.database_wrapper import ApiDatabaseWrapper
 
 sys.path.append("..")
-from base.connections_wrapper import ApiConnectionsWrapper
-from base.collection_wrapper import ApiCollectionWrapper
-from base.partition_wrapper import ApiPartitionWrapper
-from base.index_wrapper import ApiIndexWrapper
-from base.utility_wrapper import ApiUtilityWrapper
-from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
+import pymilvus
+from pymilvus import DataType, MilvusClient, ResourceGroupInfo, utility
+
 from base.async_milvus_client_wrapper import AsyncMilvusClientWrapper
-from utils.util_log import test_log as log
+from base.collection_wrapper import ApiCollectionWrapper
+from base.connections_wrapper import ApiConnectionsWrapper
+from base.index_wrapper import ApiIndexWrapper
+from base.partition_wrapper import ApiPartitionWrapper
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
+from base.utility_wrapper import ApiUtilityWrapper
 from common import common_func as cf
 from common import common_type as ct
 from common.common_params import IndexPrams
-
-from pymilvus import ResourceGroupInfo, DataType, utility, MilvusClient
-import pymilvus
+from utils.util_log import test_log as log
 
 
 class Base:
@@ -563,7 +563,7 @@ class TestcaseBase(Base):
 
         return tmp_user, tmp_pwd, tmp_role
 
-    def build_multi_index(self, index_params: Dict[str, IndexPrams], collection_obj: ApiCollectionWrapper = None):
+    def build_multi_index(self, index_params: dict[str, IndexPrams], collection_obj: ApiCollectionWrapper = None):
         collection_obj = collection_obj or self.collection_wrap
         for k, v in index_params.items():
             collection_obj.create_index(field_name=k, index_params=v.to_dict, index_name=k)
@@ -571,7 +571,7 @@ class TestcaseBase(Base):
         return collection_obj
 
     def drop_multi_index(
-        self, index_names: List[str], collection_obj: ApiCollectionWrapper = None, check_task=None, check_items=None
+        self, index_names: list[str], collection_obj: ApiCollectionWrapper = None, check_task=None, check_items=None
     ):
         collection_obj = collection_obj or self.collection_wrap
         for n in index_names:
@@ -582,7 +582,7 @@ class TestcaseBase(Base):
     def show_indexes(self, collection_obj: ApiCollectionWrapper = None):
         collection_obj = collection_obj or self.collection_wrap
         indexes = {n.field_name: n.params for n in self.collection_wrap.indexes}
-        log.info("[TestcaseBase] Collection: `{0}` index: {1}".format(collection_obj.name, indexes))
+        log.info(f"[TestcaseBase] Collection: `{collection_obj.name}` index: {indexes}")
         return indexes
 
     """ Property """

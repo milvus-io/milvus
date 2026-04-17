@@ -1,13 +1,13 @@
 from itertools import cycle
+
 import pytest
+from pymilvus import DataType, Function, FunctionType, LexicalHighlighter
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from pymilvus import Function, FunctionType, DataType, LexicalHighlighter
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -1095,7 +1095,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
 
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f'Search highlight only support with metric type "BM25" but was: : invalid parameter',
+            ct.err_msg: 'Search highlight only support with metric type "BM25" but was: : invalid parameter',
         }
         self.search(
             client,
@@ -1138,7 +1138,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         # textMatch with BM25 anns field
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"please provide varchar/text for BM25 Function based search, got FloatVector: invalid parameter",
+            ct.err_msg: "please provide varchar/text for BM25 Function based search, got FloatVector: invalid parameter",
         }
         self.search(
             client,
@@ -1155,7 +1155,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         # highlight search text with vector anns field
         error = {
             ct.err_code: 5,
-            ct.err_msg: f"service internal error: Search with highlight failed, input field of BM25 annsField not found",
+            ct.err_msg: "service internal error: Search with highlight failed, input field of BM25 annsField not found",
         }
         self.search(
             client,
@@ -1194,7 +1194,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         )[0][default_vector_field_name]
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f'Search highlight only support with metric type "BM25" but was: : invalid parameter',
+            ct.err_msg: 'Search highlight only support with metric type "BM25" but was: : invalid parameter',
         }
         self.search(
             client,
@@ -1267,7 +1267,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             num_of_fragments=1,
         )
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
-        error = {ct.err_code: 1100, ct.err_msg: f"pre_tags cannot be empty list: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "pre_tags cannot be empty list: invalid parameter"}
         self.search(
             client,
             collection_name,

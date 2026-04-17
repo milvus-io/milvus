@@ -1,5 +1,6 @@
-from pymilvus import connections
 import sys
+
+from pymilvus import connections
 
 sys.path.append("..")
 sys.path.append("../..")
@@ -92,7 +93,6 @@ def task_5(data_size, host):
 
 if __name__ == "__main__":
     import argparse
-    import threading
 
     parser = argparse.ArgumentParser(description="config for deploy test")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")

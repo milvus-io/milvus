@@ -1,7 +1,6 @@
-from pymilvus import Connections
-from pymilvus import DefaultConfig
-from pymilvus import MilvusClient
 import sys
+
+from pymilvus import Connections, DefaultConfig, MilvusClient
 
 sys.path.append("..")
 from check.func_check import ResponseChecker

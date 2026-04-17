@@ -1,28 +1,28 @@
-import pytest
-import numpy as np
+import json
+import os
 import random
 import time
-import os
-import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
 from deepdiff import DeepDiff
+from minio import Minio
+from minio.error import S3Error
+from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, WeightedRanker
+from pymilvus.bulk_writer import BulkFileType, LocalBulkWriter, bulk_import, get_import_progress
+from pymilvus.client.embedding_list import EmbeddingList
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
+from check.param_check import compare_lists_with_epsilon_ignore_dict_order
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from check.param_check import compare_lists_with_epsilon_ignore_dict_order
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from pymilvus import DataType, MilvusClient, AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus.client.embedding_list import EmbeddingList
-from pymilvus.bulk_writer import bulk_import, get_import_progress, LocalBulkWriter, BulkFileType
-import pyarrow as pa
-import pyarrow.parquet as pq
-from minio import Minio
-from minio.error import S3Error
-
 
 prefix = "struct_array"
 epsilon = 0.001
@@ -93,7 +93,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
     def generate_struct_array_data(
         self, num_rows: int, dim: int = default_dim, capacity: int = default_capacity
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate test data for struct array"""
         data = []
         for i in range(num_rows):
@@ -2160,7 +2160,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             log.info(f"Milvus result IDs: {sorted(milvus_result_ids)}")
 
             # Log detailed comparison for Milvus results
-            log.info(f"Milvus results with ground truth comparison:")
+            log.info("Milvus results with ground truth comparison:")
             gt_ranks_for_milvus = []
             for i, hit in enumerate(results[0][:limit]):
                 gt_score = next((s for doc_id, s in ground_truth_scores if doc_id == hit["id"]), None)
@@ -4173,9 +4173,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim, nullable=("clip_embedding1" == nullable_field)
+            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim, nullable=(nullable_field == "clip_embedding1")
         )
-        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
+        struct_schema.add_field("scalar_field", DataType.INT64, nullable=(nullable_field == "scalar_field"))
         struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
@@ -4313,7 +4313,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         self.minio_endpoint = f"{minio_host}:9000"
 
     def gen_file_with_local_bulk_writer(
-        self, schema, data: List[Dict[str, Any]], file_type: str = "PARQUET"
+        self, schema, data: list[dict[str, Any]], file_type: str = "PARQUET"
     ) -> tuple[str, dict]:
         """
         Generate import file using LocalBulkWriter from insert-format data
@@ -4357,7 +4357,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         return batch_files, {"id": id_arr, "float_vector": float_vector_arr, "struct_array": struct_arr}
 
-    def upload_to_minio(self, local_file_path: str) -> List[List[str]]:
+    def upload_to_minio(self, local_file_path: str) -> list[list[str]]:
         """
         Upload parquet file to MinIO
 
@@ -4393,7 +4393,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         except S3Error as e:
             raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
 
-    def call_bulkinsert(self, collection_name: str, batch_files: List[List[str]]):
+    def call_bulkinsert(self, collection_name: str, batch_files: list[list[str]]):
         """
         Call bulk import API and wait for completion
 
@@ -4980,7 +4980,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
     def generate_struct_array_data(
         self, num_rows: int, dim: int = default_dim, capacity: int = default_capacity
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate test data for struct array"""
         data = []
         for i in range(num_rows):
@@ -5149,7 +5149,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on collection")
+        log.info("Search successful with mmap enabled on collection")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_struct_array_field(self):
@@ -5202,7 +5202,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
         # Enable mmap on struct array field
         self.alter_collection_field(client, collection_name, field_name="clips", field_params={"mmap_enabled": True})
-        log.info(f"Enabled mmap on struct array field 'clips'")
+        log.info("Enabled mmap on struct array field 'clips'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5220,7 +5220,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct array field")
+        log.info("Search successful with mmap enabled on struct array field")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_struct_subfield(self):
@@ -5275,7 +5275,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.alter_collection_field(
             client, collection_name, field_name="clips[clip_embedding1]", field_params={"mmap_enabled": True}
         )
-        log.info(f"Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5293,7 +5293,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful on field with mmap enabled")
+        log.info("Search successful on field with mmap enabled")
 
         # Verify search also works on clip_embedding2 (without mmap)
         self.search(
@@ -5304,7 +5304,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful on field without mmap")
+        log.info("Search successful on field without mmap")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_emb_list_index(self):
@@ -5360,7 +5360,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.alter_index_properties(
             client, collection_name, index_name="clips[clip_embedding1]", properties={"mmap.enabled": True}
         )
-        log.info(f"Enabled mmap on embedding list index 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on embedding list index 'clips[clip_embedding1]'")
 
         # Verify mmap is enabled via describe_index
         index_info = self.describe_index(
@@ -5384,7 +5384,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on embedding list index")
+        log.info("Search successful with mmap enabled on embedding list index")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_enable_multiple_levels(self):
@@ -5438,17 +5438,17 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
         # Enable mmap at collection level
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        log.info(f"Enabled mmap at collection level")
+        log.info("Enabled mmap at collection level")
 
         # Enable mmap at field level for struct array field
         self.alter_collection_field(client, collection_name, field_name="clips", field_params={"mmap_enabled": True})
-        log.info(f"Enabled mmap at field level for 'clips'")
+        log.info("Enabled mmap at field level for 'clips'")
 
         # Enable mmap at index level for embedding list index
         self.alter_index_properties(
             client, collection_name, index_name="clips[clip_embedding1]", properties={"mmap.enabled": True}
         )
-        log.info(f"Enabled mmap at index level for 'clips[clip_embedding1]'")
+        log.info("Enabled mmap at index level for 'clips[clip_embedding1]'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5487,7 +5487,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "COSINE"},
             limit=10,
         )
-        log.info(f"All searches successful with mmap enabled at multiple levels")
+        log.info("All searches successful with mmap enabled at multiple levels")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_collection_enable_then_disable(self):
@@ -5537,7 +5537,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         # Release and enable mmap
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        log.info(f"Enabled mmap on collection")
+        log.info("Enabled mmap on collection")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -5553,12 +5553,12 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled")
+        log.info("Search successful with mmap enabled")
 
         # Now disable mmap
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": False})
-        log.info(f"Disabled mmap on collection")
+        log.info("Disabled mmap on collection")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -5570,7 +5570,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap")
+        log.info("Search successful after disabling mmap")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_index_disable_then_enable(self):
@@ -5630,14 +5630,14 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap")
+        log.info("Search successful without mmap")
 
         # Now enable mmap on index
         self.release_collection(client, collection_name)
         self.alter_index_properties(
             client, collection_name, index_name="clips[clip_embedding1]", properties={"mmap.enabled": True}
         )
-        log.info(f"Enabled mmap on index 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on index 'clips[clip_embedding1]'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -5649,7 +5649,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on index")
+        log.info("Search successful after enabling mmap on index")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_index_enable_then_disable(self):
@@ -5709,14 +5709,14 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on index (from schema)")
+        log.info("Search successful with mmap enabled on index (from schema)")
 
         # Disable mmap on index
         self.release_collection(client, collection_name)
         self.alter_index_properties(
             client, collection_name, index_name="clips[clip_embedding1]", properties={"mmap.enabled": False}
         )
-        log.info(f"Disabled mmap on index")
+        log.info("Disabled mmap on index")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -5728,7 +5728,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on index")
+        log.info("Search successful after disabling mmap on index")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_struct_subfield_enable_then_disable(self):
@@ -5796,14 +5796,14 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct sub-field (from schema)")
+        log.info("Search successful with mmap enabled on struct sub-field (from schema)")
 
         # Disable mmap on struct sub-field
         self.release_collection(client, collection_name)
         self.alter_collection_field(
             client, collection_name, field_name="clips[clip_embedding1]", field_params={"mmap_enabled": False}
         )
-        log.info(f"Disabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Disabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Verify mmap is disabled via describe_collection
         collection_info = self.describe_collection(client, collection_name, check_task="check_nothing")
@@ -5819,7 +5819,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on struct sub-field")
+        log.info("Search successful after disabling mmap on struct sub-field")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_struct_subfield_disable_then_enable(self):
@@ -5879,14 +5879,14 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap on struct sub-field")
+        log.info("Search successful without mmap on struct sub-field")
 
         # Now enable mmap on struct sub-field
         self.release_collection(client, collection_name)
         self.alter_collection_field(
             client, collection_name, field_name="clips[clip_embedding1]", field_params={"mmap_enabled": True}
         )
-        log.info(f"Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -5898,7 +5898,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on struct sub-field")
+        log.info("Search successful after enabling mmap on struct sub-field")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_struct_array_field_enable_then_disable(self):
@@ -5958,12 +5958,12 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct array field (from schema)")
+        log.info("Search successful with mmap enabled on struct array field (from schema)")
 
         # Disable mmap on struct array field
         self.release_collection(client, collection_name)
         self.alter_collection_field(client, collection_name, field_name="clips", field_params={"mmap_enabled": False})
-        log.info(f"Disabled mmap on struct array field 'clips'")
+        log.info("Disabled mmap on struct array field 'clips'")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -5975,7 +5975,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on struct array field")
+        log.info("Search successful after disabling mmap on struct array field")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_struct_array_field_disable_then_enable(self):
@@ -6035,12 +6035,12 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap on struct array field")
+        log.info("Search successful without mmap on struct array field")
 
         # Now enable mmap on struct array field
         self.release_collection(client, collection_name)
         self.alter_collection_field(client, collection_name, field_name="clips", field_params={"mmap_enabled": True})
-        log.info(f"Enabled mmap on struct array field 'clips'")
+        log.info("Enabled mmap on struct array field 'clips'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -6052,4 +6052,4 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on struct array field")
+        log.info("Search successful after enabling mmap on struct array field")

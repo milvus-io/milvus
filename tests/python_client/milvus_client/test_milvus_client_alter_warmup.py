@@ -1,15 +1,16 @@
-import pytest
-import numbers
 import time
+
+import numpy as np
+import pytest
+from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
 from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams, FieldParams, MetricType
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import DataType
-from pymilvus import AnnSearchRequest, WeightedRanker, RRFRanker
-import numpy as np
 
 prefix = "alter"
 default_vector_field_name = "vector"

@@ -1,25 +1,29 @@
 import logging
 import random
 import time
-import pytest
-from pymilvus import DataType, Function, FunctionType, FieldSchema, CollectionSchema
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import pytest
+from faker import Faker
+from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType
+from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
+
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_log import test_log as log
+from common.bulk_insert_data import (
+    DataField as df,
+)
 from common.bulk_insert_data import (
     prepare_bulk_insert_json_files,
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
-    DataField as df,
 )
-from faker import Faker
+from common.common_params import DefaultVectorIndexParams, DefaultVectorSearchParams
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 fake = Faker()
 default_vec_only_fields = [df.vec_field]
@@ -114,7 +118,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
@@ -193,7 +197,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.info(f"index building progress: {res}")
         self.collection_wrap.load()
         self.collection_wrap.load(_refresh=True)
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 3
@@ -281,7 +285,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
@@ -365,7 +369,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify num entities
         assert self.collection_wrap.num_entities == entities
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_binary_vectors(1, dim)[1]
@@ -455,7 +459,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         nq = 3
@@ -538,7 +542,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         log.info(f"index building progress: {res}")
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         nq = 3
@@ -642,7 +646,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
         # verify imported data is available for search
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(5)
 
@@ -810,7 +814,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -1014,7 +1018,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in binary_vec_fields:
             self.collection_wrap.create_index(field_name=f, index_params=ct.default_binary_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -1206,7 +1210,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
@@ -1374,7 +1378,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in sparse_vec_fields:
             self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1489,7 +1493,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in sparse_vec_fields:
             self.collection_wrap.create_index(field_name=f, index_params=ct.default_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1665,7 +1669,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1810,7 +1814,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in bm25_sparse_vec_fields:
             self.collection_wrap.create_index(field_name=f, index_params=ct.default_text_sparse_inverted_index)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -1960,7 +1964,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2110,7 +2114,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2258,7 +2262,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         }
         self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(2)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
@@ -2395,7 +2399,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == entities * file_nums
 
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_vectors(1, dim)
@@ -2475,7 +2479,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         index_params = ct.default_index
         self.collection_wrap.create_index(field_name=df.float_vec_field, index_params=index_params)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(10)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
@@ -2568,7 +2572,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         success = self.utility_wrap.wait_index_build_completed(c_name)
         assert success
         # verify search and query
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         self.collection_wrap.load(_refresh=True)
         time.sleep(2)
         search_data = cf.gen_vectors(1, dim)

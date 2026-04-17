@@ -1,4 +1,5 @@
 import sys
+
 from pymilvus import Index
 
 sys.path.append("..")

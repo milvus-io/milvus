@@ -1,12 +1,10 @@
+import time
+from pathlib import Path
+
 import h5py
 import numpy as np
-import time
-import sys
-import threading
-from pathlib import Path
 from loguru import logger
-from pymilvus import connections, Collection
-
+from pymilvus import Collection, connections
 
 all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
 
@@ -59,7 +57,7 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
     search_params = gen_search_param(index_type)
     for i in range(3):
         t0 = time.time()
-        logger.info(f"\nSearch...")
+        logger.info("\nSearch...")
         # define output_fields of search result
         res = collection.search(
             test[:nq], "float_vector", search_params, topK, output_fields=["int64"], timeout=TIMEOUT
@@ -91,7 +89,6 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
 
 if __name__ == "__main__":
     import argparse
-    import threading
 
     parser = argparse.ArgumentParser(description="config for recall test")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")

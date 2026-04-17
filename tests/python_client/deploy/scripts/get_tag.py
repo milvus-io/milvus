@@ -1,5 +1,6 @@
-import requests
 import json
+
+import requests
 
 milvus_dev = "https://registry.hub.docker.com/v2/repositories/milvusdb/milvus/tags?ordering=last_updated"
 milvus = "https://registry.hub.docker.com/v2/repositories/milvusdb/milvus/tags?ordering=last_updated"

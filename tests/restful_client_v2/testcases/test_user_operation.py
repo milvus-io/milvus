@@ -1,8 +1,10 @@
 import time
-from utils.utils import gen_collection_name, gen_unique_str
+
 import pytest
-from base.testbase import TestBase
 from pymilvus import connections
+
+from base.testbase import TestBase
+from utils.utils import gen_collection_name, gen_unique_str
 
 
 class TestUserE2E(TestBase):

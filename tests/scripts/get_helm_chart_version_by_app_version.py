@@ -1,5 +1,5 @@
-import subprocess
 import json
+import subprocess
 
 
 def get_chart_version(repo="milvus/milvus", app_version="2.2.0"):

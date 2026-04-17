@@ -1,8 +1,7 @@
 import threading
-from time import time, sleep
+from time import sleep, time
 
 import pytest
-from pymilvus.grpc_gen.common_pb2 import SegmentState
 from pymilvus.exceptions import MilvusException
 
 from base.client_base import TestcaseBase

@@ -3,18 +3,18 @@ import threading
 import time
 
 import pytest
+from pymilvus import Index, MilvusException, connections
 
 from base.collection_wrapper import ApiCollectionWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from common import common_func as cf
+from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
 from customize.milvus_operator import MilvusOperator
-from common import common_func as cf
-from common import common_type as ct
 from scale import constants, scale_common
-from pymilvus import Index, connections, MilvusException
+from utils.util_k8s import read_pod_log, wait_pods_ready
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 from utils.wrapper import counter
 
@@ -93,7 +93,7 @@ class TestQueryNodeScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             # connect
@@ -215,7 +215,7 @@ class TestQueryNodeScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             scale_querynode = random.choice([6, 7, 4, 3])
@@ -303,7 +303,7 @@ class TestQueryNodeScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
         try:
             # prepare collection
             connections.connect("scale-in", host=host, port=19530)

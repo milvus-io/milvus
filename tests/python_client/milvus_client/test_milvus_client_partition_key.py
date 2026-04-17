@@ -6,7 +6,6 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 
-
 default_dim = ct.default_dim
 
 

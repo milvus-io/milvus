@@ -1,15 +1,16 @@
 import json
 import os.path
 import time
+
 import pyetcd
 import requests
-from pymilvus import connections
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from pymilvus import connections
+
+from common.common_type import in_cluster_env
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from common.common_type import in_cluster_env
 
 
 def init_k8s_client_config():

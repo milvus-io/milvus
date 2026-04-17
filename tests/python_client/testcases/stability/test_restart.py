@@ -1,15 +1,12 @@
-import time
-import random
-import pdb
-import threading
-import logging
 import json
-from multiprocessing import Pool, Process
-import pytest
-from utils.util_pymilvus import get_milvus, restart_server, gen_entities, gen_unique_str, default_nb
-from common.constants import default_fields, default_entities
-from common.common_type import CaseLabel
+import logging
+import time
 
+import pytest
+
+from common.common_type import CaseLabel
+from common.constants import default_entities, default_fields
+from utils.util_pymilvus import default_nb, gen_entities, gen_unique_str, get_milvus, restart_server
 
 uid = "wal"
 TIMEOUT = 120

@@ -10,18 +10,18 @@ Design principles:
 - Full operator coverage: comparison, arithmetic, logical, range, string, null, array, JSON
 """
 
-import pytest
+import math
 import random
 import re
-import math
-import numpy as np
-from typing import List, Dict, Any, Tuple
-from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
-from common import common_func as cf
-from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
+from typing import Any
+
+import pytest
 from pymilvus import DataType
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 prefix = "scalar_filter"
 default_dim = 8
@@ -96,17 +96,17 @@ def make_nullable_value(dtype: DataType, rng: random.Random, null_prob: float = 
     return make_random_value(dtype, rng)
 
 
-def make_random_array(element_dtype: DataType, rng: random.Random, min_len: int = 0, max_len: int = 5) -> List[Any]:
+def make_random_array(element_dtype: DataType, rng: random.Random, min_len: int = 0, max_len: int = 5) -> list[Any]:
     """Generate a random array of elements of the given type."""
     length = rng.randint(min_len, max_len)
     return [make_random_value(element_dtype, rng) for _ in range(length)]
 
 
 def generate_deterministic_rows(
-    field_configs: List[Dict[str, Any]],
+    field_configs: list[dict[str, Any]],
     total_rows: int = 200,
     seed: int = DEFAULT_SEED,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Generate deterministic test data rows.
 
@@ -532,7 +532,7 @@ def _milvus_to_python(expr: str) -> str:
     return s
 
 
-def eval_filter(expr: str, rows: List[Dict[str, Any]]) -> List[int]:
+def eval_filter(expr: str, rows: list[dict[str, Any]]) -> list[int]:
     """
     Evaluate a Milvus filter expression against rows and return matching row indices.
 
@@ -583,7 +583,7 @@ def eval_filter(expr: str, rows: List[Dict[str, Any]]) -> List[int]:
 # ---------------------------------------------------------------------------
 # Expression generators
 # ---------------------------------------------------------------------------
-def _gen_like_expressions(field_name: str, sample_values: List[str]) -> List[str]:
+def _gen_like_expressions(field_name: str, sample_values: list[str]) -> list[str]:
     """Generate LIKE expressions for a VARCHAR field."""
     exprs = []
     # Prefix match
@@ -604,7 +604,7 @@ def _gen_like_expressions(field_name: str, sample_values: List[str]) -> List[str
     return exprs
 
 
-def _gen_array_expressions(field_name: str, element_dtype: DataType, sample_elements: List[Any]) -> List[str]:
+def _gen_array_expressions(field_name: str, element_dtype: DataType, sample_elements: list[Any]) -> list[str]:
     """Generate array expressions for an ARRAY field."""
     exprs = []
     if not sample_elements:
@@ -633,11 +633,11 @@ def _gen_array_expressions(field_name: str, element_dtype: DataType, sample_elem
 def generate_expressions_for_field(
     field_name: str,
     dtype: DataType,
-    sample_values: List[Any],
+    sample_values: list[Any],
     nullable: bool = False,
     is_array: bool = False,
     element_dtype: DataType = None,
-) -> List[str]:
+) -> list[str]:
     """
     Generate a comprehensive list of filter expressions for a single field.
 
@@ -721,10 +721,10 @@ def generate_expressions_for_field(
 
 
 def generate_compound_expressions(
-    field_exprs: Dict[str, List[str]],
+    field_exprs: dict[str, list[str]],
     max_compounds: int = 20,
     seed: int = DEFAULT_SEED,
-) -> List[str]:
+) -> list[str]:
     """
     Generate compound (AND/OR/NOT) expressions by combining single-field expressions.
 

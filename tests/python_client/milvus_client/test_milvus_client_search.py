@@ -1,22 +1,22 @@
-import math
-import time
-import os
 import json
-import requests
+import math
+import os
 import random
-import numpy as np
+import time
 
+import numpy as np
 import pytest
+import requests
 from faker import Faker
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *  # noqa
 from common.constants import *  # noqa
-from pymilvus import DataType, Function, FunctionType, AnnSearchRequest
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa
 
 fake = Faker()
 
@@ -9235,7 +9235,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
         method: test dense+sparse/dense+bm25/sparse+bm25 search with rrf/weight reranker
         expected: search successfully with rrf/weight reranker
         """
-        from pymilvus import WeightedRanker, RRFRanker
+        from pymilvus import RRFRanker, WeightedRanker
 
         client = self._client()
         collection_name = setup_collection

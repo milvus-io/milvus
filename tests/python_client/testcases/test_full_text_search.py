@@ -1,24 +1,23 @@
 import json
+import random
 
+import pandas as pd
+import pytest
+from faker import Faker
 from pymilvus import (
-    FieldSchema,
+    AnnSearchRequest,
     CollectionSchema,
     DataType,
+    FieldSchema,
     Function,
     FunctionType,
-    AnnSearchRequest,
     WeightedRanker,
 )
-from common.common_type import CaseLabel, CheckTasks
+
+from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-
-import random
-import pytest
-import pandas as pd
-from faker import Faker
+from common.common_type import CaseLabel, CheckTasks
 
 Faker.seed(19530)
 fake_en = Faker("en_US")

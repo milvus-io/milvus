@@ -1,52 +1,50 @@
-import os
-import random
-import math
-import string
+import inspect
 import json
+import math
+import os
+import pickle
+import random
+import re
+import string
 import time
 import uuid
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from functools import singledispatch
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import bm25s
+import jieba
 import numpy as np
 import pandas as pd
-from ml_dtypes import bfloat16
-from sklearn import preprocessing
-from npy_append_array import NpyAppendArray
+import pytz
+from bm25s.tokenization import Tokenizer
+from dateutil import parser
 from faker import Faker
-from pathlib import Path
 from minio import Minio
+from ml_dtypes import bfloat16
+from npy_append_array import NpyAppendArray
+from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType, MilvusClient, MilvusException
+from sklearn import preprocessing
+
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from common.common_params import ExprCheckParams
-from utils.util_log import test_log as log
 from customize.milvus_operator import MilvusOperator
-import pickle
-from collections import Counter
-import bm25s
-import jieba
-import re
-import inspect
-from typing import Optional, Tuple
-from zoneinfo import ZoneInfo
-from datetime import datetime, timedelta, timezone as tzmod
-from datetime import timezone
-from dateutil import parser
-import pytz
-
-from pymilvus import CollectionSchema, FieldSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
-
-from bm25s.tokenization import Tokenizer
+from utils.util_log import test_log as log
 
 fake = Faker()
 
 
-from common.common_params import Expr, DefaultIndexSearchParams
+from common.common_params import DefaultIndexSearchParams, Expr
 
 """" Methods of processing data """
 
 
 try:
     RNG = np.random.default_rng(seed=0)
-except ValueError as e:
+except ValueError:
     RNG = None
 
 
@@ -1053,7 +1051,7 @@ def gen_all_datatype_collection_schema(
 
     # Add BM25 function
     bm25_function = Function(
-        name=f"text",
+        name="text",
         function_type=FunctionType.BM25,
         input_field_names=["text"],
         output_field_names=["text_sparse_emb"],
@@ -2210,7 +2208,7 @@ def prepare_bulk_insert_data(
 ):
     schema = gen_default_collection_schema() if schema is None else schema
     dim = get_dim_by_schema(schema=schema)
-    log.info(f"start to generate raw data for bulk insert")
+    log.info("start to generate raw data for bulk insert")
     t0 = time.time()
     data = get_column_data_by_schema(schema=schema, nb=nb, skip_vectors=True)
     log.info(f"generate raw data for bulk insert cost {time.time() - t0} s")
@@ -2331,7 +2329,7 @@ def gen_row_data_by_schema(
     """
     # if both skip_field_names and desired_field_names are specified, raise an exception
     if skip_field_names and desired_field_names:
-        raise Exception(f"Cannot specify both skip_field_names and desired_field_names")
+        raise Exception("Cannot specify both skip_field_names and desired_field_names")
 
     if schema is None:
         schema = gen_default_collection_schema()
@@ -2347,10 +2345,7 @@ def gen_row_data_by_schema(
     fields = []
     for field in all_fields:
         # if desired_field_names is specified, only generate the fields in desired_field_names
-        if field.get("name", None) in desired_field_names:
-            fields.append(field)
-        # elif desired_field_names is not specified, generate all fields
-        elif not desired_field_names:
+        if field.get("name", None) in desired_field_names or not desired_field_names:
             fields.append(field)
 
     # Get struct_fields from schema
@@ -4120,7 +4115,7 @@ def gen_multiple_field_expressions(field_name_list=[], random_field_number=0, ex
     if not isinstance(field_name_list, list):
         raise Exception("parameter field_name_list should be a list of all the fields to be filtered")
     if random_field_number < 0:
-        raise Exception(f"random_field_number should be greater than or equal with 0]")
+        raise Exception("random_field_number should be greater than or equal with 0]")
     if not isinstance(expr_number, int):
         raise Exception("parameter parameter should be an interger")
     log.info(field_name_list)
@@ -4432,12 +4427,12 @@ def gen_varchar_expression(expr_fields):
                 (
                     Expr.OR(Expr.like(field, "%h%").subset, Expr.LIKE(field, "%jo").subset).value,
                     field,
-                    rf"(?:h.*|.*jo$)",
+                    r"(?:h.*|.*jo$)",
                 ),
                 (
                     Expr.Or(Expr.like(field, "ip%").subset, Expr.LIKE(field, "%yu%").subset).value,
                     field,
-                    rf"(?:^ip.*|.*yu)",
+                    r"(?:^ip.*|.*yu)",
                 ),
             ]
         )
@@ -4471,12 +4466,12 @@ def gen_varchar_unicode_expression(expr_fields):
                 (
                     Expr.OR(Expr.like(field, "%核%").subset, Expr.LIKE(field, "%臥蜜").subset).value,
                     field,
-                    rf"(?:核.*|.*臥蜜$)",
+                    r"(?:核.*|.*臥蜜$)",
                 ),
                 (
                     Expr.Or(Expr.like(field, "咴矷%").subset, Expr.LIKE(field, "%濉蠬%").subset).value,
                     field,
-                    rf"(?:^咴矷.*|.*濉蠬)",
+                    r"(?:^咴矷.*|.*濉蠬)",
                 ),
             ]
         )
@@ -4591,7 +4586,7 @@ def tanimoto(x, y):
 def tanimoto_calc(x, y):
     x = np.asarray(x, np.bool_)
     y = np.asarray(y, np.bool_)
-    return np.double((len(x) - np.bitwise_xor(x, y).sum())) / (len(y) + np.bitwise_xor(x, y).sum())
+    return np.double(len(x) - np.bitwise_xor(x, y).sum()) / (len(y) + np.bitwise_xor(x, y).sum())
 
 
 def substructure(x, y):
@@ -4837,21 +4832,7 @@ def insert_data(
 
             else:
                 if not enable_dynamic_field:
-                    if vector_data_type == DataType.FLOAT_VECTOR:
-                        default_data = gen_general_list_all_data_type(
-                            nb // num,
-                            dim=dim,
-                            start=start,
-                            with_json=with_json,
-                            random_primary_key=random_primary_key,
-                            multiple_dim_array=multiple_dim_array,
-                            multiple_vector_field_name=vector_name_list,
-                            auto_id=auto_id,
-                            primary_field=primary_field,
-                            nullable_fields=nullable_fields,
-                            language=language,
-                        )
-                    elif vector_data_type == DataType.FLOAT16_VECTOR or vector_data_type == DataType.BFLOAT16_VECTOR:
+                    if vector_data_type == DataType.FLOAT_VECTOR or vector_data_type == DataType.FLOAT16_VECTOR or vector_data_type == DataType.BFLOAT16_VECTOR:
                         default_data = gen_general_list_all_data_type(
                             nb // num,
                             dim=dim,
@@ -5028,7 +5009,7 @@ def install_milvus_operator_specific_config(
     if mil.wait_for_healthy(release_name, namespace, timeout=1800):
         host = mil.endpoint(release_name, namespace).split(":")[0]
     else:
-        raise MilvusException(message=f"Milvus healthy timeout 1800s")
+        raise MilvusException(message="Milvus healthy timeout 1800s")
 
     return host
 
@@ -5373,7 +5354,7 @@ def check_key_exist(source: dict, target: dict):
             if key in _target and isinstance(value, dict):
                 check_keys(_source[key], _target[key])
             elif key not in _target:
-                log.error("[check_key_exist] Key: '{0}' not in target: {1}".format(key, _target))
+                log.error(f"[check_key_exist] Key: '{key}' not in target: {_target}")
                 flag = False
 
     check_keys(source, target)
@@ -5441,7 +5422,7 @@ def parse_fmod(x: int, y: int) -> int:
         parse_fmod(-5, -3) -> -2
     """
     if y == 0:
-        raise ValueError(f"[parse_fmod] Math domain error, `y` can not bt `0`")
+        raise ValueError("[parse_fmod] Math domain error, `y` can not bt `0`")
 
     v = abs(x) % abs(y)
 
@@ -5480,8 +5461,8 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
         return 29 if is_leap else 28
 
     def _apply_offset_to_utc(
-        year: int, month: int, day: int, hour: int, minute: int, second: int, offset: Tuple[str, int, int]
-    ) -> Tuple[int, int, int, int, int, int]:
+        year: int, month: int, day: int, hour: int, minute: int, second: int, offset: tuple[str, int, int]
+    ) -> tuple[int, int, int, int, int, int]:
         sign, oh, om = offset
         delta_minutes = oh * 60 + om
         if sign == "+":
@@ -5530,7 +5511,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
         s = dt.isoformat(timespec="seconds")
         return s[:-6] + "Z" if s.endswith("+00:00") else s
 
-    def _localize_naive(dt: datetime, tz_name: str) -> Optional[datetime]:
+    def _localize_naive(dt: datetime, tz_name: str) -> datetime | None:
         """Best-effort localization that handles DST gaps/ambiguities."""
         # Prefer pytz because it surfaces NonExistent/Ambiguous errors we can resolve.
         try:
@@ -5649,7 +5630,7 @@ def get_index_warmup(describe_index_res):
 
 def get_search_params_according_to_index_params(describe_index: dict, limit: int):
     sp = {}
-    sp_obj = getattr(DefaultIndexSearchParams, describe_index.get("index_type", None), None)
+    sp_obj = getattr(DefaultIndexSearchParams, describe_index.get("index_type"), None)
     if sp_obj:
         sp = sp_obj(limit=limit, **describe_index)
     return sp

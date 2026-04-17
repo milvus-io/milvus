@@ -1,8 +1,6 @@
 import logging
 import sys
 
-from config.log_config import log_config
-
 
 class TestLog:
     def __init__(self, logger):

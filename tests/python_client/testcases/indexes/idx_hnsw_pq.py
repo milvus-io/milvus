@@ -1,6 +1,5 @@
 import pytest
 from pymilvus import DataType
-from common import common_type as ct
 
 success = "success"
 

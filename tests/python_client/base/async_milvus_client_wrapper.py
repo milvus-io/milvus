@@ -1,14 +1,12 @@
-import asyncio
 import sys
-from typing import Optional, List, Union, Dict
 
 from pymilvus import (
-    AsyncMilvusClient,
     AnnSearchRequest,
+    AsyncMilvusClient,
     RRFRanker,
 )
-from pymilvus.orm.types import CONSISTENCY_STRONG
 from pymilvus.orm.collection import CollectionSchema
+from pymilvus.orm.types import CONSISTENCY_STRONG
 
 from check.func_check import ResponseChecker
 from utils.api_request import api_request, logger_interceptor
@@ -27,7 +25,7 @@ class AsyncMilvusClientWrapper:
         password: str = "",
         db_name: str = "",
         token: str = "",
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         active_trace=False,
         check_task=None,
         check_items=None,
@@ -43,51 +41,51 @@ class AsyncMilvusClientWrapper:
         return res, check_result
 
     @logger_interceptor()
-    async def list_collections(self, timeout: Optional[float] = None, **kwargs):
+    async def list_collections(self, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.list_collections(timeout, **kwargs)
 
     @logger_interceptor()
-    async def has_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def has_collection(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.has_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def has_partition(self, collection_name: str, partition_name: str, timeout: Optional[float] = None, **kwargs):
+    async def has_partition(self, collection_name: str, partition_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.has_partition(collection_name, partition_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def describe_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def describe_collection(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.describe_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def list_partitions(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def list_partitions(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.list_partitions(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def get_collection_stats(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def get_collection_stats(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.get_collection_stats(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def flush(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def flush(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.flush(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def get_load_state(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def get_load_state(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.get_load_state(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def describe_index(self, collection_name: str, index_name: str, timeout: Optional[float] = None, **kwargs):
+    async def describe_index(self, collection_name: str, index_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.describe_index(collection_name, index_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def create_database(self, db_name: str, timeout: Optional[float] = None, **kwargs):
+    async def create_database(self, db_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.create_database(db_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def drop_database(self, db_name: str, timeout: Optional[float] = None, **kwargs):
+    async def drop_database(self, db_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.drop_database(db_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def list_databases(self, timeout: Optional[float] = None, **kwargs):
+    async def list_databases(self, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.list_databases(timeout, **kwargs)
 
     @logger_interceptor()
@@ -98,14 +96,14 @@ class AsyncMilvusClientWrapper:
     async def create_collection(
         self,
         collection_name: str,
-        dimension: Optional[int] = None,
+        dimension: int | None = None,
         primary_field_name: str = "id",  # default is "id"
         id_type: str = "int",  # or "string",
         vector_field_name: str = "vector",  # default is  "vector"
         metric_type: str = "COSINE",
         auto_id: bool = False,
-        timeout: Optional[float] = None,
-        schema: Optional[CollectionSchema] = None,
+        timeout: float | None = None,
+        schema: CollectionSchema | None = None,
         index_params=None,
         **kwargs,
     ):
@@ -126,11 +124,11 @@ class AsyncMilvusClientWrapper:
         )
 
     @logger_interceptor()
-    async def drop_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def drop_collection(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.drop_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def load_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def load_collection(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.load_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
@@ -138,15 +136,15 @@ class AsyncMilvusClientWrapper:
         return await self.async_milvus_client.release_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def truncate_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def truncate_collection(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.truncate_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def list_persistent_segments(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+    async def list_persistent_segments(self, collection_name: str, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.list_persistent_segments(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
-    async def create_index(self, collection_name: str, index_params, timeout: Optional[float] = None, **kwargs):
+    async def create_index(self, collection_name: str, index_params, timeout: float | None = None, **kwargs):
         return await self.async_milvus_client.create_index(collection_name, index_params, timeout, **kwargs)
 
     @logger_interceptor()
@@ -177,9 +175,9 @@ class AsyncMilvusClientWrapper:
     async def insert(
         self,
         collection_name: str,
-        data: Union[Dict, List[Dict]],
-        timeout: Optional[float] = None,
-        partition_name: Optional[str] = "",
+        data: dict | list[dict],
+        timeout: float | None = None,
+        partition_name: str | None = "",
         **kwargs,
     ):
         return await self.async_milvus_client.insert(collection_name, data, timeout, partition_name, **kwargs)
@@ -188,9 +186,9 @@ class AsyncMilvusClientWrapper:
     async def upsert(
         self,
         collection_name: str,
-        data: Union[Dict, List[Dict]],
-        timeout: Optional[float] = None,
-        partition_name: Optional[str] = "",
+        data: dict | list[dict],
+        timeout: float | None = None,
+        partition_name: str | None = "",
         **kwargs,
     ):
         return await self.async_milvus_client.upsert(collection_name, data, timeout, partition_name, **kwargs)
@@ -199,14 +197,14 @@ class AsyncMilvusClientWrapper:
     async def search(
         self,
         collection_name: str,
-        data: Union[List[list], list],
+        data: list[list] | list,
         filter: str = "",
         limit: int = 10,
-        output_fields: Optional[List[str]] = None,
-        search_params: Optional[dict] = None,
-        timeout: Optional[float] = None,
-        partition_names: Optional[List[str]] = None,
-        anns_field: Optional[str] = None,
+        output_fields: list[str] | None = None,
+        search_params: dict | None = None,
+        timeout: float | None = None,
+        partition_names: list[str] | None = None,
+        anns_field: str | None = None,
         **kwargs,
     ):
         return await self.async_milvus_client.search(
@@ -226,12 +224,12 @@ class AsyncMilvusClientWrapper:
     async def hybrid_search(
         self,
         collection_name: str,
-        reqs: List[AnnSearchRequest],
+        reqs: list[AnnSearchRequest],
         ranker: RRFRanker,
         limit: int = 10,
-        output_fields: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
-        partition_names: Optional[List[str]] = None,
+        output_fields: list[str] | None = None,
+        timeout: float | None = None,
+        partition_names: list[str] | None = None,
         **kwargs,
     ):
         return await self.async_milvus_client.hybrid_search(
@@ -243,10 +241,10 @@ class AsyncMilvusClientWrapper:
         self,
         collection_name: str,
         filter: str = "",
-        output_fields: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
-        ids: Optional[Union[List, str, int]] = None,
-        partition_names: Optional[List[str]] = None,
+        output_fields: list[str] | None = None,
+        timeout: float | None = None,
+        ids: list | str | int | None = None,
+        partition_names: list[str] | None = None,
         **kwargs,
     ):
         return await self.async_milvus_client.query(
@@ -257,10 +255,10 @@ class AsyncMilvusClientWrapper:
     async def get(
         self,
         collection_name: str,
-        ids: Union[list, str, int],
-        output_fields: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
-        partition_names: Optional[List[str]] = None,
+        ids: list | str | int,
+        output_fields: list[str] | None = None,
+        timeout: float | None = None,
+        partition_names: list[str] | None = None,
         **kwargs,
     ):
         return await self.async_milvus_client.get(
@@ -271,10 +269,10 @@ class AsyncMilvusClientWrapper:
     async def delete(
         self,
         collection_name: str,
-        ids: Optional[Union[list, str, int]] = None,
-        timeout: Optional[float] = None,
-        filter: Optional[str] = None,
-        partition_name: Optional[str] = None,
+        ids: list | str | int | None = None,
+        timeout: float | None = None,
+        filter: str | None = None,
+        partition_name: str | None = None,
         **kwargs,
     ):
         return await self.async_milvus_client.delete(collection_name, ids, timeout, filter, partition_name, **kwargs)

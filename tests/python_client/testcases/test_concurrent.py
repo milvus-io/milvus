@@ -1,30 +1,32 @@
-import time
-import pytest
 import json
+import time
 from time import sleep
-from pymilvus import connections
-from chaos.checker import (
-    InsertChecker,
-    UpsertChecker,
-    SearchChecker,
-    HybridSearchChecker,
-    QueryChecker,
-    DeleteChecker,
-    Op,
-    ResultAnalyzer,
-)
-from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from common import common_func as cf
-from chaos.chaos_commons import assert_statistic
-from common.common_type import CaseLabel
-from chaos import constants
+
+import pytest
 from delayed_assert import assert_expectations
+from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
+from chaos.checker import (
+    DeleteChecker,
+    HybridSearchChecker,
+    InsertChecker,
+    Op,
+    QueryChecker,
+    ResultAnalyzer,
+    SearchChecker,
+    UpsertChecker,
+)
+from common import common_func as cf
+from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 
 def get_all_collections():
     try:
-        with open("/tmp/ci_logs/all_collections.json", "r") as f:
+        with open("/tmp/ci_logs/all_collections.json") as f:
             data = json.load(f)
             all_collections = data["all"]
     except Exception as e:

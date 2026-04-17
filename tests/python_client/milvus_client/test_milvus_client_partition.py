@@ -1,13 +1,14 @@
 import threading
+
 import pytest
+from pymilvus.client.types import LoadState
+
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from pymilvus.client.types import LoadState
-
 
 prefix = "milvus_client_api_partition"
 partition_prefix = "milvus_client_api_partition"
@@ -569,7 +570,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         partition_names = []
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 999, ct.err_msg: f"invalid parameter[expected=any partition][actual=empty partition list"}
+        error = {ct.err_code: 999, ct.err_msg: "invalid parameter[expected=any partition][actual=empty partition list"}
         self.release_partitions(
             client, collection_name, partition_names, check_task=CheckTasks.err_res, check_items=error
         )
@@ -1036,7 +1037,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         partition_name = cf.gen_unique_str(prefix)
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"the length of a collection name must be less than 255 characters: invalid parameter",
+            ct.err_msg: "the length of a collection name must be less than 255 characters: invalid parameter",
         }
         self.load_partitions(client, collection_name, partition_name, check_task=CheckTasks.err_res, check_items=error)
 

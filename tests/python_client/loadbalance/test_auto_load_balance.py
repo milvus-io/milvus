@@ -1,23 +1,22 @@
 from time import sleep
-from pymilvus import connections, list_collections, utility
-from chaos.checker import (
-    CollectionCreateChecker,
-    InsertFlushChecker,
-    SearchChecker,
-    QueryChecker,
-    IndexCreateChecker,
-    Op,
-)
-from common.milvus_sys import MilvusSys
-from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from chaos.chaos_commons import assert_statistic
-from common.common_type import CaseLabel
-from common import common_func as cf
-from chaos import constants
-from customize.milvus_operator import MilvusOperator
 
 from delayed_assert import assert_expectations
+from pymilvus import connections, list_collections, utility
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
+from chaos.checker import (
+    CollectionCreateChecker,
+    IndexCreateChecker,
+    InsertFlushChecker,
+    Op,
+    QueryChecker,
+    SearchChecker,
+)
+from common import common_func as cf
+from customize.milvus_operator import MilvusOperator
+from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 
@@ -61,14 +60,14 @@ def scale_up_milvus(release_name):
         return release_name, None, None
 
 
-class TestAutoLoadBalance(object):
+class TestAutoLoadBalance:
     def teardown_method(self):
         milvus_op = MilvusOperator()
         milvus_op.uninstall(self.release_name, namespace)
 
     def test_auto_load_balance(self):
         """ """
-        log.info(f"start to install milvus")
+        log.info("start to install milvus")
         release_name, host, port = install_milvus("test-auto-load-balance")  # todo add release name
         self.release_name = release_name
         assert host is not None

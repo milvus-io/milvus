@@ -1,5 +1,6 @@
-import requests
 import argparse
+
+import requests
 from tenacity import retry, stop_after_attempt
 
 

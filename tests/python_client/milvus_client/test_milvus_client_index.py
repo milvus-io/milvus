@@ -1,12 +1,11 @@
 import pytest
+from pymilvus import DataType
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from pymilvus import DataType
 
 prefix = "client_index"
 epsilon = ct.epsilon
@@ -143,7 +142,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 3. create index
         error = {
             ct.err_code: 100,
-            ct.err_msg: f"can't find collection collection not found[database=default][collection=not_existed]",
+            ct.err_msg: "can't find collection collection not found[database=default][collection=not_existed]",
         }
         self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -169,7 +168,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 3. create index
         error = {
             ct.err_code: 100,
-            ct.err_msg: f"can't find collection collection not found[database=default][collection=not_existed]",
+            ct.err_msg: "can't find collection collection not found[database=default][collection=not_existed]",
         }
         self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -185,7 +184,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        error = {ct.err_code: 1100, ct.err_msg: f"vector index cannot be dropped on loaded collection"}
+        error = {ct.err_code: 1100, ct.err_msg: "vector index cannot be dropped on loaded collection"}
         self.drop_index(client, collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -1088,7 +1087,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             params={"json_cast_type": invalid_json_cast_type, "json_path": f"{json_field_name}['a']['b']"},
         )
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+        error = {ct.err_code: 1100, ct.err_msg: "index params][actual=invalid index params]"}
         self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1125,7 +1124,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                 params={"json_cast_type": cast_type, "json_path": f"{json_field_name}['a']['b']"},
             )
             # 3. create index
-            error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+            error = {ct.err_code: 1100, ct.err_msg: "index params][actual=invalid index params]"}
             self.create_index(client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

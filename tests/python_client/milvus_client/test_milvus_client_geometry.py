@@ -1,13 +1,14 @@
-import pytest
 import random
+
 import numpy as np
+import pytest
+from pymilvus import DataType
 from shapely import wkt
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType
 from utils.util_log import test_log as log
 
 prefix = "client_geometry"
@@ -739,8 +740,8 @@ def generate_gt(spatial_func, base_data, query_geom, geo_field_name="geo", pk_fi
     Returns:
         expected_ids: List of primary key values that should match the spatial function
     """
-    from shapely import wkt
     import shapely
+    from shapely import wkt
 
     # Spatial function mapping
     spatial_function_mapping = {

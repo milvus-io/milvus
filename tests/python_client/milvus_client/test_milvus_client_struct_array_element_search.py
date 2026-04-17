@@ -1,16 +1,16 @@
-import pytest
-import numpy as np
 import random
 
+import numpy as np
+import pytest
+from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
+from pymilvus.client.embedding_list import EmbeddingList
+
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from pymilvus import DataType, AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus.client.embedding_list import EmbeddingList
-
 
 prefix = "struct_elem"
 epsilon = 0.001
@@ -938,7 +938,7 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert hit["id"] is not None
             # Access doc_int via [] (pymilvus proxies to entity)
-            assert hit["doc_int"] is not None, f"doc_int missing from hit"
+            assert hit["doc_int"] is not None, "doc_int missing from hit"
             # Verify structA sub-fields accessible
             assert hit["structA"] is not None
         _assert_distance_order(results, "COSINE")

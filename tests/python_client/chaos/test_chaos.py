@@ -1,30 +1,31 @@
-import threading
-import pytest
-import os
-import time
 import json
+import os
+import threading
+import time
 from time import sleep
 
+import pytest
+from delayed_assert import assert_expectations
 from pymilvus import connections
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
 from chaos.checker import (
     CollectionCreateChecker,
-    InsertChecker,
-    FlushChecker,
-    SearchChecker,
-    QueryChecker,
-    IndexCreateChecker,
     DeleteChecker,
+    FlushChecker,
+    IndexCreateChecker,
+    InsertChecker,
     Op,
+    QueryChecker,
+    SearchChecker,
 )
-from common.cus_resource_opts import CustomResourceOperations as CusResource
-from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_pod_list
-from utils.util_common import findkeys
-from chaos import chaos_commons as cc
-from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
-from chaos import constants
-from delayed_assert import assert_expectations
+from common.cus_resource_opts import CustomResourceOperations as CusResource
+from utils.util_common import findkeys
+from utils.util_k8s import get_pod_list, wait_pods_ready
+from utils.util_log import test_log as log
 
 
 def check_cluster_nodes(chaos_config):

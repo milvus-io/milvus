@@ -1,18 +1,16 @@
-from ssl import ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY
 import threading
 
 import numpy as np
 import pandas as pd
-import random
 import pytest
-from pymilvus import Index, DataType
+from pymilvus import DataType
 from pymilvus.exceptions import MilvusException
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 prefix = "insert"
 pre_upsert = "upsert"

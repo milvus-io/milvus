@@ -1,8 +1,8 @@
+import copy
 import sys
 import traceback
-import copy
 
-from check.func_check import ResponseChecker, Error
+from check.func_check import Error, ResponseChecker
 from utils.util_log import test_log as log
 
 # enable_traceback = os.getenv('ENABLE_TRACEBACK', "True")
@@ -80,8 +80,8 @@ def logger_interceptor():
         async def handler(*args, **kwargs):
             _kwargs = copy.deepcopy(kwargs)
             _kwargs.pop("enable_traceback", None)
-            check_task = kwargs.get("check_task", None)
-            check_items = kwargs.get("check_items", None)
+            check_task = kwargs.get("check_task")
+            check_items = kwargs.get("check_items")
             try:
                 # log request
                 log_request(*args, **_kwargs)

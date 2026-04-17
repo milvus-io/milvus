@@ -1,14 +1,14 @@
 import datetime
 
 import pytest
-from pymilvus import connections, MilvusException
+from pymilvus import MilvusException, connections
 
 from base.collection_wrapper import ApiCollectionWrapper
+from common import common_func as cf
+from common import common_type as ct
 from common.common_type import CaseLabel
 from customize.milvus_operator import MilvusOperator
 from scale import constants
-from common import common_func as cf
-from common import common_type as ct
 from utils.util_k8s import read_pod_log, wait_pods_ready
 from utils.util_log import test_log as log
 from utils.util_pymilvus import get_latest_tag
@@ -51,7 +51,7 @@ class TestIndexNodeScale:
             # If deploy failed and want to uninsatll mic
             # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
             # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             # connect
@@ -141,7 +141,7 @@ class TestIndexNodeScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             # connect

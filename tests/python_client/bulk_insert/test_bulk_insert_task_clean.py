@@ -1,20 +1,23 @@
 import logging
 import time
-import pytest
 from pathlib import Path
+
+import pytest
+
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from common.milvus_sys import MilvusSys
-from common.common_type import CaseLabel, CheckTasks
-from utils.util_k8s import get_pod_ip_name_pairs, get_milvus_instance_name, get_milvus_deploy_tool
-from utils.util_log import test_log as log
 from common.bulk_insert_data import (
-    prepare_bulk_insert_json_files,
-    DataField as df,
     DataErrorType,
+    prepare_bulk_insert_json_files,
 )
-
+from common.bulk_insert_data import (
+    DataField as df,
+)
+from common.common_type import CaseLabel, CheckTasks
+from common.milvus_sys import MilvusSys
+from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get_pod_ip_name_pairs
+from utils.util_log import test_log as log
 
 default_vec_only_fields = [df.vec_field]
 default_multi_fields = [
@@ -124,7 +127,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         index_params = ct.default_index
         self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         self.collection_wrap.load()
-        log.info(f"wait for load finished and be ready for search")
+        log.info("wait for load finished and be ready for search")
         time.sleep(5)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2

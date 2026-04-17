@@ -2,15 +2,15 @@ import threading
 import time
 
 import pytest
+from pymilvus import MilvusException, connections
 
 from base.collection_wrapper import ApiCollectionWrapper
-from common.common_type import CaseLabel
 from common import common_func as cf
+from common.common_type import CaseLabel
 from customize.milvus_operator import MilvusOperator
 from scale import constants, scale_common
-from pymilvus import connections, MilvusException
+from utils.util_k8s import read_pod_log, wait_pods_ready
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 from utils.wrapper import counter
 
@@ -48,7 +48,7 @@ class TestDataNodeScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             # connect

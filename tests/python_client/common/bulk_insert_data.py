@@ -1,21 +1,19 @@
 import copy
 import json
 import os
-import time
+import random
+import uuid
+from pathlib import Path
 
 import numpy as np
-from ml_dtypes import bfloat16
 import pandas as pd
-import random
-from pathlib import Path
-import uuid
 from faker import Faker
+from ml_dtypes import bfloat16
 from sklearn import preprocessing
-from common.common_func import gen_unique_str
-from common.common_func import gen_timestamptz_str
+
+from common.common_func import gen_timestamptz_str, gen_unique_str
 from common.minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
-import pyarrow as pa
 
 data_source = "/tmp/bulk_insert_data"
 fake = Faker()
@@ -519,7 +517,7 @@ def gen_text_in_numpy_file(dir, data_field, rows, start=0, force=False, nullable
 
 
 def gen_dynamic_field_in_numpy_file(dir, rows, start=0, force=False):
-    file_name = f"$meta.npy"
+    file_name = "$meta.npy"
     file = f"{dir}/{file_name}"
     if not os.path.exists(file) or force:
         # non vector columns
@@ -638,7 +636,7 @@ def gen_data_by_data_field(
 ):
     if array_length is None:
         array_length = random.randint(0, 10)
-    schema = kwargs.get("schema", None)
+    schema = kwargs.get("schema")
     schema = schema.to_dict() if schema is not None else None
     nullable = False
     if schema is not None:
@@ -888,7 +886,7 @@ def gen_json_files(
 def gen_dict_data_by_data_field(
     data_fields, rows, start=0, float_vector=True, dim=128, array_length=None, enable_dynamic_field=False, **kwargs
 ):
-    schema = kwargs.get("schema", None)
+    schema = kwargs.get("schema")
     shuffle = kwargs.get("shuffle", False)
     schema = schema.to_dict() if schema is not None else None
     data = []
@@ -919,10 +917,7 @@ def gen_dict_data_by_data_field(
                     d[data_field] = gen_bf16_vectors(1, dim, True)[1][0]
                 if "fp16" in data_field:
                     d[data_field] = gen_fp16_vectors(1, dim, True)[1][0]
-            elif data_field == DataField.float_field:
-                if not nullable:
-                    d[data_field] = random.random()
-            elif data_field == DataField.double_field:
+            elif data_field == DataField.float_field or data_field == DataField.double_field:
                 if not nullable:
                     d[data_field] = random.random()
             elif data_field == DataField.pk_field:
@@ -1015,7 +1010,7 @@ def gen_new_json_files(
     enable_dynamic_field=False,
     **kwargs,
 ):
-    schema = kwargs.get("schema", None)
+    schema = kwargs.get("schema")
     dir_prefix = f"json-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{dir_prefix}"
     schema_file = f"{data_source_new}/schema.json"
@@ -1083,7 +1078,7 @@ def gen_npy_files(
     **kwargs,
 ):
     # gen numpy files
-    schema = kwargs.get("schema", None)
+    schema = kwargs.get("schema")
     schema = schema.to_dict() if schema is not None else None
     u_id = f"numpy-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{u_id}"
@@ -1231,7 +1226,7 @@ def gen_parquet_files(
     sparse_format="doc",
     **kwargs,
 ):
-    schema = kwargs.get("schema", None)
+    schema = kwargs.get("schema")
     u_id = f"parquet-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{u_id}"
     schema_file = f"{data_source_new}/schema.json"

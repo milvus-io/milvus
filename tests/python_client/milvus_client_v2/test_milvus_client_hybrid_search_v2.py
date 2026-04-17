@@ -1,17 +1,16 @@
-import numpy as np
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import DataType, Function, FunctionType
-
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_v2_base import TestMilvusClientV2Base
-
-import random
 import math
+import random
+
+import numpy as np
 import pytest
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker, WeightedRanker
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *
 
 hybrid_search_epsilon = 0.01
 

@@ -1,11 +1,11 @@
-import logging
-from utils.util_pymilvus import *
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from base.client_v2_base import TestMilvusClientV2Base
 import pytest
 from idx_diskann import DISKANN
+
+from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_pymilvus import *
 
 index_type = "DISKANN"
 success = "success"
@@ -112,7 +112,7 @@ class TestDiskannBuildParams(TestMilvusClientV2Base):
                 collection_name,
                 index_params,
                 check_task=CheckTasks.err_res,
-                check_items={"err_code": 999, "err_msg": f"can't build with this index DISKANN: invalid parameter"},
+                check_items={"err_code": 999, "err_msg": "can't build with this index DISKANN: invalid parameter"},
             )
         else:
             self.create_index(client, collection_name, index_params)

@@ -1,21 +1,22 @@
-import random
-from sklearn import preprocessing
-import numpy as np
-import time
 import concurrent.futures
-from typing import Dict, List
+import random
+import time
+
+import numpy as np
+import pytest
+from faker import Faker
+from pymilvus import Collection
+from sklearn import preprocessing
+
+from base.testbase import TestBase
+from utils.util_log import test_log as logger
 from utils.utils import (
-    gen_collection_name,
-    patch_faker_text,
     en_vocabularies_distribution,
+    gen_collection_name,
+    gen_vector,
+    patch_faker_text,
     zh_vocabularies_distribution,
 )
-from utils.util_log import test_log as logger
-import pytest
-from base.testbase import TestBase
-from utils.utils import gen_vector
-from pymilvus import Collection
-from faker import Faker
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -81,7 +82,7 @@ class TestCreateIndex(TestBase):
         num_threads = 10  # Number of concurrent tasks
         payloads = [payload.copy() for _ in range(num_threads)]
 
-        def create_index(idx_payload: Dict) -> Dict:
+        def create_index(idx_payload: dict) -> dict:
             return self.index_client.index_create(idx_payload)
 
         # Execute index creation concurrently

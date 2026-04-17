@@ -1,10 +1,12 @@
 import json
 import os
 import time
+
 from benedict import benedict
-from utils.util_log import test_log as log
-from utils.util_k8s import get_pod_ip_name_pairs
+
 from common.cus_resource_opts import CustomResourceOperations as CusResource
+from utils.util_k8s import get_pod_ip_name_pairs
+from utils.util_log import test_log as log
 
 template_yaml = os.path.join(os.path.dirname(__file__), "template/default.yaml")
 MILVUS_GRP = "milvus.io"
@@ -16,7 +18,7 @@ MILVUS_PLURAL = "milvuses"
 MILVUS_KIND = "Milvus"
 
 
-class MilvusOperator(object):
+class MilvusOperator:
     def __init__(self):
         self.group = MILVUS_GRP
         self.version = MILVUS_VER
@@ -168,7 +170,7 @@ class MilvusOperator(object):
             res_object = cus_res.get(release_name)
             mic_status = res_object.get("status", None)
             if mic_status is not None:
-                if "Healthy" == mic_status.get("status"):
+                if mic_status.get("status") == "Healthy":
                     log.info(f"milvus healthy in {time.time() - starttime} seconds")
                     return True
                 else:

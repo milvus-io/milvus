@@ -1,4 +1,5 @@
 from pymilvus import connections
+
 from utils import *
 
 
@@ -36,7 +37,6 @@ def task_2(data_size, host):
 
 if __name__ == "__main__":
     import argparse
-    import threading
 
     parser = argparse.ArgumentParser(description="config for deploy test")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="milvus server ip")

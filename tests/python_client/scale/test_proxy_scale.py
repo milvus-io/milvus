@@ -4,13 +4,13 @@ import pytest
 from pymilvus import MilvusException, connections
 
 from base.collection_wrapper import ApiCollectionWrapper
-from customize.milvus_operator import MilvusOperator
 from common import common_func as cf
-from common.common_type import default_nb
-from common.common_type import CaseLabel
-from scale import scale_common as sc, constants
+from common.common_type import CaseLabel, default_nb
+from customize.milvus_operator import MilvusOperator
+from scale import constants
+from scale import scale_common as sc
+from utils.util_k8s import read_pod_log, wait_pods_ready
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 
 
@@ -58,7 +58,7 @@ class TestProxyScale:
         if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(":")[0]
         else:
-            raise MilvusException(message=f"Milvus healthy timeout 1800s")
+            raise MilvusException(message="Milvus healthy timeout 1800s")
 
         try:
             c_name = cf.gen_unique_str("proxy_scale")

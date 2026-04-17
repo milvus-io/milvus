@@ -1,17 +1,19 @@
 from pathlib import Path
-import pytest
 from time import sleep
-from yaml import full_load
+
+import pandas as pd
+import pytest
 from pymilvus import connections
-from chaos.checker import InsertChecker, SearchChecker, QueryChecker, DeleteChecker, Op
+from yaml import full_load
+
+from chaos import chaos_commons as cc
+from chaos import constants
+from chaos.chaos_commons import assert_statistic
+from chaos.checker import DeleteChecker, InsertChecker, Op, QueryChecker, SearchChecker
+from common import common_func as cf
+from common.common_type import CaseLabel
 from utils.util_k8s import wait_pods_ready
 from utils.util_log import test_log as log
-from chaos import chaos_commons as cc
-from common.common_type import CaseLabel
-from common import common_func as cf
-from chaos.chaos_commons import assert_statistic
-from chaos import constants
-import pandas as pd
 
 
 class TestBase:
@@ -135,7 +137,7 @@ class TestOperations(TestBase):
 
         # wait all pod running
         file_path = f"{str(Path(__file__).parent.parent.parent)}/deploy/milvus_crd.yaml"
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             config = full_load(f)
         meta_name = config["metadata"]["name"]
         label_selector = f"app.kubernetes.io/instance={meta_name}"

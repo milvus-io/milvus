@@ -1,17 +1,17 @@
-import logging
-
-import pytest
 import functools
+import logging
 import socket
 
-import common.common_type as ct
-import common.common_func as cf
-from utils.util_log import test_log as log
-from common.common_func import param_info
-from check.param_check import ip_check, number_check
-from config.log_config import log_config
-from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
+import pytest
 from pymilvus.orm.types import CONSISTENCY_STRONG
+
+import common.common_func as cf
+import common.common_type as ct
+from check.param_check import ip_check, number_check
+from common.common_func import param_info
+from config.log_config import log_config
+from utils.util_log import test_log as log
+from utils.util_pymilvus import gen_binary_default_fields, gen_default_fields, gen_unique_str, get_milvus
 
 # Register the log filter plugin
 pytest_plugins = ["plugin.log_filter"]
@@ -331,7 +331,7 @@ def pytest_runtest_setup(item):
     if tags:
         cmd_tag = item.config.getoption("--tag")
         if cmd_tag != "all" and cmd_tag not in tags:
-            pytest.skip("test requires tag in {!r}".format(tags))
+            pytest.skip(f"test requires tag in {tags!r}")
 
 
 def pytest_runtestloop(session):

@@ -2,10 +2,13 @@
 CDC sync tests for index operations.
 """
 
-import time
 import random
+import time
+
 import pytest
+
 from common.common_type import CaseLabel
+
 from .base import TestCDCSyncBase, logger
 
 
@@ -551,9 +554,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                 record[field_name] = random.randint(-1000000, 1000000)
             elif field_type == "INT64":
                 record[field_name] = random.randint(-1000000000, 1000000000)
-            elif field_type == "FLOAT":
-                record[field_name] = random.uniform(-1000.0, 1000.0)
-            elif field_type == "DOUBLE":
+            elif field_type == "FLOAT" or field_type == "DOUBLE":
                 record[field_name] = random.uniform(-1000.0, 1000.0)
             elif field_type == "ARRAY":
                 record[field_name] = [random.randint(-100, 100) for _ in range(random.randint(1, 10))]

@@ -1,9 +1,10 @@
-import pytest
 import numpy as np
+import pytest
 from faker import Faker
+
 from base.testbase import TestBase
-from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 fake_en = Faker("en_US")
 
@@ -387,7 +388,7 @@ class TestTextEmbeddingSearch(TestBase):
 
         rsp = self.vector_client.vector_search(search_payload)
         assert rsp["code"] == 0, f"Search failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Search returned no results"
+        assert len(rsp["data"]) > 0, "Search returned no results"
 
         # Verify search results contain relevant documents
         found_relevant = any(
@@ -482,7 +483,7 @@ class TestTextEmbeddingSearch(TestBase):
 
         rsp = self.vector_client.vector_search(search_payload)
         assert rsp["code"] == 0, f"BM25 search failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"BM25 search returned no results"
+        assert len(rsp["data"]) > 0, "BM25 search returned no results"
 
         # test search with dense vector
         search_payload = {
@@ -494,7 +495,7 @@ class TestTextEmbeddingSearch(TestBase):
         }
         rsp = self.vector_client.vector_search(search_payload)
         assert rsp["code"] == 0, f"Dense search failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Dense search returned no results"
+        assert len(rsp["data"]) > 0, "Dense search returned no results"
 
     def test_hybrid_search_with_text_embedding_and_bm25(self, tei_endpoint):
         """
@@ -597,7 +598,7 @@ class TestTextEmbeddingSearch(TestBase):
 
         rsp = self.vector_client.vector_advanced_search(hybrid_search_payload)
         assert rsp["code"] == 0, f"Hybrid search failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Hybrid search returned no results"
+        assert len(rsp["data"]) > 0, "Hybrid search returned no results"
 
         # Verify hybrid search results are relevant
         found_relevant = any(
@@ -755,7 +756,7 @@ class TestTextEmbeddingSearchAdvanced(TestBase):
 
         rsp = self.vector_client.vector_query(query_payload)
         assert rsp["code"] == 0, f"Original query failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Original query returned no results"
+        assert len(rsp["data"]) > 0, "Original query returned no results"
         original_embedding = rsp["data"][0]["dense"]
 
         # Upsert with modified text
@@ -770,7 +771,7 @@ class TestTextEmbeddingSearchAdvanced(TestBase):
         # Query updated embedding
         rsp = self.vector_client.vector_query(query_payload)
         assert rsp["code"] == 0, f"Updated query failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Updated query returned no results"
+        assert len(rsp["data"]) > 0, "Updated query returned no results"
         updated_embedding = rsp["data"][0]["dense"]
 
         # Verify text was updated
@@ -1538,7 +1539,6 @@ class TestDecayRerank(TestBase):
         method: test dense/sparse search with gauss/exp/linear decay reranker
         expected: search should succeed with decay reranker and time-based ranking
         """
-        import random
 
         name = gen_collection_name(prefix)
         collection_name, current_time = self._create_collection_with_timestamp_field(name, tei_endpoint)
@@ -1608,7 +1608,6 @@ class TestDecayRerank(TestBase):
         method: test dense+sparse hybrid search with decay reranker
         expected: hybrid search should succeed with decay reranker
         """
-        import random
 
         name = gen_collection_name(prefix)
         collection_name, current_time = self._create_collection_with_timestamp_field(name, tei_endpoint)
@@ -1649,7 +1648,7 @@ class TestDecayRerank(TestBase):
 
         rsp = self.vector_client.vector_advanced_search(hybrid_search_payload)
         assert rsp["code"] == 0, f"Hybrid search with {decay_function} decay reranker failed: {rsp}"
-        assert len(rsp["data"]) > 0, f"Hybrid search returned no results"
+        assert len(rsp["data"]) > 0, "Hybrid search returned no results"
 
         # Log results for manual verification
         logger.info(f"Hybrid search with {decay_function} decay reranker results:")

@@ -1,15 +1,16 @@
-import random
 import math
+import random
 import threading
 import time
-import pytest
 
+import pytest
 from pymilvus import DataType
-from common.common_type import CaseLabel, CheckTasks
-from common import common_type as ct
-from common import common_func as cf
-from utils.util_log import test_log as log
+
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 
 prefix = "range_search"
 range_search_supported_indexes = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"]

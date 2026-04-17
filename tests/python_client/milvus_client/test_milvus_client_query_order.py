@@ -1,14 +1,14 @@
 import time
 
 import pytest
+from pymilvus import DataType
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
-from pymilvus import DataType
 
 default_nb = 3200
 default_dim = 8

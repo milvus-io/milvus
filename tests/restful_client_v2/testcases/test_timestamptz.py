@@ -1,11 +1,12 @@
-import time
 import random
+import time
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 
 from base.testbase import TestBase
-from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 
 @pytest.mark.L1

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional
 
 """ Define param names"""
 
@@ -294,9 +293,9 @@ class IndexPrams(BasePrams):
 @dataclass
 class SearchInsidePrams(BasePrams):
     # inside params
-    radius: Optional[float] = None
-    range_filter: Optional[float] = None
-    group_by_field: Optional[str] = None
+    radius: float | None = None
+    range_filter: float | None = None
+    group_by_field: str | None = None
 
 
 @dataclass
@@ -476,7 +475,7 @@ class DefaultScalarIndexParams:
         return {field: IndexPrams()}
 
     @staticmethod
-    def list_default(fields: List[str]) -> Dict[str, IndexPrams]:
+    def list_default(fields: list[str]) -> dict[str, IndexPrams]:
         return {n: IndexPrams() for n in fields}
 
     @staticmethod
@@ -492,7 +491,7 @@ class DefaultScalarIndexParams:
         return {field: IndexPrams(index_type=IndexName.INVERTED)}
 
     @staticmethod
-    def list_inverted(fields: List[str]) -> Dict[str, IndexPrams]:
+    def list_inverted(fields: list[str]) -> dict[str, IndexPrams]:
         return {n: IndexPrams(index_type=IndexName.INVERTED) for n in fields}
 
     @staticmethod
@@ -500,7 +499,7 @@ class DefaultScalarIndexParams:
         return {field: IndexPrams(index_type=IndexName.BITMAP)}
 
     @staticmethod
-    def list_bitmap(fields: List[str]) -> Dict[str, IndexPrams]:
+    def list_bitmap(fields: list[str]) -> dict[str, IndexPrams]:
         return {n: IndexPrams(index_type=IndexName.BITMAP) for n in fields}
 
 

@@ -1,14 +1,11 @@
-import threading
-import pytest
 import time
 
-from base.partition_wrapper import ApiPartitionWrapper
+import pytest
+
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
-from common.code_mapping import PartitionErrorMessage
 
 prefix = "partition_"
 

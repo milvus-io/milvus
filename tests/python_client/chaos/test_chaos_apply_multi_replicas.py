@@ -1,16 +1,17 @@
-import pytest
-import time
 import json
-import random
-from time import sleep
+import time
 from datetime import datetime
+from time import sleep
+
+import constants
+import pytest
 from pymilvus import connections
+
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
-from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_milvus_instance_name, get_milvus_deploy_tool
 from utils.util_common import wait_signal_to_apply_chaos
-import constants
+from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, wait_pods_ready
+from utils.util_log import test_log as log
 
 
 def parse_duration(duration_str):
@@ -235,7 +236,7 @@ class TestChaosApplyMultiReplicas:
         interval_seconds = parse_duration(chaos_interval)
         chaos_dur_seconds = parse_duration(chaos_duration)
 
-        log.info(f"periodic chaos config:")
+        log.info("periodic chaos config:")
         log.info(f"  target RGs (round-robin): {rg_list}")
         log.info(f"  chaos type: {chaos_type}")
         log.info(f"  chaos duration per cycle: {chaos_duration} ({chaos_dur_seconds}s)")
@@ -298,5 +299,5 @@ class TestChaosApplyMultiReplicas:
         with open(constants.CHAOS_INFO_SAVE_PATH, "w") as f:
             json.dump(summary, f, indent=2)
 
-        log.info(f"*********************Periodic Chaos Test Completed**********************")
+        log.info("*********************Periodic Chaos Test Completed**********************")
         log.info(f"total rounds: {round_num}, duration: {(time.time() - start_time) / 3600:.1f}h")

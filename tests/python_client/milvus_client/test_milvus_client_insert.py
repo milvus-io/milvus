@@ -1,11 +1,11 @@
-import pytest
 import numpy as np
+import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from utils.util_log import test_log as log
 from utils.util_pymilvus import *
 
 prefix = "client_insert"
@@ -158,7 +158,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
             }
             for i in range(default_nb)
         ]
-        error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
+        error = {ct.err_code: 1100, ct.err_msg: "the length of a collection name must be less than 255 characters"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -221,8 +221,8 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"Insert missed an field `vector` to collection "
-            f"without set nullable==true or set default_value",
+            ct.err_msg: "Insert missed an field `vector` to collection "
+            "without set nullable==true or set default_value",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -249,7 +249,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"Insert missed an field `id` to collection without set nullable==true or set default_value",
+            ct.err_msg: "Insert missed an field `id` to collection without set nullable==true or set default_value",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -277,7 +277,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"Attempt to insert an unexpected field `float` to collection without enabling dynamic field",
+            ct.err_msg: "Attempt to insert an unexpected field `float` to collection without enabling dynamic field",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -369,7 +369,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"The Input data type is inconsistent with defined schema, {{id}} field should be a int64",
+            ct.err_msg: "The Input data type is inconsistent with defined schema, {id} field should be a int64",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -398,7 +398,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         ]
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
         if partition_name == " ":
-            error = {ct.err_code: 1, ct.err_msg: f"Invalid partition name: . Partition name should not be empty."}
+            error = {ct.err_code: 1, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
         self.insert(
             client,
             collection_name,
@@ -1177,7 +1177,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # Try to insert with none type data
         error = {
             ct.err_code: -1,
-            ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'NoneType'",
+            ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'NoneType'",
         }
         self.insert(client, collection_name, None, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1368,7 +1368,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
             client,
             collection_name,
             vectors_to_search,
-            filter=f"field_new=='field_new'",
+            filter="field_new=='field_new'",
             check_task=CheckTasks.check_search_results,
             check_items={
                 "enable_milvus_client_api": True,
@@ -1637,7 +1637,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             {default_primary_key_field_name: i, default_float_field_name: i * 1.0, default_string_field_name: str(i)}
             for i in range(10)
         ]
-        error = {ct.err_code: 1, ct.err_msg: f"Insert missed an field `vector` to collection"}
+        error = {ct.err_code: 1, ct.err_msg: "Insert missed an field `vector` to collection"}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -1665,7 +1665,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1,
-            ct.err_msg: f"Attempt to insert an unexpected field `wrong_vector` to collection without enabling dynamic field",
+            ct.err_msg: "Attempt to insert an unexpected field `wrong_vector` to collection without enabling dynamic field",
         }
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -2114,7 +2114,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         df = cf.gen_default_dataframe_data(nb=100, auto_id=auto_id)
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'",
+            ct.err_msg: "wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'",
         }
         self.insert(client, collection_name, df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -2531,10 +2531,10 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert len(res) == nb
 
         # try to query None value entities on json field, should not be empty
-        res, _ = self.query(client, collection_name, filter=f"json is null")
+        res, _ = self.query(client, collection_name, filter="json is null")
         assert len(res) == nb
 
-        res, _ = self.query(client, collection_name, filter=f"int32_array is null")
+        res, _ = self.query(client, collection_name, filter="int32_array is null")
         assert len(res) == nb
 
         self.drop_collection(client, collection_name)

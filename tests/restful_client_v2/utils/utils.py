@@ -1,20 +1,18 @@
-import random
-import time
+import base64
+import datetime
 import random
 import string
-from faker import Faker
-import numpy as np
-from ml_dtypes import bfloat16
-from sklearn import preprocessing
-import base64
-import requests
-from loguru import logger
-import datetime
-from sklearn.metrics import pairwise_distances
+import time
 from collections import Counter
+
 import bm25s
 import jieba
-
+import numpy as np
+from faker import Faker
+from loguru import logger
+from ml_dtypes import bfloat16
+from sklearn import preprocessing
+from sklearn.metrics import pairwise_distances
 
 fake = Faker()
 fake.seed_instance(19530)
@@ -718,8 +716,8 @@ def generate_gt(spatial_func, base_data, query_geom, geo_field_name="geo", pk_fi
         expected_ids: List of primary key values that should match the spatial function
     """
     try:
-        from shapely import wkt
         import shapely
+        from shapely import wkt
     except ImportError:
         logger.warning("shapely not installed, returning empty expected_ids")
         return []

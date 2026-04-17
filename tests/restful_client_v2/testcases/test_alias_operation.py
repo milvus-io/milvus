@@ -1,10 +1,12 @@
 import random
-from sklearn import preprocessing
+
 import numpy as np
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
 import pytest
+from sklearn import preprocessing
+
 from base.testbase import TestBase
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 
 @pytest.mark.L0

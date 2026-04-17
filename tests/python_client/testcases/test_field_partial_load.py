@@ -1,4 +1,5 @@
 import pytest
+
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
@@ -149,7 +150,7 @@ class TestFieldPartialLoad(TestcaseBase):
         collection_w.load(
             load_fields=[pk_field.name, vector_field.name, load_string_field.name], skip_load_dynamic_field=True
         )
-        error = {ct.err_code: 999, ct.err_msg: f"field color cannot be returned since dynamic field not loaded"}
+        error = {ct.err_code: 999, ct.err_msg: "field color cannot be returned since dynamic field not loaded"}
         collection_w.search(
             data=search_vectors,
             anns_field=vector_field.name,
@@ -159,7 +160,7 @@ class TestFieldPartialLoad(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-        error = {ct.err_code: 999, ct.err_msg: f"field color is dynamic but dynamic field is not loaded"}
+        error = {ct.err_code: 999, ct.err_msg: "field color is dynamic but dynamic field is not loaded"}
         collection_w.search(
             data=search_vectors,
             anns_field=vector_field.name,
@@ -277,7 +278,7 @@ class TestFieldPartialLoad(TestcaseBase):
         )
         assert pk_field.name in res[0][0].fields.keys() and vector_field.name in res[0][0].fields.keys()
         # load p2 with different fields
-        error = {ct.err_code: 999, ct.err_msg: f"can't change the load field list for loaded collection"}
+        error = {ct.err_code: 999, ct.err_msg: "can't change the load field list for loaded collection"}
         p2.load(
             load_fields=[pk_field.name, vector_field.name, not_load_string_field.name, not_load_int64_field.name],
             check_task=CheckTasks.err_res,
@@ -357,7 +358,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
         collection_w.load(
             load_fields=[vector_field.name, load_int64_field.name], check_task=CheckTasks.err_res, check_items=error
         )
-        error = {ct.err_code: 999, ct.err_msg: f"does not contain vector field"}
+        error = {ct.err_code: 999, ct.err_msg: "does not contain vector field"}
         collection_w.load(
             load_fields=[pk_field.name, load_int64_field.name], check_task=CheckTasks.err_res, check_items=error
         )
@@ -457,7 +458,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
             check_items={"nq": nq, "limit": 10},
         )
         # try to add more fields in load fields list when reloading
-        error = {ct.err_code: 999, ct.err_msg: f"can't change the load field list for loaded collection"}
+        error = {ct.err_code: 999, ct.err_msg: "can't change the load field list for loaded collection"}
         collection_w.load(
             load_fields=[pk_field.name, vector_field.name, load_string_field.name, not_load_int64_field.name],
             check_task=CheckTasks.err_res,
@@ -508,12 +509,12 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
         # build index
         collection_w.create_index(field_name=vector_field.name, index_params=ct.default_index)
         # add one of dynamic fields in load fields list
-        error = {ct.err_code: 999, ct.err_msg: f"failed to get field schema by name: fieldName(color) not found"}
+        error = {ct.err_code: 999, ct.err_msg: "failed to get field schema by name: fieldName(color) not found"}
         collection_w.load(
             load_fields=[pk_field.name, vector_field.name, "color"], check_task=CheckTasks.err_res, check_items=error
         )
         # add non_existing field in load fields list
-        error = {ct.err_code: 999, ct.err_msg: f"failed to get field schema by name: fieldName(not_existing) not found"}
+        error = {ct.err_code: 999, ct.err_msg: "failed to get field schema by name: fieldName(not_existing) not found"}
         collection_w.load(
             load_fields=[pk_field.name, vector_field.name, "not_existing"],
             check_task=CheckTasks.err_res,
@@ -567,7 +568,7 @@ class TestFieldPartialLoadInvalid(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
-        error = {ct.err_code: 999, ct.err_msg: f"cannot parse expression"}
+        error = {ct.err_code: 999, ct.err_msg: "cannot parse expression"}
         collection_w.search(
             data=search_vectors,
             anns_field=vector_field.name,

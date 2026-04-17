@@ -1,6 +1,7 @@
-from utils.utils import gen_unique_str
-from base.testbase import TestBase
 import pytest
+
+from base.testbase import TestBase
+from utils.utils import gen_unique_str
 
 
 @pytest.mark.L1
