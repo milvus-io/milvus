@@ -4,9 +4,12 @@ import (
 	"container/list"
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -26,6 +29,7 @@ type pendingTask struct {
 	task      Task
 	callbacks []func(error) error
 	resultCh  chan error // buffered(1); result sent then channel closed on completion
+	enqueueAt time.Time  // for queue duration metric
 }
 
 // keyLockDispatcher provides per-key serial execution with cross-key concurrency.
@@ -65,6 +69,8 @@ func newKeyLockDispatcher[K comparable](maxParallel int) *keyLockDispatcher[K] {
 // sync throughput cannot keep up with the write rate. The caller can cancel via
 // ctx to unblock during shutdown.
 func (d *keyLockDispatcher[K]) Submit(ctx context.Context, key K, t Task, callbacks ...func(error) error) *conc.Future[struct{}] {
+	nodeID := paramtable.GetStringNodeID()
+
 	// Backpressure: acquire a semaphore slot. Blocks if all slots are taken.
 	// Returns early if ctx is canceled (e.g. during shutdown).
 	if err := d.semaphore.Acquire(ctx); err != nil {
@@ -73,11 +79,15 @@ func (d *keyLockDispatcher[K]) Submit(ctx context.Context, key K, t Task, callba
 		})
 	}
 
+	metrics.WALFlusherSyncDispatcherTaskTotal.WithLabelValues(nodeID).Inc()
+	metrics.WALFlusherSyncDispatcherPending.WithLabelValues(nodeID).Inc()
+
 	pt := &pendingTask{
 		ctx:       ctx,
 		task:      t,
 		callbacks: callbacks,
 		resultCh:  make(chan error, 1),
+		enqueueAt: time.Now(),
 	}
 
 	// Create a Future that resolves when the task completes.
@@ -142,6 +152,7 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 			close(pt.resultCh)
 
 			d.semaphore.Release()
+			metrics.WALFlusherSyncDispatcherPending.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 
 			d.mu.Lock()
 			d.inFlight[key] = false
@@ -159,10 +170,15 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 	// release its slot, allowing the goroutine's Submit to proceed.
 	go func() {
 		f := d.workerPool.Submit(func() (struct{}, error) {
+			nodeID := paramtable.GetStringNodeID()
+			metrics.WALFlusherSyncDispatcherQueueDuration.WithLabelValues(nodeID).Observe(time.Since(pt.enqueueAt).Seconds())
+
+			startTime := time.Now()
 			err := pt.task.Run(pt.ctx)
 			for _, cb := range pt.callbacks {
 				err = cb(err)
 			}
+			metrics.WALFlusherSyncDispatcherExecuteDuration.WithLabelValues(nodeID).Observe(time.Since(startTime).Seconds())
 			onComplete(err)
 			return struct{}{}, err
 		})
@@ -185,6 +201,7 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 // pending Future with context.Canceled. Should be called after the worker pool
 // has been released to clean up tasks that were never dispatched.
 func (d *keyLockDispatcher[K]) Close() {
+	nodeID := paramtable.GetStringNodeID()
 	err := context.Canceled
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -196,6 +213,7 @@ func (d *keyLockDispatcher[K]) Close() {
 			pt.resultCh <- err
 			close(pt.resultCh)
 			d.semaphore.Release()
+			metrics.WALFlusherSyncDispatcherPending.WithLabelValues(nodeID).Dec()
 		}
 		delete(d.queues, key)
 	}
