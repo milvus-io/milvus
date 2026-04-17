@@ -1,0 +1,88 @@
+name: Python Lint (tests/)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'tests/**/*.py'
+      - 'tests/pyproject.toml'
+      - 'tests/.python-version'
+      - 'tests/uv.lock'
+      - '.github/workflows/python-lint.yaml'
+  pull_request:
+    paths:
+      - 'tests/**/*.py'
+      - 'tests/pyproject.toml'
+      - 'tests/.python-version'
+      - 'tests/uv.lock'
+      - '.github/workflows/python-lint.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ruff:
+    name: Ruff (changed files only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need full history so we can diff against the base branch.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.21"
+
+      - name: Sync tooling
+        working-directory: tests
+        run: uv sync
+
+      - name: Resolve changed Python files under tests/
+        id: changed
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          else
+            # push event: diff against previous commit.
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+          fi
+          # Guard against empty/zero base_sha (e.g. first push to a new branch).
+          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+            base_sha="$(git rev-parse "$head_sha^" 2>/dev/null || echo "$head_sha")"
+          fi
+          files=$(git diff --name-only --diff-filter=AM "$base_sha" "$head_sha" \
+                    | grep -E '^tests/.*\.py$' || true)
+          if [ -z "$files" ]; then
+            echo "No Python files changed under tests/."
+            echo "files=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changed files:"
+            echo "$files"
+            # Join with spaces, single-line, for downstream xargs.
+            joined=$(echo "$files" | tr '\n' ' ')
+            echo "files=$joined" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: ruff check
+        if: steps.changed.outputs.files != ''
+        working-directory: tests
+        run: |
+          # Strip the leading "tests/" prefix since we run inside tests/.
+          files="$(echo '${{ steps.changed.outputs.files }}' | tr ' ' '\n' | sed 's#^tests/##' | tr '\n' ' ')"
+          uv run ruff check $files
+
+      - name: ruff format --check
+        if: steps.changed.outputs.files != ''
+        working-directory: tests
+        run: |
+          files="$(echo '${{ steps.changed.outputs.files }}' | tr ' ' '\n' | sed 's#^tests/##' | tr '\n' ' ')"
+          uv run ruff format --check $files
