@@ -89,7 +89,7 @@ func (s *WeightedFunctionSuite) TestNewWeightedFuction() {
 	{
 		functionSchema.InputFieldNames = []string{"ts"}
 		_, err := newWeightedFunction(schema, functionSchema)
-		s.ErrorContains(err, "The weighted function does not support input parameters,")
+		s.ErrorContains(err, "the weighted function does not support input parameters,")
 	}
 }
 

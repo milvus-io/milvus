@@ -72,7 +72,7 @@ type Node struct {
 func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 	for _, input := range n.inputs {
 		if _, ok := msg[input]; !ok {
-			return nil, fmt.Errorf("Node [%s]'s input %s not found", n.name, input)
+			return nil, fmt.Errorf("node [%s]'s input %s not found", n.name, input)
 		}
 	}
 	inputs := make([]any, len(n.inputs))
@@ -85,7 +85,7 @@ func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 func (n *Node) packOutputs(outputs []any, srcMsg opMsg) (opMsg, error) {
 	msg := srcMsg
 	if len(outputs) != len(n.outputs) {
-		return nil, fmt.Errorf("Node [%s] output size not match operator output size", n.name)
+		return nil, fmt.Errorf("node [%s] output size not match operator output size", n.name)
 	}
 	for i, output := range n.outputs {
 		msg[output] = outputs[i]

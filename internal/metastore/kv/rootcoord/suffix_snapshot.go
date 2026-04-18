@@ -97,7 +97,7 @@ var _ kv.SnapShotKV = (*SuffixSnapshot)(nil)
 // NewSuffixSnapshot creates a NewSuffixSnapshot with provided kv
 func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSnapshot, error) {
 	if metaKV == nil {
-		return nil, retry.Unrecoverable(errors.New("MetaKv is nil"))
+		return nil, retry.Unrecoverable(errors.New("metaKv is nil"))
 	}
 
 	// ensure snapshot has trailing '/'
@@ -636,7 +636,7 @@ func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
 
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	if !strings.HasPrefix(snapshotKey, ss.snapshotPrefix) {
-		return "", fmt.Errorf("get original key failed, invaild snapshot key:%s", snapshotKey)
+		return "", fmt.Errorf("get original key failed, invalid snapshot key:%s", snapshotKey)
 	}
 	// collect keys that parent node is snapshot node if the corresponding the latest ts is expired.
 	idx := strings.LastIndex(snapshotKey, ss.separator)
@@ -670,8 +670,8 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 // and removes expired versions or all versions if the original key has been deleted
 func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) error {
 	log := log.Ctx(ctx)
-	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
-	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
+	ttlTime := paramtable.Get().MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+	reserveTime := paramtable.Get().MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
 
 	candidateExpiredKeys := make([]string, 0)
 	latestOriginalKey := ""

@@ -70,22 +70,22 @@ func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.Functio
 	})
 
 	if len(funcSchema.GetOutputFieldNames()) != 0 {
-		return nil, fmt.Errorf("Rerank function output field names should be empty")
+		return nil, fmt.Errorf("rerank function output field names should be empty")
 	}
 
 	for _, name := range funcSchema.GetInputFieldNames() {
 		if name == "" {
-			return nil, fmt.Errorf("Rerank input field name cannot be empty string")
+			return nil, fmt.Errorf("rerank input field name cannot be empty string")
 		}
 		if lo.Count(funcSchema.GetInputFieldNames(), name) > 1 {
-			return nil, fmt.Errorf("Each function input field should be used exactly once in the same function, input field: %s", name)
+			return nil, fmt.Errorf("each function input field should be used exactly once in the same function, input field: %s", name)
 		}
 		inputField, ok := nameMap[name]
 		if !ok {
-			return nil, fmt.Errorf("Function input field not found: %s", name)
+			return nil, fmt.Errorf("function input field not found: %s", name)
 		}
 		if inputField.GetNullable() {
-			return nil, fmt.Errorf("Function input field cannot be nullable: field %s", inputField.GetName())
+			return nil, fmt.Errorf("function input field cannot be nullable: field %s", inputField.GetName())
 		}
 		base.inputFieldIDs = append(base.inputFieldIDs, inputField.FieldID)
 		base.inputFieldTypes = append(base.inputFieldTypes, inputField.DataType)

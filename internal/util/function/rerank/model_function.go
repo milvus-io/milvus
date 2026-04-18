@@ -116,11 +116,11 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	}
 
 	if len(base.GetInputFieldNames()) != 1 {
-		return nil, fmt.Errorf("Rerank model only supports single input, but gets [%s] input", base.GetInputFieldNames())
+		return nil, fmt.Errorf("rerank model only supports single input, but gets [%s] input", base.GetInputFieldNames())
 	}
 
 	if base.GetInputFieldTypes()[0] != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("Rerank model only support varchar, bug got [%s]", base.GetInputFieldTypes()[0].String())
+		return nil, fmt.Errorf("rerank model only support varchar, bug got [%s]", base.GetInputFieldTypes()[0].String())
 	}
 
 	provider, err := newProvider(funcSchema.Params, extraInfo)
@@ -132,12 +132,12 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	for _, param := range funcSchema.Params {
 		if param.Key == queryKeyName {
 			if err := json.Unmarshal([]byte(param.Value), &queries); err != nil {
-				return nil, fmt.Errorf("Parse rerank params [queries] failed, err: %v", err)
+				return nil, fmt.Errorf("parse rerank params [queries] failed, err: %v", err)
 			}
 		}
 	}
 	if len(queries) == 0 {
-		return nil, fmt.Errorf("Rerank function lost params queries")
+		return nil, fmt.Errorf("rerank function lost params queries")
 	}
 
 	if base.pkType == schemapb.DataType_Int64 {
@@ -180,7 +180,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 			return nil, err
 		}
 		if len(newScores) != end-i {
-			return nil, fmt.Errorf("Call Rerank service failed, %d docs but got %d scores", end-i, len(newScores))
+			return nil, fmt.Errorf("call rerank service failed, %d docs but got %d scores", end-i, len(newScores))
 		}
 		scores = append(scores, newScores...)
 	}
