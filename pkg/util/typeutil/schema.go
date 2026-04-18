@@ -2547,4 +2547,3 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 	}
 	return false
 }
-

@@ -1344,7 +1344,6 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	suite.Len(addedTasks, 0)
 }
 
-
 func TestSegmentCheckerSuite(t *testing.T) {
 	suite.Run(t, new(SegmentCheckerTestSuite))
 }
