@@ -508,10 +508,20 @@ func (o *idfOracle) diskSize() int64 {
 	return o.sealedDiskSize.Load()
 }
 
+// resourceTrackingEnabled reports whether to charge/refund the C++ caching layer.
+// When tiered storage eviction is disabled, the caching layer's resource accounting is
+// inert (no eviction will be driven by it), so we skip the cgo calls entirely.
+func resourceTrackingEnabled() bool {
+	return paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool()
+}
+
 // syncResource precisely syncs resource usage to the caching layer.
 // Used for segment lifecycle events (Register/Unregister/SyncDistribution).
 // Caller must NOT hold the RWMutex.
 func (o *idfOracle) syncResource() {
+	if !resourceTrackingEnabled() {
+		return
+	}
 	actualMem := o.MemorySize()
 	actualDisk := o.diskSize()
 
@@ -524,6 +534,9 @@ func (o *idfOracle) syncResource() {
 // Only charges (with headroom), never refunds. Used in Insert path (UpdateGrowing).
 // Caller must hold RWMutex.Lock (so memSize is safe to call without RLock).
 func (o *idfOracle) checkMemoryResource() {
+	if !resourceTrackingEnabled() {
+		return
+	}
 	actualMem := o.memSize()
 
 	o.resourceMu.Lock()
