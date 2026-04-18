@@ -340,69 +340,66 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     AssertInfo(cur_column_group, "current column groups shall not be null");
     AssertInfo(new_column_group, "new column groups shall not be null");
 
-    // Build a set of current FieldIds from current column groups
-    std::map<int64_t, int> cur_field_ids;
-    for (int i = 0; i < cur_column_group->size(); i++) {
-        auto cg = cur_column_group->at(i);
+    // The loon manifest gives no ordering guarantee on the column-groups
+    // vector, so we don't try to pair cur/new groups by position or by a
+    // synthesized leader. For each field we only ask: "is it present in
+    // current, and did its backing files change?" — field-level existence
+    // plus per-field file-list comparison is enough to classify
+    // new/replace/unchanged without any group-identity assumption.
+    std::map<int64_t, const std::vector<milvus_storage::api::ColumnGroupFile>*>
+        cur_field_to_files;
+    for (const auto& cg : *cur_column_group) {
+        if (!cg) {
+            continue;
+        }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_ids.emplace(field_id, i);
+            cur_field_to_files[field_id] = &cg->files;
         }
     }
 
-    // Per-index flag: set when the column group at index i has the same
-    // shape but a different underlying file list between current and new.
-    // Post-compaction manifests frequently keep the column-group layout
-    // identical while pointing at different parquet files; without this
-    // detection the field falls into the else branch below and the
-    // loader never rebuilds the reader.
-    std::vector<bool> group_files_changed(new_column_group->size(), false);
-    size_t shared_cg_count =
-        std::min(cur_column_group->size(), new_column_group->size());
-    for (size_t i = 0; i < shared_cg_count; i++) {
-        const auto& cur_cg = cur_column_group->at(i);
-        const auto& new_cg = new_column_group->at(i);
-        if (!cur_cg || !new_cg) {
-            continue;
+    auto same_files =
+        [](const std::vector<milvus_storage::api::ColumnGroupFile>& a,
+           const std::vector<milvus_storage::api::ColumnGroupFile>& b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
         }
-        const auto& cur_files = cur_cg->files;
-        const auto& new_files = new_cg->files;
-        if (cur_files.size() != new_files.size()) {
-            group_files_changed[i] = true;
-            continue;
-        }
-        for (size_t j = 0; j < cur_files.size(); j++) {
-            if (cur_files[j].path != new_files[j].path) {
-                group_files_changed[i] = true;
-                break;
+        for (size_t j = 0; j < a.size(); j++) {
+            if (a[j].path != b[j].path) {
+                return false;
             }
         }
-    }
+        return true;
+    };
 
-    // Build a set of new FieldIds and find column groups to load/replace
-    std::map<int64_t, int> new_field_ids;
+    // Find column groups to load/replace on the new side
+    std::set<int64_t> new_seen_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->at(i);
+        if (!cg) {
+            continue;
+        }
         std::vector<FieldId> fields;
         std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
         std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            new_field_ids.emplace(field_id, i);
+            new_seen_field_ids.emplace(field_id);
 
-            auto iter = cur_field_ids.find(field_id);
+            auto cur_iter = cur_field_to_files.find(field_id);
             bool was_default_filled =
                 fields_filled_with_default_.count(FieldId(field_id)) > 0;
             bool is_new_field =
-                iter == cur_field_ids.end() && !was_default_filled;
-            bool same_position_files_changed = iter != cur_field_ids.end() &&
-                                               iter->second == i &&
-                                               group_files_changed[i];
-            bool is_replace_field =
-                was_default_filled ||
-                (iter != cur_field_ids.end() && iter->second != i) ||
-                same_position_files_changed;
+                cur_iter == cur_field_to_files.end() && !was_default_filled;
+            // A field that was present in current must go to replace when
+            // its backing files changed — whether that's the same group
+            // rewriting its parquet (compaction) or the field landing in
+            // a different group with a different file set. Either way the
+            // cached chunks are stale.
+            bool files_changed = cur_iter != cur_field_to_files.end() &&
+                                 !same_files(*cur_iter->second, cg->files);
+            bool is_replace_field = was_default_filled || files_changed;
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
@@ -458,8 +455,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     }
 
     // Find field data to drop: fields in current but not in new
-    for (const auto& [field_id, cg_index] : cur_field_ids) {
-        if (new_field_ids.find(field_id) == new_field_ids.end()) {
+    for (const auto& [field_id, files_ptr] : cur_field_to_files) {
+        if (new_seen_field_ids.find(field_id) == new_seen_field_ids.end()) {
             diff.field_data_to_drop.emplace(field_id);
         }
     }
