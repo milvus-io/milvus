@@ -580,7 +580,6 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	return fieldsData, nil
 }
 
-
 const (
 	lambdaParamKey = "lambda"
 )

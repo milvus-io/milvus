@@ -77,7 +77,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-
 // UniqueID is an alias of typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
 
