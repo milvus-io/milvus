@@ -223,8 +223,8 @@ type decayReScorer func(float64, float64, float64, float64, float64) float64
 
 func gaussianDecay(origin, scale, decay, offset, distance float64) float64 {
 	adjustedDist := math.Max(0, math.Abs(distance-origin)-offset)
-	sigmaSquare := math.Pow(scale, 2.0) / math.Log(decay)
-	exponent := math.Pow(adjustedDist, 2.0) / sigmaSquare
+	sigmaSquare := scale * scale / math.Log(decay)
+	exponent := adjustedDist * adjustedDist / sigmaSquare
 	return math.Exp(exponent)
 }
 
