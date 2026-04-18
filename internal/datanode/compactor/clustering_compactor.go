@@ -662,11 +662,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for _, v := range vs {
 			offset++
 
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
 				return errors.New("unexpected error")

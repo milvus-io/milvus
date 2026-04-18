@@ -76,7 +76,7 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 		case L0PreImportTaskType:
 			t.(*L0PreImportTask).State = state
 		case L0ImportTaskType:
-			t.(*L0ImportTask).ImportTaskV2.State = state
+			t.(*L0ImportTask).State = state
 		}
 	}
 }
@@ -91,7 +91,7 @@ func UpdateReason(reason string) UpdateAction {
 		case L0PreImportTaskType:
 			t.(*L0PreImportTask).Reason = reason
 		case L0ImportTaskType:
-			t.(*L0ImportTask).ImportTaskV2.Reason = reason
+			t.(*L0ImportTask).Reason = reason
 		}
 	}
 }

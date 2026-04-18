@@ -506,10 +506,11 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				Nullable:     tt.nullable,
 				DefaultValue: tt.defaultVal,
 			}
-			if tt.dataType == schemapb.DataType_Array {
+			switch tt.dataType {
+			case schemapb.DataType_Array:
 				fieldSchema.ElementType = schemapb.DataType_Int64
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
-			} else if tt.dataType == schemapb.DataType_VarChar {
+			case schemapb.DataType_VarChar:
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
 			}
 

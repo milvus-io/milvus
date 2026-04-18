@@ -238,7 +238,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// Currently, flusher works as a separate component.
 		defer func() {
 			impl.lastDispatchTimeTick = timetick
-			if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			if err = impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 				impl.logger.Warn("failed to observe message", zap.Error(err))
 			}
 		}()

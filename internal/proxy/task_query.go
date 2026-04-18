@@ -335,7 +335,7 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		return err
 	}
 	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
+	t.OutputFieldsId = outputFieldIDs
 	t.plan.OutputFieldIds = outputFieldIDs
 	t.plan.DynamicFields = t.userDynamicFields
 	log.Ctx(ctx).Debug("translate output fields to field ids",

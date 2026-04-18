@@ -2428,7 +2428,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	if err != nil {
 		return err
 	}
-	namespaceIsSet := insertMsg.InsertRequest.Namespace != nil
+	namespaceIsSet := insertMsg.Namespace != nil
 
 	if namespaceEnabeld != namespaceIsSet {
 		if namespaceIsSet {
