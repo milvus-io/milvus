@@ -563,7 +563,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 			s.NoError(err)
 
 			_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
-			s.ErrorContains(err, "search reaults mismatch rerank inputs")
+			s.ErrorContains(err, "search results mismatch rerank inputs")
 		}
 	}
 

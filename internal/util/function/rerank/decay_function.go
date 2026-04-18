@@ -80,7 +80,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[int64, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
+			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
 		}
 	} else {
 		switch inputType {
@@ -93,7 +93,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		case schemapb.DataType_Double:
 			return newFunction[string, float64](base, funcSchema)
 		default:
-			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numberic field", inputType.String())
+			return nil, fmt.Errorf("decay rerank: unsupported input field type:%s, only support numeric field", inputType.String())
 		}
 	}
 }
@@ -170,7 +170,7 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	case linearFunction:
 		decayFunc.reScorer = linearDecay
 	default:
-		return nil, fmt.Errorf("invaild decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
+		return nil, fmt.Errorf("invalid decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
 	}
 	return decayFunc, nil
 }

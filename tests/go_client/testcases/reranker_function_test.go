@@ -608,7 +608,7 @@ func TestRerankFunctionDecayNegative(t *testing.T) {
 		decay         interface{}
 		expectedError string
 	}{
-		{"invalid_function_type", "invalid", defaultTimestamp, 3600, 0.1, "invaild decay function"},
+		{"invalid_function_type", "invalid", defaultTimestamp, 3600, 0.1, "invalid decay function"},
 		{"negative_scale", "linear", defaultTimestamp, -3600, 0.1, "scale must > 0"},
 		{"invalid_origin_format", "linear", "invalid", 3600, 0.1, "is not a number"},
 		{"invalid_decay_range", "linear", defaultTimestamp, 3600, 1.5, "decay must 0 < decay < 1"},

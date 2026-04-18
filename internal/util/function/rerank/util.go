@@ -72,7 +72,7 @@ func organizeFieldIdData(multipSearchResultData []*schemapb.SearchResultData, in
 				}
 			}
 			if len(idField) != len(inputFieldIds) {
-				return nil, fmt.Errorf("search reaults mismatch rerank inputs")
+				return nil, fmt.Errorf("search results mismatch rerank inputs")
 			}
 		}
 		multipIdField = append(multipIdField, idField)
@@ -431,7 +431,7 @@ func getMergeFunc[T PKType](name string) (scoreMergeFunc[T], error) {
 	case "sum":
 		return sumMerge[T], nil
 	default:
-		return nil, fmt.Errorf("unsupport score mode: [%s], only supports: [max, avg, sum]", name)
+		return nil, fmt.Errorf("unsupported score mode: [%s], only supports: [max, avg, sum]", name)
 	}
 }
 

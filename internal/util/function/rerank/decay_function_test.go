@@ -96,7 +96,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 		functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normsScorekey, Value: "true"}
 		functionSchema.Params[6] = &commonpb.KeyValuePair{Key: scoreMode, Value: "unknow"}
 		_, err = newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "unsupport score mode")
+		s.ErrorContains(err, "unsupported score mode")
 	}
 
 	{
@@ -154,7 +154,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 		}
 		functionSchema.Params[4].Value = "NotExist"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "invaild decay function:")
+		s.ErrorContains(err, "invalid decay function:")
 		functionSchema.Params[4].Value = "exp"
 	}
 
@@ -300,7 +300,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 
 		_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
-		s.ErrorContains(err, "search reaults mismatch rerank inputs")
+		s.ErrorContains(err, "search results mismatch rerank inputs")
 	}
 
 	// singleSearchResultData
