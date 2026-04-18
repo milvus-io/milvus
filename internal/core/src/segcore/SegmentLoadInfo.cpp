@@ -363,6 +363,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         }
     }
 
+    // Compare path + row range: storage v2 packed files can share a path
+    // across compactions while the row window (start_index/end_index)
+    // changes, so path-only comparison would leave stale cache in place.
     auto same_files =
         [](const std::vector<milvus_storage::api::ColumnGroupFile>& a,
            const std::vector<milvus_storage::api::ColumnGroupFile>& b) -> bool {
@@ -370,7 +373,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             return false;
         }
         for (size_t j = 0; j < a.size(); j++) {
-            if (a[j].path != b[j].path) {
+            if (a[j].path != b[j].path ||
+                a[j].start_index != b[j].start_index ||
+                a[j].end_index != b[j].end_index) {
                 return false;
             }
         }

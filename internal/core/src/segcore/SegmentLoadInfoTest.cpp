@@ -2585,3 +2585,57 @@ TEST_F(SegmentLoadInfoTest,
     }
     EXPECT_EQ(emissions_for_106, 1);
 }
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSamePathDifferentRowRangeTriggersReplace) {
+    // Same file path on both sides, but the row range (start_index /
+    // end_index) differs — e.g. compaction re-slices a packed file.
+    // path-only comparison would miss this and leave stale cache.
+    auto make_cgs = [](int64_t start, int64_t end) {
+        auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+        auto pk_cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        pk_cg->format = "parquet";
+        pk_cg->columns.push_back("100");
+        milvus_storage::api::ColumnGroupFile pk_file;
+        pk_file.path = "/pk/file.parquet";
+        pk_file.start_index = 0;
+        pk_file.end_index = 0;
+        pk_cg->files.push_back(std::move(pk_file));
+        cgs->push_back(std::move(pk_cg));
+
+        auto user_cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        user_cg->format = "parquet";
+        user_cg->columns.push_back("105");
+        user_cg->columns.push_back("106");
+        milvus_storage::api::ColumnGroupFile user_file;
+        user_file.path = "/user/packed.parquet";
+        user_file.start_index = start;
+        user_file.end_index = end;
+        user_cg->files.push_back(std::move(user_file));
+        cgs->push_back(std::move(user_cg));
+        return cgs;
+    };
+
+    auto current_cgs = make_cgs(0, 500);
+    auto new_cgs = make_cgs(500, 1000);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        std::set<int64_t> ids;
+        for (auto f : fields) {
+            ids.insert(f.get());
+        }
+        if (ids == std::set<int64_t>{105, 106}) {
+            saw_user_group = true;
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+}
