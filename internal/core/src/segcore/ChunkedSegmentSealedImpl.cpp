@@ -2727,8 +2727,11 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     }
 
     // load column groups
-    if (!diff.column_groups_to_load.empty() ||
-        !diff.column_groups_to_lazyload.empty()) {
+    bool has_cg_changes = !diff.column_groups_to_load.empty() ||
+                          !diff.column_groups_to_replace.empty() ||
+                          !diff.column_groups_to_lazyload.empty() ||
+                          !diff.column_groups_to_lazyreplace.empty();
+    if (has_cg_changes) {
         auto properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
@@ -2736,6 +2739,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         auto arrow_schema = schema_->ConvertToArrowSchema();
         reader_ = milvus_storage::api::Reader::create(
             column_groups, arrow_schema, nullptr, *properties);
+        // New column group fields
         if (!diff.column_groups_to_load.empty()) {
             LoadColumnGroups(
                 column_groups, properties, diff.column_groups_to_load, true);
@@ -2745,6 +2749,25 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
                              properties,
                              diff.column_groups_to_lazyload,
                              false);
+        }
+        // Replace column group fields — used when the group shape stayed the
+        // same but files changed (e.g. compaction rewrote the parquet) so we
+        // must evict the stale column before installing the new one.
+        if (!diff.column_groups_to_replace.empty()) {
+            LoadColumnGroups(column_groups,
+                             properties,
+                             diff.column_groups_to_replace,
+                             true,
+                             /*op_ctx=*/nullptr,
+                             /*is_replace=*/true);
+        }
+        if (!diff.column_groups_to_lazyreplace.empty()) {
+            LoadColumnGroups(column_groups,
+                             properties,
+                             diff.column_groups_to_lazyreplace,
+                             false,
+                             /*op_ctx=*/nullptr,
+                             /*is_replace=*/true);
         }
     }
 
@@ -2944,7 +2967,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
     std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     bool eager_load,
-    milvus::OpContext* op_ctx) {
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
     for (const auto& pair : cg_field_ids) {
@@ -2955,9 +2979,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                    properties,
                                    cg_index,
                                    field_ids,
-                                   eager_load]() {
-            LoadColumnGroup(
-                column_groups, properties, cg_index, field_ids, eager_load);
+                                   eager_load,
+                                   op_ctx,
+                                   is_replace]() {
+            LoadColumnGroup(column_groups,
+                            properties,
+                            cg_index,
+                            field_ids,
+                            eager_load,
+                            op_ctx,
+                            is_replace);
         });
         load_group_futures.emplace_back(std::move(future));
     }
@@ -2972,7 +3003,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     bool eager_load,
-    milvus::OpContext* op_ctx) {
+    milvus::OpContext* op_ctx,
+    bool is_replace) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
     auto column_group = column_groups->get_column_group(index);
@@ -3069,7 +3101,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             data_type,
             use_mmap,
             true,
-            op_ctx);  // manifest cannot provide parquet skip index directly
+            op_ctx,
+            is_replace);  // manifest cannot provide parquet skip index directly
         if (field_id == TimestampFieldID) {
             auto timestamp_proxy_column = get_column(TimestampFieldID);
             AssertInfo(timestamp_proxy_column != nullptr,
