@@ -130,7 +130,7 @@ type FunctionScore struct {
 
 func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Reranker, error) {
 	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
-		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
+		return nil, fmt.Errorf("%s is not rerank function", funcSchema.GetType().String())
 	}
 	if len(funcSchema.GetOutputFieldNames()) != 0 {
 		return nil, fmt.Errorf("rerank function should not have output field, but now is %d", len(funcSchema.GetOutputFieldNames()))

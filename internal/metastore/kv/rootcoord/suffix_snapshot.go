@@ -451,7 +451,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 			return nil
 		}
 
-		err := ss.MetaKv.WalkWithPrefix(ctx, key, ss.paginationSize, applyFn)
+		err := ss.WalkWithPrefix(ctx, key, ss.paginationSize, applyFn)
 		return fks, fvs, err
 	}
 	ss.Lock()
@@ -474,7 +474,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 		resultValues = append(resultValues, value)
 	}
 
-	err := ss.MetaKv.WalkWithPrefix(ctx, prefix, ss.paginationSize, func(k []byte, v []byte) error {
+	err := ss.WalkWithPrefix(ctx, prefix, ss.paginationSize, func(k []byte, v []byte) error {
 		sKey := string(k)
 		sValue := string(v)
 
@@ -659,7 +659,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []
 		keyGroup = keyGroup[0 : len(keyGroup)-1]
 	}
 	removeFn := func(partialKeys []string) error {
-		return ss.MetaKv.MultiRemove(ctx, partialKeys)
+		return ss.MultiRemove(ctx, partialKeys)
 	}
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	return etcd.RemoveByBatchWithLimit(keyGroup, maxTxnNum, removeFn)
@@ -704,7 +704,7 @@ func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) e
 	}
 
 	// Walk through all keys with the snapshot prefix
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
+	err := ss.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
 		key := ss.hideRootPrefix(string(k))
 		ts, ok := ss.isTSKey(key)
 		if !ok {
