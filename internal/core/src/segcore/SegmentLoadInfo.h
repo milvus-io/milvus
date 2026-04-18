@@ -703,6 +703,17 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups();
 
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
+
     // ==================== Stats & Delta Logs ====================
 
     [[nodiscard]] int
