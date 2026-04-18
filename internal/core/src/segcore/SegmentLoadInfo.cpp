@@ -183,6 +183,23 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
     }
 
+    // Two FieldBinlogs at the same group id are equivalent only when their
+    // underlying log files (log_path sequence) match. Compaction/version
+    // bumps can swap files under the same fieldid, and without detecting
+    // that here the loader never evicts the stale column cache.
+    auto same_binlog_files = [](const proto::segcore::FieldBinlog& a,
+                                const proto::segcore::FieldBinlog& b) -> bool {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     std::map<int64_t, int64_t> new_binlog_fields;
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
@@ -195,25 +212,37 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         if (child_fields.empty()) {
             child_fields.emplace_back(new_field_binlog.fieldid());
         }
+
+        auto* cur_field_binlog =
+            GetFieldBinlog(FieldId(new_field_binlog.fieldid()));
+        bool group_files_changed =
+            cur_field_binlog != nullptr &&
+            !same_binlog_files(*cur_field_binlog, new_field_binlog);
+
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             // current_fields is keyed by child field id (see loop above);
             // look up by child_id, not by the new group id.
             auto iter = current_fields.find(child_id);
-            // Load/replace this child if it's absent from current or its
-            // group moved to a different binlog.
-            if (iter == current_fields.end() ||
-                iter->second != new_field_binlog.fieldid()) {
-                // Route through the replace path if the child already has a
-                // column installed — either a prior binlog load or a default
-                // value filled during schema evolution. Otherwise it's a
-                // fresh load.
-                if (iter != current_fields.end() ||
-                    IsFieldFilledWithDefault(FieldId(child_id))) {
-                    ids_to_replace.emplace_back(child_id);
-                } else {
-                    ids_to_load.emplace_back(child_id);
-                }
+            // A binlog entry needs (re)loading when either
+            //   (a) the group mapping differs between current and new, or
+            //   (b) the group maps the same way but the underlying log
+            //       files changed (e.g. compaction rewrote the segment).
+            bool group_mapping_differs =
+                iter == current_fields.end() ||
+                iter->second != new_field_binlog.fieldid();
+            if (!group_mapping_differs && !group_files_changed) {
+                continue;
+            }
+            // Route through the replace path if the child already has a
+            // column installed — either a prior binlog load or a default
+            // value filled during schema evolution. Otherwise it's a
+            // fresh load.
+            if (iter != current_fields.end() ||
+                IsFieldFilledWithDefault(FieldId(child_id))) {
+                ids_to_replace.emplace_back(child_id);
+            } else {
+                ids_to_load.emplace_back(child_id);
             }
         }
         if (!ids_to_load.empty()) {
@@ -242,50 +271,106 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     AssertInfo(cur_column_group, "current column groups shall not be null");
     AssertInfo(new_column_group, "new column groups shall not be null");
 
-    // Build a set of current FieldIds from current column groups
-    std::map<int64_t, int> cur_field_ids;
+    // The loon manifest gives no ordering guarantee on the column-groups
+    // vector, so we don't try to pair cur/new groups by position or by a
+    // synthesized leader. For each field we only ask: "is it present in
+    // current, and did its backing files change?" — field-level existence
+    // plus per-field file-list comparison is enough to classify
+    // new/replace/unchanged without any group-identity assumption.
+    std::map<int64_t, const std::vector<milvus_storage::api::ColumnGroupFile>*>
+        cur_field_to_files;
     for (int i = 0; i < cur_column_group->size(); i++) {
         auto cg = cur_column_group->get_column_group(i);
+        if (!cg) {
+            continue;
+        }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_ids.emplace(field_id, i);
+            cur_field_to_files[field_id] = &cg->files;
         }
     }
 
-    // Build a set of new FieldIds and find column groups to load
-    std::map<int64_t, int> new_field_ids;
+    auto same_files =
+        [](const std::vector<milvus_storage::api::ColumnGroupFile>& a,
+           const std::vector<milvus_storage::api::ColumnGroupFile>& b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (size_t j = 0; j < a.size(); j++) {
+            if (a[j].path != b[j].path) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Find column groups to load/replace on the new side
+    std::set<int64_t> new_seen_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->get_column_group(i);
+        if (!cg) {
+            continue;
+        }
         std::vector<FieldId> fields;
+        std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
+        std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            new_field_ids.emplace(field_id, i);
+            new_seen_field_ids.emplace(field_id);
 
-            auto iter = cur_field_ids.find(field_id);
-            // If this field doesn't exist in current, mark the column group for loading
-            if (iter == cur_field_ids.end() || iter->second != i) {
+            auto cur_iter = cur_field_to_files.find(field_id);
+            bool was_default_filled =
+                IsFieldFilledWithDefault(FieldId(field_id));
+            bool is_new_field =
+                cur_iter == cur_field_to_files.end() && !was_default_filled;
+            // A field that was present in current must go to replace when
+            // its backing files changed — whether that's the same group
+            // rewriting its parquet (compaction) or the field landing in
+            // a different group with a different file set. Either way the
+            // cached chunks are stale.
+            bool files_changed = cur_iter != cur_field_to_files.end() &&
+                                 !same_files(*cur_iter->second, cg->files);
+            bool is_replace_field = was_default_filled || files_changed;
+
+            auto classify = [&](std::vector<FieldId>& eager,
+                                std::vector<FieldId>& lazy) {
                 if (schema_->ShouldLoadField(FieldId(field_id)) &&
                     field_index_has_raw_data_.find(FieldId(field_id)) ==
                         field_index_has_raw_data_.end()) {
-                    fields.emplace_back(field_id);
+                    eager.emplace_back(field_id);
                 } else {
-                    // put lazy load & index_has_raw_data field in lazy_fields
-                    lazy_fields.emplace_back(field_id);
+                    // lazy load & index_has_raw_data fields go to lazy bucket
+                    lazy.emplace_back(field_id);
                 }
+            };
+
+            if (is_new_field) {
+                classify(fields, lazy_fields);
+            } else if (is_replace_field) {
+                classify(replace_fields, lazy_replace_fields);
             }
+            // else: field in current at a group with identical files —
+            // nothing to emit.
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);
         }
+        if (!replace_fields.empty()) {
+            diff.column_groups_to_replace.emplace_back(i, replace_fields);
+        }
         if (!lazy_fields.empty()) {
             diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        }
+        if (!lazy_replace_fields.empty()) {
+            diff.column_groups_to_lazyreplace.emplace_back(i,
+                                                           lazy_replace_fields);
         }
     }
 
     // Find field data to drop: fields in current but not in new
-    for (const auto& [field_id, cg_index] : cur_field_ids) {
-        if (new_field_ids.find(field_id) == new_field_ids.end()) {
+    for (const auto& [field_id, files_ptr] : cur_field_to_files) {
+        if (new_seen_field_ids.find(field_id) == new_seen_field_ids.end()) {
             diff.field_data_to_drop.emplace(field_id);
         }
     }

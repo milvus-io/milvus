@@ -819,3 +819,306 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
     EXPECT_TRUE(diff.binlogs_to_load.empty());
     EXPECT_TRUE(diff.field_data_to_drop.empty());
 }
+
+// -----------------------------------------------------------------------------
+// Tests for same-group file-change detection in ComputeDiffBinlogs and
+// ComputeDiffColumnGroups.
+// When compaction rewrites the data under the same group id / column group
+// index, the files list changes but the field layout does not. These tests
+// verify that the diff emits replace entries so the loader can evict stale
+// cached columns.
+// -----------------------------------------------------------------------------
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupDifferentFilesTriggersReplace) {
+    // Current: legacy field 105 pointing at binlog A
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_A");
+    cur_log->set_entries_num(1000);
+
+    // New: same group id, same child field, but a different log_path
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    new_proto.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/binlog_B");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.HasChanges());
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupDifferentFileCountTriggersReplace) {
+    // Current: legacy field 105 with one binlog file
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_A");
+    cur_log->set_entries_num(500);
+
+    // New: same group id, same child, but an additional binlog file (post
+    // compaction merging more files into the same group).
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* extra_log = new_proto.mutable_binlog_paths(0)->add_binlogs();
+    extra_log->set_log_path("/path/to/binlog_B");
+    extra_log->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogSameGroupIdenticalFilesNoDiff) {
+    // Current and new have identical binlog contents under group 105.
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(105);
+    auto* log1 = binlog->add_binlogs();
+    log1->set_log_path("/path/to/binlog_A");
+    log1->set_entries_num(500);
+    auto* log2 = binlog->add_binlogs();
+    log2->set_log_path("/path/to/binlog_B");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupFilesChangedWithNewChildSplitsReplaceAndLoad) {
+    // Current: multi-field group 200 contains only child 105
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(200);
+    cur_binlog->add_child_fields(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/group_binlog_A");
+    cur_log->set_entries_num(1000);
+
+    // New: same group id 200 but files changed AND child 106 is newly added.
+    // Expect: 105 -> replace (already loaded, cache stale), 106 -> load (new).
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(200);
+    new_binlog->add_child_fields(105);
+    new_binlog->add_child_fields(106);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/group_binlog_B");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 106);
+
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+// ---- Column group same-index file-change detection ----
+
+namespace {
+
+// Build a ColumnGroups payload from a list of (fields, files) pairs so
+// tests can exercise ComputeDiffColumnGroups without a real manifest.
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+MakeColumnGroups(
+    std::initializer_list<
+        std::pair<std::vector<int64_t>, std::vector<std::string>>> groups) {
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto& [field_ids, paths] : groups) {
+        auto cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        cg->format = "parquet";
+        for (auto fid : field_ids) {
+            cg->columns.push_back(std::to_string(fid));
+        }
+        for (const auto& p : paths) {
+            milvus_storage::api::ColumnGroupFile f;
+            f.path = p;
+            f.start_index = 0;
+            f.end_index = 0;
+            cg->files.push_back(std::move(f));
+        }
+        auto st = cgs->add_column_group(std::move(cg));
+        EXPECT_TRUE(st.ok()) << st.ToString();
+    }
+    return cgs;
+}
+
+proto::segcore::SegmentLoadInfo
+MakeManifestProto(const std::string& manifest_path) {
+    proto::segcore::SegmentLoadInfo p;
+    p.set_segmentid(100);
+    p.set_num_of_rows(1000);
+    p.set_manifest_path(manifest_path);
+    return p;
+}
+
+}  // namespace
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexDifferentFilesTriggersReplace) {
+    // Two column groups with identical shape {105,106} at index 1, but the
+    // new manifest points at different parquet files. The pk (100) is in
+    // its own group at index 0 so it stays untouched.
+    auto current_cgs =
+        MakeColumnGroups({{{100}, {"/pk/file_A.parquet"}},
+                          {{105, 106}, {"/user/file_A.parquet"}}});
+    auto new_cgs = MakeColumnGroups({{{100}, {"/pk/file_A.parquet"}},
+                                     {{105, 106}, {"/user/file_B.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // User fields (105, 106) at the unchanged index 1 must be replaced
+    // since the underlying parquet file changed.
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        if (idx == 1) {
+            saw_user_group = true;
+            std::set<int64_t> ids;
+            for (auto f : fields) {
+                ids.insert(f.get());
+            }
+            EXPECT_EQ(ids, (std::set<int64_t>{105, 106}));
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+    // PK group (index 0) had identical files; no replace entry for it.
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        EXPECT_NE(idx, 0);
+    }
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexIdenticalFilesNoReplace) {
+    auto cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}}, {{105, 106}, {"/user/file.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
+    current_info.SetColumnGroupsForTesting(cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v1"), schema_);
+    new_info.SetColumnGroupsForTesting(cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexDifferentFileCountTriggersReplace) {
+    auto current_cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}}, {{105, 106}, {"/user/a.parquet"}}});
+    auto new_cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}},
+         {{105, 106}, {"/user/a.parquet", "/user/b.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        if (idx == 1) {
+            saw_user_group = true;
+            std::set<int64_t> ids;
+            for (auto f : fields) {
+                ids.insert(f.get());
+            }
+            EXPECT_EQ(ids, (std::set<int64_t>{105, 106}));
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupMovedFieldNotDoubleEmittedWithFilesChanged) {
+    // Current: field 106 lives at column-group index 1 (alongside 105).
+    // New: field 106 moves to a new column-group index 2, and the files
+    //      at index 1 also differ. 106 must appear exactly once in the
+    //      diff — as a "moved" entry under group 2, not also under 1.
+    auto current_cgs =
+        MakeColumnGroups({{{100}, {"/pk/file.parquet"}},
+                          {{105, 106}, {"/user/file_A.parquet"}}});
+    auto new_cgs = MakeColumnGroups({{{100}, {"/pk/file.parquet"}},
+                                     {{105}, {"/user/file_B.parquet"}},
+                                     {{106}, {"/moved/file.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    int emissions_for_106 = 0;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    for (const auto& [idx, fields] : diff.column_groups_to_lazyreplace) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    for (const auto& [idx, fields] : diff.column_groups_to_load) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    EXPECT_EQ(emissions_for_106, 1);
+}

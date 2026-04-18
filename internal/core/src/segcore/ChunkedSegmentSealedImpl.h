@@ -981,7 +981,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
         bool eager_load,
-        milvus::OpContext* op_ctx = nullptr);
+        milvus::OpContext* op_ctx = nullptr,
+        bool is_replace = false);
 
     /**
      * @brief Load a single column group at the specified index
@@ -1002,7 +1003,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids,
         bool eager_load,
-        milvus::OpContext* op_ctx = nullptr);
+        milvus::OpContext* op_ctx = nullptr,
+        bool is_replace = false);
 
     /**
      * @brief Reloads columns from the specified field IDs

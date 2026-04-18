@@ -57,9 +57,19 @@ struct LoadDiff {
     // same index could appear multiple times if same group using different setups
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
 
+    // list of column group indices and related field ids to replace. Used
+    // when the group shape (columns) stayed the same but the backing parquet
+    // files changed (e.g. compaction rewrote the segment) so the loader must
+    // evict the stale cached column before installing the new one.
+    std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_replace;
+
     // list of column group indices and related field ids to lazy load
     // used for lazy load fields or fields with index has raw data
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_lazyload;
+
+    // lazy-equivalent of column_groups_to_replace.
+    std::vector<std::pair<int, std::vector<FieldId>>>
+        column_groups_to_lazyreplace;
 
     std::vector<FieldId> fields_to_reload;
 
@@ -80,6 +90,9 @@ struct LoadDiff {
     HasChanges() const {
         return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
                !binlogs_to_replace.empty() || !column_groups_to_load.empty() ||
+               !column_groups_to_replace.empty() ||
+               !column_groups_to_lazyload.empty() ||
+               !column_groups_to_lazyreplace.empty() ||
                !fields_to_reload.empty() || !indexes_to_drop.empty() ||
                !field_data_to_drop.empty() || manifest_updated;
     }
@@ -143,6 +156,58 @@ struct LoadDiff {
         oss << "column_groups_to_load=[";
         first = true;
         for (const auto& [group_idx, field_ids] : column_groups_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_replace
+        oss << "column_groups_to_replace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_lazyload
+        oss << "column_groups_to_lazyload=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_lazyload) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_lazyreplace
+        oss << "column_groups_to_lazyreplace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] :
+             column_groups_to_lazyreplace) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -563,6 +628,17 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups();
+
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
 
     // ==================== Stats & Delta Logs ====================
 
