@@ -45,6 +45,8 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/ConcurrentVector.h"
+#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -439,55 +441,100 @@ SegmentInternalInterface::FillTargetEntry(
         return pk_field_id.has_value() && pk_field_id.value() == field_id;
     };
 
-    milvus::OpContext op_ctx;
-    for (auto field_id : plan->field_ids_) {
+    // Per-field fetch: returns nullptr for fields that should be skipped
+    // (ignore_non_pk && non-pk non-system). Shared OpContext is safe because
+    // storage_usage members are atomics.
+    milvus::OpContext shared_ctx;
+    auto fetch_field = [&](FieldId field_id) -> std::unique_ptr<DataArray> {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
-
             FixedVector<int64_t> output(size);
-            bulk_subscript(&op_ctx, system_type, offsets, size, output.data());
-
+            bulk_subscript(
+                &shared_ctx, system_type, offsets, size, output.data());
             auto data_array = std::make_unique<DataArray>();
             data_array->set_field_id(field_id.get());
             data_array->set_type(milvus::proto::schema::DataType::Int64);
-
             auto scalar_array = data_array->mutable_scalars();
             auto data = reinterpret_cast<const int64_t*>(output.data());
             auto obj = scalar_array->mutable_long_data();
             obj->mutable_data()->Add(data, data + size);
-            fields_data->AddAllocated(data_array.release());
-            continue;
+            return data_array;
         }
-
         if (ignore_non_pk && !is_pk_field(field_id)) {
-            continue;
+            return nullptr;
         }
-
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col = bulk_subscript(
-                &op_ctx, field_id, offsets, size, target_dynamic_fields);
-            fields_data->AddAllocated(col.release());
-            continue;
+            return bulk_subscript(
+                &shared_ctx, field_id, offsets, size, target_dynamic_fields);
         }
         std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_->operator[](field_id);
         if (!is_field_exist(field_id)) {
             col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            col = bulk_subscript(&op_ctx, field_id, offsets, size);
+            col = bulk_subscript(&shared_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
         }
+        return col;
+    };
+
+    // Parallelize per-field fetching on the MIDDLE thread pool. Each worker
+    // runs PinCells + bulk_subscript independently so N output fields no
+    // longer serialize their downloads / data copies through one thread.
+    // For a single field the submit overhead is not worth it.
+    const auto field_count = plan->field_ids_.size();
+    std::vector<std::unique_ptr<DataArray>> per_field_cols;
+    if (field_count >= 2) {
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<std::unique_ptr<DataArray>>> futures;
+        futures.reserve(field_count);
+        for (size_t i = 0; i < field_count; ++i) {
+            auto field_id = plan->field_ids_[i];
+            futures.emplace_back(pool.Submit(
+                [&fetch_field, field_id]() -> std::unique_ptr<DataArray> {
+                    return fetch_field(field_id);
+                }));
+        }
+        per_field_cols = storage::WaitAllFutures(std::move(futures));
+    } else {
+        per_field_cols.reserve(field_count);
+        for (size_t i = 0; i < field_count; ++i) {
+            per_field_cols.emplace_back(fetch_field(plan->field_ids_[i]));
+        }
+    }
+
+    // Serial merge into proto output, preserving the original field order.
+    // Reduce-phase merge-sort relies on ids filled in the requested order.
+    for (size_t i = 0; i < field_count; ++i) {
+        auto field_id = plan->field_ids_[i];
+        auto col = std::move(per_field_cols[i]);
+        if (col == nullptr) {
+            // Skipped by fetch_field (ignore_non_pk && non-pk non-system).
+            continue;
+        }
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            fields_data->AddAllocated(col.release());
+            continue;
+        }
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            fields_data->AddAllocated(col.release());
+            continue;
+        }
+        auto& field_meta = plan->schema_->operator[](field_id);
         if (fill_ids && is_pk_field(field_id)) {
-            // fill_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do
-            // merge-sort.
+            // fill_ids is true when the first Retrieve was called. The reduce
+            // phase depends on the ids to do merge-sort.
             auto col_data = col.get();
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
@@ -500,8 +547,8 @@ SegmentInternalInterface::FillTargetEntry(
                 case DataType::VARCHAR: {
                     auto str_ids = ids->mutable_str_id();
                     auto& src_data = col_data->scalars().string_data();
-                    for (auto i = 0; i < src_data.data_size(); ++i) {
-                        *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    for (auto j = 0; j < src_data.data_size(); ++j) {
+                        *(str_ids->mutable_data()->Add()) = src_data.data(j);
                     }
                     break;
                 }
@@ -522,13 +569,14 @@ SegmentInternalInterface::FillTargetEntry(
             fields_data->AddAllocated(col.release());
         }
     }
+
     // Add retrieve_storage_cost to results
     results->set_scanned_remote_bytes(
         results->scanned_remote_bytes() +
-        op_ctx.storage_usage.scanned_cold_bytes.load());
+        shared_ctx.storage_usage.scanned_cold_bytes.load());
     results->set_scanned_total_bytes(
         results->scanned_total_bytes() +
-        op_ctx.storage_usage.scanned_total_bytes.load());
+        shared_ctx.storage_usage.scanned_total_bytes.load());
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
