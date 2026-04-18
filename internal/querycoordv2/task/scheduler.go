@@ -206,7 +206,7 @@ func (etd *ExecutingTaskDelta) Sub(task Task) {
 	defer etd.mu.Unlock()
 
 	if !etd.taskIDRecords.Contain(task.ID()) {
-		log.Warn("task already exists in delta cache",
+		log.Warn("task not found in delta cache",
 			zap.Int64("collectionID", task.CollectionID()),
 			zap.Int64("replicaID", task.ReplicaID()),
 			zap.Int64("taskID", task.ID()))
