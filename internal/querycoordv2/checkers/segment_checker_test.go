@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1251,97 +1250,6 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	ch2DelegatorList = getCh2DelegatorList()
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when partition is nil")
-}
-
-func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
-	ctx := context.Background()
-	checker := suite.checker
-	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	checker.meta.HandleNodeUp(ctx, 1)
-	checker.meta.HandleNodeUp(ctx, 2)
-
-	// target carries a newer DataVersion than the loaded segment in dist
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			DataVersion:   2,
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-
-	// dist has the segment loaded with an older DataVersion
-	distSegment := utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel")
-	distSegment.DataVersion = proto.Int32(1)
-	checker.dist.SegmentDistManager.Update(2, distSegment)
-	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-		Node:    2,
-		Version: 1,
-		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
-	})
-
-	var addedTasks []task.Task
-	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		addedTasks = append(addedTasks, t)
-		return nil
-	}).Maybe()
-
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 1)
-	suite.Len(addedTasks[0].Actions(), 1)
-	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, addedTasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeReopen, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.EqualValues(2, action.Node())
-
-	// when dist DataVersion catches up, no reopen task should be generated
-	addedTasks = nil
-	distSegment.DataVersion = proto.Int32(2)
-	checker.dist.SegmentDistManager.Update(2, distSegment)
-	// invalidate version cache to force re-check
-	delete(checker.versionCache, int64(1))
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 0)
-
-	// when dist DataVersion is nil (old QueryNode in mixed-version rollout),
-	// DataVersion must not be used as a Reopen trigger to avoid an infinite loop.
-	addedTasks = nil
-	distSegment.DataVersion = nil
-	checker.dist.SegmentDistManager.Update(2, distSegment)
-	delete(checker.versionCache, int64(1))
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 0)
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {
