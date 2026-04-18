@@ -2312,6 +2312,67 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogSameGroupIdenticalFilesNoDiff) {
 }
 
 TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogMultiFieldGroupIdenticalFilesNoDiff) {
+    // Multi-field (storage v2) binlog group: group id 200 carries children
+    // 105 and 106 under the same log file. Cur and new are identical, so
+    // the diff must be empty. Regression for a bug where the mapping
+    // lookup used the group id (which is not a map key) and spuriously
+    // routed both children into binlogs_to_replace.
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(200);
+    binlog->add_child_fields(105);
+    binlog->add_child_fields(106);
+    auto* log1 = binlog->add_binlogs();
+    log1->set_log_path("/path/to/group_binlog_A");
+    log1->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogMultiFieldGroupDifferentFilesReplacesAllChildren) {
+    // Same multi-field group shape on both sides but the underlying
+    // binlog file path changes — every child must land in
+    // binlogs_to_replace so the loader evicts the stale cached columns.
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(200);
+    cur_binlog->add_child_fields(105);
+    cur_binlog->add_child_fields(106);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/group_binlog_A");
+    cur_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    new_proto.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/group_binlog_B");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    std::set<int64_t> replaced;
+    for (const auto& fid : diff.binlogs_to_replace[0].first) {
+        replaced.insert(fid.get());
+    }
+    EXPECT_EQ(replaced, (std::set<int64_t>{105, 106}));
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
        ComputeDiffBinlogSameGroupFilesChangedWithNewChildSplitsReplaceAndLoad) {
     // Current: multi-field group 200 contains only child 105
     proto::segcore::SegmentLoadInfo current_proto;

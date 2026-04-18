@@ -294,9 +294,14 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
-            auto iter = current_fields.find(new_field_binlog.fieldid());
+            // current_fields is keyed by child field id, so look up the
+            // child — keying by new_field_binlog.fieldid() misses multi-
+            // field groups (whose group id is not itself a map key) and
+            // spuriously classifies unchanged groups as moved.
+            auto iter = current_fields.find(child_id);
             // A binlog entry needs (re)loading when either
-            //   (a) the group mapping differs between current and new, or
+            //   (a) the group this child belongs to differs between
+            //       current and new, or
             //   (b) the group maps the same way but the underlying log
             //       files changed (e.g. compaction rewrote the segment).
             bool group_mapping_differs =
