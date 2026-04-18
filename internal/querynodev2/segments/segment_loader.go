@@ -104,6 +104,7 @@ type Loader interface {
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
+
 }
 
 type ResourceEstimate struct {

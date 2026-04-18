@@ -37,6 +37,7 @@ type Manager interface {
 	Remove(nodeID int64)
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
+	GetActiveNodeCount() int
 
 	MarkResourceExhaustion(nodeID int64, duration time.Duration)
 	IsResourceExhausted(nodeID int64) bool
@@ -97,6 +98,19 @@ func (m *NodeManager) GetAll() []*NodeInfo {
 		ret = append(ret, n)
 	}
 	return ret
+}
+
+// GetActiveNodeCount returns the number of nodes in normal (non-stopping) state.
+func (m *NodeManager) GetActiveNodeCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	count := 0
+	for _, node := range m.nodes {
+		if node.GetState() == NodeStateNormal {
+			count++
+		}
+	}
+	return count
 }
 
 func NewNodeManager() *NodeManager {
@@ -207,6 +221,12 @@ func (n *NodeInfo) CPUNum() int64 {
 	return n.getCPUNum()
 }
 
+func (n *NodeInfo) UsedMemory() float64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.stats.getUsedMemory()
+}
+
 func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
 	n.lastHeartbeat.Store(time.UnixNano())
 }
@@ -276,6 +296,12 @@ func WithMemCapacity(capacity float64) StatsOption {
 func WithCPUNum(num int64) StatsOption {
 	return func(n *NodeInfo) {
 		n.setCPUNum(num)
+	}
+}
+
+func WithUsedMemory(mb float64) StatsOption {
+	return func(n *NodeInfo) {
+		n.setUsedMemory(mb)
 	}
 }
 

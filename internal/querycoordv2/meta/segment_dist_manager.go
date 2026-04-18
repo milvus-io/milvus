@@ -171,6 +171,7 @@ func (segment *Segment) Clone() *Segment {
 type SegmentDistManagerInterface interface {
 	Update(nodeID typeutil.UniqueID, segments ...*Segment)
 	GetByFilter(filters ...SegmentDistFilter) []*Segment
+	HasSegmentOnNodes(segmentID int64, nodes []int64) bool
 	GetSegmentDist(collectionID int64) []*metricsinfo.Segment
 	GetVersion() int64
 }
@@ -193,6 +194,7 @@ type nodeSegments struct {
 	segments        []*Segment
 	collSegments    map[int64][]*Segment
 	channelSegments map[string][]*Segment
+	segmentIndex    map[int64]struct{} // segment ID → exists (for O(1) lookup)
 }
 
 func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) bool) []*Segment {
@@ -214,10 +216,15 @@ func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) 
 }
 
 func composeNodeSegments(segments []*Segment) nodeSegments {
+	idx := make(map[int64]struct{}, len(segments))
+	for _, s := range segments {
+		idx[s.GetID()] = struct{}{}
+	}
 	return nodeSegments{
 		segments:        segments,
 		collSegments:    lo.GroupBy(segments, func(segment *Segment) int64 { return segment.GetCollectionID() }),
 		channelSegments: lo.GroupBy(segments, func(segment *Segment) string { return segment.GetInsertChannel() }),
+		segmentIndex:    idx,
 	}
 }
 
@@ -243,6 +250,20 @@ func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segme
 	}
 	m.segments[nodeID] = composeNodeSegments(segments)
 	m.version++
+}
+
+// HasSegmentOnNodes checks if a segment exists on any of the given nodes. O(len(nodes)) via map lookup.
+func (m *SegmentDistManager) HasSegmentOnNodes(segmentID int64, nodes []int64) bool {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	for _, nodeID := range nodes {
+		if ns, ok := m.segments[nodeID]; ok {
+			if _, exists := ns.segmentIndex[segmentID]; exists {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetByFilter return segment list which match all given filters

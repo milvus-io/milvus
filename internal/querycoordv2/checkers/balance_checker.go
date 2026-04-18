@@ -344,7 +344,7 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collect
 // Returns:
 //   - segmentTasks: tasks for moving segments between nodes
 //   - channelTasks: tasks for moving channels between nodes
-func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig, isStoppingBalance bool) ([]task.Task, []task.Task) {
+func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig, isStoppingBalance bool, maxSegmentPlans int) ([]task.Task, []task.Task) {
 	if len(replicas) == 0 {
 		return nil, nil
 	}
@@ -361,6 +361,11 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 			balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
 		}
+	}
+
+	// Truncate segment plans to the budget limit
+	if maxSegmentPlans > 0 && len(segmentPlans) > maxSegmentPlans {
+		segmentPlans = segmentPlans[:maxSegmentPlans]
 	}
 
 	// Set LoadPriority based on balance type:
@@ -460,7 +465,8 @@ func (b *BalanceChecker) processBalanceQueue(
 			continue
 		}
 
-		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
+		remainingBudget := config.segmentBatchSize - generatedSegmentTaskNum
+		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance, remainingBudget)
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)
@@ -521,18 +527,30 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		}
 	}()
 
+	hasGrowTasks := b.scheduler.GetSegmentTaskNum(task.WithTaskTypeFilter(task.TaskTypeGrow)) > 0
+
 	// Load current configuration to respect dynamic parameter changes
 	config := b.loadBalanceConfig()
 
+	// Compute dynamic batch sizes based on active QN count
+	activeNodes := b.nodeManager.GetActiveNodeCount()
+	if activeNodes == 0 {
+		activeNodes = 1
+	}
+
 	// Phase 1: Process stopping balance first (higher priority)
-	// This handles nodes that are being gracefully stopped and need immediate attention
+	// Stopping balance (node draining) must always run, even during recovery.
+	// Batch size = activeQN × StoppingBalanceSegmentFactor
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		stoppingConfig := config
+		stoppingConfig.segmentBatchSize = activeNodes * paramtable.Get().QueryCoordCfg.StoppingBalanceSegmentFactor.GetAsInt()
+
 		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetStoppingBalancer(),
 			b.getReplicaForStoppingBalance,
 			b.constructStoppingBalanceQueue,
 			func() *assign.PriorityQueue { return b.stoppingBalanceQueue },
-			config,
+			stoppingConfig,
 			true, // isStoppingBalance: use HIGH priority for node draining
 		)
 
@@ -551,19 +569,27 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// Phase 2: Process normal balance if no stopping balance was needed
-	// This handles regular load balancing operations for cluster optimization
+	// Skip normal balance when recovery (grow) tasks exist to avoid wasting QN resources.
+	// Stopping balance above is exempt because node-draining is high priority.
+	if hasGrowTasks {
+		return nil
+	}
+	// Batch size = activeQN × NormalBalanceSegmentFactor
 	if paramtable.Get().QueryCoordCfg.AutoBalance.GetAsBool() {
 		// Respect the auto balance interval to prevent too frequent operations
 		if time.Since(b.autoBalanceTs) <= config.autoBalanceInterval {
 			return nil
 		}
 
+		normalConfig := config
+		normalConfig.segmentBatchSize = activeNodes * paramtable.Get().QueryCoordCfg.NormalBalanceSegmentFactor.GetAsInt()
+
 		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
 			balance.GetGlobalBalancerFactory().GetBalancer(),
 			b.getReplicaForNormalBalance,
 			b.constructNormalBalanceQueue,
 			func() *assign.PriorityQueue { return b.normalBalanceQueue },
-			config,
+			normalConfig,
 			false, // isStoppingBalance: use LOW priority for normal balance
 		)
 

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
@@ -75,6 +76,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			continue
 		}
 
+		t.SetSegmentSize(computeSegmentBinlogSize(p.Segment.SegmentInfo))
 		log.Info("create segment task",
 			zap.Int64("collection", p.Segment.GetCollectionID()),
 			zap.Int64("segmentID", p.Segment.GetID()),
@@ -83,7 +85,8 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			zap.String("level", p.Segment.GetLevel().String()),
 			zap.Int32("loadPriority", int32(p.LoadPriority)),
 			zap.Int64("from", p.From),
-			zap.Int64("to", p.To))
+			zap.Int64("to", p.To),
+			zap.Int64("segmentSize", t.SegmentSize()))
 		if task.GetTaskType(t) == task.TaskTypeMove {
 			// from balance checker
 			t.SetPriority(task.TaskPriorityLow)
@@ -240,4 +243,19 @@ func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
 		return weighter(channels[i]) < weighter(channels[j])
 	})
 	return channels
+}
+
+func computeSegmentBinlogSize(seg *datapb.SegmentInfo) int64 {
+	size := int64(0)
+	for _, fieldBinlog := range seg.GetBinlogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			size += binlog.GetMemorySize()
+		}
+	}
+	for _, fieldBinlog := range seg.GetStatslogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			size += binlog.GetMemorySize()
+		}
+	}
+	return size
 }

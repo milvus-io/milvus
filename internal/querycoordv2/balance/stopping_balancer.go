@@ -135,7 +135,7 @@ func (b *StoppingBalancer) genChannelPlan(ctx context.Context, br *balanceReport
 		br.AddRecord(StrRecordf("found %d channels on stopping node %d to be reassigned", len(dmChannels), nodeID))
 
 		// Assign these channels to active nodes
-		plans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), dmChannels, rwNodes, false)
+		plans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), dmChannels, rwNodes)
 
 		// Set the source node and replica for each plan
 		for i := range plans {
@@ -186,7 +186,7 @@ func (b *StoppingBalancer) genSegmentPlan(ctx context.Context, br *balanceReport
 		br.AddRecord(StrRecordf("found %d movable segments on stopping node %d to be reassigned", len(segments), nodeID))
 
 		// Assign these segments to active nodes
-		plans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes, false)
+		plans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segments, rwNodes)
 
 		// Set the source node and replica for each plan
 		for i := range plans {

@@ -34,8 +34,6 @@ import (
 // TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution tests that segments are evenly distributed
 func TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key, "100")
-	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.Key)
 	mockScheduler := task.NewMockScheduler(t)
 	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -66,7 +64,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EvenDistribution(t *testing.T) {
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 9, len(plans))
@@ -102,7 +100,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 	segments := []*meta.Segment{}
 	nodes := []int64{1}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))
@@ -122,44 +120,9 @@ func TestRoundRobinAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 	}
 	nodes := []int64{}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.Nil(t, plans)
-}
-
-// TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal tests when all nodes are not in normal state
-func TestRoundRobinAssignPolicy_AssignSegment_AllNodesNotNormal(t *testing.T) {
-	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-
-	nodeManager := session.NewNodeManager()
-
-	// Add nodes in non-normal state
-	for i := int64(1); i <= 2; i++ {
-		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-			NodeID:   i,
-			Address:  "localhost",
-			Hostname: "node",
-		}))
-		nodeManager.Get(i).SetState(session.NodeStateStopping)
-	}
-
-	policy := newRoundRobinAssignPolicy(nodeManager, mockScheduler, nil)
-
-	segments := []*meta.Segment{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1000}},
-	}
-	nodes := []int64{1, 2}
-
-	// Without force assign, should return nil
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
-	assert.Nil(t, plans)
-
-	// With force assign, should proceed
-	plansForced := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
-	assert.NotNil(t, plansForced)
-	assert.Equal(t, 1, len(plansForced))
 }
 
 // TestRoundRobinAssignPolicy_AssignSegment_SingleNode tests with single node
@@ -190,7 +153,7 @@ func TestRoundRobinAssignPolicy_AssignSegment_SingleNode(t *testing.T) {
 	}
 
 	nodes := []int64{1}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 5, len(plans))
@@ -235,7 +198,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 6, len(plans))
@@ -272,7 +235,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	channels := []*meta.DmChannel{}
 	nodes := []int64{1}
 
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))
@@ -305,7 +268,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
 	}
 
 	nodes := []int64{1}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 1, len(plans))

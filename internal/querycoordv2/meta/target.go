@@ -45,11 +45,15 @@ type CollectionTarget struct {
 
 	// cache collection total row count
 	totalRowCount int64
+
+	// segment binlog sizes in bytes, used for memory budget throttling
+	segmentSizes map[int64]int64
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
 	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
+	segmentSizes := make(map[int64]int64, len(segments))
 	totalRowCount := int64(0)
 	for _, segment := range segments {
 		channel := segment.GetInsertChannel()
@@ -63,6 +67,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		}
 		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
 		totalRowCount += segment.GetNumOfRows()
+		segmentSizes[segment.GetID()] = computeSegmentBinlogSize(segment)
 	}
 	return &CollectionTarget{
 		segments:           segments,
@@ -72,7 +77,23 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partitions:         typeutil.NewSet(partitionIDs...),
 		version:            time.Now().UnixNano(),
 		totalRowCount:      totalRowCount,
+		segmentSizes:       segmentSizes,
 	}
+}
+
+func computeSegmentBinlogSize(seg *datapb.SegmentInfo) int64 {
+	size := int64(0)
+	for _, fieldBinlog := range seg.GetBinlogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			size += binlog.GetMemorySize()
+		}
+	}
+	for _, fieldBinlog := range seg.GetStatslogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			size += binlog.GetMemorySize()
+		}
+	}
+	return size
 }
 
 func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget {
@@ -80,6 +101,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 	dmChannels := make(map[string]*DmChannel)
 	channel2Segments := make(map[string][]*datapb.SegmentInfo)
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo)
+	segmentSizes := make(map[int64]int64)
 	var partitions []int64
 
 	lackSegmentInfo := false
@@ -108,6 +130,9 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				channel2Segments[t.GetChannelName()] = append(channel2Segments[t.GetChannelName()], info)
 				partition2Segments[partition.GetPartitionID()] = append(partition2Segments[partition.GetPartitionID()], info)
 				totalRowCount += segment.GetNumOfRows()
+				if segment.GetSize() > 0 {
+					segmentSizes[segment.GetID()] = segment.GetSize()
+				}
 			}
 			partitions = append(partitions, partition.GetPartitionID())
 		}
@@ -137,6 +162,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		version:            target.GetVersion(),
 		lackSegmentInfo:    lackSegmentInfo,
 		totalRowCount:      totalRowCount,
+		segmentSizes:       segmentSizes,
 	}
 }
 
@@ -173,6 +199,7 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 					ID:        info.GetID(),
 					Level:     info.GetLevel(),
 					NumOfRows: info.GetNumOfRows(),
+					Size:      p.segmentSizes[info.GetID()],
 				})
 			}
 		}
@@ -233,6 +260,13 @@ func (p *CollectionTarget) Ready() bool {
 
 func (p *CollectionTarget) GetRowCount() int64 {
 	return p.totalRowCount
+}
+
+func (p *CollectionTarget) GetSegmentSize(segID int64) int64 {
+	if p.segmentSizes == nil {
+		return 0
+	}
+	return p.segmentSizes[segID]
 }
 
 type target struct {

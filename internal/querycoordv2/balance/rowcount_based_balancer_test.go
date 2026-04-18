@@ -432,7 +432,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 			NumOfGrowingRows: 50,
 		},
 	})
-	plans := balancer.GetAssignPolicy().AssignSegment(ctx, 1, toAssign, lo.Keys(distributions), false)
+	plans := balancer.GetAssignPolicy().AssignSegment(ctx, 1, toAssign, lo.Keys(distributions))
 	for _, p := range plans {
 		suite.Equal(int64(2), p.To)
 	}

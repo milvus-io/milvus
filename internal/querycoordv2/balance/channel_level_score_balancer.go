@@ -164,7 +164,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlanForOutboundNodes(ctx context.C
 	channelPlans := make([]assign.ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
-		plans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
+		plans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -183,7 +183,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlanForOutboundNodes(ctx context.C
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
-		plans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes, false)
+		plans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -251,7 +251,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 		return nil
 	}
 
-	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
+	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -291,7 +291,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica 
 			return nil
 		}
 
-		channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

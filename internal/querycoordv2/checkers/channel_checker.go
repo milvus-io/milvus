@@ -282,7 +282,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 				rwNodes = replica.GetRWNodes()
 			}
 		}
-		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
+		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes)
 		plans = append(plans, plan...)
 	}
 

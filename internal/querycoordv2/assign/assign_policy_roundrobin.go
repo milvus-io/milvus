@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // RoundRobinAssignPolicy implements a simple round-robin assignment strategy
@@ -55,11 +54,10 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 	collectionID int64,
 	segments []*meta.Segment,
 	nodes []int64,
-	forceAssign bool,
 ) []SegmentAssignPlan {
 	// Filter nodes
 	filter := newCommonSegmentNodeFilter(p.nodeManager)
-	nodes = filter.FilterNodes(ctx, nodes, forceAssign)
+	nodes = filter.FilterNodes(ctx, nodes)
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -81,8 +79,6 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 		return nodes[i] < nodes[j]
 	})
 
-	// Apply batch size limit
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 
 	// Assign segments in round-robin fashion
@@ -93,9 +89,6 @@ func (p *RoundRobinAssignPolicy) AssignSegment(
 			To:      nodes[i%len(nodes)],
 		}
 		ret = append(ret, plan)
-		if len(ret) >= balanceBatchSize {
-			break
-		}
 	}
 
 	return ret
@@ -107,11 +100,10 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	collectionID int64,
 	channels []*meta.DmChannel,
 	nodes []int64,
-	forceAssign bool,
 ) []ChannelAssignPlan {
 	// Filter nodes
 	nodeFilter := newCommonChannelNodeFilter(p.nodeManager)
-	nodes = nodeFilter.FilterNodes(ctx, nodes, forceAssign)
+	nodes = nodeFilter.FilterNodes(ctx, nodes)
 	if len(nodes) == 0 {
 		return nil
 	}

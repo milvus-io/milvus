@@ -403,10 +403,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
 		params.Reset("queryCoord.collectionObserverInterval")
 
-		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
-		params.Save("queryCoord.checkExecutedFlagInterval", "200")
-		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
-		params.Reset("queryCoord.checkExecutedFlagInterval")
+		assert.Equal(t, 200, Params.DistPullIntervalFast.GetAsInt())
+		params.Save("queryCoord.distPullIntervalFast", "100")
+		assert.Equal(t, 100, Params.DistPullIntervalFast.GetAsInt())
+		params.Reset("queryCoord.distPullIntervalFast")
 
 		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
@@ -422,7 +422,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, Params.BalanceChannelBatchSize.GetAsInt())
 		assert.Equal(t, true, Params.EnableBalanceOnMultipleCollections.GetAsBool())
 
-		assert.Equal(t, 20, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+		assert.Equal(t, 10, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 

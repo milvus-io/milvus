@@ -2617,7 +2617,7 @@ type queryCoordConfig struct {
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
+	DistPullIntervalFast               ParamItem `refreshable:"true"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
@@ -2639,6 +2639,12 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	PendingMemoryFactor ParamItem `refreshable:"true"`
+
+	SegmentTaskCapFactor           ParamItem `refreshable:"true"`
+	StoppingBalanceSegmentFactor   ParamItem `refreshable:"true"`
+	NormalBalanceSegmentFactor     ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -2672,7 +2678,8 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.TaskExecutionCap = ParamItem{
 		Key:          "queryCoord.taskExecutionCap",
 		Version:      "2.2.0",
-		DefaultValue: "360",
+		DefaultValue: "64",
+		Doc:          "Fallback max concurrent load tasks per node when cpuNum is unavailable.",
 		Export:       true,
 	}
 	p.TaskExecutionCap.Init(base.mgr)
@@ -3192,14 +3199,14 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
 
-	p.CheckExecutedFlagInterval = ParamItem{
-		Key:          "queryCoord.checkExecutedFlagInterval",
-		Version:      "2.4.4",
-		DefaultValue: "100",
-		Doc:          "the interval of check executed flag to force to pull dist",
+	p.DistPullIntervalFast = ParamItem{
+		Key:          "queryCoord.distPullIntervalFast",
+		Version:      "2.6.13",
+		DefaultValue: "200",
+		Doc:          "the dist pull interval when node has pending tasks (ms)",
 		Export:       true,
 	}
-	p.CheckExecutedFlagInterval.Init(base.mgr)
+	p.DistPullIntervalFast.Init(base.mgr)
 
 	p.CollectionBalanceSegmentBatchSize = ParamItem{
 		Key:          "queryCoord.collectionBalanceSegmentBatchSize",
@@ -3288,7 +3295,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.QueryNodeTaskParallelismFactor = ParamItem{
 		Key:          "queryCoord.queryNodeTaskParallelismFactor",
 		Version:      "2.5.14",
-		DefaultValue: "20",
+		DefaultValue: "10",
 		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
 		Export:       false,
 	}
@@ -3330,6 +3337,42 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
+
+	p.PendingMemoryFactor = ParamItem{
+		Key:          "queryCoord.pendingMemoryFactor",
+		Version:      "2.6.13",
+		DefaultValue: "1.0",
+		Doc:          "Amplification factor for pending task memory estimation. Loading may use more memory than final segment size due to decompression/indexing. Set > 1.0 for conservative scheduling.",
+		Export:       true,
+	}
+	p.PendingMemoryFactor.Init(base.mgr)
+
+	p.SegmentTaskCapFactor = ParamItem{
+		Key:          "queryCoord.segmentTaskCapFactor",
+		Version:      "2.6.13",
+		DefaultValue: "16",
+		Doc:          "Per-node factor for computing the global segment task cap (cap = activeNodes × factor). Limits total segment tasks in the scheduler to prevent unbounded queue growth.",
+		Export:       true,
+	}
+	p.SegmentTaskCapFactor.Init(base.mgr)
+
+	p.StoppingBalanceSegmentFactor = ParamItem{
+		Key:          "queryCoord.stoppingBalanceSegmentFactor",
+		Version:      "2.6.13",
+		DefaultValue: "4",
+		Doc:          "Per-node factor for stopping balance segment batch size (batch = activeNodes × factor). Controls how many segments are moved per stopping-balance round.",
+		Export:       true,
+	}
+	p.StoppingBalanceSegmentFactor.Init(base.mgr)
+
+	p.NormalBalanceSegmentFactor = ParamItem{
+		Key:          "queryCoord.normalBalanceSegmentFactor",
+		Version:      "2.6.13",
+		DefaultValue: "2",
+		Doc:          "Per-node factor for normal balance segment batch size (batch = activeNodes × factor). Controls how many segments are moved per normal-balance round.",
+		Export:       true,
+	}
+	p.NormalBalanceSegmentFactor.Init(base.mgr)
 
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",

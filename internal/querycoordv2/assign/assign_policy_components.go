@@ -30,7 +30,7 @@ import (
 // nodeFilter filters nodes based on various criteria
 type nodeFilter interface {
 	// FilterNodes filters the input nodes and returns the valid ones
-	FilterNodes(ctx context.Context, nodes []int64, forceAssign bool) []int64
+	FilterNodes(ctx context.Context, nodes []int64) []int64
 }
 
 // segmentScoreCalculator calculates the score of a segment
@@ -84,10 +84,7 @@ func newCommonSegmentNodeFilter(nodeManager *session.NodeManager) nodeFilter {
 }
 
 // FilterNodes filters the input nodes and returns nodes in normal state
-func (f *commonSegmentNodeFilter) FilterNodes(ctx context.Context, nodes []int64, forceAssign bool) []int64 {
-	if forceAssign {
-		return nodes
-	}
+func (f *commonSegmentNodeFilter) FilterNodes(ctx context.Context, nodes []int64) []int64 {
 	return lo.Filter(nodes, func(node int64, _ int) bool {
 		info := f.nodeManager.Get(node)
 		return info != nil && info.GetState() == session.NodeStateNormal && !f.nodeManager.IsResourceExhausted(node)
@@ -106,13 +103,9 @@ func newCommonChannelNodeFilter(nodeManager *session.NodeManager) nodeFilter {
 }
 
 // FilterNodes filters nodes for channel assignment considering SQN, version, and state
-func (f *commonChannelNodeFilter) FilterNodes(ctx context.Context, nodes []int64, forceAssign bool) []int64 {
+func (f *commonChannelNodeFilter) FilterNodes(ctx context.Context, nodes []int64) []int64 {
 	// Filter SQN if streaming service is enabled
 	nodes = filterSQNIfStreamingServiceEnabled(nodes)
-
-	if forceAssign {
-		return nodes
-	}
 
 	return lo.Filter(nodes, func(node int64, _ int) bool {
 		info := f.nodeManager.Get(node)

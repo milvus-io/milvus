@@ -193,7 +193,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
+	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -265,7 +265,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, onlineNodes, false)
+	channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, onlineNodes)
 	for i := range channelPlans {
 		channelPlans[i].From = channelPlans[i].Channel.Node
 		channelPlans[i].Replica = replica
