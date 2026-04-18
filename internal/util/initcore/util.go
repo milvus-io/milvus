@@ -29,6 +29,9 @@ import "C"
 import (
 	"strings"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func UpdateLogLevel(level string) error {
@@ -78,6 +81,30 @@ func UpdateExprResCacheEnable(enable bool) {
 
 func UpdateExprResCacheCapacityBytes(capacity int) {
 	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+}
+
+func UpdateArrowIOThreadPoolCapacity(threads int) {
+	C.SetArrowIOThreadPoolCapacity(C.int(threads))
+}
+
+// ResolveArrowIOThreadPoolCapacity returns the effective arrow IO thread pool
+// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. Returns 0
+// when the coefficient is unset, which signals the C++ side to keep arrow's
+// built-in default (8).
+func ResolveArrowIOThreadPoolCapacity() int {
+	cfg := paramtable.Get().CommonCfg
+	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
+	if coef <= 0 {
+		return 0
+	}
+	threads := int(coef * float64(hardware.GetCPUNum()))
+	if threads < 1 {
+		threads = 1
+	}
+	if maxCap := cfg.ArrowIOThreadPoolMaxCapacity.GetAsInt(); maxCap > 0 && threads > maxCap {
+		threads = maxCap
+	}
+	return threads
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

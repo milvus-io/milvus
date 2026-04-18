@@ -155,6 +155,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
 	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
+	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
