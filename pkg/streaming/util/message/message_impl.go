@@ -102,9 +102,6 @@ func (m *messageImpl) WithBarrierTimeTick(tt uint64) MutableMessage {
 
 // WithWALTerm sets the wal term of current message.
 func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
-	if m.properties.Exist(messageWALTerm) {
-		panic("wal term already set in properties of message")
-	}
 	m.properties.Set(messageWALTerm, EncodeInt64(term))
 	return m
 }
