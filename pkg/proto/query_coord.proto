@@ -406,6 +406,7 @@ message SegmentLoadInfo {
     common.LoadPriority priority = 23;
     string manifest_path = 24;
     int32 data_version = 25;
+    bool use_take_for_output = 26;
 }
 
 message FieldIndexInfo {

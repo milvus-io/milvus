@@ -3515,6 +3515,9 @@ type queryNodeConfig struct {
 	IDFReadBufferSize ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+
+	// external collection
+	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4702,6 +4705,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
+
+	p.ExternalCollectionUseTakeForOutput = ParamItem{
+		Key:          "queryNode.externalCollection.useTakeForOutput",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          `When true, use take() API to fetch output fields from external storage instead of bulk_subscript`,
+		Export:       false,
+	}
+	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4859,6 +4871,7 @@ type dataCoordConfig struct {
 	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
+	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6084,11 +6097,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments = ParamItem{
 		Key:          "dataCoord.externalCollectionPreAllocSegments",
 		Version:      "2.6.8",
-		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
-		DefaultValue: "1000",
+		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
+		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
+	p.ExternalCollectionFilesPerTask = ParamItem{
+		Key:          "dataCoord.externalCollectionFilesPerTask",
+		Version:      "3.0.0",
+		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		DefaultValue: "10000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionFilesPerTask.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
@@ -6867,7 +6889,7 @@ if this parameter <= 0, will set it as 10`,
 
 	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
 		Key:          "dataNode.externalCollection.targetRowsPerSegment",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1000000",
 		Doc:          "Target number of rows per segment for external collections",
 		Export:       false,

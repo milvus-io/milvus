@@ -12,6 +12,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -67,6 +68,113 @@ const (
 	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
+// ensureHTTPScheme prepends "http://" to address when SSL is disabled and no scheme is present.
+// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
+// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+func ensureHTTPScheme(address string, useSSL bool) string {
+	if !useSSL && !strings.Contains(address, "://") {
+		return "http://" + address
+	}
+	return address
+}
+
+// ExtfsPrefixForCollection returns the extfs property prefix for a specific collection.
+// Each external collection uses its own namespace to avoid conflicts.
+func ExtfsPrefixForCollection(collectionID int64) string {
+	return fmt.Sprintf("extfs.%d.", collectionID)
+}
+
+// BuildExtfsOverrides builds a complete set of extfs properties for an external collection.
+// It always copies the baseline from storageConfig so that C++ resolve_config can match
+// the extfs group by address+bucket (even for same-bucket relative paths, because C++
+// explore returns full URIs like aws://host:port/bucket/key).
+// For cross-bucket URIs, it overrides bucket/address from the URI.
+// Finally, user-specified extfs overrides from ExternalSpec take highest priority.
+func BuildExtfsOverrides(externalSource string, storageConfig *indexpb.StorageConfig,
+	extfsPrefix string, specExtfs map[string]string,
+) map[string]string {
+	overrides := make(map[string]string)
+
+	// Always copy baseline from storageConfig so the per-collection extfs group
+	// is self-contained (C++ resolve_config treats each group independently).
+	copyStorageConfigToExtfs(overrides, extfsPrefix, storageConfig)
+
+	// For cross-bucket URIs, override bucket and address from the URI.
+	u, err := url.Parse(externalSource)
+	if err == nil && u.Scheme != "" {
+		// Override bucket from the URI path (first component after leading /).
+		path := strings.TrimPrefix(u.Path, "/")
+		parts := strings.SplitN(path, "/", 2)
+		if len(parts) > 0 && parts[0] != "" {
+			overrides[extfsPrefix+"bucket_name"] = parts[0]
+		}
+
+		// Override address from the URI host.
+		if u.Host != "" {
+			overrides[extfsPrefix+"address"] = ensureHTTPScheme(u.Host, storageConfig.GetUseSSL())
+		}
+	}
+
+	// Apply spec extfs overrides (highest priority, keys already prefixed by caller).
+	for k, v := range specExtfs {
+		overrides[k] = v
+	}
+
+	return overrides
+}
+
+// copyStorageConfigToExtfs copies all relevant storage config fields to the extfs override map.
+func copyStorageConfigToExtfs(overrides map[string]string, prefix string, cfg *indexpb.StorageConfig) {
+	if cfg.GetStorageType() != "" {
+		overrides[prefix+"storage_type"] = cfg.GetStorageType()
+	}
+	if cfg.GetBucketName() != "" {
+		overrides[prefix+"bucket_name"] = cfg.GetBucketName()
+	}
+	if cfg.GetAddress() != "" {
+		overrides[prefix+"address"] = ensureHTTPScheme(cfg.GetAddress(), cfg.GetUseSSL())
+	}
+	if cfg.GetRootPath() != "" {
+		overrides[prefix+"root_path"] = cfg.GetRootPath()
+	}
+	if cfg.GetAccessKeyID() != "" {
+		overrides[prefix+"access_key_id"] = cfg.GetAccessKeyID()
+	}
+	if cfg.GetSecretAccessKey() != "" {
+		overrides[prefix+"access_key_value"] = cfg.GetSecretAccessKey()
+	}
+	if cfg.GetCloudProvider() != "" {
+		overrides[prefix+"cloud_provider"] = cfg.GetCloudProvider()
+	}
+	if cfg.GetIAMEndpoint() != "" {
+		overrides[prefix+"iam_endpoint"] = cfg.GetIAMEndpoint()
+	}
+	if cfg.GetRegion() != "" {
+		overrides[prefix+"region"] = cfg.GetRegion()
+	}
+	if cfg.GetSslCACert() != "" {
+		overrides[prefix+"ssl_ca_cert"] = cfg.GetSslCACert()
+	}
+	if cfg.GetGcpCredentialJSON() != "" {
+		overrides[prefix+"gcp_credential_json"] = cfg.GetGcpCredentialJSON()
+	}
+	if cfg.GetUseSSL() {
+		overrides[prefix+"use_ssl"] = "true"
+	} else {
+		overrides[prefix+"use_ssl"] = "false"
+	}
+	if cfg.GetUseIAM() {
+		overrides[prefix+"use_iam"] = "true"
+	} else {
+		overrides[prefix+"use_iam"] = "false"
+	}
+	if cfg.GetUseVirtualHost() {
+		overrides[prefix+"use_virtual_host"] = "true"
+	} else {
+		overrides[prefix+"use_virtual_host"] = "false"
+	}
+}
+
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
 // This function converts a StorageConfig structure into a Properties object by
 // calling the FFI properties_create function. All configuration fields from
@@ -83,13 +191,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, PropertyFSAddress)
-		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-		fsAddr := storageConfig.GetAddress()
-		if !storageConfig.GetUseSSL() && !strings.Contains(fsAddr, "://") {
-			fsAddr = "http://" + fsAddr
-		}
-		values = append(values, fsAddr)
+		values = append(values, ensureHTTPScheme(storageConfig.GetAddress(), storageConfig.GetUseSSL()))
 	}
 	if storageConfig.GetBucketName() != "" {
 		keys = append(keys, PropertyFSBucketName)
@@ -178,100 +280,23 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		values = append(values, "false")
 	}
 
-	// Add extfs.default.* properties (mirrors string fields from fs.* with extfs.default.* prefix)
-	const extfsPrefix = "extfs.default."
-	if storageConfig.GetStorageType() != "" {
-		keys = append(keys, extfsPrefix+"storage_type")
-		values = append(values, storageConfig.GetStorageType())
-	}
-	if storageConfig.GetStorageType() == "local" {
-		keys = append(keys, extfsPrefix+"bucket_name")
-		values = append(values, "local")
-	} else if storageConfig.GetBucketName() != "" {
-		keys = append(keys, extfsPrefix+"bucket_name")
-		values = append(values, storageConfig.GetBucketName())
-	}
-	if storageConfig.GetAddress() != "" {
-		keys = append(keys, extfsPrefix+"address")
-		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
-		addr := storageConfig.GetAddress()
-		if !storageConfig.GetUseSSL() && !strings.Contains(addr, "://") {
-			addr = "http://" + addr
-		}
-		values = append(values, addr)
-	}
-	if storageConfig.GetRootPath() != "" {
-		keys = append(keys, extfsPrefix+"root_path")
-		values = append(values, storageConfig.GetRootPath())
-	}
-	if storageConfig.GetAccessKeyID() != "" {
-		keys = append(keys, extfsPrefix+"access_key_id")
-		values = append(values, storageConfig.GetAccessKeyID())
-	}
-	if storageConfig.GetSecretAccessKey() != "" {
-		keys = append(keys, extfsPrefix+"access_key_value")
-		values = append(values, storageConfig.GetSecretAccessKey())
-	}
-	if storageConfig.GetCloudProvider() != "" {
-		keys = append(keys, extfsPrefix+"cloud_provider")
-		values = append(values, storageConfig.GetCloudProvider())
-	}
-	if storageConfig.GetIAMEndpoint() != "" {
-		keys = append(keys, extfsPrefix+"iam_endpoint")
-		values = append(values, storageConfig.GetIAMEndpoint())
-	}
-	if storageConfig.GetRegion() != "" {
-		keys = append(keys, extfsPrefix+"region")
-		values = append(values, storageConfig.GetRegion())
-	}
-	if storageConfig.GetSslCACert() != "" {
-		keys = append(keys, extfsPrefix+"ssl_ca_cert")
-		values = append(values, storageConfig.GetSslCACert())
-	}
-	if storageConfig.GetGcpCredentialJSON() != "" {
-		keys = append(keys, extfsPrefix+"gcp_credential_json")
-		values = append(values, storageConfig.GetGcpCredentialJSON())
-	}
-	// Temporarily disabled: extfs.default.* boolean properties.
-	//
-	// Root cause: extfs.* keys are not registered in milvus-storage's property_infos.
-	// The FFI (loon_properties_create) only accepts string key-value pairs, so
-	// ConvertFFIProperties stores unregistered keys as std::string (e.g.,
-	// extfs.default.use_ssl = string("false")). Later, ExtractExternalFsProperties
-	// copies this variant as-is to fs.use_ssl, but create_file_system_config expects
-	// GetValue<bool>, which fails because the variant holds a string, not a bool.
-	//
-	// Workaround: omit these properties so they are absent from the extfs-mapped
-	// Properties map. GetValue<bool> then falls back to the default value from
-	// property_infos (false), which is correct for non-SSL environments.
-	//
-	// TODO: re-enable once milvus-storage fixes ExtractExternalFsProperties to
-	// perform type conversion when mapping extfs.* → fs.* properties.
-	//
-	// keys = append(keys, extfsPrefix+"use_ssl")
-	// if storageConfig.GetUseSSL() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
-	// keys = append(keys, extfsPrefix+"use_iam")
-	// if storageConfig.GetUseIAM() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
-	// keys = append(keys, extfsPrefix+"use_virtual_host")
-	// if storageConfig.GetUseVirtualHost() {
-	// 	values = append(values, "true")
-	// } else {
-	// 	values = append(values, "false")
-	// }
+	// No extfs.default.* properties here. Per-collection extfs properties
+	// (extfs.{collectionID}.*) are passed via extraKVs by BuildExtfsOverrides.
 
-	// Add extra kvs
+	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
-		keys = append(keys, k)
-		values = append(values, v)
+		found := false
+		for i, existingKey := range keys {
+			if existingKey == k {
+				values[i] = v
+				found = true
+				break
+			}
+		}
+		if !found {
+			keys = append(keys, k)
+			values = append(values, v)
+		}
 	}
 
 	// Convert to C arrays
@@ -360,12 +385,6 @@ func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 }
 
 // CompareManifestPath compares two manifest paths by their version.
-// Returns:
-//
-//	-1 if a < b (a is older)
-//	 0 if a == b (same version or both empty)
-//	 1 if a > b (a is newer)
-//	 error if the paths are not comparable (parse failure or different base paths)
 func CompareManifestPath(a, b string) (int, error) {
 	if a == b {
 		return 0, nil

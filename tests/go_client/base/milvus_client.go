@@ -80,6 +80,9 @@ func NewMilvusClient(ctx context.Context, cfg *client.ClientConfig) (*MilvusClie
 }
 
 func (mc *MilvusClient) Close(ctx context.Context) error {
+	if mc.Client == nil {
+		return nil
+	}
 	err := mc.Client.Close(ctx)
 	return err
 }
