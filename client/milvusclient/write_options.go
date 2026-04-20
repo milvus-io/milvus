@@ -53,6 +53,10 @@ type columnBasedDataOption struct {
 	partitionName string
 	columns       []column.Column
 	partialUpdate bool
+
+	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
+	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
+	deferredErr error
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -262,6 +266,109 @@ func (opt *columnBasedDataOption) WithInt8VectorColumn(colName string, dim int, 
 	return opt.WithColumns(column)
 }
 
+// WithStructArrayColumn appends a struct-array column built from a row-based representation,
+// inferring the per-sub-field array type from the corresponding field in `structSchema`.
+//
+// `rows` is a per-collection-row list; each entry is a map keyed by sub-field name. The value
+// for a scalar sub-field must be `[]<T>` (e.g. []int32, []string); the value for a vector
+// sub-field must be `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
+//
+// Example:
+//
+//	structSchema := entity.NewStructSchema().
+//	    WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256)).
+//	    WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+//	rows := []map[string]any{
+//	    {"clip_str": []string{"a", "b"}, "clip_emb": [][]float32{v1, v2}},
+//	    {"clip_str": []string{"c"},      "clip_emb": [][]float32{v3}},
+//	}
+//	opt.WithStructArrayColumn("clips", structSchema, rows)
+func (opt *columnBasedDataOption) WithStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) *columnBasedDataOption {
+	col, err := buildStructArrayColumn(colName, structSchema, rows)
+	if err != nil {
+		// Defer error reporting to InsertRequest/UpsertRequest so the builder chain stays valid.
+		if opt.deferredErr == nil {
+			opt.deferredErr = errors.Wrapf(err, "WithStructArrayColumn(%q)", colName)
+		}
+		return opt
+	}
+	return opt.WithColumns(col)
+}
+
+func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) (column.Column, error) {
+	if structSchema == nil {
+		return nil, errors.New("structSchema is required for WithStructArrayColumn")
+	}
+	subColumns := make([]column.Column, 0, len(structSchema.Fields))
+	for _, sub := range structSchema.Fields {
+		subColumn, err := newStructSubColumn(sub)
+		if err != nil {
+			return nil, err
+		}
+		subColumns = append(subColumns, subColumn)
+	}
+	structCol := column.NewColumnStructArray(colName, subColumns)
+	for i, row := range rows {
+		if err := structCol.AppendValue(row); err != nil {
+			return nil, errors.Wrapf(err, "row %d", i)
+		}
+	}
+	return structCol, nil
+}
+
+func newStructSubColumn(field *entity.Field) (column.Column, error) {
+	switch field.DataType {
+	case entity.FieldTypeBool:
+		return column.NewColumnBoolArray(field.Name, nil), nil
+	case entity.FieldTypeInt8:
+		return column.NewColumnInt8Array(field.Name, nil), nil
+	case entity.FieldTypeInt16:
+		return column.NewColumnInt16Array(field.Name, nil), nil
+	case entity.FieldTypeInt32:
+		return column.NewColumnInt32Array(field.Name, nil), nil
+	case entity.FieldTypeInt64:
+		return column.NewColumnInt64Array(field.Name, nil), nil
+	case entity.FieldTypeFloat:
+		return column.NewColumnFloatArray(field.Name, nil), nil
+	case entity.FieldTypeDouble:
+		return column.NewColumnDoubleArray(field.Name, nil), nil
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		return column.NewColumnVarCharArray(field.Name, nil), nil
+	case entity.FieldTypeFloatVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBinaryVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeInt8Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
+	default:
+		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
+	}
+}
+
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
 	opt.partitionName = partitionName
 	return opt
@@ -277,6 +384,9 @@ func (opt *columnBasedDataOption) CollectionName() string {
 }
 
 func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err
@@ -291,6 +401,9 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 }
 
 func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err

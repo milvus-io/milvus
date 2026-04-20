@@ -149,3 +149,114 @@ func (iv Int8Vector) Serialize() []byte {
 func (iv Int8Vector) FieldType() FieldType {
 	return FieldTypeInt8Vector
 }
+
+// serializeVectorArray concatenates inner vector bytes for EmbList placeholder values.
+func serializeVectorArray[V Vector](vs []V) []byte {
+	if len(vs) == 0 {
+		return nil
+	}
+	out := make([]byte, 0, len(vs)*len(vs[0].Serialize()))
+	for _, v := range vs {
+		out = append(out, v.Serialize()...)
+	}
+	return out
+}
+
+// FloatVectorArray groups multiple float vectors into one search query, used for MAX_SIM-style
+// search against ArrayOfVector sub-fields of struct array (e.g. anns_field="clips[clip_emb]").
+// Each call to Search receives one or more `Vector` items; pass FloatVectorArray instead of
+// FloatVector when you want each query slot to carry a list of vectors (the EmbeddingList
+// equivalent in pymilvus).
+type FloatVectorArray []FloatVector
+
+// Dim returns the dim of the inner vectors (assumed uniform).
+func (fa FloatVectorArray) Dim() int {
+	if len(fa) == 0 {
+		return 0
+	}
+	return fa[0].Dim()
+}
+
+// FieldType returns the underlying float vector field type so the read path can pick the right
+// EmbList placeholder type.
+func (fa FloatVectorArray) FieldType() FieldType {
+	return FieldTypeFloatVector
+}
+
+// Serialize concatenates the bytes of each inner vector, matching the format the server expects
+// for EmbListFloatVector placeholder values.
+func (fa FloatVectorArray) Serialize() []byte {
+	return serializeVectorArray(fa)
+}
+
+// Float16VectorArray groups multiple float16 vectors for EmbListFloat16Vector search.
+type Float16VectorArray []Float16Vector
+
+func (fa Float16VectorArray) Dim() int {
+	if len(fa) == 0 {
+		return 0
+	}
+	return fa[0].Dim()
+}
+
+func (fa Float16VectorArray) FieldType() FieldType {
+	return FieldTypeFloat16Vector
+}
+
+func (fa Float16VectorArray) Serialize() []byte {
+	return serializeVectorArray(fa)
+}
+
+// BFloat16VectorArray groups multiple bfloat16 vectors for EmbListBFloat16Vector search.
+type BFloat16VectorArray []BFloat16Vector
+
+func (fa BFloat16VectorArray) Dim() int {
+	if len(fa) == 0 {
+		return 0
+	}
+	return fa[0].Dim()
+}
+
+func (fa BFloat16VectorArray) FieldType() FieldType {
+	return FieldTypeBFloat16Vector
+}
+
+func (fa BFloat16VectorArray) Serialize() []byte {
+	return serializeVectorArray(fa)
+}
+
+// BinaryVectorArray groups multiple binary vectors for EmbListBinaryVector search.
+type BinaryVectorArray []BinaryVector
+
+func (fa BinaryVectorArray) Dim() int {
+	if len(fa) == 0 {
+		return 0
+	}
+	return fa[0].Dim()
+}
+
+func (fa BinaryVectorArray) FieldType() FieldType {
+	return FieldTypeBinaryVector
+}
+
+func (fa BinaryVectorArray) Serialize() []byte {
+	return serializeVectorArray(fa)
+}
+
+// Int8VectorArray groups multiple int8 vectors for EmbListInt8Vector search.
+type Int8VectorArray []Int8Vector
+
+func (fa Int8VectorArray) Dim() int {
+	if len(fa) == 0 {
+		return 0
+	}
+	return fa[0].Dim()
+}
+
+func (fa Int8VectorArray) FieldType() FieldType {
+	return FieldTypeInt8Vector
+}
+
+func (fa Int8VectorArray) Serialize() []byte {
+	return serializeVectorArray(fa)
+}

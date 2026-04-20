@@ -104,3 +104,57 @@ func TestVectors(t *testing.T) {
 		assert.Equal(t, dim, len(iv.Serialize()))
 	})
 }
+
+func TestVectorArrays(t *testing.T) {
+	const dim = 4
+	const rows = 3
+
+	t.Run("float vector array", func(t *testing.T) {
+		fa := FloatVectorArray{
+			FloatVector{1, 2, 3, 4},
+			FloatVector{5, 6, 7, 8},
+			FloatVector{9, 10, 11, 12},
+		}
+		assert.Equal(t, FieldTypeFloatVector, fa.FieldType())
+		assert.Equal(t, dim, fa.Dim())
+		// 3 vectors * dim floats * 4 bytes/float
+		assert.Equal(t, rows*dim*4, len(fa.Serialize()))
+
+		var empty FloatVectorArray
+		assert.Equal(t, 0, empty.Dim())
+		assert.Nil(t, empty.Serialize())
+	})
+
+	t.Run("float16 vector array", func(t *testing.T) {
+		raw := make([]byte, dim*2)
+		fa := Float16VectorArray{Float16Vector(raw), Float16Vector(raw)}
+		assert.Equal(t, FieldTypeFloat16Vector, fa.FieldType())
+		assert.Equal(t, dim, fa.Dim())
+		assert.Equal(t, 2*dim*2, len(fa.Serialize()))
+	})
+
+	t.Run("bfloat16 vector array", func(t *testing.T) {
+		raw := make([]byte, dim*2)
+		fa := BFloat16VectorArray{BFloat16Vector(raw), BFloat16Vector(raw)}
+		assert.Equal(t, FieldTypeBFloat16Vector, fa.FieldType())
+		assert.Equal(t, dim, fa.Dim())
+		assert.Equal(t, 2*dim*2, len(fa.Serialize()))
+	})
+
+	t.Run("binary vector array", func(t *testing.T) {
+		// binary dim is bits; use 2 bytes -> 16 bits.
+		raw := make([]byte, 2)
+		fa := BinaryVectorArray{BinaryVector(raw), BinaryVector(raw)}
+		assert.Equal(t, FieldTypeBinaryVector, fa.FieldType())
+		assert.Equal(t, 16, fa.Dim())
+		assert.Equal(t, 2*2, len(fa.Serialize()))
+	})
+
+	t.Run("int8 vector array", func(t *testing.T) {
+		raw := make([]int8, dim)
+		fa := Int8VectorArray{Int8Vector(raw), Int8Vector(raw), Int8Vector(raw)}
+		assert.Equal(t, FieldTypeInt8Vector, fa.FieldType())
+		assert.Equal(t, dim, fa.Dim())
+		assert.Equal(t, rows*dim, len(fa.Serialize()))
+	})
+}
