@@ -2034,7 +2034,8 @@ func TestCollectionLevelMetricsAggregation(t *testing.T) {
 		assert.NotEmpty(t, client.Metrics)
 		assert.NotNil(t, client.Metrics[0].CollectionMetrics)
 
-		if clientID == "client-1" {
+		switch clientID {
+		case "client-1":
 			collMetrics := client.Metrics[0].CollectionMetrics
 			assert.Len(t, collMetrics, 2)
 			assert.Contains(t, collMetrics, "collection_A")
@@ -2055,7 +2056,7 @@ func TestCollectionLevelMetricsAggregation(t *testing.T) {
 			assert.Equal(t, 15.0, collMetrics["collection_B"].AvgLatencyMs)
 			assert.Equal(t, 70.0, collMetrics["collection_B"].P99LatencyMs)
 			assert.Equal(t, 150.0, collMetrics["collection_B"].MaxLatencyMs)
-		} else if clientID == "client-2" {
+		case "client-2":
 			collMetrics := client.Metrics[0].CollectionMetrics
 			assert.Len(t, collMetrics, 2)
 			assert.Contains(t, collMetrics, "collection_A")

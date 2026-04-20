@@ -521,7 +521,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	ctx := context.Background()
 
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSnapshotName(), true)
+	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
 	if err != nil {
 		log.Error("failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), zap.Error(err))...)
@@ -675,7 +675,6 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 		// Update binlog information for all segments
 		for _, result := range resp.GetSegmentResults() {
-
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
 			var err error
@@ -721,7 +720,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			}
 
 			// Sync JSON key indexes
-			if err = syncJsonKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
+			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
 			}
 
@@ -957,7 +956,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 // Index Synchronization: JSON Key Indexes
 // ===========================================================================================
 
-// syncJsonKeyIndexes synchronizes JSON key index metadata to segment.
+// syncJSONKeyIndexes synchronizes JSON key index metadata to segment.
 //
 // Process flow:
 //  1. Update segment with JSON key index logs
@@ -978,7 +977,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 // - Indexes on keys within JSON fields
 // - Stored inline with segment metadata (not in indexMeta)
 // - Enables efficient queries on JSON field contents
-func syncJsonKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
+func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
 ) error {
 	if len(result.GetJsonKeyIndexInfos()) == 0 {
@@ -986,7 +985,7 @@ func syncJsonKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	}
 
 	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetJsonKeyIndexLogs(result.GetJsonKeyIndexInfos()))
+		SetJSONKeyIndexLogs(result.GetJsonKeyIndexInfos()))
 	if err != nil {
 		log.Warn("failed to update json key index",
 			WrapCopySegmentTaskLog(task,

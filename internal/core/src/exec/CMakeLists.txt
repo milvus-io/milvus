@@ -11,6 +11,7 @@
 
 add_source_at_current_directory_recursively()
 add_library(milvus_exec OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_exec PUBLIC milvus_conan_deps)
 
 # ── Per-arch SIMD compile flags for runtime dispatch ──
 # Each SimdFilter*.cpp is compiled with arch-specific flags so xsimd

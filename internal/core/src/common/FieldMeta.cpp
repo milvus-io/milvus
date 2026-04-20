@@ -145,8 +145,9 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         auto is_system =
             SystemProperty::Instance().SystemFieldVerify(name, field_id);
         AssertInfo(is_system,
-                   "invalid system type: name(" + name.get() + "), id(" +
-                       std::to_string(field_id.get()) + ")");
+                   "invalid system type: name({}), id({})",
+                   name.get(),
+                   field_id.get());
     }
 
     auto data_type = DataType(schema_proto.data_type());

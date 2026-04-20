@@ -50,7 +50,7 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("wrong binlog type, expect:%s, actual:%s",
 				et.String(), event.TypeCode.String()))
 		}
-		rows, validDataRows, _, err := event.PayloadReaderInterface.GetDataFromPayload()
+		rows, validDataRows, _, err := event.GetDataFromPayload()
 		if err != nil {
 			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
 		}

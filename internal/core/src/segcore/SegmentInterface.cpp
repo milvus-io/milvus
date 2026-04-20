@@ -71,7 +71,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
         bulk_subscript(&op_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
-    ParsePksFromFieldData(results.primary_keys_, *field_data.get());
+    ParsePksFromFieldData(results.primary_keys_, *field_data);
     results.search_storage_cost_.scanned_remote_bytes +=
         op_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=

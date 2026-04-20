@@ -20,6 +20,7 @@
 #include <exception>
 #include <list>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -174,11 +175,12 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         if (boost::filesystem::is_directory(*iter)) {
             LOG_WARN("{} is a directory", iter->path().string());
         } else {
-            LOG_INFO("trying to add index file: {}", iter->path().string());
-            AssertInfo(disk_file_manager_->AddFile(iter->path().string()),
+            auto file_path_str = iter->path().string();
+            LOG_INFO("trying to add index file: {}", file_path_str);
+            AssertInfo(disk_file_manager_->AddFile(file_path_str),
                        "failed to add index file: {}",
-                       iter->path().string());
-            LOG_INFO("index file: {} added", iter->path().string());
+                       file_path_str);
+            LOG_INFO("index file: {} added", file_path_str);
         }
     }
 
@@ -278,26 +280,31 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         return;
     }
     std::vector<std::string> null_offset_files;
+    std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
         if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
 
-        // add slice meta file for null offset file compact
         if (file_name == INDEX_FILE_SLICE_META) {
-            null_offset_files.push_back(file);
+            slice_meta_file = file;
         }
     }
 
     if (null_offset_files.size() > 0) {
+        AssertInfo(slice_meta_file.has_value(),
+                   "null offset slices found but _meta_slice is missing");
+        null_offset_files.push_back(slice_meta_file.value());
         // null offset file is sliced
         auto index_datas = this->file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
-        auto null_offsets_data = CompactIndexDatas(index_datas);
-        auto null_offsets_data_codecs =
-            std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto null_offsets_data_codecs = CompactIndexDatasByKey(
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
+        AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
+                   "null offset file is empty");
         for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());
@@ -764,6 +771,7 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -775,7 +783,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                 Assert(IsStringDataType(
                     static_cast<DataType>(schema_.element_type())));
             }
-            std::vector<std::string> output;
+            output.clear();
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
                     array_column[i].template get_data<std::string>(j));
@@ -828,6 +836,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     int64_t row_offset = 0;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -841,9 +850,8 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             Assert(IsStringDataType(
                 static_cast<DataType>(schema_.element_type())));
 
-            std::vector<std::string> output;
+            output.clear();
             auto length = array_column[i].length();
-            output.reserve(length);
             for (int64_t j = 0; j < length; j++) {
                 output.push_back(
                     array_column[i].template get_data<std::string>(j));

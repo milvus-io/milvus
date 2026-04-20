@@ -174,7 +174,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
 		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), mp.MsgID)
-		impl.RecoveryStorage.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
+		impl.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
 			MessageID: messageID,
 			TimeTick:  mp.Timestamp,
 			Magic:     utility.RecoveryMagicStreamingInitialized,
@@ -244,7 +244,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
 	// only for truncate api now.
 	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
-		if err := impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+		if err := impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 			return err
 		}
@@ -252,7 +252,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// TODO: We will merge the flusher into recovery storage in future.
 		// Currently, flusher works as a separate component.
 		defer func() {
-			if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			if err = impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 				impl.logger.Warn("failed to observe message", zap.Error(err))
 			}
 		}()

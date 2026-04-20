@@ -145,6 +145,14 @@ func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
 }
 
+// GetResourceGroupName returns the resource group name of the session.
+func (s *SessionRaw) GetResourceGroupName() string {
+	if s.ServerLabels == nil {
+		return ""
+	}
+	return s.ServerLabels[LabelResourceGroup]
+}
+
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // Exclusive indicates that this server can only start one.

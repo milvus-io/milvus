@@ -30,6 +30,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/Geometry.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
 #include "storage/StorageV2FSCache.h"
@@ -810,9 +811,8 @@ GenIndexPathIdentifier(int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id) {
-    return std::to_string(build_id) + "_" + std::to_string(index_version) +
-           "_" + std::to_string(segment_id) + "_" + std::to_string(field_id) +
-           "/";
+    return fmt::format(
+        "{}_{}_{}_{}/", build_id, index_version, segment_id, field_id);
 }
 
 std::string
@@ -944,8 +944,7 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t field_id) {
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
-    boost::filesystem::path path1 =
-        std::to_string(segment_id) + "_" + std::to_string(field_id) + "/";
+    boost::filesystem::path path1 = fmt::format("{}_{}/", segment_id, field_id);
     return NormalizePath(prefix / path / path1);
 }
 
@@ -1537,38 +1536,43 @@ GetFieldDatasFromManifest(
 
     std::vector<std::string> needed_columns = {column_name};
 
-    // Create arrow schema from field meta
-    std::shared_ptr<arrow::Schema> arrow_schema;
     bool nullable = field_meta.field_schema.nullable();
+    bool is_external = !ext_field.empty();
 
-    if (IsVectorDataType(data_type.value())) {
-        if (data_type.value() == DataType::VECTOR_ARRAY) {
-            arrow_schema = CreateArrowSchema(
-                data_type.value(), static_cast<int>(dim), element_type.value());
-        } else if (IsSparseFloatVectorDataType(data_type.value())) {
+    // External tables: schemaless reader — let the reader derive types from
+    // file metadata, then normalize Arrow types to Milvus internal format.
+    // Internal tables: explicit schema reader — the reader returns data in
+    // the exact Milvus-native Arrow types, no normalization needed.
+    std::shared_ptr<arrow::Schema> reader_schema = nullptr;
+    if (!is_external) {
+        std::shared_ptr<arrow::Schema> arrow_schema;
+        if (IsVectorDataType(data_type.value())) {
+            if (data_type.value() == DataType::VECTOR_ARRAY) {
+                arrow_schema = CreateArrowSchema(data_type.value(),
+                                                 static_cast<int>(dim),
+                                                 element_type.value());
+            } else if (IsSparseFloatVectorDataType(data_type.value())) {
+                arrow_schema = CreateArrowSchema(data_type.value(), nullable);
+            } else {
+                arrow_schema = CreateArrowSchema(
+                    data_type.value(), static_cast<int>(dim), nullable);
+            }
+        } else if (data_type.value() == DataType::ARRAY) {
             arrow_schema = CreateArrowSchema(data_type.value(), nullable);
         } else {
-            arrow_schema = CreateArrowSchema(
-                data_type.value(), static_cast<int>(dim), nullable);
+            arrow_schema = CreateArrowSchema(data_type.value(), nullable);
         }
-    } else if (data_type.value() == DataType::ARRAY) {
-        arrow_schema = CreateArrowSchema(data_type.value(), nullable);
-    } else {
-        arrow_schema = CreateArrowSchema(data_type.value(), nullable);
+        reader_schema = std::make_shared<arrow::Schema>(
+            arrow::Schema({arrow_schema->field(0)->WithName(column_name)}));
     }
 
-    auto updated_schema = std::make_shared<arrow::Schema>(
-        arrow::Schema({arrow_schema->field(0)->WithName(column_name)}));
-
+    auto needed_cols_ptr =
+        std::make_shared<std::vector<std::string>>(needed_columns);
     auto reader = milvus_storage::api::Reader::create(
-        column_groups,
-        updated_schema,
-        std::make_shared<std::vector<std::string>>(needed_columns),
-        *loon_ffi_properties);
+        column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
     AssertInfo(reader != nullptr, "Failed to create reader");
 
-    // without predicate
     auto reader_result = reader->get_record_batch_reader("");
     AssertInfo(reader_result.ok(),
                "Failed to get record batch reader: " +
@@ -1576,7 +1580,6 @@ GetFieldDatasFromManifest(
 
     auto record_batch_reader = reader_result.ValueOrDie();
 
-    // Read all record batches and convert to FieldDataPtr
     std::vector<FieldDataPtr> field_datas;
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
@@ -1584,22 +1587,25 @@ GetFieldDatasFromManifest(
         AssertInfo(status.ok(),
                    "Failed to read record batch: " + status.ToString());
         if (batch == nullptr) {
-            break;  // End of stream
+            break;
         }
 
-        // Convert record batch to FieldData
         auto num_rows = batch->num_rows();
         if (num_rows == 0) {
             continue;
         }
 
         auto raw_column = batch->GetColumnByName(column_name);
+        if (is_external) {
+            raw_column = NormalizeExternalArrow(raw_column,
+                                                data_type.value(),
+                                                dim,
+                                                nullable,
+                                                element_type.value());
+        }
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
-        auto field_data = CreateFieldData(data_type.value(),
-                                          element_type.value(),
-                                          batch->schema()->field(0)->nullable(),
-                                          dim,
-                                          num_rows);
+        auto field_data = CreateFieldData(
+            data_type.value(), element_type.value(), nullable, dim, num_rows);
         field_data->FillFieldData(chunked_array);
         field_datas.push_back(field_data);
     }
@@ -1702,14 +1708,15 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
         }
 
         int64_t num_rows = array->length();
-        AssertInfo(array->null_count() == 0,
-                   "Null values in vector columns are not supported for "
-                   "external collections");
         auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
         AssertInfo(buffer_result.ok(),
                    "Failed to allocate buffer for vector normalization");
         auto buffer = std::move(*buffer_result);
         auto dst = buffer->mutable_data();
+        // Zero-fill for null rows (nullable vectors from external Parquet)
+        if (array->null_count() > 0) {
+            memset(dst, 0, num_rows * byte_width);
+        }
 
         if (type_id == arrow::Type::LIST) {
             auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
@@ -1723,10 +1730,12 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
-                auto offset = list_array->value_offset(i);
-                memcpy(dst + i * byte_width,
-                       raw + offset * elem_byte_size,
-                       byte_width);
+                if (array->IsValid(i)) {
+                    auto offset = list_array->value_offset(i);
+                    memcpy(dst + i * byte_width,
+                           raw + offset * elem_byte_size,
+                           byte_width);
+                }
             }
         } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
             auto fsl_array =
@@ -1741,10 +1750,12 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
-                auto offset = fsl_array->value_offset(i);
-                memcpy(dst + i * byte_width,
-                       raw + offset * elem_byte_size,
-                       byte_width);
+                if (array->IsValid(i)) {
+                    auto offset = fsl_array->value_offset(i);
+                    memcpy(dst + i * byte_width,
+                           raw + offset * elem_byte_size,
+                           byte_width);
+                }
             }
         } else {
             ThrowInfo(ErrorCode::Unsupported,
@@ -1752,12 +1763,347 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                       array->type()->ToString());
         }
 
-        auto fsb_array = std::make_shared<arrow::FixedSizeBinaryArray>(
-            fsb_type, num_rows, std::move(buffer));
-        result.push_back(std::move(fsb_array));
+        // Preserve null bitmap from the source array
+        std::shared_ptr<arrow::Buffer> null_bitmap;
+        if (array->null_count() > 0 && array->data()->buffers[0]) {
+            null_bitmap = array->data()->buffers[0];
+        }
+        auto fsb_data = arrow::ArrayData::Make(fsb_type,
+                                               num_rows,
+                                               {null_bitmap, std::move(buffer)},
+                                               array->null_count());
+        result.push_back(
+            std::make_shared<arrow::FixedSizeBinaryArray>(fsb_data));
     }
     return result;
 }
+
+// ============================================================
+// Arrow type normalization helpers for external table loading
+// ============================================================
+
+arrow::ArrayVector
+ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        if (arr->type_id() == arrow::Type::BINARY) {
+            result.push_back(arr);
+            continue;
+        }
+        auto fsb = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
+        int byte_width = fsb->byte_width();
+        int64_t n = fsb->length();
+
+        // Build offsets: null rows occupy no data space
+        auto offsets_result = arrow::AllocateBuffer((n + 1) * sizeof(int32_t));
+        AssertInfo(offsets_result.ok(), "Failed to allocate offsets buffer");
+        auto offsets_buf = std::move(*offsets_result);
+        auto* offsets = reinterpret_cast<int32_t*>(offsets_buf->mutable_data());
+        int32_t offset = 0;
+        offsets[0] = 0;
+        for (int64_t i = 0; i < n; i++) {
+            offset += fsb->IsValid(i) ? byte_width : 0;
+            offsets[i + 1] = offset;
+        }
+
+        // Build data: copy only valid rows
+        auto data_result = arrow::AllocateBuffer(offset);
+        AssertInfo(data_result.ok(), "Failed to allocate data buffer");
+        auto data_buf = std::move(*data_result);
+        auto* dst = data_buf->mutable_data();
+        for (int64_t i = 0; i < n; i++) {
+            if (fsb->IsValid(i)) {
+                memcpy(dst, fsb->Value(i), byte_width);
+                dst += byte_width;
+            }
+        }
+
+        // Reuse the original null bitmap
+        auto bin_data = arrow::ArrayData::Make(arrow::binary(),
+                                               n,
+                                               {fsb->data()->buffers[0],
+                                                std::move(offsets_buf),
+                                                std::move(data_buf)},
+                                               fsb->null_count(),
+                                               /*offset=*/0);
+        result.push_back(std::make_shared<arrow::BinaryArray>(bin_data));
+    }
+    return result;
+}
+
+arrow::ArrayVector
+ConvertStringArrayToBinary(const arrow::ArrayVector& arrays) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        if (arr->type_id() != arrow::Type::STRING) {
+            result.push_back(arr);
+            continue;
+        }
+        // Zero-copy: StringArray and BinaryArray share identical layout
+        auto d = arr->data();
+        auto bin = arrow::ArrayData::Make(
+            arrow::binary(), d->length, d->buffers, d->null_count, d->offset);
+        result.push_back(std::make_shared<arrow::BinaryArray>(bin));
+    }
+    return result;
+}
+
+arrow::ArrayVector
+ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+
+    GEOSContextHandle_t ctx = GEOS_init_r();
+    AssertInfo(ctx != nullptr, "Failed to initialize GEOS context");
+
+    for (const auto& arr : arrays) {
+        if (arr->type_id() != arrow::Type::STRING) {
+            result.push_back(arr);
+            continue;
+        }
+        auto str_array = std::static_pointer_cast<arrow::StringArray>(arr);
+        arrow::BinaryBuilder builder;
+        auto status = builder.Reserve(str_array->length());
+        AssertInfo(status.ok(),
+                   "BinaryBuilder reserve failed: " + status.ToString());
+        for (int64_t i = 0; i < str_array->length(); ++i) {
+            if (str_array->IsNull(i)) {
+                status = builder.AppendNull();
+                AssertInfo(status.ok(), "AppendNull failed");
+                continue;
+            }
+            auto wkt = str_array->GetString(i);
+            Geometry geom(ctx, wkt.c_str());
+            auto wkb = geom.to_wkb_string();
+            status = builder.Append(wkb);
+            AssertInfo(status.ok(), "Append WKB failed");
+        }
+        std::shared_ptr<arrow::Array> wkb_array;
+        status = builder.Finish(&wkb_array);
+        AssertInfo(status.ok(), "BinaryBuilder finish failed");
+        result.push_back(wkb_array);
+    }
+
+    GEOS_finish_r(ctx);
+    return result;
+}
+
+arrow::ArrayVector
+ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        if (arr->type_id() != arrow::Type::TIMESTAMP) {
+            result.push_back(arr);
+            continue;
+        }
+        auto ts_arr = std::static_pointer_cast<arrow::TimestampArray>(arr);
+        auto ts_type =
+            std::static_pointer_cast<arrow::TimestampType>(arr->type());
+        auto unit = ts_type->unit();
+        arrow::Int64Builder builder;
+        auto status = builder.Reserve(ts_arr->length());
+        AssertInfo(status.ok(), "Int64Builder reserve failed");
+        for (int64_t i = 0; i < ts_arr->length(); i++) {
+            if (ts_arr->IsNull(i)) {
+                status = builder.AppendNull();
+            } else {
+                status = builder.Append(
+                    ConvertToMicroseconds(ts_arr->Value(i), unit));
+            }
+            AssertInfo(status.ok(), "Int64Builder append failed");
+        }
+        std::shared_ptr<arrow::Array> int_array;
+        status = builder.Finish(&int_array);
+        AssertInfo(status.ok(), "Int64Builder finish failed");
+        result.push_back(std::move(int_array));
+    }
+    return result;
+}
+
+arrow::ArrayVector
+ConvertListToProtobufBinary(const arrow::ArrayVector& arrays) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        if (arr->type_id() != arrow::Type::LIST) {
+            result.push_back(arr);
+            continue;
+        }
+        auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
+        arrow::BinaryBuilder builder;
+        auto status = builder.Reserve(list_arr->length());
+        AssertInfo(status.ok(), "BinaryBuilder reserve failed");
+        for (int64_t i = 0; i < list_arr->length(); i++) {
+            if (list_arr->IsNull(i)) {
+                status = builder.AppendNull();
+            } else {
+                auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                std::string serialized;
+                proto.SerializeToString(&serialized);
+                status = builder.Append(serialized);
+            }
+            AssertInfo(status.ok(), "BinaryBuilder append failed");
+        }
+        std::shared_ptr<arrow::Array> bin_array;
+        status = builder.Finish(&bin_array);
+        AssertInfo(status.ok(), "BinaryBuilder finish failed");
+        result.push_back(std::move(bin_array));
+    }
+    return result;
+}
+
+arrow::ArrayVector
+NormalizeVectorArrays(const arrow::ArrayVector& arrays,
+                      DataType data_type,
+                      int64_t dim,
+                      bool nullable) {
+    if (arrays.empty()) {
+        return arrays;
+    }
+    auto type_id = arrays[0]->type_id();
+    // Already the target type
+    if (type_id == arrow::Type::FIXED_SIZE_BINARY && !nullable) {
+        return arrays;
+    }
+    if (type_id == arrow::Type::BINARY && nullable) {
+        return arrays;
+    }
+
+    // Step 1: List/FixedSizeList → FixedSizeBinary
+    arrow::ArrayVector fsb;
+    if (type_id == arrow::Type::FIXED_SIZE_BINARY) {
+        fsb =
+            arrays;  // already FixedSizeBinary (but needs Binary for nullable)
+    } else {
+        fsb = NormalizeVectorArraysToFixedSizeBinary(
+            arrays, data_type, static_cast<int>(dim));
+    }
+
+    // Step 2: nullable → FixedSizeBinary → BinaryArray
+    if (nullable) {
+        return ConvertFixedSizeBinaryToBinary(fsb);
+    }
+    return fsb;
+}
+
+arrow::ArrayVector
+NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
+                          DataType element_type,
+                          int64_t dim) {
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        if (arr->type_id() != arrow::Type::LIST) {
+            result.push_back(arr);
+            continue;
+        }
+        auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
+        if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
+            result.push_back(arr);
+            continue;
+        }
+        auto normalized = NormalizeVectorArraysToFixedSizeBinary(
+            {list_arr->values()}, element_type, static_cast<int>(dim));
+        auto rebuilt =
+            arrow::ListArray::FromArrays(*list_arr->offsets(), *normalized[0]);
+        AssertInfo(rebuilt.ok(),
+                   "Failed to rebuild ListArray for VectorArray: {}",
+                   rebuilt.status().ToString());
+        result.push_back(*rebuilt);
+    }
+    return result;
+}
+
+// --- Tier 2: Per-consumer entry points ---
+
+// FieldMeta overload: extracts parameters and delegates.
+std::shared_ptr<arrow::Array>
+NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
+                       const FieldMeta& field_meta) {
+    auto dt = field_meta.get_data_type();
+    int64_t dim = (IsVectorDataType(dt) && !IsSparseFloatVectorDataType(dt))
+                      ? field_meta.get_dim()
+                      : 0;
+    auto element_type = IsVectorArrayDataType(dt) || IsArrayDataType(dt)
+                            ? field_meta.get_element_type()
+                            : DataType::NONE;
+    return NormalizeExternalArrow(
+        array, dt, dim, field_meta.is_nullable(), element_type);
+}
+
+// Load path: batch wrapper.
+arrow::ArrayVector
+NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
+                             const FieldMeta& field_meta) {
+    if (arrays.empty()) {
+        return arrays;
+    }
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+    for (const auto& arr : arrays) {
+        result.push_back(NormalizeExternalArrow(arr, field_meta));
+    }
+    return result;
+}
+
+// Overload for callers without FieldMeta.
+std::shared_ptr<arrow::Array>
+NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
+                       DataType data_type,
+                       int64_t dim,
+                       bool nullable,
+                       DataType element_type) {
+    auto type_id = array->type_id();
+
+    // Dense vectors
+    if (IsVectorDataType(data_type) &&
+        !IsSparseFloatVectorDataType(data_type) &&
+        !IsVectorArrayDataType(data_type)) {
+        if (type_id == arrow::Type::FIXED_SIZE_BINARY && !nullable) {
+            return array;
+        }
+        if (type_id == arrow::Type::BINARY && nullable) {
+            return array;
+        }
+        auto result = NormalizeVectorArrays({array}, data_type, dim, nullable);
+        return result[0];
+    }
+    // VectorArray inner: List<List<scalar>> → List<FixedSizeBinary>
+    if (IsVectorArrayDataType(data_type) && type_id == arrow::Type::LIST &&
+        element_type != DataType::NONE) {
+        auto result = NormalizeVectorArrayInner({array}, element_type, dim);
+        return result[0];
+    }
+    // Geometry: WKT → WKB
+    if (data_type == DataType::GEOMETRY && type_id == arrow::Type::STRING) {
+        auto result = ConvertWKTStringArrayToWKBBinary({array});
+        return result[0];
+    }
+    // JSON/VARCHAR/STRING/TEXT: String → Binary
+    if ((data_type == DataType::VARCHAR || data_type == DataType::STRING ||
+         data_type == DataType::TEXT || data_type == DataType::JSON) &&
+        type_id == arrow::Type::STRING) {
+        auto result = ConvertStringArrayToBinary({array});
+        return result[0];
+    }
+    // Timestamptz: Timestamp → Int64
+    if (data_type == DataType::TIMESTAMPTZ &&
+        type_id == arrow::Type::TIMESTAMP) {
+        auto result = ConvertTimestampToInt64({array});
+        return result[0];
+    }
+    // Array: List → Protobuf Binary
+    if (data_type == DataType::ARRAY && type_id == arrow::Type::LIST) {
+        auto result = ConvertListToProtobufBinary({array});
+        return result[0];
+    }
+    return array;
+}
+
+// ============================================================
 
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,

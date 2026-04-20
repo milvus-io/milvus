@@ -988,8 +988,8 @@ func TestProxy(t *testing.T) {
 
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
-	testServer.Proxy.SetAddress(testServer.lisAddr)
-	assert.Equal(t, testServer.lisAddr, testServer.Proxy.GetAddress())
+	testServer.SetAddress(testServer.lisAddr)
+	assert.Equal(t, testServer.lisAddr, testServer.GetAddress())
 
 	rootCoordClient, err := mixc.NewClient(ctx)
 	assert.NoError(t, err)

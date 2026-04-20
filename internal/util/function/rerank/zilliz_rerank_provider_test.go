@@ -51,7 +51,7 @@ type testBaseProvider struct {
 	batchSize int
 }
 
-func (provider *testBaseProvider) maxBatch() int {
+func (provider *testBaseProvider) MaxBatch() int {
 	return provider.batchSize
 }
 
@@ -62,7 +62,7 @@ type testZillzProvider struct {
 	params map[string]string
 }
 
-func (provider *testZillzProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *testZillzProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	return provider.client.Rerank(ctx, query, docs, provider.params, 30)
 }
 
@@ -166,13 +166,13 @@ func (s *ZillizRerankProviderSuite) TestNewZillizProvider_Success() {
 			// but we can verify that the parameters were parsed correctly by checking the error doesn't relate to parameter parsing
 			if err != nil {
 				// Connection errors are expected in unit tests
-				s.Contains(err.Error(), "Connect model serving failed", "Expected connection error, got: %v", err)
+				s.Contains(err.Error(), "connect model serving failed", "Expected connection error, got: %v", err)
 			} else {
 				// If somehow the connection succeeds, verify the provider was created correctly
 				s.NotNil(provider)
 				zillizProvider, ok := provider.(*zillzProvider)
 				s.True(ok)
-				s.Equal(tt.expectedBatch, zillizProvider.maxBatch())
+				s.Equal(tt.expectedBatch, zillizProvider.MaxBatch())
 				s.Equal(tt.expectedParams, zillizProvider.params)
 			}
 		})
@@ -287,7 +287,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_Success() {
 	}
 
 	// Test the rerank method
-	scores, err := provider.rerank(ctx, query, docs)
+	scores, err := provider.Rerank(ctx, query, docs)
 
 	s.NoError(err)
 	s.Equal(expectedScores, scores)
@@ -315,7 +315,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_Error() {
 	}
 
 	// Test the rerank method
-	scores, err := provider.rerank(ctx, query, docs)
+	scores, err := provider.Rerank(ctx, query, docs)
 
 	s.Error(err)
 	s.Nil(scores)
@@ -352,7 +352,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_MaxBatch() {
 				testBaseProvider: testBaseProvider{batchSize: tt.batchSize},
 			}
 
-			s.Equal(tt.expectedBatch, provider.maxBatch())
+			s.Equal(tt.expectedBatch, provider.MaxBatch())
 		})
 	}
 }
@@ -378,7 +378,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_WithDifferentParams
 	}
 
 	// Test the rerank method
-	scores, err := provider.rerank(ctx, query, docs)
+	scores, err := provider.Rerank(ctx, query, docs)
 
 	s.NoError(err)
 	s.Equal(expectedScores, scores)
@@ -406,7 +406,7 @@ func (s *ZillizRerankProviderSuite) TestZillzProvider_Rerank_EmptyDocs() {
 	}
 
 	// Test the rerank method
-	scores, err := provider.rerank(ctx, query, docs)
+	scores, err := provider.Rerank(ctx, query, docs)
 
 	s.NoError(err)
 	s.Equal(expectedScores, scores)
@@ -430,7 +430,7 @@ func (s *ZillizRerankProviderSuite) TestParameterParsing() {
 		provider, err := newZillizProvider(params, conf, extraInfo)
 		if err != nil {
 			// Connection error is expected in unit tests
-			s.Contains(err.Error(), "Connect model serving failed")
+			s.Contains(err.Error(), "connect model serving failed")
 		} else {
 			s.NotNil(provider)
 		}
@@ -454,7 +454,7 @@ func (s *ZillizRerankProviderSuite) TestParameterParsing() {
 		provider, err := newZillizProvider(params, conf, extraInfo)
 		if err != nil {
 			// Connection error is expected in unit tests
-			s.Contains(err.Error(), "Connect model serving failed")
+			s.Contains(err.Error(), "connect model serving failed")
 		} else {
 			s.NotNil(provider)
 			zillizProvider, ok := provider.(*zillzProvider)
@@ -488,7 +488,7 @@ func BenchmarkZillzProvider_Rerank(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := provider.rerank(ctx, query, docs)
+		_, err := provider.Rerank(ctx, query, docs)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -508,8 +508,8 @@ func TestZillizProviderIntegration(t *testing.T) {
 		DBName:    "test-db",
 	}
 
-	// This will test the integration through the main newProvider function
-	_, err := newProvider(params, extraInfo)
+	// This will test the integration through the main NewModelProvider function
+	_, err := NewModelProvider(params, extraInfo)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Zilliz client config error")
+	assert.Contains(t, err.Error(), "zilliz client config error")
 }

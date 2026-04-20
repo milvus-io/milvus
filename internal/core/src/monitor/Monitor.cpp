@@ -282,48 +282,155 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file,
                         mmapAllocatedCountFileLabel)
 
 // async cgo metrics
+std::map<std::string, std::string> cgoSearchPoolLabel = {{"pool", "search"}};
+std::map<std::string, std::string> cgoLoadPoolLabel = {{"pool", "load"}};
+
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds,
                                    "[cpp]async cgo queue duration");
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_cgo_queue_duration_seconds_all,
+    internal_cgo_queue_duration_seconds_search,
     internal_cgo_queue_duration_seconds,
-    {},
+    cgoSearchPoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_queue_duration_seconds_load,
+    internal_cgo_queue_duration_seconds,
+    cgoLoadPoolLabel,
     secondsBuckets);
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_execute_duration_seconds,
                                    "[cpp]async execute duration");
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_cgo_execute_duration_seconds_all,
+    internal_cgo_execute_duration_seconds_search,
     internal_cgo_execute_duration_seconds,
-    {},
+    cgoSearchPoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_execute_duration_seconds_load,
+    internal_cgo_execute_duration_seconds,
+    cgoLoadPoolLabel,
     secondsBuckets);
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_before_execute_total,
                                  "[cpp]async cgo cancel before execute count");
-DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_all,
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_search,
                           internal_cgo_cancel_before_execute_total,
-                          {});
+                          cgoSearchPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_load,
+                          internal_cgo_cancel_before_execute_total,
+                          cgoLoadPoolLabel);
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_during_execute_total,
                                  "[cpp]async cgo cancel during execute count");
-DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_all,
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_search,
                           internal_cgo_cancel_during_execute_total,
-                          {});
+                          cgoSearchPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_load,
+                          internal_cgo_cancel_during_execute_total,
+                          cgoLoadPoolLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_pool_size,
                                "[cpp]async cgo pool size");
-DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_all, internal_cgo_pool_size, {});
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_search,
+                        internal_cgo_pool_size,
+                        cgoSearchPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_load,
+                        internal_cgo_pool_size,
+                        cgoLoadPoolLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_inflight_task_total,
                                "[cpp]async cgo inflight task");
-DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_all,
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_search,
                         internal_cgo_inflight_task_total,
-                        {});
+                        cgoSearchPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_load,
+                        internal_cgo_inflight_task_total,
+                        cgoLoadPoolLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total,
                                "[cpp]async cgo executing task");
-DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all,
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_search,
                         internal_cgo_executing_task_total,
-                        {});
+                        cgoSearchPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load,
+                        internal_cgo_executing_task_total,
+                        cgoLoadPoolLabel);
+
+// storage thread pool metrics
+std::map<std::string, std::string> highPoolLabel = {{"priority", "high"}};
+std::map<std::string, std::string> middlePoolLabel = {{"priority", "middle"}};
+std::map<std::string, std::string> lowPoolLabel = {{"priority", "low"}};
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity,
+                               "[cpp]storage thread pool max threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_high,
+                        internal_storage_pool_capacity,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_middle,
+                        internal_storage_pool_capacity,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_low,
+                        internal_storage_pool_capacity,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_active_threads,
+                               "[cpp]storage thread pool active threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_high,
+                        internal_storage_pool_active_threads,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_middle,
+                        internal_storage_pool_active_threads,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_low,
+                        internal_storage_pool_active_threads,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_idle_threads,
+                               "[cpp]storage thread pool idle threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_high,
+                        internal_storage_pool_idle_threads,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_middle,
+                        internal_storage_pool_idle_threads,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_low,
+                        internal_storage_pool_idle_threads,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_queue_depth,
+                               "[cpp]storage thread pool queue depth");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_high,
+                        internal_storage_pool_queue_depth,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_middle,
+                        internal_storage_pool_queue_depth,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_low,
+                        internal_storage_pool_queue_depth,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_storage_pool_task_submitted_total,
+                                 "[cpp]storage thread pool tasks submitted");
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_high,
+                          internal_storage_pool_task_submitted_total,
+                          highPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_middle,
+                          internal_storage_pool_task_submitted_total,
+                          middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_low,
+                          internal_storage_pool_task_submitted_total,
+                          lowPoolLabel);
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_storage_pool_task_completed_total,
+                                 "[cpp]storage thread pool tasks completed");
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_high,
+                          internal_storage_pool_task_completed_total,
+                          highPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_middle,
+                          internal_storage_pool_task_completed_total,
+                          middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low,
+                          internal_storage_pool_task_completed_total,
+                          lowPoolLabel);
 
 }  // namespace milvus::monitor

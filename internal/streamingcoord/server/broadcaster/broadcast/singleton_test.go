@@ -25,8 +25,8 @@ func newMockBalancerForTest(t *testing.T) *mock_balancer.MockBalancer {
 		<-ctx.Done()
 		return ctx.Err()
 	}).Maybe()
-	mb.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
-	mb.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
+	mb.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
+	mb.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Maybe()
 	return mb
 }
 

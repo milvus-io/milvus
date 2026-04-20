@@ -1205,6 +1205,9 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// Stop background snapshot loop before refunding candidates
+	sd.distribution.Close()
+
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
 

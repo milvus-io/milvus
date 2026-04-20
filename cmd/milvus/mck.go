@@ -301,8 +301,8 @@ func (c *mck) collectInvalidTaskForPartition() []int64 {
 	for id, tasks := range c.partitionIDToTasks {
 		if _, ok := c.partitionIDMap[id]; !ok {
 			invalidTasksOfPartition = append(invalidTasksOfPartition, tasks...)
-			buffer.WriteString(fmt.Sprintf("Partition ID: %d\n", id))
-			buffer.WriteString(fmt.Sprintf("Tasks: %v\n", tasks))
+			fmt.Fprintf(&buffer, "Partition ID: %d\n", id)
+			fmt.Fprintf(&buffer, "Tasks: %v\n", tasks)
 		}
 	}
 	invalidTasksOfPartition = removeRepeatElement(invalidTasksOfPartition)
@@ -322,8 +322,8 @@ func (c *mck) collectInvalidTaskForSegment() []int64 {
 		for id, tasks := range c.segmentIDToTasks {
 			if _, ok := c.segmentIDMap[id]; !ok {
 				invalidTasksOfSegment = append(invalidTasksOfSegment, tasks...)
-				buffer.WriteString(fmt.Sprintf("Segment ID: %d\n", id))
-				buffer.WriteString(fmt.Sprintf("Tasks: %v\n", tasks))
+				fmt.Fprintf(&buffer, "Segment ID: %d\n", id)
+				fmt.Fprintf(&buffer, "Tasks: %v\n", tasks)
 			}
 		}
 		invalidTasksOfSegment = removeRepeatElement(invalidTasksOfSegment)

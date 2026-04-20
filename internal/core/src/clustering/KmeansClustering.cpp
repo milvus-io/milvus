@@ -199,7 +199,7 @@ KmeansClustering::CentroidIdMappingToPB(
             stats.add_num_in_centroid(num_vectors[j]);
         }
         cur_offset += num_offset;
-        stats_arr.emplace_back(stats);
+        stats_arr.emplace_back(std::move(stats));
     }
     return stats_arr;
 }
@@ -258,14 +258,14 @@ KmeansClustering::StreamingAssignandUpload(
     centroid_stats.SerializeToArray(data.get(), byte_size);
     std::unordered_map<std::string, int64_t> remote_paths_to_size;
     LOG_INFO(msg_header_ + "start upload cluster centroids file");
-    AddClusteringResultFiles(
-        file_manager_->GetChunkManager().get(),
-        data.get(),
-        byte_size,
-        GetRemoteCentroidsObjectPrefix() + "/" + std::string(CENTROIDS_NAME),
-        remote_paths_to_size);
-    cluster_result_.centroid_path =
+    auto centroid_remote_path =
         GetRemoteCentroidsObjectPrefix() + "/" + std::string(CENTROIDS_NAME);
+    AddClusteringResultFiles(file_manager_->GetChunkManager().get(),
+                             data.get(),
+                             byte_size,
+                             centroid_remote_path,
+                             remote_paths_to_size);
+    cluster_result_.centroid_path = std::move(centroid_remote_path);
     cluster_result_.centroid_file_size =
         remote_paths_to_size.at(cluster_result_.centroid_path);
     remote_paths_to_size.clear();
@@ -356,7 +356,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         std::vector<std::string> segment_files(
             pair.second.insert_files().begin(),
             pair.second.insert_files().end());
-        insert_files[pair.first] = segment_files;
+        insert_files[pair.first] = std::move(segment_files);
     }
 
     std::map<int64_t, int64_t> num_rows(config.num_rows().begin(),

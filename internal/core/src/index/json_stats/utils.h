@@ -546,6 +546,11 @@ class JsonStatsMeta {
         layout_type_map_ = layout_map;
     }
 
+    void
+    SetLayoutTypeMap(std::map<JsonKey, JsonKeyLayoutType>&& layout_map) {
+        layout_type_map_ = std::move(layout_map);
+    }
+
     const std::map<JsonKey, JsonKeyLayoutType>&
     GetLayoutTypeMap() const {
         return layout_type_map_;

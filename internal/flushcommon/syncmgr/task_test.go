@@ -164,7 +164,7 @@ func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
 		WithMetaCache(s.metacache).
 		WithSchema(s.schema).
 		WithStorageConfig(&indexpb.StorageConfig{
-			BucketName:  paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(),
+			BucketName:  paramtable.Get().MinioCfg.BucketName.GetValue(),
 			StorageType: "local",
 			RootPath:    "/tmp",
 		})

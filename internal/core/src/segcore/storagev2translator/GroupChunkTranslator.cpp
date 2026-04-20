@@ -41,16 +41,13 @@
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
-#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/format/parquet/file_reader.h"
 #include "mmap/Types.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
-#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -69,6 +66,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
+    std::vector<milvus_storage::RowGroupMetadataVector>&& row_group_meta_list,
     bool use_mmap,
     bool mmap_populate,
     int64_t num_fields,
@@ -94,7 +92,8 @@ GroupChunkTranslator::GroupChunkTranslator(
       }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
-      insert_files_(insert_files),
+      insert_files_(std::move(insert_files)),
+      row_group_meta_list_(std::move(row_group_meta_list)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       load_priority_(load_priority),
@@ -127,72 +126,6 @@ GroupChunkTranslator::GroupChunkTranslator(
                 }(),
                 /* is_index */ false),
             /* support_eviction */ true) {
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
-
-    // Get row group metadata from files in parallel using HIGH POOL
-    // to avoid blocking the MIDDLE POOL thread with serial S3 I/O
-    struct FileMetaResult {
-        std::shared_ptr<parquet::FileMetaData> parquet_metadata;
-        milvus_storage::RowGroupMetadataVector row_group_meta;
-        std::map<int64_t, milvus_storage::ColumnOffset> field_id_mapping;
-    };
-    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-    std::vector<std::future<FileMetaResult>> futures;
-    futures.reserve(insert_files_.size());
-    for (const auto& file : insert_files_) {
-        futures.push_back(pool.Submit([&fs, file, this]() {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            FileMetaResult meta_result;
-            meta_result.parquet_metadata =
-                reader->file_metadata()->GetParquetMetadata();
-            meta_result.row_group_meta =
-                reader->file_metadata()->GetRowGroupMetadataVector();
-            meta_result.field_id_mapping =
-                reader->file_metadata()->GetFieldIDMapping();
-            auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] translator {} failed to close file reader when "
-                "get row group "
-                "metadata from file {} with error {}",
-                key_,
-                file + " with error: " + status.ToString());
-            return meta_result;
-        }));
-    }
-    // Ensure all futures are awaited even if one throws, to prevent
-    // use-after-free on captured references (&fs, this) in background tasks.
-    auto futures_guard = folly::makeGuard([&futures]() {
-        for (auto& f : futures) {
-            if (f.valid()) {
-                try {
-                    f.get();
-                } catch (...) {
-                }
-            }
-        }
-    });
-    parquet_file_metadata_.reserve(insert_files_.size());
-    row_group_meta_list_.reserve(insert_files_.size());
-    for (auto& f : futures) {
-        auto meta_result = f.get();
-        parquet_file_metadata_.push_back(
-            std::move(meta_result.parquet_metadata));
-        row_group_meta_list_.push_back(std::move(meta_result.row_group_meta));
-        if (field_id_mapping_.empty()) {
-            field_id_mapping_ = std::move(meta_result.field_id_mapping);
-        }
-    }
-
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
@@ -462,6 +395,20 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
             }
         } catch (...) {
             LOG_WARN("drain channel exception swallowed");
+        }
+        try {
+            storage::WaitAllFutures(load_futures);
+        } catch (const std::exception& e) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored background load "
+                "exception after cancellation: {}",
+                key_,
+                e.what());
+        } catch (...) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored unknown background "
+                "load exception after cancellation",
+                key_);
         }
         throw;
     }

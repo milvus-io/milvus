@@ -25,6 +25,8 @@ import (
 var RegisterTruncateCollectionV2AckOnceCallback = registerMessageAckOnceCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 
 func resetMessageAckOnceCallbacks() {
+	messageAckOnceCallbacksMu.Lock()
+	defer messageAckOnceCallbacksMu.Unlock()
 	messageAckOnceCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckOnceCallback]{
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckOnceCallback](),
 	}

@@ -421,6 +421,18 @@ var (
 			Name:      "task_num_in_scheduler",
 			Help:      "number of tasks in global scheduler",
 		}, []string{TaskTypeLabel, TaskStateLabel})
+
+	// DataCoordSnapshotActivePins records the number of active (un-expired) pins
+	// held on source snapshots — primarily by restore jobs. Lets operators see
+	// which snapshots are currently protected from drop, flag drift vs. active
+	// CopySegmentJob count, and spot TTL expiry approaching for long-running restores.
+	DataCoordSnapshotActivePins = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_active_pins",
+			Help:      "number of active (un-expired) pins on a given source snapshot",
+		}, []string{collectionIDLabelName, "snapshot_name"})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -459,6 +471,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexStatsTaskNum)
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
+	registry.MustRegister(DataCoordSnapshotActivePins)
 	registerStreamingCoord(registry)
 }
 

@@ -37,7 +37,7 @@ JsonCastType
 JsonCastType::FromString(const std::string& str) {
     auto it = json_cast_type_map_.find(str);
     if (it == json_cast_type_map_.end()) {
-        ThrowInfo(Unsupported, "Invalid json cast type: " + str);
+        ThrowInfo(Unsupported, "Invalid json cast type: {}", str);
     }
     return it->second;
 }

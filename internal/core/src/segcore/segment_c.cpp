@@ -155,7 +155,7 @@ NewSegmentWithLoadInfo(CCollection collection,
 
         auto segment =
             CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
-        segment->SetLoadInfo(load_info);
+        segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -183,7 +183,8 @@ AsyncReopenSegment(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->Reopen(&op_ctx, load_info);
             return nullptr;
-        });
+        },
+        milvus::futures::PoolType::kLoad);
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
 }
@@ -249,7 +250,8 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
             segment->Load(trace_ctx, &op_ctx);
 
             return nullptr;
-        });
+        },
+        milvus::futures::PoolType::kLoad);
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
 }

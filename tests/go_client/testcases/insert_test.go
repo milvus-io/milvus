@@ -20,6 +20,8 @@ import (
 )
 
 func TestInsertDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
@@ -44,6 +46,8 @@ func TestInsertDefault(t *testing.T) {
 }
 
 func TestInsertDefaultPartition(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
@@ -73,6 +77,8 @@ func TestInsertDefaultPartition(t *testing.T) {
 }
 
 func TestInsertVarcharPkDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
@@ -138,6 +144,8 @@ func TestInsertAllFieldsData(t *testing.T) {
 
 // test insert dynamic data with column
 func TestInsertDynamicExtraColumn(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -191,6 +199,8 @@ func TestInsertDynamicExtraColumn(t *testing.T) {
 }
 
 func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -214,6 +224,8 @@ func TestInsertFp16OrBf16VectorsWithFp32Vector(t *testing.T) {
 
 // test insert array column with empty data
 func TestInsertEmptyArray(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -294,6 +306,8 @@ func TestInsertArrayDataCapacityExceed(t *testing.T) {
 
 // test insert not exist collection or not exist partition
 func TestInsertNotExist(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -313,6 +327,8 @@ func TestInsertNotExist(t *testing.T) {
 
 // test insert data columns len, order mismatch fields
 func TestInsertColumnsMismatchFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -347,6 +363,8 @@ func TestInsertColumnsMismatchFields(t *testing.T) {
 
 // test insert with columns which has different len
 func TestInsertColumnsDifferentLen(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -364,6 +382,8 @@ func TestInsertColumnsDifferentLen(t *testing.T) {
 }
 
 func TestInsertAutoIdPkData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -383,6 +403,8 @@ func TestInsertAutoIdPkData(t *testing.T) {
 
 // test insert invalid column: empty column or dim not match
 func TestInsertInvalidColumn(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
@@ -409,6 +431,8 @@ func TestInsertInvalidColumn(t *testing.T) {
 
 // test insert invalid column: empty column or dim not match
 func TestInsertColumnVarcharExceedLen(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
@@ -431,6 +455,8 @@ func TestInsertColumnVarcharExceedLen(t *testing.T) {
 
 // test insert sparse vector
 func TestInsertSparseData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -451,6 +477,8 @@ func TestInsertSparseData(t *testing.T) {
 }
 
 func TestInsertSparseDataMaxDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -476,6 +504,8 @@ func TestInsertSparseDataMaxDim(t *testing.T) {
 
 // empty spare vector can't be searched, but can be queried
 func TestInsertReadSparseEmptyVector(t *testing.T) {
+	t.Parallel()
+
 	// invalid sparse vector: positions >= uint32
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -509,6 +539,8 @@ func TestInsertReadSparseEmptyVector(t *testing.T) {
 }
 
 func TestInsertSparseInvalidVector(t *testing.T) {
+	t.Parallel()
+
 	// invalid sparse vector: len(positions) != len(values)
 	positions := []uint32{1, 10}
 	values := []float32{0.4, 5.0, 0.34}
@@ -539,6 +571,8 @@ func TestInsertSparseInvalidVector(t *testing.T) {
 }
 
 func TestInsertSparseVectorSamePosition(t *testing.T) {
+	t.Parallel()
+
 	// invalid sparse vector: positions >= uint32
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -702,6 +736,8 @@ func TestInsertVarcharRows(t *testing.T) {
 }
 
 func TestInsertSparseRows(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -743,6 +779,8 @@ func TestInsertSparseRows(t *testing.T) {
 
 // test field name: pk, row json name: int64
 func TestInsertRowFieldNameNotMatch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -762,6 +800,8 @@ func TestInsertRowFieldNameNotMatch(t *testing.T) {
 
 // test field name: pk, row json name: int64
 func TestInsertRowMismatchFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -885,6 +925,8 @@ func TestInsertEnableAutoIDRow(t *testing.T) {
 }
 
 func TestFlushRate(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection

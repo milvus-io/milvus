@@ -512,6 +512,11 @@ class SegmentLoadInfo {
         return info_.priority();
     }
 
+    [[nodiscard]] bool
+    GetUseTakeForOutput() const {
+        return info_.use_take_for_output();
+    }
+
     // ==================== Compaction Info ====================
 
     [[nodiscard]] const google::protobuf::RepeatedField<int64_t>&
@@ -702,6 +707,17 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups();
+
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
 
     // ==================== Stats & Delta Logs ====================
 

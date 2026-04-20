@@ -97,7 +97,7 @@ func metaKVCreator() (kv.MetaKv, error) {
 			panic(err)
 		}
 		return kv_tikv.NewTiKV(tikvCli, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(),
-			kv_tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+			kv_tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 	}
 	etcdConfig := &paramtable.Get().EtcdCfg
 	etcdCli, err := etcd.CreateEtcdClient(
@@ -116,7 +116,7 @@ func metaKVCreator() (kv.MetaKv, error) {
 		panic(err)
 	}
 	return etcdkv.NewEtcdKV(etcdCli, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
-		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
+		etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 }
 
 func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) (rootcoord.IMetaTable, metastore.RootCoordCatalog) {
@@ -126,31 +126,21 @@ func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) (rootcoo
 	switch paramtable.Get().MetaStoreCfg.MetaStoreType.GetValue() {
 	case util.MetaStoreTypeEtcd:
 		var metaKV kv.MetaKv
-		var ss *kvmetestore.SuffixSnapshot
 		var err error
 
 		if metaKV, err = metaKVCreator(); err != nil {
 			panic(err)
 		}
-
-		if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
-			panic(err)
-		}
-		catalog = kvmetestore.NewCatalog(metaKV, ss)
+		catalog = kvmetestore.NewCatalog(metaKV)
 	case util.MetaStoreTypeTiKV:
 		log.Ctx(ctx).Info("Using tikv as meta storage.")
 		var metaKV kv.MetaKv
-		var ss *kvmetestore.SuffixSnapshot
 		var err error
 
 		if metaKV, err = metaKVCreator(); err != nil {
 			panic(err)
 		}
-
-		if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, paramtable.Get().TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
-			panic(err)
-		}
-		catalog = kvmetestore.NewCatalog(metaKV, ss)
+		catalog = kvmetestore.NewCatalog(metaKV)
 	default:
 		panic(fmt.Sprintf("MetaStoreType %s not supported", paramtable.Get().MetaStoreCfg.MetaStoreType.GetValue()))
 	}

@@ -134,19 +134,14 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     if (index_load_info_.enable_mmap && index->IsMmapSupported()) {
         AssertInfo(!index_load_info_.mmap_dir_path.empty(),
                    "mmap directory path is empty");
-        auto filepath = std::filesystem::path(index_load_info_.mmap_dir_path) /
-                        "index_files" / index_load_info_.index_id /
-                        index_load_info_.segment_id /
-                        index_load_info_.field_id / "index";
-        auto embedding_list_meta_path =
-            std::filesystem::path(index_load_info_.mmap_dir_path) /
-            "index_files" / index_load_info_.index_id /
-            index_load_info_.segment_id / index_load_info_.field_id /
-            index::EMB_LIST_META_FILE_NAME;
+        auto base_path = std::filesystem::path(index_load_info_.mmap_dir_path) /
+                         "index_files" / index_load_info_.index_id /
+                         index_load_info_.segment_id /
+                         index_load_info_.field_id;
         config_[milvus::index::ENABLE_MMAP] = "true";
-        config_[milvus::index::MMAP_FILE_PATH] = filepath.string();
+        config_[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
         config_[milvus::index::EMB_LIST_META_PATH] =
-            embedding_list_meta_path.string();
+            (base_path / index::EMB_LIST_META_FILE_NAME).string();
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }
@@ -163,7 +158,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
         LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadV3(config_);
+        index->LoadUnified(config_);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
         index->Load(ctx_, config_);

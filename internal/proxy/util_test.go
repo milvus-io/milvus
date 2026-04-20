@@ -2190,8 +2190,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2219,8 +2219,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2248,8 +2248,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2276,8 +2276,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2292,8 +2292,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 	})
 	t.Run("json data is string", func(t *testing.T) {
 		data := "abcdefg"
-		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, [][]byte{[]byte(data)})
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -4093,7 +4093,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
 	})
 
 	t.Run("JSON not supported in struct", func(t *testing.T) {
@@ -4124,7 +4124,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "Nested array is not supported")
+			assert.Contains(t, err.Error(), "nested array is not supported")
 		}
 	})
 
@@ -5263,7 +5263,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid hash_function empty value", func(t *testing.T) {
@@ -5288,7 +5288,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid token_level value", func(t *testing.T) {
@@ -5313,7 +5313,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid token_level empty value", func(t *testing.T) {
@@ -5338,7 +5338,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid seed string value", func(t *testing.T) {

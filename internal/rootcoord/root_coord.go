@@ -82,11 +82,12 @@ func (c *Core) validateResourceGroups(ctx context.Context, properties []*commonp
 	var rgs []string
 	var err error
 
-	if level == "database" {
+	switch level {
+	case "database":
 		rgs, err = common.DatabaseLevelResourceGroups(properties)
-	} else if level == "collection" {
+	case "collection":
 		rgs, err = common.CollectionLevelResourceGroups(properties)
-	} else {
+	default:
 		return fmt.Errorf("invalid level %s for resource group validation", level)
 	}
 
@@ -373,12 +374,12 @@ func (c *Core) initKVCreator() {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			c.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(c.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
 			c.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(c.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}
@@ -392,24 +393,16 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			log.Ctx(initCtx).Info("Using etcd as meta storage.")
-			var ss *kvmetastore.SuffixSnapshot
-			var err error
-
 			metaKV := c.metaKVCreator()
-			if ss, err = kvmetastore.NewSuffixSnapshot(metaKV, kvmetastore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetastore.SnapshotPrefix); err != nil {
-				return err
-			}
-			catalog = kvmetastore.NewCatalog(metaKV, ss)
+			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
+			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
+			catalog = kvmetastore.NewCatalog(metaKV)
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
-			var ss *kvmetastore.SuffixSnapshot
-			var err error
-
 			metaKV := c.metaKVCreator()
-			if ss, err = kvmetastore.NewSuffixSnapshot(metaKV, kvmetastore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetastore.SnapshotPrefix); err != nil {
-				return err
-			}
-			catalog = kvmetastore.NewCatalog(metaKV, ss)
+			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
+			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
+			catalog = kvmetastore.NewCatalog(metaKV)
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}

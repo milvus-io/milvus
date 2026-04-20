@@ -47,6 +47,7 @@ ProcessJsonFieldData(
 
     bool is_array = cast_type.data_type() == JsonCastType::DataType::ARRAY;
 
+    folly::fbvector<T> values;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int64_t i = 0; i < n; i++) {
@@ -67,7 +68,7 @@ ProcessJsonFieldData(
                 continue;
             }
 
-            folly::fbvector<T> values;
+            values.clear();
             if (is_array) {
                 auto doc = json_column->dom_doc();
                 auto array_res = doc.at_pointer(nested_path).get_array();

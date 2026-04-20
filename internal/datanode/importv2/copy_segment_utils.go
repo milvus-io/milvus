@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -47,8 +48,8 @@ type SegmentFiles struct {
 	Bm25Binlogs       []string
 	VectorScalarIndex []string
 	TextIndex         []string
-	JsonKeyIndex      []string
-	JsonStats         []string
+	JSONKeyIndex      []string
+	JSONStats         []string
 }
 
 // Copy Mode Implementation for Snapshot/Backup Import
@@ -170,9 +171,9 @@ func extractTextIndexFiles(textIndexInfos map[int64]*datapb.TextIndexStats) []st
 	return paths
 }
 
-// extractJsonFiles extracts JSON index files, separated by data format version.
+// extractJSONFiles extracts JSON index files, separated by data format version.
 // Returns (jsonKeyFiles, jsonStatsFiles).
-func extractJsonFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, []string) {
+func extractJSONFiles(jsonIndexInfos map[int64]*datapb.JsonKeyStats) ([]string, []string) {
 	var jsonKeyFiles []string
 	var jsonStatsFiles []string
 
@@ -250,7 +251,7 @@ func collectSegmentFiles(
 	// using potentially stale or wrong-format paths from etcd metadata.
 	if source.GetStorageVersion() < storage.StorageV3 {
 		files.TextIndex = extractTextIndexFiles(source.GetTextIndexFiles())
-		files.JsonKeyIndex, files.JsonStats = extractJsonFiles(source.GetJsonKeyIndexFiles())
+		files.JSONKeyIndex, files.JSONStats = extractJSONFiles(source.GetJsonKeyIndexFiles())
 	}
 
 	return files, nil
@@ -306,10 +307,10 @@ func generateMappingsFromFiles(
 	if err := addMappings(files.TextIndex, IndexTypeText); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.JsonKeyIndex, IndexTypeJSONKey); err != nil {
+	if err := addMappings(files.JSONKeyIndex, IndexTypeJSONKey); err != nil {
 		return nil, err
 	}
-	if err := addMappings(files.JsonStats, IndexTypeJSONStats); err != nil {
+	if err := addMappings(files.JSONStats, IndexTypeJSONStats); err != nil {
 		return nil, err
 	}
 
@@ -405,7 +406,7 @@ func CopySegmentAndIndexFiles(
 		indexInfo.IndexFilePaths = shortenIndexFilePaths(indexInfo.IndexFilePaths)
 	}
 
-	jsonKeyIndexInfos = shortenJsonStatsPath(jsonKeyIndexInfos)
+	jsonKeyIndexInfos = shortenJSONStatsPath(jsonKeyIndexInfos)
 
 	log.Info("path compression completed",
 		zap.Int("binlogFields", len(segmentInfo.GetBinlogs())),
@@ -594,7 +595,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	parts[logTypeIndex+2] = targetPartitionIDStr
 	parts[logTypeIndex+3] = targetSegmentIDStr
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
 }
 
 // buildIndexInfoFromSource builds complete index metadata from source information.
@@ -692,17 +693,17 @@ func buildIndexInfoFromSource(
 	// pass metadata as placeholders. For V2, transform file paths using mappings.
 	jsonKeyIndexInfos := make(map[int64]*datapb.JsonKeyStats)
 	if source.GetStorageVersion() >= storage.StorageV3 {
-		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
-			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
-			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
-				dstJson.BuildID = newID
+		for fieldID, srcJSON := range source.GetJsonKeyIndexFiles() {
+			dstJSON := proto.Clone(srcJSON).(*datapb.JsonKeyStats)
+			if newID, ok := target.GetNewBuildIds()[dstJSON.GetBuildID()]; ok {
+				dstJSON.BuildID = newID
 			}
-			jsonKeyIndexInfos[fieldID] = dstJson
+			jsonKeyIndexInfos[fieldID] = dstJSON
 		}
 	} else {
-		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
-			targetFiles := make([]string, 0, len(srcJson.GetFiles()))
-			for _, srcFile := range srcJson.GetFiles() {
+		for fieldID, srcJSON := range source.GetJsonKeyIndexFiles() {
+			targetFiles := make([]string, 0, len(srcJSON.GetFiles()))
+			for _, srcFile := range srcJSON.GetFiles() {
 				targetFile, ok := mappings[srcFile]
 				if !ok {
 					return nil, nil, nil, fmt.Errorf("no mapping found for JSON index file: %s", srcFile)
@@ -710,12 +711,12 @@ func buildIndexInfoFromSource(
 				targetFiles = append(targetFiles, targetFile)
 			}
 
-			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
-			dstJson.Files = targetFiles
-			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
-				dstJson.BuildID = newID
+			dstJSON := proto.Clone(srcJSON).(*datapb.JsonKeyStats)
+			dstJSON.Files = targetFiles
+			if newID, ok := target.GetNewBuildIds()[dstJSON.GetBuildID()]; ok {
+				dstJSON.BuildID = newID
 			}
-			jsonKeyIndexInfos[fieldID] = dstJson
+			jsonKeyIndexInfos[fieldID] = dstJSON
 		}
 	}
 
@@ -849,7 +850,7 @@ func generateTargetIndexPath(
 	parts[keywordIdx+partitionOffset] = strconv.FormatInt(target.GetPartitionId(), 10)
 	parts[keywordIdx+segmentOffset] = strconv.FormatInt(target.GetSegmentId(), 10)
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
 }
 
 // ============================================================================
@@ -897,7 +898,7 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 	return result
 }
 
-// shortenJsonStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
+// shortenJSONStatsPath shortens JSON stats file paths to only keep the last 2+ segments.
 //
 // In normal import flow, the C++ core returns already-shortened paths (e.g., "shared_key_index/file").
 // In copy segment flow, DataNode returns full paths after file copying.
@@ -912,12 +913,12 @@ func shortenIndexFilePaths(fullPaths []string) []string {
 //
 // Returns:
 //   - Map of field ID to JsonKeyStats with shortened paths
-func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
+func shortenJSONStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*datapb.JsonKeyStats {
 	result := make(map[int64]*datapb.JsonKeyStats)
 	for fieldID, stats := range jsonStats {
 		shortenedFiles := make([]string, 0, len(stats.GetFiles()))
 		for _, file := range stats.GetFiles() {
-			shortenedFiles = append(shortenedFiles, shortenSingleJsonStatsPath(file))
+			shortenedFiles = append(shortenedFiles, shortenSingleJSONStatsPath(file))
 		}
 
 		result[fieldID] = &datapb.JsonKeyStats{
@@ -933,7 +934,7 @@ func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 	return result
 }
 
-// shortenSingleJsonStatsPath shortens a single JSON stats file path.
+// shortenSingleJSONStatsPath shortens a single JSON stats file path.
 //
 // This function extracts the relative path from a full JSON stats file path by:
 //  1. Finding "shared_key_index" or "shredding_data" keywords and extracting from that position
@@ -959,7 +960,7 @@ func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 //
 // Returns:
 //   - Shortened path relative to fieldID directory
-func shortenSingleJsonStatsPath(fullPath string) string {
+func shortenSingleJSONStatsPath(fullPath string) string {
 	// Find "shared_key_index" in path
 	if idx := strings.Index(fullPath, jsonStatsSharedIndexPath); idx != -1 {
 		return fullPath[idx:]
@@ -975,7 +976,7 @@ func shortenSingleJsonStatsPath(fullPath string) string {
 	parts := strings.Split(fullPath, "/")
 	for i, part := range parts {
 		if part == common.JSONStatsPath && i+8 < len(parts) {
-			return strings.Join(parts[i+8:], "/")
+			return path.Join(parts[i+8:]...)
 		}
 	}
 

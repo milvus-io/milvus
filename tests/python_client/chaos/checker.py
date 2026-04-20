@@ -398,7 +398,7 @@ class Checker:
     """
 
     def __init__(self, collection_name=None, partition_name=None, shards_num=2, dim=8, insert_data=True,
-                 schema=None, replica_number=1, **kwargs):
+                 schema=None, replica_number=0, **kwargs):
         self.recovery_time = 0
         self._succ = 0
         self._fail = 0
@@ -801,7 +801,7 @@ class Checker:
 class CollectionLoadChecker(Checker):
     """check collection load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionLoadChecker_")
@@ -831,7 +831,7 @@ class CollectionLoadChecker(Checker):
 class CollectionReleaseChecker(Checker):
     """check collection release operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionReleaseChecker_")
@@ -863,7 +863,7 @@ class CollectionReleaseChecker(Checker):
 class CollectionRenameChecker(Checker):
     """check collection rename operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionRenameChecker_")
@@ -899,7 +899,7 @@ class CollectionRenameChecker(Checker):
 class PartitionLoadChecker(Checker):
     """check partition load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartitionLoadChecker_")
@@ -931,7 +931,7 @@ class PartitionLoadChecker(Checker):
 class PartitionReleaseChecker(Checker):
     """check partition release operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         self.replica_number = replica_number
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartitionReleaseChecker_")
@@ -1081,7 +1081,7 @@ class TensorSearchChecker(Checker):
 class FullTextSearchChecker(Checker):
     """check full text search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FullTextSearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -1164,7 +1164,7 @@ class MinHashSearchChecker(Checker):
 class HybridSearchChecker(Checker):
     """check hybrid search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None, ):
         if collection_name is None:
             collection_name = cf.gen_unique_str("HybridSearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -1970,7 +1970,7 @@ class IndexDropChecker(Checker):
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -2003,7 +2003,7 @@ class QueryChecker(Checker):
 class TextMatchChecker(Checker):
     """check text match search operations with highlighter in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("TextMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -2059,7 +2059,7 @@ class TextMatchChecker(Checker):
 class PhraseMatchChecker(Checker):
     """check phrase match query operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PhraseMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -2101,7 +2101,7 @@ class PhraseMatchChecker(Checker):
 class JsonQueryChecker(Checker):
     """check json query operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("JsonQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -2149,7 +2149,7 @@ class JsonQueryChecker(Checker):
 class GeoQueryChecker(Checker):
     """check geometry query operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+    def __init__(self, collection_name=None, shards_num=2, replica_number=0, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("GeoQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
@@ -2536,13 +2536,13 @@ class SnapshotChecker(Checker):
         try:
             # 1. Create snapshot
             self.snapshot_name = cf.gen_unique_str("snapshot_")
-            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            self.milvus_client.create_snapshot(self.snapshot_name, self.c_name)
             log.info(f"[SnapshotChecker] Created snapshot {self.snapshot_name} for {self.c_name}")
 
             # 2. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
             job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection
+                self.snapshot_name, self.c_name, self.restored_collection
             )
             log.info(f"[SnapshotChecker] Started restore job {job_id}")
 
@@ -2577,7 +2577,7 @@ class SnapshotChecker(Checker):
             log.warning(f"[SnapshotChecker] Failed to drop restored collection: {e}")
         try:
             if self.snapshot_name:
-                self.milvus_client.drop_snapshot(self.snapshot_name)
+                self.milvus_client.drop_snapshot(self.snapshot_name, collection_name=self.c_name)
                 log.debug(f"[SnapshotChecker] Dropped snapshot {self.snapshot_name}")
                 self.snapshot_name = None
         except Exception as e:
@@ -2769,13 +2769,13 @@ class SnapshotRestoreChecker(Checker):
 
             # 3. Create snapshot
             self.snapshot_name = cf.gen_unique_str("snapshot_")
-            self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
+            self.milvus_client.create_snapshot(self.snapshot_name, self.c_name)
             log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
 
             # 4. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
             job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection
+                self.snapshot_name, self.c_name, self.restored_collection
             )
             log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
 
@@ -2820,7 +2820,7 @@ class SnapshotRestoreChecker(Checker):
 
         try:
             if self.snapshot_name:
-                self.milvus_client.drop_snapshot(self.snapshot_name)
+                self.milvus_client.drop_snapshot(self.snapshot_name, collection_name=self.c_name)
                 log.debug(f"Dropped snapshot {self.snapshot_name}")
                 self.snapshot_name = None
         except Exception as e:

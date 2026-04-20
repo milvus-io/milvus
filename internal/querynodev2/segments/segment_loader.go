@@ -946,6 +946,22 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
+	// For external table segments (ManifestPath set, BinlogPaths empty), extract
+	// indexes directly from fieldID2IndexInfo without a corresponding FieldBinlog,
+	// because the segment data lives in the external store rather than Milvus binlogs.
+	if loadInfo.GetManifestPath() != "" {
+		for _, infos := range fieldID2IndexInfo {
+			for _, indexInfo := range infos {
+				if _, exists := indexedFieldInfos[indexInfo.IndexID]; !exists {
+					indexedFieldInfos[indexInfo.IndexID] = &IndexedFieldInfo{
+						FieldBinlog: &datapb.FieldBinlog{},
+						IndexInfo:   indexInfo,
+					}
+				}
+			}
+		}
+	}
+
 	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
 	textIndexedInfo := statsResult.TextIndexStats
 	jsonKeyIndexInfo := statsResult.JSONKeyStats
@@ -1381,46 +1397,42 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	for _, deltalog := range deltaLogs {
-		err := func() error {
-			opts := []storage.RwOption{
-				storage.WithDownloader(
-					func(ctx context.Context, paths []string) ([][]byte, error) {
-						return loader.cm.MultiRead(ctx, paths)
-					},
-				),
-			}
-			paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
-				return binlog.GetLogPath()
-			})
-			reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
-			if err != nil {
-				return err
-			}
-			return readDeltaRecords(reader)
-		}()
+	// Collect delta paths and reader options based on storage version.
+	var paths []string
+	var opts []storage.RwOption
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
+		// V3: delta data lives in manifest
+		paths, err = packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig())
 		if err != nil {
 			return err
 		}
+		opts = []storage.RwOption{
+			storage.WithStorageConfig(createStorageConfig()),
+			storage.WithVersion(storage.StorageV3),
+		}
+	} else {
+		// V1: delta data referenced by Deltalogs entries
+		for _, deltalog := range deltaLogs {
+			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
+				if p := binlog.GetLogPath(); p != "" {
+					paths = append(paths, p)
+				}
+			}
+		}
+		opts = []storage.RwOption{
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return loader.cm.MultiRead(ctx, paths)
+			}),
+		}
 	}
 
-	// Read deltalogs from manifest for StorageV3 segments
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
-		reader, err := storage.NewDeltalogReaderFromManifest(
-			pkField.DataType,
-			manifestPath,
-			storage.WithStorageConfig(createStorageConfig()),
-			storage.WithVersion(storage.StorageV2),
-		)
+	if len(paths) > 0 {
+		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return err
-			}
-			// io.EOF means no deltalogs in manifest, not an error
-		} else {
-			if err := readDeltaRecords(reader); err != nil {
-				return err
-			}
+			return err
+		}
+		if err := readDeltaRecords(reader); err != nil {
+			return err
 		}
 	}
 

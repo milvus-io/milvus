@@ -21,6 +21,8 @@ import (
 )
 
 func TestSearchDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -39,6 +41,8 @@ func TestSearchDefault(t *testing.T) {
 }
 
 func TestSearchDefaultGrowing(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -57,6 +61,8 @@ func TestSearchDefaultGrowing(t *testing.T) {
 
 // test search collection and partition name not exist
 func TestSearchInvalidCollectionPartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -112,6 +118,8 @@ func TestSearchEmptyCollection(t *testing.T) {
 }
 
 func TestSearchEmptySparseCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -130,6 +138,8 @@ func TestSearchEmptySparseCollection(t *testing.T) {
 
 // test search with partition names []string{}, specify partitions
 func TestSearchPartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -338,6 +348,8 @@ func TestSearchOutputSparse(t *testing.T) {
 
 // test search with invalid vector field name: not exist; non-vector field, empty fiend name, json and dynamic field -> error
 func TestSearchInvalidVectorField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -455,6 +467,8 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 
 // test search metric type isn't the same with index metric type
 func TestSearchNotMatchMetricType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -472,6 +486,8 @@ func TestSearchNotMatchMetricType(t *testing.T) {
 
 // test search with invalid topK -> error
 func TestSearchInvalidTopK(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -490,6 +506,8 @@ func TestSearchInvalidTopK(t *testing.T) {
 
 // test search with invalid topK -> error
 func TestSearchInvalidOffset(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -508,6 +526,8 @@ func TestSearchInvalidOffset(t *testing.T) {
 
 // test search with invalid search params
 func TestSearchInvalidSearchParams(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -542,6 +562,8 @@ func TestSearchInvalidSearchParams(t *testing.T) {
 
 // search with index scann search param ef < topK -> error
 func TestSearchInvalidScannReorderK(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -613,6 +635,8 @@ func TestSearchScannAllMetricsWithRawData(t *testing.T) {
 
 // test search with valid expression
 func TestSearchExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -725,6 +749,8 @@ func TestSearchJsonFieldExpr(t *testing.T) {
 }
 
 func TestSearchDynamicFieldExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// create collection
@@ -786,6 +812,8 @@ func TestSearchDynamicFieldExpr(t *testing.T) {
 }
 
 func TestSearchArrayFieldExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -864,6 +892,8 @@ func TestSearchNotExistedExpr(t *testing.T) {
 
 // test search with fp16/ bf16 /binary vector
 func TestSearchMultiVectors(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1021,6 +1051,8 @@ func TestSearchWithEmptySparseVector(t *testing.T) {
 
 // test search from empty sparse vectors collection
 func TestSearchFromEmptySparseVector(t *testing.T) {
+	t.Parallel()
+
 	idxInverted := index.NewSparseInvertedIndex(entity.IP, 0.1)
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1100,10 +1132,14 @@ func TestSearchSparseVectorPagination(t *testing.T) {
 
 // test sparse vector unsupported search: TODO iterator search
 func TestSearchSparseVectorNotSupported(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("Go-sdk support iterator search in progress")
 }
 
 func TestRangeSearchSparseVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

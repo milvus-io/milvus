@@ -342,6 +342,46 @@ CompactIndexDatas(
     return index_file_slices;
 }
 
+IndexDataCodec
+CompactIndexDatasByKey(
+    const std::string& key,
+    std::unique_ptr<storage::DataCodec> slice_meta,
+    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas) {
+    Config meta_data = Config::parse(
+        std::string(reinterpret_cast<const char*>(slice_meta->PayloadData()),
+                    slice_meta->PayloadSize()));
+
+    int slice_num = 0;
+    size_t total_len = 0;
+    bool found = false;
+    for (const auto& item : meta_data[META]) {
+        if (item[NAME] == key) {
+            slice_num = item[SLICE_NUM];
+            total_len = static_cast<size_t>(item[TOTAL_LEN]);
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        return {};
+    }
+
+    IndexDataCodec index_data_codec;
+    size_t data_len = 0;
+    for (auto i = 0; i < slice_num; ++i) {
+        std::string file_name = GenSlicedFileName(key, i);
+        auto it = index_datas.find(file_name);
+        AssertInfo(it != index_datas.end(), "lost index slice data");
+        index_data_codec.codecs_.push_back(std::move(it->second));
+        data_len += index_data_codec.codecs_.back()->PayloadSize();
+    }
+    AssertInfo(total_len == data_len,
+               "index len is inconsistent after disassemble and assemble");
+    index_data_codec.size_ = data_len;
+    return index_data_codec;
+}
+
 void
 AssembleIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,
@@ -425,8 +465,8 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         const ssize_t size_read = read(fd, buf, count);
         if (size_read != count) {
             ThrowInfo(ErrorCode::UnistdError,
-                      "read data from fd error, returned read size is " +
-                          std::to_string(size_read));
+                      "read data from fd error, returned read size is {}",
+                      size_read);
         }
 
         buf = static_cast<char*>(buf) + size_read;

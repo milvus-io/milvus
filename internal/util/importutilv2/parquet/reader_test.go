@@ -78,10 +78,8 @@ func randomString(length int) string {
 }
 
 func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int, nullPercent int) (*storage.InsertData, error) {
-	useNullType := false
-	if nullPercent == 100 {
-		useNullType = true
-	}
+	useNullType := nullPercent == 100
+
 	pqSchema, err := ConvertToArrowSchemaForUT(schema, useNullType)
 	if err != nil {
 		return nil, err

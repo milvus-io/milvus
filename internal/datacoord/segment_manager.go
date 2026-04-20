@@ -518,12 +518,8 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 			return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
 		})
 	} else {
-		sealedSegments = s.meta.GetSegments(sealed.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
-		growingSegments = s.meta.GetSegments(growing.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
+		sealedSegments = s.meta.GetSegments(sealed.Collect(), isSegmentHealthy)
+		growingSegments = s.meta.GetSegments(growing.Collect(), isSegmentHealthy)
 	}
 
 	var ret []UniqueID

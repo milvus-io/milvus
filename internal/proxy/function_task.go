@@ -85,11 +85,11 @@ func (t *addCollectionFunctionTask) Name() string {
 
 func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return fmt.Errorf("function schema is empty")
 	}
 
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support adding BM25 function")
+		return fmt.Errorf("currently does not support adding BM25 function")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -100,7 +100,7 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
-	newColl.Functions = append(coll.schema.CollectionSchema.Functions, t.FunctionSchema)
+	newColl.Functions = append(coll.schema.Functions, t.FunctionSchema)
 	if err := validateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
 		return err
 	}
@@ -172,13 +172,13 @@ func (t *alterCollectionFunctionTask) Name() string {
 
 func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return fmt.Errorf("function schema is empty")
 	}
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support alter BM25 function")
+		return fmt.Errorf("currently does not support alter BM25 function")
 	}
 	if t.FunctionName != t.FunctionSchema.Name {
-		return fmt.Errorf("Invalid function config, name not match")
+		return fmt.Errorf("invalid function config, name not match")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -193,7 +193,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	for _, fSchema := range coll.schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
-				return fmt.Errorf("Currently does not support alter BM25 function")
+				return fmt.Errorf("currently does not support alter BM25 function")
 			}
 			newFunctions = append(newFunctions, t.FunctionSchema)
 			funcExist = true
@@ -202,7 +202,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	if !funcExist {
-		return fmt.Errorf("Function %s not found", t.FunctionName)
+		return fmt.Errorf("function %s not found", t.FunctionName)
 	}
 
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
@@ -303,7 +303,7 @@ func (t *dropCollectionFunctionTask) Execute(ctx context.Context) error {
 	}
 
 	if t.fSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support droping BM25 function")
+		return fmt.Errorf("currently does not support droping BM25 function")
 	}
 
 	var err error

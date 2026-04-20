@@ -295,7 +295,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	if it.indexEngineVersionManager.GetIndexNonEncoding() {
 		indexNonEncoding = "true"
 	}
-	indexParams = append(indexParams, &commonpb.KeyValuePair{
+	params = append(params, &commonpb.KeyValuePair{
 		Key:   common.IndexNonEncoding,
 		Value: indexNonEncoding,
 	})
@@ -331,6 +331,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
+		ExternalSource:            schema.GetExternalSource(),
+		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

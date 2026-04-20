@@ -32,7 +32,7 @@ type VoyageAIClient struct {
 
 func NewVoyageAIClient(apiKey string) (*VoyageAIClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.VoyageAIAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.VoyageAIAKEnvStr)
 	}
 	return &VoyageAIClient{
 		apiKey: apiKey,
@@ -125,7 +125,7 @@ func (c *voyageAIEmbedding) Check() error {
 
 func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutSec int64) (any, error) {
 	if outputType != "float" && outputType != "int8" {
-		return nil, fmt.Errorf("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
+		return nil, fmt.Errorf("Voyageai: unsupported output type: [%s], only support float and int8", outputType) //nolint:staticcheck // starts with proper noun
 	}
 	r := EmbeddingRequest{
 		Model:       modelName,

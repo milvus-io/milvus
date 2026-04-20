@@ -119,7 +119,7 @@ func buildPlainQueryPipeline(
 	reduceType reduce.IReduceType,
 ) *queryutil.Pipeline {
 	b := queryutil.NewPipelineBuilder("proxy-query-plain")
-	b.Add(queryutil.OpReduceByPK, in(), ch(chanReduced), queryutil.NewSortAndCheckPKOperator(reduceType))
+	b.Add(queryutil.OpReduceByPK, in(), ch(chanReduced), queryutil.NewSortAndCheckPKOperator(reduceType, schema))
 	b.Add(queryutil.OpSlice, ch(chanReduced), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 	b.Add("complement_fields", ch(chanSliced), out(), newComplementFieldOperator(schema))
 	return b.Build()
@@ -133,7 +133,7 @@ func buildOrderByPipeline(
 	outputFieldIDs []int64,
 ) *queryutil.Pipeline {
 	b := queryutil.NewPipelineBuilder("proxy-query-orderby")
-	b.Add(queryutil.OpConcatAndCheckPK, in(), ch(chanReduced), queryutil.NewConcatAndCheckPKOperator())
+	b.Add(queryutil.OpConcatAndCheckPK, in(), ch(chanReduced), queryutil.NewConcatAndCheckPKOperator(schema))
 	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperator(orderByFields, offset+limit))
 	b.Add(queryutil.OpSlice, ch(chanSorted), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 

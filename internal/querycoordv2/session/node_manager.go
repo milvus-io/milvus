@@ -185,26 +185,26 @@ func (n *NodeInfo) ResourceGroupName() string {
 func (n *NodeInfo) SegmentCnt() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.stats.getSegmentCnt()
+	return n.getSegmentCnt()
 }
 
 func (n *NodeInfo) ChannelCnt() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.stats.getChannelCnt()
+	return n.getChannelCnt()
 }
 
 // return node's memory capacity in mb
 func (n *NodeInfo) MemCapacity() float64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.stats.getMemCapacity()
+	return n.getMemCapacity()
 }
 
 func (n *NodeInfo) CPUNum() int64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.stats.getCPUNum()
+	return n.getCPUNum()
 }
 
 func (n *NodeInfo) SetLastHeartbeat(time time.Time) {

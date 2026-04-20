@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -24,12 +25,13 @@ import (
 )
 
 type rankParams struct {
-	limit           int64
-	offset          int64
-	roundDecimal    int64
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
+	limit            int64
+	offset           int64
+	roundDecimal     int64
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -58,6 +60,13 @@ func (r *rankParams) GetGroupByFieldId() int64 {
 		return r.groupByFieldId
 	}
 	return -1
+}
+
+func (r *rankParams) GetGroupByFieldName() string {
+	if r != nil {
+		return r.groupByFieldName
+	}
+	return ""
 }
 
 func (r *rankParams) GetGroupSize() int64 {
@@ -112,7 +121,7 @@ type SearchInfo struct {
 // and whether a filter expression is present. The caller supplies hasFilter
 // because the DSL/expression is not available inside parseSearchInfo.
 func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
-	isRangeSearch := strings.Contains(s.planInfo.GetSearchParams(), radiusKey)
+	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
 	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0
 	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
 		return internalpb.SearchType_DEFAULT
@@ -543,8 +552,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"Not allowed to do groupBy when doing iteration")
 	}
 
-	isRangeSearch = strings.Contains(searchParamStr, radiusKey)
+	isRangeSearch = gjson.Get(searchParamStr, radiusKey).Exists()
 	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if !isRangeSearch && gjson.Get(searchParamStr, rangeFilterKey).Exists() {
+		return nil, merr.WrapErrParameterInvalid("range_filter", "",
+			"range_filter requires radius to be set; range_filter alone is not a valid range search parameter")
+	}
 	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
@@ -620,7 +633,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
 		if !ok {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			return nil, fmt.Errorf("field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
 	}
@@ -707,12 +720,13 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 type groupByInfo struct {
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
-	jsonPath        string
-	jsonType        schemapb.DataType
-	strictCast      bool
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
+	jsonPath         string
+	jsonType         schemapb.DataType
+	strictCast       bool
 }
 
 func (g *groupByInfo) GetGroupByFieldId() int64 {
@@ -720,6 +734,13 @@ func (g *groupByInfo) GetGroupByFieldId() int64 {
 		return g.groupByFieldId
 	}
 	return 0
+}
+
+func (g *groupByInfo) GetGroupByFieldName() string {
+	if g != nil {
+		return g.groupByFieldName
+	}
+	return ""
 }
 
 func (g *groupByInfo) GetGroupSize() int64 {
@@ -839,6 +860,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		return nil, err
 	}
 	ret.groupByFieldId = groupByFieldId
+	ret.groupByFieldName = groupByFieldName
 	if jsonPath != "" {
 		ret.jsonPath = jsonPath
 	}
@@ -959,12 +981,13 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	return &rankParams{
-		limit:           limit,
-		offset:          offset,
-		roundDecimal:    roundDecimal,
-		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
-		groupSize:       groupByInfo.GetGroupSize(),
-		strictGroupSize: groupByInfo.GetStrictGroupSize(),
+		limit:            limit,
+		offset:           offset,
+		roundDecimal:     roundDecimal,
+		groupByFieldId:   groupByInfo.GetGroupByFieldId(),
+		groupByFieldName: groupByInfo.GetGroupByFieldName(),
+		groupSize:        groupByInfo.GetGroupSize(),
+		strictGroupSize:  groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

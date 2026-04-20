@@ -704,7 +704,7 @@ func genRowBasedInsertMsg(numRows, dim int) (msg *msgstream.InsertMsg, pks []int
 	raws := make([][]interface{}, 0)
 	for i := 0; i < numRows; i++ {
 		row, pk, raw := genRowWithAllFields(dim)
-		msg.InsertRequest.RowData = append(msg.InsertRequest.RowData, row)
+		msg.RowData = append(msg.RowData, row)
 		pks = append(pks, pk)
 		raws = append(raws, raw)
 	}

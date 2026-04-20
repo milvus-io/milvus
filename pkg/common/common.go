@@ -100,6 +100,21 @@ const (
 )
 
 const (
+	// Scalar index engine version tracks the *capability* of a Milvus node
+	// (which index types / features it supports). It is reported by QueryNodes
+	// in their session and aggregated by datacoord so that newly built indexes
+	// are clamped to a version every node in the cluster can load — this is
+	// what makes rolling upgrades safe.
+	//
+	// Engine version is distinct from the on-disk file format version
+	// (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h). Multiple engine
+	// versions can share the same file format; bumping the engine version
+	// does not necessarily imply a format change.
+	//
+	// Scalar index engine version 3:
+	// - Packed single-file index layout (file format v3) becomes the default
+	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
+	//   INVERTED to STL_SORT
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(3)
 	MaximumScalarIndexEngineVersion = int32(3)
@@ -153,6 +168,8 @@ const (
 
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
+
+	DefaultResourceGroupName = "__default_resource_group"
 )
 
 const (
@@ -503,22 +520,26 @@ func IsQueryModeKeyExists(kvs ...*commonpb.KeyValuePair) bool {
 func GetQueryMode(kvs ...*commonpb.KeyValuePair) string {
 	for _, kv := range kvs {
 		if kv.Key == QueryModeKey {
-			return strings.ToLower(strings.TrimSpace(kv.Value))
+			return kv.Value
 		}
 	}
 	return ""
 }
 
 // ValidateQueryMode validates the query_mode value. Returns nil if the value
-// is valid or if query_mode is not set.
+// is valid or if query_mode is not set. Also rejects case-variant keys
+// (e.g. "QUERY_MODE", "Query_Mode") that would be silently ignored.
 func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.Key == QueryModeKey {
-			mode := strings.ToLower(strings.TrimSpace(kv.Value))
+			mode := kv.Value
 			if mode != QueryModeLargeTopK {
 				return fmt.Errorf("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
 			}
 			return nil
+		}
+		if strings.EqualFold(kv.Key, QueryModeKey) {
+			return fmt.Errorf("invalid property key %q, did you mean %q?", kv.Key, QueryModeKey)
 		}
 	}
 	return nil

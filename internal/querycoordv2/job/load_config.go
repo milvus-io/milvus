@@ -229,7 +229,7 @@ func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*mes
 				})
 			} else {
 				// allocate a new replica.
-				newID, err := req.Meta.ReplicaManager.AllocateReplicaID(ctx)
+				newID, err := req.Meta.AllocateReplicaID(ctx)
 				if err != nil {
 					return nil, err
 				}

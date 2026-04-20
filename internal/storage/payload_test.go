@@ -2742,7 +2742,7 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 					for j := 0; j < 16; j++ {
 						sparseVec[j] = byte((i*10 + j) % 256)
 					}
-					data.SparseFloatArray.Contents = append(data.SparseFloatArray.Contents, sparseVec)
+					data.Contents = append(data.Contents, sparseVec)
 				}
 			}
 

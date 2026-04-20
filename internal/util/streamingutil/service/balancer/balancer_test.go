@@ -67,7 +67,8 @@ func (p *testPickBuilder) Build(info PickerBuildInfo) balancer.Picker {
 func TestBaseBalancerReserveAttributes(t *testing.T) {
 	v := func(info PickerBuildInfo) {
 		for _, sc := range info.ReadySCs {
-			if sc.Address.Addr == "1.1.1.1" {
+			switch sc.Address.Addr {
+			case "1.1.1.1":
 				if sc.Address.Attributes == nil {
 					t.Errorf("in picker.validate, got address %+v with nil attributes, want not nil", sc.Address)
 				}
@@ -75,7 +76,7 @@ func TestBaseBalancerReserveAttributes(t *testing.T) {
 				if !ok || foo != "2233niang" {
 					t.Errorf("in picker.validate, got address[1.1.1.1] with invalid attributes value %v, want 2233niang", sc.Address.Attributes.Value("foo"))
 				}
-			} else if sc.Address.Addr == "2.2.2.2" {
+			case "2.2.2.2":
 				if sc.Address.Attributes != nil {
 					t.Error("in b.subConns, got address[2.2.2.2] with not nil attributes, want nil")
 				}

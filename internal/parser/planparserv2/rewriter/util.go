@@ -15,14 +15,13 @@ import (
 
 func columnKey(c *planpb.ColumnInfo) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%d|%d|%d|%t|%t|%t|",
+	fmt.Fprintf(&b, "%d|%d|%d|%t|%t|%t|",
 		c.GetFieldId(),
 		int32(c.GetDataType()),
 		int32(c.GetElementType()),
 		c.GetIsPrimaryKey(),
 		c.GetIsAutoID(),
-		c.GetIsPartitionKey(),
-	))
+		c.GetIsPartitionKey())
 	for _, p := range c.GetNestedPath() {
 		b.WriteString(p)
 		b.WriteByte('|')

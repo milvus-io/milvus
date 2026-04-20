@@ -48,7 +48,7 @@ type Server struct {
 
 // NewServer create a new CDC server.
 func NewServer(ctx context.Context) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec // cancel is stored in Server and called on Stop()
 	return &Server{
 		ctx:            ctx1,
 		cancel:         cancel,
@@ -85,6 +85,7 @@ func (s *Server) Stop() (err error) {
 func (s *Server) stop() {
 	s.componentState.OnStopping()
 	log := log.Ctx(s.ctx)
+	defer s.cancel()
 
 	log.Info("stopping cdc...")
 

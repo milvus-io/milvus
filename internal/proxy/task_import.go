@@ -102,7 +102,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if schema.CollectionSchema == nil || len(schema.CollectionSchema.GetFields()) == 0 {
+	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportFailed("collection schema has no fields")
 	}
 	it.schema = schema

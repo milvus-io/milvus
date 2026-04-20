@@ -17,6 +17,8 @@ import (
 )
 
 func TestDelete(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -53,6 +55,8 @@ func TestDelete(t *testing.T) {
 
 // test delete with string pks
 func TestDeleteVarcharPks(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -88,6 +92,8 @@ func TestDeleteVarcharPks(t *testing.T) {
 
 // test delete from empty collection
 func TestDeleteEmptyCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -113,6 +119,8 @@ func TestDeleteEmptyCollection(t *testing.T) {
 
 // test delete from an not exist collection or partition
 func TestDeleteNotExistName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -131,6 +139,8 @@ func TestDeleteNotExistName(t *testing.T) {
 // test delete with complex expr without loading
 // delete without loading support: pk ids
 func TestDeleteComplexExprWithoutLoad(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -167,6 +177,8 @@ func TestDeleteComplexExprWithoutLoad(t *testing.T) {
 
 // test delete with nil ids
 func TestDeleteEmptyIds(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -194,6 +206,8 @@ func TestDeleteEmptyIds(t *testing.T) {
 
 // test delete with string pks
 func TestDeleteVarcharEmptyIds(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -230,6 +244,8 @@ func TestDeleteVarcharEmptyIds(t *testing.T) {
 
 // test delete with invalid ids
 func TestDeleteInvalidIds(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -249,6 +265,8 @@ func TestDeleteInvalidIds(t *testing.T) {
 
 // test delete with non-pk ids
 func TestDeleteWithIds(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -295,6 +313,8 @@ func TestDeleteWithIds(t *testing.T) {
 
 // test delete with default partition name params
 func TestDeleteDefaultPartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -333,6 +353,8 @@ func TestDeleteDefaultPartitionName(t *testing.T) {
 
 // test delete with empty partition "": actually delete from all partitions
 func TestDeleteEmptyPartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -371,6 +393,8 @@ func TestDeleteEmptyPartitionName(t *testing.T) {
 
 // test delete with partition name
 func TestDeletePartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -435,6 +459,8 @@ func TestDeletePartitionName(t *testing.T) {
 
 // test delete ids field not pk int64
 func TestDeleteComplexExpr(t *testing.T) {
+	t.Parallel()
+
 	type exprCount struct {
 		expr  string
 		count int
@@ -507,6 +533,8 @@ func TestDeleteComplexExpr(t *testing.T) {
 
 // test delete json expr
 func TestDeleteComplexExprJson(t *testing.T) {
+	t.Parallel()
+
 	type exprCount struct {
 		expr  string
 		count int
@@ -569,6 +597,8 @@ func TestDeleteComplexExprJson(t *testing.T) {
 }
 
 func TestDeleteInvalidExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

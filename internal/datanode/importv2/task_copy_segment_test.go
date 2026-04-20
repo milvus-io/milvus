@@ -17,11 +17,11 @@
 package importv2
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -98,12 +98,12 @@ func TestNewCopySegmentTask(t *testing.T) {
 
 		// Test Cancel
 		copyTask.Cancel()
-		// Verify context is cancelled
+		// Verify context is canceled
 		select {
 		case <-copyTask.ctx.Done():
 			// Expected behavior
 		default:
-			t.Fatal("context should be cancelled")
+			t.Fatal("context should be canceled")
 		}
 	})
 

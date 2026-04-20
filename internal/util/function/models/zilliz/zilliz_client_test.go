@@ -515,7 +515,7 @@ func TestNewZilliClient_WithMockServer(t *testing.T) {
 		// because grpc.NewClient creates lazy connections
 		if err != nil {
 			// Connection error is expected since we can't easily mock the global client manager
-			assert.Contains(t, err.Error(), "Connect model serving failed")
+			assert.Contains(t, err.Error(), "connect model serving failed")
 		} else {
 			assert.NotNil(t, client)
 			assert.Equal(t, "test-deployment", client.modelDeploymentID)

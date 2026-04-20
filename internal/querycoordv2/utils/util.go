@@ -120,20 +120,29 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 					zap.String("targetManifest", segmentInfo.GetManifestPath()))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
-			// cmp >= 0: dist manifest is same or newer than target, segment data is ready
+			// cmp >= 0: dist manifest is same or newer than target.
+			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
+			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
+			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
+				log.RatedInfo(10, "segment data version is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.Int32("distDataVersion", *segment.DataVersion),
+					zap.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
+				return merr.WrapErrSegmentNotLoaded(segmentID)
+			}
 		}
 	}
 	return nil
 }
 
 func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
-	percentage := m.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
 		return err
 	}
-	collection := m.CollectionManager.GetCollection(ctx, collectionID)
+	collection := m.GetCollection(ctx, collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
 		// when collection is loaded, regard collection as readable, set percentage == 100
 		percentage = 100
@@ -159,7 +168,7 @@ func GetShardLeadersWithChannels(
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
-	replicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 

@@ -24,8 +24,6 @@ message(STATUS ${CMAKE_BUILD_TYPE})
 
 set(WITH_JAEGER ON CACHE BOOL "" FORCE )
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
-
 FetchContent_Declare(
         milvus-common
         GIT_REPOSITORY  ${GIT_REPOSITORY}

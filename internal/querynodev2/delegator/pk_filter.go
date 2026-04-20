@@ -160,7 +160,7 @@ func buildPKFilterUnaryRangeExpr(expr *planpb.UnaryRangeExpr) PKFilterExpr {
 		expr.GetValue() == nil {
 		return &pkFilterUnsupportedExpr{}
 	}
-	pk, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetValue(), expr.String())
+	pk, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetValue())
 	if !ok {
 		return &pkFilterUnsupportedExpr{}
 	}
@@ -183,11 +183,11 @@ func buildPKFilterBinaryRangeExpr(expr *planpb.BinaryRangeExpr) PKFilterExpr {
 		expr.GetUpperValue() == nil {
 		return &pkFilterUnsupportedExpr{}
 	}
-	lower, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetLowerValue(), expr.String())
+	lower, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetLowerValue())
 	if !ok {
 		return &pkFilterUnsupportedExpr{}
 	}
-	upper, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetUpperValue(), expr.String())
+	upper, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), expr.GetUpperValue())
 	if !ok {
 		return &pkFilterUnsupportedExpr{}
 	}
@@ -209,7 +209,7 @@ func buildPKFilterTermExpr(expr *planpb.TermExpr) PKFilterExpr {
 	}
 	converted := make([]storage.PrimaryKey, 0, len(values))
 	for _, value := range values {
-		pk, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), value, expr.String())
+		pk, ok := pkFromGenericValue(expr.GetColumnInfo().GetDataType(), value)
 		if !ok {
 			return &pkFilterUnsupportedExpr{}
 		}
@@ -218,14 +218,14 @@ func buildPKFilterTermExpr(expr *planpb.TermExpr) PKFilterExpr {
 	return &pkFilterTermExpr{values: converted}
 }
 
-func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue, expr string) (storage.PrimaryKey, bool) {
+func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue) (storage.PrimaryKey, bool) {
 	switch dataType {
 	case schemapb.DataType_Int64:
 		return storage.NewInt64PrimaryKey(value.GetInt64Val()), true
 	case schemapb.DataType_VarChar:
 		return storage.NewVarCharPrimaryKey(value.GetStringVal()), true
 	default:
-		log.Warn("unknown pk type", zap.Int("type", int(dataType)), zap.String("expr", expr))
+		log.Warn("unknown pk type", zap.Int("type", int(dataType)))
 		return nil, false
 	}
 }
@@ -352,7 +352,7 @@ func pkEqualMatchesTarget(seg PKFilterTarget, value storage.PrimaryKey, batchHit
 	if !ok {
 		return true
 	}
-	return !(minPk.GT(value) || maxPk.LT(value))
+	return minPk.LE(value) && maxPk.GE(value)
 }
 
 func pkUnaryRangeMatchesTarget(seg PKFilterTarget, op planpb.OpType, value storage.PrimaryKey) bool {

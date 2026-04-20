@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -48,11 +48,13 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		ctx context.Context,
 		collectionID int64,
 		name, description string,
+		compactionProtectionSeconds int64,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
+		assert.Equal(t, int64(3600), compactionProtectionSeconds)
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -66,9 +68,10 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 	// Create test broadcast result using message builder
 	broadcastMsg := message.NewCreateSnapshotMessageBuilderV2().
 		WithHeader(&message.CreateSnapshotMessageHeader{
-			CollectionId: 100,
-			Name:         "test_snapshot",
-			Description:  "test description",
+			CollectionId:                100,
+			Name:                        "test_snapshot",
+			Description:                 "test description",
+			CompactionProtectionSeconds: 3600,
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -100,6 +103,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		ctx context.Context,
 		collectionID int64,
 		name, description string,
+		compactionProtectionSeconds int64,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -148,10 +152,12 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_Success(t *testing.T) {
 	mockDropSnapshot := mockey.Mock((*snapshotManager).DropSnapshot).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
+		collectionID int64,
 		name string,
 	) error {
 		dropSnapshotCalled = true
 		assert.Equal(t, "test_snapshot", name)
+		assert.Equal(t, int64(100), collectionID)
 		return nil
 	}).Build()
 	defer mockDropSnapshot.UnPatch()
@@ -165,7 +171,8 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_Success(t *testing.T) {
 	// Create test broadcast result
 	broadcastMsg := message.NewDropSnapshotMessageBuilderV2().
 		WithHeader(&message.DropSnapshotMessageHeader{
-			Name: "test_snapshot",
+			Name:         "test_snapshot",
+			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -194,6 +201,7 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_DropError(t *testing.T) {
 	mockDropSnapshot := mockey.Mock((*snapshotManager).DropSnapshot).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
+		collectionID int64,
 		name string,
 	) error {
 		return expectedErr
@@ -209,7 +217,8 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_DropError(t *testing.T) {
 	// Create test broadcast result
 	broadcastMsg := message.NewDropSnapshotMessageBuilderV2().
 		WithHeader(&message.DropSnapshotMessageHeader{
-			Name: "test_snapshot",
+			Name:         "test_snapshot",
+			CollectionId: 100,
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -229,6 +238,90 @@ func TestDDLCallbacks_DropSnapshotV2AckCallback_DropError(t *testing.T) {
 	assert.Equal(t, expectedErr, err)
 }
 
+// --- Test dropSnapshotsByCollectionV2AckCallback ---
+
+func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Success(t *testing.T) {
+	ctx := context.Background()
+
+	dropCalled := false
+	var capturedCollectionID int64
+
+	mockDropByCollection := mockey.Mock((*snapshotManager).DropSnapshotsByCollection).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		collectionID int64,
+	) error {
+		dropCalled = true
+		capturedCollectionID = collectionID
+		return nil
+	}).Build()
+	defer mockDropByCollection.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshotManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	broadcastMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+		WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotsByCollectionMessageV2{
+		Message: typedMsg,
+	}
+
+	err := callbacks.dropSnapshotsByCollectionV2AckCallback(ctx, result)
+
+	assert.NoError(t, err)
+	assert.True(t, dropCalled)
+	assert.Equal(t, int64(100), capturedCollectionID)
+}
+
+func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Error(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("drop by collection error")
+
+	mockDropByCollection := mockey.Mock((*snapshotManager).DropSnapshotsByCollection).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		collectionID int64,
+	) error {
+		return expectedErr
+	}).Build()
+	defer mockDropByCollection.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshotManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	broadcastMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+		WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotsByCollectionMessageV2{
+		Message: typedMsg,
+	}
+
+	err := callbacks.dropSnapshotsByCollectionV2AckCallback(ctx, result)
+
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
 // --- Test restoreSnapshotV2AckCallback ---
 
 func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
@@ -243,6 +336,7 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
+		collectionID int64,
 		name string,
 	) (*SnapshotData, error) {
 		readSnapshotDataCalled = true
@@ -257,9 +351,11 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
+		sourceCollectionID int64,
 		snapshotName string,
 		collectionID int64,
 		jobID int64,
+		pinID int64,
 	) (int64, error) {
 		restoreDataCalled = true
 		assert.Equal(t, "test_snapshot", snapshotName)
@@ -293,9 +389,10 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 	// Create test broadcast result with pre-allocated jobID
 	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(&message.RestoreSnapshotMessageHeader{
-			SnapshotName: "test_snapshot",
-			CollectionId: 200,
-			JobId:        12345, // Pre-allocated jobID
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345, // Pre-allocated jobID
+			SourceCollectionId: 100,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -327,9 +424,11 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
+		sourceCollectionID int64,
 		snapshotName string,
 		collectionID int64,
 		jobID int64,
+		pinID int64,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
@@ -344,9 +443,10 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 	// Create test broadcast result
 	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(&message.RestoreSnapshotMessageHeader{
-			SnapshotName: "test_snapshot",
-			CollectionId: 200,
-			JobId:        12345,
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345,
+			SourceCollectionId: 100,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -374,11 +474,13 @@ func newTestSnapshotMeta(snapshots map[string]*datapb.SnapshotInfo) *snapshotMet
 	sm := &snapshotMeta{
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
 		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
 	}
 	for name, info := range snapshots {
-		sm.snapshotName2ID.Insert(name, info.GetId())
+		collID := info.GetCollectionId()
+		nameMap, _ := sm.snapshotName2ID.GetOrInsert(collID, typeutil.NewConcurrentMap[string, UniqueID]())
+		nameMap.Insert(name, info.GetId())
 		sm.snapshotID2Info.Insert(info.GetId(), info)
 	}
 	return sm
@@ -408,7 +510,7 @@ func buildValidateTestServer(t *testing.T, snapshotFound bool) *Server {
 // buildBaseSnapshotData creates a SnapshotData with a default partition and one index.
 func buildBaseSnapshotData() *SnapshotData {
 	return &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
 		},
@@ -586,7 +688,7 @@ func TestValidateRestoreSnapshotResources_SuccessNoIndexes(t *testing.T) {
 
 	// No indexes in snapshot data
 	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
 		},
@@ -613,7 +715,7 @@ func TestValidateRestoreSnapshotResources_MultiplePartitionsAndIndexes(t *testin
 	defer m3.UnPatch()
 
 	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{
 				"_default": 1,

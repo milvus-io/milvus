@@ -84,15 +84,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
 	tso := mocktso.NewAllocator(t)
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
+			catalog:     rootcoord.NewCatalog(catalogKV),
 			names:       testDB,
 			aliases:     newNameDb(),
 			dbName2Meta: make(map[string]*model.Database),
@@ -112,6 +110,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		return nil
 	})
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
+		return nil
+	})
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
 		return nil
 	})
 
@@ -135,7 +136,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 			result := results[mutableMsg.VChannel()]
 			immutableMsg := mutableMsg.WithTimeTick(result.TimeTick).WithLastConfirmed(result.LastConfirmedMessageID).IntoImmutableMessage(result.MessageID)
 			wg.Add(1)
-			go func() {
+			go func() { //nolint:gosec // context.Background is intentional for retries in test
 				defer wg.Done()
 				retry.Do(context.Background(), func() error {
 					return registry.CallMessageAckOnceCallbacks(context.Background(), immutableMsg)

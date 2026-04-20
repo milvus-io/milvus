@@ -243,9 +243,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
 	for _, node := range nodeIDs {
 		if allNodeHasMemInfo {
-			nodeScoreMap[node].SetAssignedScore(nodeMemMap[node] * average)
+			nodeScoreMap[node].AddAssignedScore(nodeMemMap[node] * average)
 		} else {
-			nodeScoreMap[node].SetAssignedScore(average)
+			nodeScoreMap[node].AddAssignedScore(average)
 		}
 
 		// Add delegator overhead
@@ -437,9 +437,9 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64,
 
 	for _, node := range nodeIDs {
 		if allNodeHasMemInfo {
-			nodeScoreMap[node].SetAssignedScore(nodeMemMap[node] * average)
+			nodeScoreMap[node].AddAssignedScore(nodeMemMap[node] * average)
 		} else {
-			nodeScoreMap[node].SetAssignedScore(average)
+			nodeScoreMap[node].AddAssignedScore(average)
 		}
 	}
 

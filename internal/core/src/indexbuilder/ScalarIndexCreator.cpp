@@ -136,7 +136,7 @@ ScalarIndexCreator::Upload() {
                        config_, index::SCALAR_INDEX_ENGINE_VERSION)
                        .value_or(1);
     if (version >= 3) {
-        return index_->UploadV3(config_);
+        return index_->UploadUnified(config_);
     }
     return index_->Upload(config_);
 }

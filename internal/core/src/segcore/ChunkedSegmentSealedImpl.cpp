@@ -13,6 +13,7 @@
 
 #include <cxxabi.h>
 #include <fmt/core.h>
+#include <folly/ScopeGuard.h>
 #include <folly/Try.h>
 #include <simdjson.h>
 #include <algorithm>
@@ -95,6 +96,7 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/packed/chunk_manager.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -126,6 +128,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "storage/FileManager.h"
+#include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -135,6 +138,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
@@ -601,15 +605,60 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
+    auto load_cg_start = std::chrono::high_resolution_clock::now();
     LOG_INFO(
-        "Loading segment {} field data with manifest {}", id_, manifest_path);
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
+        "[LoadColumnGroups] segment {} start, manifest {}", id_, manifest_path);
+    auto properties = std::make_shared<milvus_storage::api::Properties>(
+        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+             .GetProperties());
     auto column_groups = segment_load_info_.GetColumnGroups();
 
-    auto arrow_schema = schema_->BuildReaderArrowSchema();
-    reader_ = milvus_storage::api::Reader::create(
-        column_groups, arrow_schema, nullptr, *properties);
+    // External collections: inject extfs.{collectionID}.* derived from
+    // external_source. milvus_storage routes each file URI to the matching
+    // extfs alias by (bucket, address); file URIs in the Iceberg manifest
+    // live under external_source, so the alias always matches — same-bucket
+    // and cross-bucket are handled uniformly.
+    if (schema_->is_external_collection()) {
+        InjectExtfsProperties(*properties,
+                              segment_load_info_.GetCollectionID(),
+                              schema_->get_external_source(),
+                              schema_->get_external_spec());
+    }
+
+    // Schemaless reader for external collections: pass nullptr schema and
+    // let the Reader derive types from file metadata (Parquet footer).
+    // FillFieldData handles Parquet-native → Milvus type conversion.
+    //
+    // This overload (LoadColumnGroups(manifest_path)) is reached only via
+    // ApplyLoadDiff when load_external_manifest is set, which in turn is
+    // gated on is_external_collection() — see SegmentLoadInfo.cpp where the
+    // flag is assigned. The non-external path uses LoadColumnGroups(
+    // column_groups, ...) and never enters here.
+    auto needed_columns = schema_->GetExternalColumnNames();
+    // reader_mutex_ guards reader_ against concurrent use in ExecuteTake.
+    // Reopen reaches this function with mutex_ already released (see Reopen
+    // for the rationale), so without this lock a concurrent ExecuteTake can
+    // observe a mid-assigned shared_ptr or drop the old Reader's refcount
+    // while another thread is still calling take() on it. Initial load is
+    // uncontended (segment not yet ready), so the extra lock is free.
+    {
+        std::lock_guard<std::mutex> lock(reader_mutex_);
+        reader_ = milvus_storage::api::Reader::create(column_groups,
+                                                      /*arrow_schema=*/nullptr,
+                                                      needed_columns,
+                                                      *properties);
+    }
+
+    auto reader_create_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - load_cg_start)
+            .count();
+    LOG_INFO(
+        "[LoadColumnGroups] segment {} reader created in {}ms, {} column "
+        "groups",
+        id_,
+        reader_create_ms,
+        column_groups->size());
 
     // Pre-resolve field IDs for each column group, then reuse the
     // standard LoadColumnGroup overload.
@@ -625,42 +674,89 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
         cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
-    std::vector<std::future<void>> load_group_futures;
+    // Split each column group's fields into eager (warmup=sync/async) and
+    // lazy (warmup=disable) subsets, so that each subset creates its own
+    // ChunkReader with column projection.  This avoids downloading all
+    // columns from S3 when only a subset needs eager warming.
+    struct FieldGroupTask {
+        int cg_index;
+        std::vector<FieldId> field_ids;
+        bool eager_load;
+    };
+    std::vector<FieldGroupTask> tasks;
+
     for (const auto& pair : cg_field_ids) {
         auto cg_index = pair.first;
-        const auto& field_ids = pair.second;
-        auto future =
-            pool.Submit([this, column_groups, properties, cg_index, field_ids] {
-                LoadColumnGroup(column_groups,
-                                properties,
-                                cg_index,
-                                field_ids,
-                                /*eager_load=*/false,
-                                /*op_ctx=*/nullptr);
-            });
-        load_group_futures.emplace_back(std::move(future));
-    }
+        const auto& all_fields = pair.second;
 
-    std::vector<std::exception_ptr> load_exceptions;
-    for (auto& future : load_group_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            load_exceptions.push_back(std::current_exception());
+        std::vector<FieldId> eager_fields;
+        std::vector<FieldId> lazy_fields;
+
+        for (const auto& field_id : all_fields) {
+            const auto& field_meta = (*schema_)[field_id];
+            bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+            auto [has_warmup, warmup_str] = schema_->WarmupPolicy(
+                field_id, field_is_vector, /*is_index=*/false);
+            // Resolve effective warmup using global config as fallback
+            auto resolved = getCacheWarmupPolicy(has_warmup ? warmup_str : "",
+                                                 field_is_vector,
+                                                 /*is_index=*/false,
+                                                 /*in_load_list=*/true);
+            if (resolved != CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+                eager_fields.push_back(field_id);
+            } else {
+                lazy_fields.push_back(field_id);
+            }
+        }
+
+        if (!eager_fields.empty()) {
+            tasks.push_back({cg_index, std::move(eager_fields), true});
+        }
+        // Lazy fields are emitted one-per-field so that each creates its
+        // own single-column projected ChunkReader. Accessing one lazy
+        // field (e.g. caption) will not co-load sibling lazy fields
+        // (e.g. vector), avoiding unnecessary S3 downloads.
+        for (const auto& fid : lazy_fields) {
+            tasks.push_back({cg_index, {fid}, false});
+        }
+        if (!eager_fields.empty() && !lazy_fields.empty()) {
+            LOG_INFO(
+                "[LoadColumnGroups] segment {} cg {} split: {} eager, {} lazy",
+                get_segment_id(),
+                cg_index,
+                eager_fields.size(),
+                lazy_fields.size());
         }
     }
 
-    // If any exceptions occurred during index loading, handle them
-    if (!load_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
-                  load_exceptions.size(),
-                  load_group_futures.size(),
-                  id_);
+    LOG_INFO(
+        "[LoadColumnGroups] segment {} external table: {} tasks from {} column "
+        "groups",
+        get_segment_id(),
+        tasks.size(),
+        cg_field_ids.size());
 
-        // Rethrow the first exception
-        std::rethrow_exception(load_exceptions[0]);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    std::vector<std::future<void>> load_group_futures;
+    for (auto& task : tasks) {
+        auto future = pool.Submit([this,
+                                   column_groups,
+                                   properties,
+                                   cg_index = task.cg_index,
+                                   field_ids = std::move(task.field_ids),
+                                   eager_load = task.eager_load] {
+            LoadColumnGroup(column_groups,
+                            properties,
+                            cg_index,
+                            field_ids,
+                            eager_load,
+                            /*op_ctx=*/nullptr,
+                            /*is_replace=*/false);
+        });
+        load_group_futures.emplace_back(std::move(future));
     }
+
+    storage::WaitAllFutures(load_group_futures);
 
     if (schema_->is_external_collection()) {
         SynthesizeExternalSystemFields();
@@ -706,38 +802,127 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     }
 }
 
-std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
-parse_parquet_statistics(
-    const std::vector<std::shared_ptr<parquet::FileMetaData>>& file_metas,
-    const std::map<int64_t, milvus_storage::ColumnOffset>& field_id_mapping,
-    int64_t field_id) {
-    ChunkedSegmentSealedImpl::ParquetStatistics statistics;
-    if (file_metas.size() == 0) {
-        return std::nullopt;
-    }
-    auto it = field_id_mapping.find(field_id);
-    AssertInfo(it != field_id_mapping.end(),
-               "field id {} not found in field id mapping",
-               field_id);
-    auto offset = it->second;
+namespace {
 
-    for (auto& file_meta : file_metas) {
-        auto num_row_groups = file_meta->num_row_groups();
-        for (auto i = 0; i < num_row_groups; i++) {
-            auto row_group = file_meta->RowGroup(i);
-            auto column_chunk = row_group->ColumnChunk(offset.col_index);
-            if (!column_chunk->is_stats_set()) {
-                AssertInfo(statistics.size() == 0,
-                           "Statistics is not set for some column chunks "
-                           "for field {}",
-                           field_id);
+struct FileMetadataLoadResult {
+    milvus_storage::RowGroupMetadataVector row_group_meta;
+    // per field_id → per-row-group statistics; nullptr entry means the row
+    // group had no statistics set for this field.
+    std::map<int64_t, std::vector<std::shared_ptr<parquet::Statistics>>>
+        per_field_row_group_stats;
+};
+
+}  // namespace
+
+LoadedGroupChunkMetadata
+LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
+                       const std::vector<FieldId>& field_ids_for_stats,
+                       const std::string& debug_key) {
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+
+    std::vector<std::future<FileMetadataLoadResult>> futures;
+    futures.reserve(insert_files.size());
+    for (const auto& file : insert_files) {
+        // Futures are always joined below before this function returns, so
+        // capturing loader inputs by reference is safe here.
+        futures.push_back(pool.Submit([&fs,
+                                       file,
+                                       &field_ids_for_stats,
+                                       &debug_key]() {
+            auto result = milvus_storage::FileRowGroupReader::Make(
+                fs,
+                file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties());
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
+
+            auto reader = result.ValueOrDie();
+            FileMetadataLoadResult load_result;
+            auto file_metadata = reader->file_metadata();
+            load_result.row_group_meta =
+                file_metadata->GetRowGroupMetadataVector();
+
+            if (!field_ids_for_stats.empty()) {
+                auto field_id_mapping = file_metadata->GetFieldIDMapping();
+                auto parquet_metadata = file_metadata->GetParquetMetadata();
+                auto num_row_groups = parquet_metadata->num_row_groups();
+                for (const auto& field_id : field_ids_for_stats) {
+                    auto it = field_id_mapping.find(field_id.get());
+                    AssertInfo(it != field_id_mapping.end(),
+                               "field id {} not found in field id mapping",
+                               field_id.get());
+                    auto& per_rg =
+                        load_result.per_field_row_group_stats[field_id.get()];
+                    per_rg.reserve(num_row_groups);
+                    for (int i = 0; i < num_row_groups; ++i) {
+                        auto column_chunk =
+                            parquet_metadata->RowGroup(i)->ColumnChunk(
+                                it->second.col_index);
+                        per_rg.push_back(column_chunk->is_stats_set()
+                                             ? column_chunk->statistics()
+                                             : nullptr);
+                    }
+                }
+            }
+
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "[StorageV2] metadata loader {} failed to close "
+                       "file reader for {} with error {}",
+                       debug_key,
+                       file,
+                       status.ToString());
+            return load_result;
+        }));
+    }
+
+    auto futures_guard = folly::makeGuard([&futures]() {
+        for (auto& future : futures) {
+            if (future.valid()) {
+                try {
+                    future.get();
+                } catch (...) {
+                }
+            }
+        }
+    });
+
+    LoadedGroupChunkMetadata metadata;
+    metadata.row_group_meta_list.reserve(insert_files.size());
+
+    for (auto& future : futures) {
+        auto load_result = future.get();
+        metadata.row_group_meta_list.push_back(
+            std::move(load_result.row_group_meta));
+        // Walk files in order and replicate the original single-threaded
+        // semantics: once any row group has reported stats for a field, every
+        // subsequent row group (in this file or any later file) must also
+        // report stats; otherwise fail.
+        for (const auto& field_id : field_ids_for_stats) {
+            auto& stats_vec = metadata.parquet_stats_by_field[field_id.get()];
+            auto it =
+                load_result.per_field_row_group_stats.find(field_id.get());
+            if (it == load_result.per_field_row_group_stats.end()) {
                 continue;
             }
-            auto stats = column_chunk->statistics();
-            statistics.push_back(stats);
+            for (auto& stat : it->second) {
+                if (stat == nullptr) {
+                    AssertInfo(stats_vec.empty(),
+                               "Statistics is not set for some column chunks "
+                               "for field {}",
+                               field_id.get());
+                    continue;
+                }
+                stats_vec.push_back(std::move(stat));
+            }
         }
     }
-    return statistics;
+
+    return metadata;
 }
 
 void
@@ -801,6 +986,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
+        auto metadata = LoadGroupChunkMetadata(
+            insert_files,
+            ENABLE_PARQUET_STATS_SKIP_INDEX ? milvus_field_ids
+                                            : std::vector<FieldId>{},
+            fmt::format(
+                "seg_{}_cg_{}", get_segment_id(), column_group_id.get()));
+        auto parquet_stats_by_field =
+            std::move(metadata.parquet_stats_by_field);
 
         auto translator =
             std::make_unique<storagev2translator::GroupChunkTranslator>(
@@ -808,15 +1001,13 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                insert_files,
+                std::move(insert_files),
+                std::move(metadata.row_group_meta_list),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority,
                 info.warmup_policy);
-
-        auto file_metas = translator->parquet_file_metas();
-        auto field_id_mapping = translator->field_id_mapping();
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -828,8 +1019,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             auto data_type = field_meta.get_data_type();
             std::optional<ParquetStatistics> statistics_opt;
             if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
-                statistics_opt = parse_parquet_statistics(
-                    file_metas, field_id_mapping, field_id.get());
+                auto it = parquet_stats_by_field.find(field_id.get());
+                AssertInfo(it != parquet_stats_by_field.end(),
+                           "parquet statistics for field {} not found",
+                           field_id.get());
+                statistics_opt = std::move(it->second);
             }
 
             load_field_data_common(
@@ -2926,8 +3120,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     column->BulkRawJsonAt(
         op_ctx,
         [&](Json json, size_t offset, bool is_valid) {
-            dst->at(offset) =
-                ExtractSubJson(std::string(json.data()), dynamic_field_names);
+            dst->at(offset) = ExtractSubJson(json.data(), dynamic_field_names);
         },
         seg_offsets,
         count);
@@ -3448,11 +3641,15 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                 field_id, num_rows, column->DataByteSize());
         }
     }
+    // Skip index construction: for proxy columns (external tables) with no
+    // statistics, skip building the skip index during load to avoid triggering
+    // S3 data fetches when warmup=disable. The skip index will be unavailable
+    // for these segments, which only affects skip-index-based pruning.
     if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
         if (statistics) {
             LoadSkipIndexFromStatistics(
                 field_id, data_type, statistics.value());
-        } else {
+        } else if (!is_proxy_column) {
             LoadSkipIndex(field_id, data_type, column);
         }
     }
@@ -3571,6 +3768,7 @@ ChunkedSegmentSealedImpl::Reopen(
     std::unique_lock lck(mutex_);
     SegmentLoadInfo current(segment_load_info_);
     segment_load_info_ = new_seg_load_info;
+    use_take_for_output_ = segment_load_info_.GetUseTakeForOutput();
     lck.unlock();
 
     // compute load diff
@@ -3624,8 +3822,16 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
             for (const auto& field_id : schema_->get_field_ids()) {
                 needed_columns->push_back(std::to_string(field_id.get()));
             }
-            reader_ = milvus_storage::api::Reader::create(
-                column_groups, arrow_schema, needed_columns, *properties);
+            // reader_mutex_ guards reader_ against concurrent ExecuteTake.
+            // ApplyLoadDiff is invoked from Reopen AFTER mutex_ has been
+            // released (Reopen:lck.unlock()), so a concurrent take() on the
+            // old reader_ could otherwise observe a half-assigned shared_ptr
+            // or lose its referent mid-call.
+            {
+                std::lock_guard<std::mutex> lock(reader_mutex_);
+                reader_ = milvus_storage::api::Reader::create(
+                    column_groups, arrow_schema, needed_columns, *properties);
+            }
             // New column group fields
             if (!diff.column_groups_to_load.empty()) {
                 LoadColumnGroups(column_groups,
@@ -3831,16 +4037,18 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
 
 void
 ChunkedSegmentSealedImpl::SetLoadInfo(
-    const proto::segcore::SegmentLoadInfo& load_info) {
+    proto::segcore::SegmentLoadInfo load_info) {
     std::unique_lock lck(mutex_);
-    segment_load_info_ = SegmentLoadInfo(load_info, schema_);
+    segment_load_info_ = SegmentLoadInfo(std::move(load_info), schema_);
+    use_take_for_output_ = segment_load_info_.GetUseTakeForOutput();
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
-        "storage_version: {}",
+        "storage_version: {}, use_take_for_output: {}",
         id_,
         segment_load_info_.GetNumOfRows(),
         segment_load_info_.GetIndexInfoCount(),
-        segment_load_info_.GetStorageVersion());
+        segment_load_info_.GetStorageVersion(),
+        use_take_for_output_);
 }
 
 void
@@ -3966,13 +4174,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO(
-        "[StorageV2] segment {} loads manifest cg index {} ({} field(s), "
-        "eager={})",
-        this->get_segment_id(),
-        index,
-        milvus_field_ids.size(),
-        eager_load);
+    LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
+             this->get_segment_id(),
+             index);
     auto mmap_dir_path =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager()
@@ -4361,45 +4565,15 @@ ChunkedSegmentSealedImpl::BuildTakeContext(const int64_t* offsets,
 
 std::unique_ptr<DataArray>
 ChunkedSegmentSealedImpl::ArrowToDataArray(
-    const std::shared_ptr<arrow::Array>& arr_in,
+    const std::shared_ptr<arrow::Array>& arr,
     const FieldMeta& field_meta,
     const std::vector<int64_t>& result_mapping,
     int64_t size) {
-    // Normalize dense vector arrays (List/FixedSizeList → FixedSizeBinary),
-    // matching the Load path (ManifestGroupTranslator / GetFieldDatasFromManifest).
-    auto arr = arr_in;
-    auto dt = field_meta.get_data_type();
-    if (IsVectorDataType(dt) && !IsSparseFloatVectorDataType(dt) &&
-        !IsVectorArrayDataType(dt) &&
-        arr->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
-        auto normalized = storage::NormalizeVectorArraysToFixedSizeBinary(
-            {arr}, dt, field_meta.get_dim());
-        arr = normalized[0];
-    }
-
-    // Normalize VectorArray: outer List stays, inner List<Float> → FixedSizeBinary.
-    // External Parquet stores as list(list(float)), Milvus expects list(fixed_size_binary).
-    if (IsVectorArrayDataType(dt) && arr->type_id() == arrow::Type::LIST) {
-        auto outer_list = std::static_pointer_cast<arrow::ListArray>(arr);
-        auto inner_values = outer_list->values();
-        if (inner_values->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
-            auto normalized = storage::NormalizeVectorArraysToFixedSizeBinary(
-                {inner_values},
-                field_meta.get_element_type(),
-                field_meta.get_dim());
-            auto result = arrow::ListArray::FromArrays(*outer_list->offsets(),
-                                                       *normalized[0]);
-            AssertInfo(result.ok(),
-                       "Failed to rebuild ListArray for VectorArray: {}",
-                       result.status().ToString());
-            arr = *result;
-        }
-    }
-
     auto data_array = std::make_unique<DataArray>();
-    data_array->set_type(static_cast<proto::schema::DataType>(dt));
+    data_array->set_type(
+        static_cast<proto::schema::DataType>(field_meta.get_data_type()));
 
-    switch (dt) {
+    switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             auto typed = std::static_pointer_cast<arrow::BooleanArray>(arr);
             auto obj = data_array->mutable_scalars()->mutable_bool_data();
@@ -4468,184 +4642,73 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             }
             break;
         }
-        case DataType::VECTOR_FLOAT: {
-            // Always FixedSizeBinary after normalization.
-            auto typed =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-            int byte_width = typed->byte_width();
-            int dim = byte_width / sizeof(float);
-            AssertInfo(dim == field_meta.get_dim(),
-                       "VECTOR_FLOAT dim mismatch: arrow={}, schema={}",
-                       dim,
-                       field_meta.get_dim());
-            auto vectors = data_array->mutable_vectors();
-            vectors->set_dim(dim);
-            auto* dst = vectors->mutable_float_vector()->mutable_data();
-            dst->Reserve(size * dim);
-            for (int64_t i = 0; i < size; i++) {
-                auto val = typed->Value(result_mapping[i]);
-                auto floats = reinterpret_cast<const float*>(val);
-                dst->Add(floats, floats + dim);
-            }
-            break;
-        }
-        case DataType::VECTOR_BINARY: {
-            auto typed =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-            int byte_width = typed->byte_width();
-            AssertInfo(
-                byte_width == (field_meta.get_dim() + 7) / 8,
-                "VECTOR_BINARY byte_width mismatch: arrow={}, expected={}",
-                byte_width,
-                (field_meta.get_dim() + 7) / 8);
-            auto vectors = data_array->mutable_vectors();
-            vectors->set_dim(field_meta.get_dim());
-            auto* dst = vectors->mutable_binary_vector();
-            dst->reserve(size * byte_width);
-            for (int64_t i = 0; i < size; i++) {
-                auto val = typed->Value(result_mapping[i]);
-                dst->append(reinterpret_cast<const char*>(val), byte_width);
-            }
-            break;
-        }
-        case DataType::VECTOR_FLOAT16: {
-            auto typed =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-            int byte_width = typed->byte_width();
-            int dim = byte_width / 2;
-            AssertInfo(dim == field_meta.get_dim(),
-                       "VECTOR_FLOAT16 dim mismatch: arrow={}, schema={}",
-                       dim,
-                       field_meta.get_dim());
-            auto vectors = data_array->mutable_vectors();
-            vectors->set_dim(dim);
-            auto* dst = vectors->mutable_float16_vector();
-            dst->reserve(size * byte_width);
-            for (int64_t i = 0; i < size; i++) {
-                auto val = typed->Value(result_mapping[i]);
-                dst->append(reinterpret_cast<const char*>(val), byte_width);
-            }
-            break;
-        }
-        case DataType::VECTOR_BFLOAT16: {
-            auto typed =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-            int byte_width = typed->byte_width();
-            int dim = byte_width / 2;
-            AssertInfo(dim == field_meta.get_dim(),
-                       "VECTOR_BFLOAT16 dim mismatch: arrow={}, schema={}",
-                       dim,
-                       field_meta.get_dim());
-            auto vectors = data_array->mutable_vectors();
-            vectors->set_dim(dim);
-            auto* dst = vectors->mutable_bfloat16_vector();
-            dst->reserve(size * byte_width);
-            for (int64_t i = 0; i < size; i++) {
-                auto val = typed->Value(result_mapping[i]);
-                dst->append(reinterpret_cast<const char*>(val), byte_width);
-            }
-            break;
-        }
-        case DataType::VECTOR_INT8: {
-            auto typed =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-            int byte_width = typed->byte_width();
-            AssertInfo(byte_width == field_meta.get_dim(),
-                       "VECTOR_INT8 dim mismatch: arrow={}, schema={}",
-                       byte_width,
-                       field_meta.get_dim());
-            auto vectors = data_array->mutable_vectors();
-            vectors->set_dim(byte_width);
-            auto* dst = vectors->mutable_int8_vector();
-            dst->reserve(size * byte_width);
-            for (int64_t i = 0; i < size; i++) {
-                auto val = typed->Value(result_mapping[i]);
-                dst->append(reinterpret_cast<const char*>(val), byte_width);
-            }
-            break;
-        }
         case DataType::JSON: {
-            // External Parquet stores JSON as UTF-8 string (StringArray).
-            // Internal binlog stores as raw bytes (BinaryArray).
-            // Both contain identical UTF-8 bytes, just different Arrow type.
+            // NormalizeExternalArrow already converted String→Binary.
             auto obj = data_array->mutable_scalars()->mutable_json_data();
-            if (arr->type_id() == arrow::Type::STRING) {
-                auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    auto val = typed->GetView(result_mapping[i]);
-                    obj->add_data(val.data(), val.size());
-                }
-            } else {
-                AssertInfo(arr->type_id() == arrow::Type::BINARY,
-                           "JSON field: unexpected Arrow type {}",
-                           arr->type()->ToString());
-                auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    auto val = typed->Value(result_mapping[i]);
-                    obj->add_data(val.data(), val.size());
-                }
+            auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                auto val = typed->Value(result_mapping[i]);
+                obj->add_data(val.data(), val.size());
             }
             break;
         }
         case DataType::GEOMETRY: {
-            // External Parquet may store as WKT text (StringArray) or
-            // WKB binary (BinaryArray). Both are passed through as raw bytes.
+            // NormalizeExternalArrow already converted WKT→WKB if needed.
             auto obj = data_array->mutable_scalars()->mutable_geometry_data();
-            if (arr->type_id() == arrow::Type::STRING) {
-                auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    auto val = typed->GetView(result_mapping[i]);
-                    obj->add_data(val.data(), val.size());
-                }
-            } else {
-                AssertInfo(arr->type_id() == arrow::Type::BINARY,
-                           "GEOMETRY field: unexpected Arrow type {}",
-                           arr->type()->ToString());
-                auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    auto val = typed->Value(result_mapping[i]);
-                    obj->add_data(val.data(), val.size());
-                }
+            auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                auto val = typed->Value(result_mapping[i]);
+                obj->add_data(val.data(), val.size());
             }
             break;
         }
         case DataType::TIMESTAMPTZ: {
+            // NormalizeExternalArrow already converted Timestamp→Int64.
             auto obj =
                 data_array->mutable_scalars()->mutable_timestamptz_data();
-            if (arr->type_id() == arrow::Type::TIMESTAMP) {
-                auto typed =
-                    std::static_pointer_cast<arrow::TimestampArray>(arr);
-                auto ts_type =
-                    std::static_pointer_cast<arrow::TimestampType>(arr->type());
-                auto unit = ts_type->unit();
-                for (int64_t i = 0; i < size; i++) {
-                    obj->add_data(storage::ConvertToMicroseconds(
-                        typed->Value(result_mapping[i]), unit));
-                }
-            } else {
-                auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    obj->add_data(typed->Value(result_mapping[i]));
-                }
+            auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
             }
             break;
         }
         case DataType::ARRAY: {
+            // NormalizeExternalArrow already converted List→Binary(protobuf).
             auto obj = data_array->mutable_scalars()->mutable_array_data();
-            if (arr->type_id() == arrow::Type::LIST) {
-                auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    *obj->add_data() = storage::ArrowListToScalarFieldProto(
-                        list_arr, result_mapping[i]);
+            auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
+            for (int64_t i = 0; i < size; i++) {
+                auto val = typed->Value(result_mapping[i]);
+                auto* sf = obj->add_data();
+                sf->ParseFromArray(val.data(), static_cast<int>(val.size()));
+            }
+            break;
+        }
+        case DataType::VECTOR_FLOAT: {
+            int dim = field_meta.get_dim();
+            auto vectors = data_array->mutable_vectors();
+            vectors->set_dim(dim);
+            auto float_data = vectors->mutable_float_vector();
+            float_data->mutable_data()->Resize(size * dim, 0.0f);
+            for (int64_t i = 0; i < size; i++) {
+                auto idx = result_mapping[i];
+                if (arr->IsNull(idx)) {
+                    continue;
                 }
-            } else {
-                auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
-                for (int64_t i = 0; i < size; i++) {
-                    auto val = typed->Value(result_mapping[i]);
-                    auto* sf = obj->add_data();
-                    sf->ParseFromArray(val.data(),
-                                       static_cast<int>(val.size()));
+                const uint8_t* val = nullptr;
+                if (arr->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
+                    val = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                              arr)
+                              ->Value(idx);
+                } else {
+                    auto bin_val =
+                        std::static_pointer_cast<arrow::BinaryArray>(arr)
+                            ->Value(idx);
+                    val = reinterpret_cast<const uint8_t*>(bin_val.data());
                 }
+                auto floats = reinterpret_cast<const float*>(val);
+                std::copy(floats,
+                          floats + dim,
+                          float_data->mutable_data()->mutable_data() + i * dim);
             }
             break;
         }
@@ -4655,7 +4718,6 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto inner_values =
                 std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
                     outer_list->values());
-            int byte_width = inner_values->byte_width();
             int dim = field_meta.get_dim();
             auto element_type = field_meta.get_element_type();
             auto* va = data_array->mutable_vectors()
@@ -4667,22 +4729,28 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 int64_t start = outer_list->value_offset(idx);
                 int64_t end = outer_list->value_offset(idx + 1);
                 int64_t num_vectors = end - start;
-                auto* vf = va->Add();
-                if (num_vectors == 0) {
-                    // Empty list row — add empty VectorField proto.
-                    continue;
-                }
                 VectorArray vec_arr(inner_values->GetValue(start),
                                     num_vectors,
                                     dim,
                                     element_type);
+                auto* vf = va->Add();
                 *vf = vec_arr.output_data();
             }
             break;
         }
         default:
-            return nullptr;
+            return nullptr;  // unsupported type
     }
+
+    // Populate valid_data for nullable fields so clients can identify nulls.
+    if (field_meta.is_nullable()) {
+        auto* vd = data_array->mutable_valid_data();
+        vd->Reserve(size);
+        for (int64_t i = 0; i < size; i++) {
+            vd->Add(arr->IsValid(result_mapping[i]));
+        }
+    }
+
     return data_array;
 }
 
@@ -4692,7 +4760,12 @@ ChunkedSegmentSealedImpl::ExecuteTake(
     const std::shared_ptr<std::vector<std::string>>& needed_columns,
     const char* caller_tag,
     double& elapsed_ms) const {
-    // Reader is NOT thread-safe; serialize concurrent take() calls.
+    // reader_->take() is NOT thread-safe — concurrent retrieve and search
+    // workers may hit the same segment simultaneously under load. Also,
+    // Reopen/ApplyLoadDiff can reassign reader_ under reader_mutex_ while a
+    // take() is in flight. Serialize both the null check and the take() call
+    // through reader_mutex_ so we never observe a half-assigned shared_ptr
+    // and the old Reader cannot be destroyed mid-call.
     std::lock_guard<std::mutex> lock(reader_mutex_);
     if (!reader_) {
         LOG_WARN("[TakeAPI] {} reader is null for segment {}", caller_tag, id_);
@@ -4723,11 +4796,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids) const {
-    if (!schema_->is_external_collection() || size == 0) {
-        return false;
-    }
-    constexpr int64_t kTakeThreshold = 10000;
-    if (size > kTakeThreshold) {
+    if (!schema_->is_external_collection() || size == 0 ||
+        !use_take_for_output_) {
         return false;
     }
 
@@ -4860,7 +4930,10 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
         size_t fi = it->second;
-        auto& arr = combined_arrays[fi];
+        auto arr = combined_arrays[fi];
+
+        // Normalize external arrow types to Milvus internal format.
+        arr = storage::NormalizeExternalArrow(arr, field_meta);
 
         auto data_array =
             ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
@@ -4897,11 +4970,8 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                                            const int64_t* seg_offsets,
                                            int64_t size,
                                            SearchResult& results) const {
-    if (!schema_->is_external_collection() || size == 0) {
-        return false;
-    }
-    constexpr int64_t kTakeThreshold = 10000;
-    if (size > kTakeThreshold) {
+    if (!schema_->is_external_collection() || size == 0 ||
+        !use_take_for_output_) {
         return false;
     }
 
@@ -4954,6 +5024,9 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
             }
             arr = *combined_result;
         }
+
+        // Normalize external arrow types to Milvus internal format.
+        arr = storage::NormalizeExternalArrow(arr, field_meta);
 
         auto data_array =
             ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);

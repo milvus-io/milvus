@@ -937,7 +937,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         field_name = default_new_field_name
-        error = {ct.err_code: 1100, ct.err_msg: f"already has another clutering key field, "
+        error = {ct.err_code: 1100, ct.err_msg: f"already has another clustering key field, "
                                                 f"field name: {field_name}: invalid parameter"}
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -961,7 +961,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        error = {ct.err_code: 1100, ct.err_msg: f"duplicate field name: {default_string_field_name}: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"duplicated field name {default_string_field_name}: invalid parameter"}
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)

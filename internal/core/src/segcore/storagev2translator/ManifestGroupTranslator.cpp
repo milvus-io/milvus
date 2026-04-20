@@ -327,6 +327,20 @@ ManifestGroupTranslator::get_cells(
         } catch (...) {
             LOG_WARN("drain channel exception swallowed");
         }
+        try {
+            storage::WaitAllFutures(load_futures);
+        } catch (const std::exception& e) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored background load "
+                "exception after cancellation: {}",
+                key_,
+                e.what());
+        } catch (...) {
+            LOG_WARN(
+                "[StorageV2] translator {} cleanup ignored unknown background "
+                "load exception after cancellation",
+                key_);
+        }
         throw;
     }
 
@@ -413,22 +427,12 @@ ManifestGroupTranslator::load_group_chunk(
         array_vecs.push_back(std::move(merged_array_vec));
     }
 
-    // Normalize vector arrays from LIST/FIXED_SIZE_LIST to FixedSizeBinary.
-    // External parquet files store vectors as list-of-float; Milvus expects
-    // FixedSizeBinary. Only run for external fields — normal collections
-    // already store vectors as FIXED_SIZE_BINARY (or BINARY for nullable).
+    // Normalize all arrow arrays for ChunkWriter compatibility.
+    // Handles: vectors (nullable/non-nullable), strings, timestamps,
+    // arrays, vector arrays, JSON, geometry.
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
-        if (field_metas[idx].is_external_field() &&
-            IsVectorDataType(field_metas[idx].get_data_type()) &&
-            !IsSparseFloatVectorDataType(field_metas[idx].get_data_type()) &&
-            !IsVectorArrayDataType(field_metas[idx].get_data_type()) &&
-            !array_vecs[idx].empty() &&
-            array_vecs[idx][0]->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
-            array_vecs[idx] = storage::NormalizeVectorArraysToFixedSizeBinary(
-                array_vecs[idx],
-                field_metas[idx].get_data_type(),
-                field_metas[idx].get_dim());
-        }
+        array_vecs[idx] = storage::NormalizeArrowForChunkWriter(
+            array_vecs[idx], field_metas[idx]);
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
