@@ -185,6 +185,9 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	}
 
 	for collection, partitions := range partitions {
+		var partitionsToSave []*Partition
+		var partitionsToCache []*Partition
+		released := false
 		for _, partition := range partitions {
 			// Partitions not loaded done should be deprecated
 			if partition.GetStatus() != querypb.LoadStatus_Loaded {
@@ -193,25 +196,35 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 					ctxLog.Info("recover loading partition times reach limit, release collection",
 						zap.Int64("collectionID", collection),
 						zap.Int32("recoverTimes", partition.RecoverTimes))
+					released = true
 					break
 				}
 
 				partition.RecoverTimes += 1
-				m.putPartition(ctx, []*Partition{
-					{
-						PartitionLoadInfo: partition,
-						CreatedAt:         time.Now(),
-					},
-				}, true)
+				partitionsToSave = append(partitionsToSave, &Partition{
+					PartitionLoadInfo: partition,
+					CreatedAt:         time.Now(),
+				})
 				continue
 			}
 
-			m.putPartition(ctx, []*Partition{
-				{
-					PartitionLoadInfo: partition,
-					CreatedAt:         time.Now(),
-				},
-			}, false)
+			partitionsToCache = append(partitionsToCache, &Partition{
+				PartitionLoadInfo: partition,
+				CreatedAt:         time.Now(),
+			})
+		}
+		if released {
+			continue
+		}
+		if len(partitionsToSave) > 0 {
+			if err := m.putPartition(ctx, partitionsToSave, true); err != nil {
+				return err
+			}
+		}
+		if len(partitionsToCache) > 0 {
+			if err := m.putPartition(ctx, partitionsToCache, false); err != nil {
+				return err
+			}
 		}
 	}
 
