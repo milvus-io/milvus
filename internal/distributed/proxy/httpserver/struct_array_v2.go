@@ -404,7 +404,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 			}
 			subFieldData = append(subFieldData, &schemapb.FieldData{
 				Type:      schemapb.DataType_Array,
-				FieldName: sub.GetName(),
+				FieldName: short,
 				FieldId:   sub.GetFieldID(),
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
@@ -443,7 +443,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 			}
 			subFieldData = append(subFieldData, &schemapb.FieldData{
 				Type:      schemapb.DataType_ArrayOfVector,
-				FieldName: sub.GetName(),
+				FieldName: short,
 				FieldId:   sub.GetFieldID(),
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
