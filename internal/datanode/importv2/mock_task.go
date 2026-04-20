@@ -195,6 +195,186 @@ func (_c *MockTask_GetBufferSize_Call) RunAndReturn(run func() int64) *MockTask_
 	return _c
 }
 
+// GetCostCPUNum provides a mock function with no fields
+func (_m *MockTask) GetCostCPUNum() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCostCPUNum")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockTask_GetCostCPUNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCostCPUNum'
+type MockTask_GetCostCPUNum_Call struct {
+	*mock.Call
+}
+
+// GetCostCPUNum is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetCostCPUNum() *MockTask_GetCostCPUNum_Call {
+	return &MockTask_GetCostCPUNum_Call{Call: _e.mock.On("GetCostCPUNum")}
+}
+
+func (_c *MockTask_GetCostCPUNum_Call) Run(run func()) *MockTask_GetCostCPUNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetCostCPUNum_Call) Return(_a0 int64) *MockTask_GetCostCPUNum_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_GetCostCPUNum_Call) RunAndReturn(run func() int64) *MockTask_GetCostCPUNum_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCostTime provides a mock function with no fields
+func (_m *MockTask) GetCostTime() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCostTime")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockTask_GetCostTime_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCostTime'
+type MockTask_GetCostTime_Call struct {
+	*mock.Call
+}
+
+// GetCostTime is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetCostTime() *MockTask_GetCostTime_Call {
+	return &MockTask_GetCostTime_Call{Call: _e.mock.On("GetCostTime")}
+}
+
+func (_c *MockTask_GetCostTime_Call) Run(run func()) *MockTask_GetCostTime_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetCostTime_Call) Return(_a0 int64) *MockTask_GetCostTime_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_GetCostTime_Call) RunAndReturn(run func() int64) *MockTask_GetCostTime_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetExecEndMs provides a mock function with no fields
+func (_m *MockTask) GetExecEndMs() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExecEndMs")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockTask_GetExecEndMs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExecEndMs'
+type MockTask_GetExecEndMs_Call struct {
+	*mock.Call
+}
+
+// GetExecEndMs is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetExecEndMs() *MockTask_GetExecEndMs_Call {
+	return &MockTask_GetExecEndMs_Call{Call: _e.mock.On("GetExecEndMs")}
+}
+
+func (_c *MockTask_GetExecEndMs_Call) Run(run func()) *MockTask_GetExecEndMs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetExecEndMs_Call) Return(_a0 int64) *MockTask_GetExecEndMs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_GetExecEndMs_Call) RunAndReturn(run func() int64) *MockTask_GetExecEndMs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetExecStartMs provides a mock function with no fields
+func (_m *MockTask) GetExecStartMs() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExecStartMs")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockTask_GetExecStartMs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExecStartMs'
+type MockTask_GetExecStartMs_Call struct {
+	*mock.Call
+}
+
+// GetExecStartMs is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetExecStartMs() *MockTask_GetExecStartMs_Call {
+	return &MockTask_GetExecStartMs_Call{Call: _e.mock.On("GetExecStartMs")}
+}
+
+func (_c *MockTask_GetExecStartMs_Call) Run(run func()) *MockTask_GetExecStartMs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetExecStartMs_Call) Return(_a0 int64) *MockTask_GetExecStartMs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_GetExecStartMs_Call) RunAndReturn(run func() int64) *MockTask_GetExecStartMs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionID provides a mock function with no fields
 func (_m *MockTask) GetCollectionID() int64 {
 	ret := _m.Called()

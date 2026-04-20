@@ -16,7 +16,11 @@
 
 package taskcost
 
-import "time"
+import (
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+)
 
 func NowMs() int64 {
 	return time.Now().UnixMilli()
@@ -40,4 +44,28 @@ func EstimateConcurrentWorkers(parallel, poolCap int64) int64 {
 		return poolCap
 	}
 	return parallel
+}
+
+// FullMachineCPUNum returns hardware.GetCPUNum() — the upper bound used for
+// tasks that saturate knowhere's / segcore's shared build thread pool
+// (vector index builds, analyze k-means training, clustering compaction).
+func FullMachineCPUNum() int64 {
+	return int64(hardware.GetCPUNum())
+}
+
+// EstimateIndexBuildCPUNum returns the approximate number of CPU threads an
+// index build task consumes during execution.
+//
+// Vector indexes go through knowhere's build thread pool (sized to NumCPU
+// in cluster mode, see internal/datanode/index/init_segcore.go:74). All
+// current scalar indexes build single-threaded: the tantivy wrapper
+// hardcodes 1 thread (internal/core/thirdparty/tantivy/tantivy-wrapper.h:23
+// — covers INVERTED / NGRAM / TEXT_MATCH / JSON_INVERTED), and the rest
+// (BITMAP / STL_SORT / STRING_SORT / MARISA / HYBRID / RTREE) are plain
+// loops with no thread pool / OpenMP / std::async.
+func EstimateIndexBuildCPUNum(isVectorIndex bool) int64 {
+	if isVectorIndex {
+		return FullMachineCPUNum()
+	}
+	return 1
 }

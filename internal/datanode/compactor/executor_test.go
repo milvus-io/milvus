@@ -133,7 +133,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(nil)
@@ -153,7 +153,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Greater(t, task.execStartMs, int64(0))
 		assert.Greater(t, task.execEndMs, int64(0))
 		assert.GreaterOrEqual(t, task.costTimeMs, int64(0))
-		assert.Equal(t, int64(2), task.costCPUNum)
+		assert.Equal(t, int64(1), task.costCPUNum)
 		costTime, costCPU, ok := ex.GetTaskCost(planID)
 		assert.True(t, ok)
 		assert.Equal(t, task.costTimeMs, costTime)
@@ -170,7 +170,7 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(nil)
@@ -190,7 +190,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Greater(t, task.execStartMs, int64(0))
 		assert.Greater(t, task.execEndMs, int64(0))
 		assert.GreaterOrEqual(t, task.costTimeMs, int64(0))
-		assert.Equal(t, int64(2), task.costCPUNum)
+		assert.Equal(t, int64(1), task.costCPUNum)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 
@@ -363,7 +363,7 @@ func TestCompactionExecutor(t *testing.T) {
 		slotUsage := int64(10)
 
 		mockC.EXPECT().GetPlanID().Return(planID)
-		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(nil)
 
@@ -408,7 +408,7 @@ func TestCompactionExecutor(t *testing.T) {
 
 		planID := int64(1)
 		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
-		mockC.EXPECT().GetSlotUsage().Return(int64(5)).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(int64(5)).Times(2)
 		mockC.EXPECT().GetCollection().Return(int64(1)).Maybe()
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
@@ -457,7 +457,7 @@ func TestCompactionExecutor(t *testing.T) {
 			mockC.EXPECT().GetPlanID().Return(planID).Times(4)
 			mockC.EXPECT().GetCollection().Return(int64(100))
 			mockC.EXPECT().GetChannelName().Return("ch1")
-			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(3)
+			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
 			mockC.EXPECT().Complete().Return()
 			mockC.EXPECT().GetStorageConfig().Return(nil)
 
@@ -506,7 +506,7 @@ func TestCompactionExecutor(t *testing.T) {
 		}
 
 		mockC.EXPECT().GetPlanID().Return(planID)
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(storageConfig)
 

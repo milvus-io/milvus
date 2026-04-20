@@ -713,7 +713,7 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
 		mockC.EXPECT().GetCollection().Return(int64(1)).Maybe()
 		mockC.EXPECT().GetChannelName().Return("ch-cost")
-		mockC.EXPECT().GetSlotUsage().Return(int64(2)).Times(3)
+		mockC.EXPECT().GetSlotUsage().Return(int64(2)).Times(2)
 		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
 			PlanID: planID,
 			State:  datapb.CompactionTaskState_completed,
@@ -738,7 +738,7 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 				return false
 			}
 			props := taskcommon.NewProperties(resp.GetProperties())
-			return props.GetCostTime() >= 0 && props.GetCostCPUNum() == 2
+			return props.GetCostTime() >= 0 && props.GetCostCPUNum() == 1
 		}, 3*time.Second, 20*time.Millisecond)
 	})
 

@@ -249,14 +249,14 @@ func (sched *TaskScheduler) processTask(t Task) {
 	startMs := taskcost.NowMs()
 	switch task := t.(type) {
 	case *indexBuildTask:
-		if task.IsVectorIndex() {
-			vecIndexPoolCap := int64(GetVecIndexBuildPool().Cap())
-			costCPUNum = taskcost.EstimateConcurrentWorkers(task.GetSlot(), vecIndexPoolCap)
-		}
+		costCPUNum = taskcost.EstimateIndexBuildCPUNum(task.IsVectorIndex())
 		task.manager.StoreIndexTaskExecutionStart(task.req.GetClusterID(), task.req.GetBuildID(), startMs, costCPUNum)
 	case *statsTask:
+		// TODO: profile stats pipelines (sort/text/json) — leave at 1 until actual thread usage is known.
 		task.manager.StoreStatsTaskExecutionStart(task.req.GetClusterID(), task.req.GetTaskID(), startMs, costCPUNum)
 	case *analyzeTask:
+		// analyze runs k-means training inside knowhere and saturates the build thread pool.
+		costCPUNum = taskcost.FullMachineCPUNum()
 		task.manager.StoreAnalyzeTaskExecutionStart(task.req.GetClusterID(), task.req.GetTaskID(), startMs, costCPUNum)
 	}
 

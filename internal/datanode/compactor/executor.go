@@ -85,6 +85,18 @@ func NewExecutor() *executor {
 	}
 }
 
+// estimateCompactionCPUNum approximates the number of CPU threads a compaction
+// task consumes. Clustering compaction runs majkmeans training inside knowhere
+// and saturates the shared build thread pool (sized to NumCPU). Mix and L0
+// compactions are predominantly serial pipelines today; they report 1 as a
+// placeholder until their thread usage is profiled.
+func estimateCompactionCPUNum(compactionType datapb.CompactionType) int64 {
+	if compactionType == datapb.CompactionType_ClusteringCompaction {
+		return taskcost.FullMachineCPUNum()
+	}
+	return 1
+}
+
 func getTaskSlotUsage(task Compactor) int64 {
 	// Calculate slot usage
 	taskSlotUsage := task.GetSlotUsage()
@@ -211,7 +223,7 @@ func (e *executor) executeTask(task Compactor) {
 	)
 
 	startMs := taskcost.NowMs()
-	costCPUNum := taskcost.EstimateConcurrentWorkers(getTaskSlotUsage(task), int64(GetExecPool().Cap()))
+	costCPUNum := estimateCompactionCPUNum(task.GetCompactionType())
 	e.mu.Lock()
 	if state, exists := e.tasks[task.GetPlanID()]; exists {
 		state.execStartMs = startMs
