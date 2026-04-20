@@ -847,7 +847,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
-	searchType := searchInfo.DetermineSearchType(hasFilter)
+	searchType := internalpb.SearchType_DEFAULT
+	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
+	if t.request.GetFunctionScore() == nil {
+		searchType = searchInfo.DetermineSearchType(hasFilter)
+	}
 
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
