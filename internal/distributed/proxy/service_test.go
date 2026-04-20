@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -1199,16 +1200,85 @@ func TestHttpAuthenticate(t *testing.T) {
 	}
 }
 
+// stubWebUIRegistrar is a minimal implementation of webUIRouterRegistrar for tests.
+type stubWebUIRegistrar struct {
+	called bool
+}
+
+func (s *stubWebUIRegistrar) RegisterRestRouter(router gin.IRouter) {
+	s.called = true
+	router.GET("/_cluster/info", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/_cluster/clients", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/_cluster/dependencies", func(c *gin.Context) { c.Status(http.StatusOK) })
+}
+
+// proxyWithWebUI wraps MockProxy and additionally implements webUIRouterRegistrar
+// so that the type assertion in registerHTTPServer succeeds during tests.
+type proxyWithWebUI struct {
+	*mocks.MockProxy
+	webuiCalled bool
+}
+
+func (p *proxyWithWebUI) RegisterRestRouter(router gin.IRouter) {
+	p.webuiCalled = true
+}
+
+// TestRegisterHTTPServer_WithWebUIRegistrar covers the true branch of the type
+// assertion `if r, ok := s.proxy.(webUIRouterRegistrar); ok` inside
+// registerHTTPServer (service.go line 189-191). Without this test that line is
+// never reached because getServer() installs a *mocks.MockProxy which does not
+// implement webUIRouterRegistrar.
+// Regression test for: https://github.com/milvus-io/milvus/issues/48926
+func TestRegisterHTTPServer_WithWebUIRegistrar(t *testing.T) {
+	mockey.PatchConvey("proxy implementing webUIRouterRegistrar causes RegisterRestRouter to be called", t, func() {
+		// mhttp.Register writes to a package-level http.ServeMux; repeated
+		// registrations for the same path panic. Stub it out so this test can
+		// call registerHTTPServer without touching global state.
+		mockey.Mock(mhttp.Register).To(func(_ *mhttp.Handler) {}).Build()
+
+		server := getServer(t)
+		base := server.proxy.(*mocks.MockProxy)
+		webUIProxy := &proxyWithWebUI{MockProxy: base}
+		server.proxy = webUIProxy
+
+		server.registerHTTPServer()
+
+		assert.True(t, webUIProxy.webuiCalled,
+			"RegisterRestRouter must be invoked on the WebUI group when the proxy satisfies webUIRouterRegistrar")
+	})
+}
+
+// TestRegisterWebUIRoutes directly tests the registerWebUIRoutes helper, covering
+// all new lines in service.go and verifying that the WebUI group is created without
+// the authenticate middleware.
+// Regression test for: https://github.com/milvus-io/milvus/issues/48926
+func TestRegisterWebUIRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	stub := &stubWebUIRegistrar{}
+	registerWebUIRoutes(engine, stub)
+
+	assert.True(t, stub.called, "RegisterRestRouter should have been called")
+
+	for _, path := range []string{"/_cluster/info", "/_cluster/clients", "/_cluster/dependencies"} {
+		req := httptest.NewRequest(http.MethodGet, apiPathPrefix+path, nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code,
+			"WebUI route %s should be reachable without any auth middleware", path)
+	}
+}
+
 // TestWebUIRoutesSkipAuthentication verifies that the WebUI management routes
-// (/_cluster/*, /_qc/*, etc.) registered via RegisterRestRouter remain accessible
-// without credentials even when authorizationEnabled = true.  The SDK REST API
-// routes must still require authentication.
+// (/_cluster/*, etc.) remain accessible without credentials even when
+// authorizationEnabled = true, while SDK REST API routes still require auth.
 // Regression test for: https://github.com/milvus-io/milvus/issues/48926
 func TestWebUIRoutesSkipAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Use the mock hook so that the authenticate function does not panic
-	// when it cannot find valid credentials; it will abort with 401 instead.
+	// Use the mock hook so that authenticate does not panic when no credentials
+	// are present; it aborts with 401 instead.
 	hookutil.SetMockAPIHook("", nil)
 	defer hookutil.SetMockAPIHook("", nil)
 
@@ -1222,31 +1292,19 @@ func TestWebUIRoutesSkipAuthentication(t *testing.T) {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		apiv1.Use(authenticate)
 	}
-	apiv1.GET("/sdk-test-route", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
+	apiv1.GET("/sdk-test-route", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	// WebUI management group — no authenticate middleware (mirrors registerHTTPServer fix).
-	webuiGroup := engine.Group(apiPathPrefix)
-	webuiGroup.GET("/_cluster/info", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-	webuiGroup.GET("/_cluster/clients", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-	webuiGroup.GET("/_cluster/dependencies", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
+	// WebUI management group — registerWebUIRoutes creates it without auth middleware.
+	stub := &stubWebUIRegistrar{}
+	registerWebUIRoutes(engine, stub)
 
 	t.Run("WebUI cluster routes accessible without credentials when auth enabled", func(t *testing.T) {
 		for _, path := range []string{"/_cluster/info", "/_cluster/clients", "/_cluster/dependencies"} {
 			req := httptest.NewRequest(http.MethodGet, apiPathPrefix+path, nil)
 			w := httptest.NewRecorder()
 			engine.ServeHTTP(w, req)
-			assert.NotEqual(t, http.StatusUnauthorized, w.Code,
-				"WebUI route %s should not require authentication", path)
 			assert.Equal(t, http.StatusOK, w.Code,
-				"WebUI route %s should return 200 without credentials", path)
+				"WebUI route %s should return 200 without credentials when auth is enabled", path)
 		}
 	})
 
@@ -1258,22 +1316,19 @@ func TestWebUIRoutesSkipAuthentication(t *testing.T) {
 			"SDK routes must still require authentication when auth is enabled")
 	})
 
-	t.Run("WebUI routes accessible without credentials when auth disabled", func(t *testing.T) {
+	t.Run("WebUI routes accessible when auth disabled", func(t *testing.T) {
 		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
 
 		engine2 := gin.New()
-		apiv2 := engine2.Group(apiPathPrefix)
-		// No authenticate middleware because auth is disabled.
-		apiv2.GET("/sdk-test-route", func(c *gin.Context) {
-			c.Status(http.StatusOK)
-		})
+		stub2 := &stubWebUIRegistrar{}
+		registerWebUIRoutes(engine2, stub2)
 
-		req := httptest.NewRequest(http.MethodGet, apiPathPrefix+"/sdk-test-route", nil)
+		req := httptest.NewRequest(http.MethodGet, apiPathPrefix+"/_cluster/info", nil)
 		w := httptest.NewRecorder()
 		engine2.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code,
-			"All routes should be accessible when auth is disabled")
+			"WebUI routes should be accessible when auth is disabled")
 	})
 }
 

@@ -88,6 +88,12 @@ var (
 
 const apiPathPrefix = "/api/v1"
 
+// webUIRouterRegistrar is satisfied by the real proxy.Proxy and can also be
+// satisfied by lightweight test stubs, avoiding a dependency on the concrete type.
+type webUIRouterRegistrar interface {
+	RegisterRestRouter(router gin.IRouter)
+}
+
 // Server is the Proxy Server
 type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
@@ -180,10 +186,8 @@ func (s *Server) registerHTTPServer() {
 	// built-in WebUI regardless of the authorizationEnabled setting; the WebUI
 	// frontend has no mechanism to supply user credentials.
 	// Telemetry routes (_telemetry/*) carry their own per-handler auth middleware.
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		webuiGroup := metricsGinHandler.Group(apiPathPrefix)
-		webuiGroup.Use(httpserver.RequestHandlerFunc)
-		p.RegisterRestRouter(webuiGroup)
+	if r, ok := s.proxy.(webUIRouterRegistrar); ok {
+		registerWebUIRoutes(metricsGinHandler, r)
 	}
 
 	mhttp.Register(&mhttp.Handler{
@@ -191,6 +195,14 @@ func (s *Server) registerHTTPServer() {
 		HandlerFunc: nil,
 		Handler:     metricsGinHandler.Handler(),
 	})
+}
+
+// registerWebUIRoutes creates a gin group without the user-auth middleware and
+// delegates route registration to r. Extracted for testability.
+func registerWebUIRoutes(engine *gin.Engine, r webUIRouterRegistrar) {
+	webuiGroup := engine.Group(apiPathPrefix)
+	webuiGroup.Use(httpserver.RequestHandlerFunc)
+	r.RegisterRestRouter(webuiGroup)
 }
 
 func (s *Server) startHTTPServer(errChan chan error) {
