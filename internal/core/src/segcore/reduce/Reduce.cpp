@@ -43,7 +43,6 @@
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
 #include "segcore/ReduceUtils.h"
-#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -179,37 +178,9 @@ ReduceHelper::FillPrimaryKey() {
     num_segments_ = search_results_.size();
 
     // Second pass: fill primary keys
-    if (num_segments_ > 1) {
-        // Parallel execution using MIDDLE thread pool for multiple segments
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-        std::vector<std::future<void>> futures;
-        futures.reserve(num_segments_);
-        for (auto& search_result : search_results_) {
-            auto future = pool.Submit([this, search_result] {
-                auto segment =
-                    static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result);
-            });
-            futures.emplace_back(std::move(future));
-        }
-        auto futures_guard = folly::makeGuard([&futures]() {
-            for (auto& f : futures) {
-                if (f.valid()) {
-                    try {
-                        f.get();
-                    } catch (...) {
-                    }
-                }
-            }
-        });
-        for (auto& future : futures) {
-            future.get();
-        }
-    } else if (num_segments_ == 1) {
-        auto segment =
-            static_cast<SegmentInterface*>(search_results_[0]->segment_);
-        segment->FillPrimaryKeys(plan_, *search_results_[0]);
+    for (auto& search_result : search_results_) {
+        auto segment = static_cast<SegmentInterface*>(search_result->segment_);
+        segment->FillPrimaryKeys(plan_, *search_result);
     }
 }
 
