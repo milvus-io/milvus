@@ -374,6 +374,26 @@ func TestBuildQueryResp_StructArrayRoundTrip(t *testing.T) {
 	assert.EqualValues(t, 10, decoded[0]["sub_int"])
 }
 
+func TestIsEmbeddingListData(t *testing.T) {
+	// element-level: one number-array vector per query.
+	assert.False(t, isEmbeddingListData(`{"data": [[0.1, 0.2, 0.3, 0.4]]}`))
+	assert.False(t, isEmbeddingListData(`{"data": [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]]}`))
+	// element-level: binary/byte-backed vectors as top-level base64 strings.
+	assert.False(t, isEmbeddingListData(`{"data": ["YmFzZTY0"]}`))
+	assert.False(t, isEmbeddingListData(`{"data": ["YmFzZTY0", "YmFzZTY1"]}`))
+
+	// embedding list: one list-of-number-arrays per query.
+	assert.True(t, isEmbeddingListData(`{"data": [[[0.1, 0.2, 0.3, 0.4]]]}`))
+	assert.True(t, isEmbeddingListData(`{"data": [[[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]], [[0.9, 1.0, 1.1, 1.2]]]}`))
+	// embedding list: list-of-base64-strings per query.
+	assert.True(t, isEmbeddingListData(`{"data": [["YmFzZTY0", "YmFzZTY1"]]}`))
+
+	// Degenerate inputs fall back to element-level (no EmbList routing).
+	assert.False(t, isEmbeddingListData(`{"data": []}`))
+	assert.False(t, isEmbeddingListData(`{"data": "not-array"}`))
+	assert.False(t, isEmbeddingListData(`{"data": [[]]}`))
+}
+
 func TestPrintStructArrayFieldsV2(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
