@@ -1050,6 +1050,12 @@ message CopySegmentSource {
   // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
   // When storage_version >= 3, binlog paths must be resolved from manifest_path
   int64 storage_version = 12;
+
+  // buildID -> IndexStorePathVersion for each SegmentIndex owned by this source segment.
+  // Authoritative for v0/v1 path reconstruction on the target side. Callers MUST populate
+  // this whenever a source index exists, or target path rewrite will default to
+  // BUILD_ROOTED and corrupt paths for COLLECTION_ROOTED indexes.
+  map<int64, index.IndexStorePathVersion> index_store_path_versions = 13;
 }
 
 message CopySegmentTarget {
