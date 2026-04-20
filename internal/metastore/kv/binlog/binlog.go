@@ -133,9 +133,14 @@ func DecompressBinLogs(s *datapb.SegmentInfo) error {
 	if err != nil {
 		return err
 	}
-	err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetDeltalogs())
-	if err != nil {
-		return err
+	// V3 segments store delta data in the manifest; Deltalogs entries are
+	// pathless summary placeholders for compaction triggers — skip V1 path
+	// reconstruction which would generate wrong paths.
+	if s.GetManifestPath() == "" {
+		err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, s.GetDeltalogs())
+		if err != nil {
+			return err
+		}
 	}
 	err = DecompressBinLog(storage.StatsBinlog, collectionID, partitionID, segmentID, s.GetStatslogs())
 	if err != nil {

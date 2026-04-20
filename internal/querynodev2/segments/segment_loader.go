@@ -1397,52 +1397,42 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	// For V3 (manifest) segments, Deltalogs is a pathless placeholder used only
-	// for compaction-trigger decisions. The real delta data is referenced by
-	// the manifest and loaded below.
-	isV3 := loadInfo.GetManifestPath() != ""
-	if !isV3 {
+	// Collect delta paths and reader options based on storage version.
+	var paths []string
+	var opts []storage.RwOption
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
+		// V3: delta data lives in manifest
+		paths, err = packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig())
+		if err != nil {
+			return err
+		}
+		opts = []storage.RwOption{
+			storage.WithStorageConfig(createStorageConfig()),
+			storage.WithVersion(storage.StorageV3),
+		}
+	} else {
+		// V1: delta data referenced by Deltalogs entries
 		for _, deltalog := range deltaLogs {
-			err := func() error {
-				opts := []storage.RwOption{
-					storage.WithDownloader(
-						func(ctx context.Context, paths []string) ([][]byte, error) {
-							return loader.cm.MultiRead(ctx, paths)
-						},
-					),
+			for _, binlog := range lo.Filter(deltalog.Binlogs, valid) {
+				if p := binlog.GetLogPath(); p != "" {
+					paths = append(paths, p)
 				}
-				paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
-					return binlog.GetLogPath()
-				})
-				reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
-				if err != nil {
-					return err
-				}
-				return readDeltaRecords(reader)
-			}()
-			if err != nil {
-				return err
 			}
+		}
+		opts = []storage.RwOption{
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return loader.cm.MultiRead(ctx, paths)
+			}),
 		}
 	}
 
-	// Read deltalogs from manifest for StorageV3 segments
-	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
-		reader, err := storage.NewDeltalogReaderFromManifest(
-			pkField.DataType,
-			manifestPath,
-			storage.WithStorageConfig(createStorageConfig()),
-			storage.WithVersion(storage.StorageV2),
-		)
+	if len(paths) > 0 {
+		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				return err
-			}
-			// io.EOF means no deltalogs in manifest, not an error
-		} else {
-			if err := readDeltaRecords(reader); err != nil {
-				return err
-			}
+			return err
+		}
+		if err := readDeltaRecords(reader); err != nil {
+			return err
 		}
 	}
 
