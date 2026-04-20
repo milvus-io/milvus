@@ -1440,6 +1440,20 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 				break
 			}
 		}
+		// Fall through to struct array sub-fields if no top-level vector field matched.
+		if vectorField == nil {
+			for _, sf := range collSchema.GetStructArrayFields() {
+				for _, sub := range sf.GetFields() {
+					if sub.GetName() == fieldName && typeutil.IsVectorType(sub.GetDataType()) {
+						vectorField = sub
+						break
+					}
+				}
+				if vectorField != nil {
+					break
+				}
+			}
+		}
 	}
 	if vectorField == nil {
 		return nil, errors.New("cannot find a vector field named: " + fieldName)
@@ -1462,7 +1476,15 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 
-	phv, err := convertQueries2Placeholder(body, dataType, dim)
+	var phv *commonpb.PlaceholderValue
+	if vectorField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		// Struct sub-vector search: the user supplies one embedding list per
+		// query and we pack each list into a single flat byte buffer whose
+		// PlaceholderType is the EmbList variant of the element type.
+		phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
+	} else {
+		phv, err = convertQueries2Placeholder(body, dataType, dim)
+	}
 	if err != nil {
 		return nil, err
 	}

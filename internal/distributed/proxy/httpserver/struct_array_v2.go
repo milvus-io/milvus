@@ -22,6 +22,7 @@ import (
 
 	"github.com/tidwall/gjson"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -371,6 +372,157 @@ func decodeByteVectorElement(v gjson.Result, dim, bytesPerVec int64, isFloat16 b
 func wrapStructSubParseError(sub *schemapb.FieldSchema, v gjson.Result, msg string) error {
 	return merr.WrapErrParameterInvalidMsg(
 		"sub-field %s parse error: %s (value=%s)", sub.GetName(), msg, v.Raw)
+}
+
+// convertEmbListQueries2Placeholder parses a search body whose "data" is a JSON
+// array of embedding lists. Each top-level element represents one nq query and
+// is itself a JSON array of vectors of the given element type. The resulting
+// PlaceholderValue carries one flat byte buffer per nq (all vectors of that
+// query concatenated), tagged with the matching EmbList* placeholder type.
+//
+// Request shape examples:
+//   - FloatVector element: [ [[0.1,0.2,0.3,0.4], [0.5,0.6,0.7,0.8]],
+//                            [[0.9,1.0,1.1,1.2]] ]
+//   - BinaryVector element: [ ["base64_1", "base64_2"], ["base64_3"] ]
+func convertEmbListQueries2Placeholder(body string, elemType schemapb.DataType, dim int64) (*commonpb.PlaceholderValue, error) {
+	raw := gjson.Get(body, HTTPRequestData)
+	if !raw.IsArray() {
+		return nil, merr.WrapErrParameterInvalidMsg("search data must be an array of embedding lists")
+	}
+	queries := raw.Array()
+	if len(queries) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("search data is empty")
+	}
+
+	placeholderType, err := embListPlaceholderType(elemType)
+	if err != nil {
+		return nil, err
+	}
+
+	values := make([][]byte, 0, len(queries))
+	for qIdx, q := range queries {
+		if !q.IsArray() {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"search data[%d] must be an array of vectors", qIdx)
+		}
+		vecs := q.Array()
+		if len(vecs) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"search data[%d] embedding list is empty", qIdx)
+		}
+		buf, err := encodeEmbListQuery(vecs, elemType, dim, qIdx)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, buf)
+	}
+	return &commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   placeholderType,
+		Values: values,
+	}, nil
+}
+
+func embListPlaceholderType(elemType schemapb.DataType) (commonpb.PlaceholderType, error) {
+	switch elemType {
+	case schemapb.DataType_FloatVector:
+		return commonpb.PlaceholderType_EmbListFloatVector, nil
+	case schemapb.DataType_Float16Vector:
+		return commonpb.PlaceholderType_EmbListFloat16Vector, nil
+	case schemapb.DataType_BFloat16Vector:
+		return commonpb.PlaceholderType_EmbListBFloat16Vector, nil
+	case schemapb.DataType_BinaryVector:
+		return commonpb.PlaceholderType_EmbListBinaryVector, nil
+	case schemapb.DataType_Int8Vector:
+		return commonpb.PlaceholderType_EmbListInt8Vector, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"unsupported embedding list element type %s", elemType)
+	}
+}
+
+// encodeEmbListQuery flattens one query's list of vectors into a single byte
+// buffer (all vectors concatenated). The wire format used by proxy/query nodes
+// for EmbList* placeholders is `dim * N * bytes_per_elem` bytes, no explicit
+// separators — each query's total byte count divided by the per-vector size
+// determines N.
+func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int64, qIdx int) ([]byte, error) {
+	switch elemType {
+	case schemapb.DataType_FloatVector:
+		buf := make([]byte, 0, int(dim*4)*len(vecs))
+		for vIdx, v := range vecs {
+			if !v.IsArray() {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] must be a float vector array", qIdx, vIdx)
+			}
+			var row []float32
+			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] parse fail: %s", qIdx, vIdx, err.Error())
+			}
+			if int64(len(row)) != dim {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] dim mismatch: expect %d got %d", qIdx, vIdx, dim, len(row))
+			}
+			buf = append(buf, typeutil.Float32ArrayToBytes(row)...)
+		}
+		return buf, nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		isFloat16 := elemType == schemapb.DataType_Float16Vector
+		bytesPerVec := dim * 2
+		buf := make([]byte, 0, int(bytesPerVec)*len(vecs))
+		for vIdx, v := range vecs {
+			b, err := decodeByteVectorElement(v, dim, bytesPerVec, isFloat16)
+			if err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d]: %s", qIdx, vIdx, err.Error())
+			}
+			buf = append(buf, b...)
+		}
+		return buf, nil
+	case schemapb.DataType_BinaryVector:
+		bytesPerVec := dim / 8
+		buf := make([]byte, 0, int(bytesPerVec)*len(vecs))
+		for vIdx, v := range vecs {
+			if v.Type != gjson.String {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] binary vector must be base64-encoded string", qIdx, vIdx)
+			}
+			var row []byte
+			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] parse fail: %s", qIdx, vIdx, err.Error())
+			}
+			if int64(len(row)) != bytesPerVec {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] byte-length mismatch: expect %d got %d", qIdx, vIdx, bytesPerVec, len(row))
+			}
+			buf = append(buf, row...)
+		}
+		return buf, nil
+	case schemapb.DataType_Int8Vector:
+		buf := make([]byte, 0, int(dim)*len(vecs))
+		for vIdx, v := range vecs {
+			if !v.IsArray() {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] must be an int8 vector array", qIdx, vIdx)
+			}
+			var row []int8
+			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] parse fail: %s", qIdx, vIdx, err.Error())
+			}
+			if int64(len(row)) != dim {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"search data[%d][%d] dim mismatch: expect %d got %d", qIdx, vIdx, dim, len(row))
+			}
+			buf = append(buf, typeutil.Int8ArrayToBytes(row)...)
+		}
+		return buf, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"unsupported embedding list element type %s", elemType)
+	}
 }
 
 // buildStructArrayFieldData aggregates per-row struct array payloads into a single
