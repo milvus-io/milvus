@@ -1,0 +1,238 @@
+syntax = "proto3";
+package milvus.proto.view;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/viewpb";
+
+// ViewSyncService is the unified service to sync query views and data views between coord and nodes.
+service ViewSyncService {
+    // SyncQueryView syncs query view state between coord and streaming/query nodes using bidirectional streaming.
+    // Coord pushes query view state transitions to nodes; nodes respond with their current local state.
+    // The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
+    rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
+    }
+    // SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
+    // Applies to both loaded and unloaded collections.
+    rpc SyncDataView(SyncDataViewRequest) returns (SyncDataViewResponse) {
+    }
+}
+
+//
+// ======================== Data View Messages ========================
+//
+
+// DataVersion is the composite version of a data view.
+// Ordered by lexicographic order of (streaming_version, compact_version).
+// Collection-level versioning to support future shard splitting.
+message DataVersion {
+    int64 streaming_version = 1;  // Incremented when a growing segment is flushed to sealed.
+    int64 compact_version = 2;    // Incremented when segments are compacted.
+}
+
+// DataViewOfCollection represents the complete storage view of a collection,
+// containing all sealed segments (no duplicates).
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    DataVersion data_version = 3;  // The current version of this data view.
+}
+
+// DataViewOfShard represents the storage view of a single shard (vchannel).
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+    // Delete data with timetick > this value needs to be applied to segments in this shard.
+    // Used by streaming nodes to determine when older delete data can be safely evicted.
+    uint64 delete_apply_start_after_timetick = 3;
+}
+
+// DataViewOfPartition represents the storage view of a single partition within a shard.
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    // Sealed segment IDs in this partition.
+    repeated int64 segment_ids = 2;
+}
+
+//
+// ======================== Query View State Enums ========================
+//
+
+// QueryViewState represents the lifecycle state of a query view.
+// Normal flow:   Preparing → Ready → Up → Down → Dropping → Dropped
+// Abnormal flow: Preparing → Unrecoverable → Dropping → Dropped
+enum QueryViewState {
+    QueryViewStateUnknown = 0;
+    // Initial state. View is created with data distribution determined.
+    // Pushed to target streaming/query nodes for resource preparation.
+    QueryViewStatePreparing = 1;
+    // All nodes have completed resource preparation.
+    // Coord needs to push Up to streaming node.
+    QueryViewStateReady = 2;
+    // View is active on streaming node and serving queries.
+    // Only applies to streaming node; query node stays in Ready.
+    QueryViewStateUp = 3;
+    // View is deactivated on streaming node (no longer generates new query plans).
+    // Precedes the dropping phase for resource cleanup.
+    QueryViewStateDown = 4;
+    // Resource preparation failed on one or more nodes (e.g., OOM).
+    // View cannot be recovered; will proceed to Dropping → Dropped for cleanup.
+    QueryViewStateUnrecoverable = 5;
+    // View is being dropped. Sealed segments can be released from query nodes.
+    // Coord pushes this state to all nodes to trigger resource cleanup.
+    QueryViewStateDropping = 6;
+    // View is fully dropped and can be removed from persistent storage.
+    QueryViewStateDropped = 7;
+    // StreamingNode-only: WAL is recovering after SN crash.
+    // Not used by Coord or QueryNode. Maps to Up for Coord-visible state.
+    // See design doc Section 2.4.
+    QueryViewStateUpRecovering = 8;
+}
+
+
+//
+// ======================== Query View Messages ========================
+//
+
+// QueryViewOfShard represents a complete query view for a shard on a specific replica.
+// Contains the view metadata, streaming node assignment, and query node segment assignments.
+message QueryViewOfShard {
+    QueryViewMeta meta = 1;
+    repeated QueryViewOfQueryNode query_node = 2;   // Sealed segment assignments per query node.
+    QueryViewOfStreamingNode streaming_node = 3;     // Streaming node assignment for growing data.
+}
+
+// QueryViewMeta contains the metadata of a query view.
+message QueryViewMeta {
+    int64 collection_id = 1;
+    int64 replica_id = 2;       // The replica this view belongs to.
+    string vchannel = 3;        // The shard (vchannel) this view covers.
+    QueryViewVersion version = 4;
+    QueryViewState state = 5;
+    QueryViewSettings settings = 6;
+    // Inherited from DataViewOfShard at the time this query view was created.
+    // Delete data with timetick > this value needs to be applied to segments in this shard.
+    uint64 delete_apply_start_after_timetick = 7;
+}
+
+// QueryViewSettings contains the load configuration for a query view.
+message QueryViewSettings {
+    // Partitions that must be loaded for the view to be available.
+    repeated int64 required_partitions = 1;
+    // Partitions that should be loaded but do not affect view availability.
+    repeated int64 optional_partitions = 2;
+    // Fields that must be loaded for the view to be available.
+    repeated int64 required_fields = 3;
+}
+
+// QueryViewOfStreamingNode represents the streaming node's portion of a query view.
+// Currently empty; streaming node is implicitly determined by the shard's vchannel binding.
+message QueryViewOfStreamingNode {
+}
+
+// QueryViewOfQueryNode represents a query node's segment assignments within a query view.
+message QueryViewOfQueryNode {
+    int64 node_id = 1;
+    // Partitions and their segments assigned to this query node.
+    repeated QueryViewOfPartition partitions = 2;
+}
+
+// QueryViewVersion is the composite version of a query view.
+// Scoped to ShardOnReplica level. Ordered by lexicographic order of (data_version, query_version).
+// When data_version changes, query_version resets to 1.
+message QueryViewVersion {
+    DataVersion data_version = 1;  // The data view version this query view is based on.
+    int64 query_version = 2;       // Increments when data is redistributed across nodes (balance, recovery).
+}
+
+// QueryViewOfPartition represents a partition's segment list within a query view.
+message QueryViewOfPartition {
+    int64 partition_id = 1;
+    // All segment IDs in this partition.
+    repeated int64 segment_ids = 2;
+    // Subset of segment IDs that are in Ready state.
+    // Segments not in this list are implicitly NotReady.
+    // Coord → Node (Request): this field is empty (all segments start as NotReady).
+    // Node → Coord (Response): this field contains the ready subset.
+    repeated int64 ready_segment_ids = 3;
+}
+
+//
+// ======================== SyncQueryView RPC Messages ========================
+//
+
+// SyncRequest is the bidirectional streaming request for SyncQueryView RPC.
+// Uses oneof to support query view sync and graceful stream close.
+message SyncRequest {
+    oneof request {
+        SyncQueryViewsRequest views = 1;
+        SyncCloseRequest close = 2;
+    }
+}
+
+// SyncQueryViewsRequest carries query view states to be atomically applied on the target node.
+message SyncQueryViewsRequest {
+    repeated QueryViewOfShard query_views = 1;
+}
+
+// SyncCloseRequest signals graceful close of the bidirectional stream.
+message SyncCloseRequest {
+}
+
+// SyncResponse is the bidirectional streaming response for SyncQueryView RPC.
+message SyncResponse {
+    oneof response {
+        SyncQueryViewsResponse views = 1;
+        SyncCloseResponse close = 2;
+    }
+}
+
+// SyncQueryViewsResponse carries the node's current query view states and optional balance attributes.
+// The response always reflects the node's latest local state, not just the delta from the request.
+message SyncQueryViewsResponse {
+    repeated QueryViewOfShard query_views = 1;
+    // Balance attributes reported by the node for coord's balancer decision-making.
+    oneof balance_attributes {
+        StreamingNodeBalanceAttributes streaming_node = 2;
+        QueryNodeBalanceAttributes query_node = 3;
+    }
+}
+
+// SyncCloseResponse acknowledges graceful close of the bidirectional stream.
+message SyncCloseResponse {
+}
+
+//
+// ======================== SyncDataView RPC Messages ========================
+//
+
+// SyncDataViewRequest carries data view timetick information to streaming nodes.
+// Only used for unloaded collections; loaded collections sync timetick via SyncQueryView.
+message SyncDataViewRequest {
+    repeated DataViewShardTimeTick shards = 1;
+}
+
+// DataViewShardTimeTick is a lightweight message carrying only the vchannel and timetick
+// for delete data eviction, avoiding the overhead of full DataViewOfShard.
+message DataViewShardTimeTick {
+    string vchannel = 1;
+    // Delete data with timetick > this value needs to be applied to segments in this shard.
+    uint64 delete_apply_start_after_timetick = 2;
+}
+
+// SyncDataViewResponse is the acknowledgement of the data view sync.
+message SyncDataViewResponse {
+}
+
+//
+// ======================== Balance Attributes ========================
+//
+
+// StreamingNodeBalanceAttributes carries streaming node metrics for balance decisions.
+// Reserved for future use.
+message StreamingNodeBalanceAttributes {
+}
+
+// QueryNodeBalanceAttributes carries query node resource usage metrics for balance decisions.
+message QueryNodeBalanceAttributes {
+    int64 memory_usage = 1;  // Current memory usage in bytes.
+    int64 disk_usage = 2;    // Current disk usage in bytes.
+}
