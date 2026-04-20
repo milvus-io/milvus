@@ -110,9 +110,8 @@ func TestCreatePartitionInvalid(t *testing.T) {
 }
 
 func TestPartitionsNumExceedsMax(t *testing.T) {
-	t.Parallel()
-
-	// 120 seconds may timeout for 1024 partitions
+	// 1023 sequential CreatePartition calls serialize on a per-collection lock in rootcoord;
+	// keep this test serial so it isn't starved by other parallel tests' DDL load.
 	ctx := hp.CreateContext(t, time.Second*300)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
