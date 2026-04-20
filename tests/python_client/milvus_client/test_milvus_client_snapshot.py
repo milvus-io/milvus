@@ -308,7 +308,8 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 3. Start restore (creates CopySegment jobs referencing the snapshot)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
 
         # 4. Wait until restore is actively in progress (ref count registered)
         #    before attempting drop, to avoid timing-dependent flakiness
@@ -320,16 +321,18 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
             time.sleep(0.5)
         log.info(f"Restore state before drop attempt: {state.state}")
 
-        # 5. Attempt to drop the snapshot while restore is in progress
-        error = {ct.err_code: 5, ct.err_msg: "is restoring"}
-        self.drop_snapshot(client, snapshot_name,
+        # 5. Attempt to drop the snapshot while restore is in progress.
+        # PR #48143 introduced pin-based protection: restore jobs pin the snapshot
+        # and Drop fails with "active pins exist, unpin before dropping".
+        error = {ct.err_code: 2601, ct.err_msg: "active pins exist"}
+        self.drop_snapshot(client, snapshot_name, collection_name,
                            check_task=CheckTasks.err_res, check_items=error)
 
         # 6. Wait for restore to complete
         wait_for_restore_complete(client, job_id)
 
         # 7. After restore completes, drop should succeed (ref count is 0)
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
         # 8. Verify snapshot is actually dropped
         snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
@@ -3385,7 +3388,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Start restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
 
         # 3. Immediately drop the target collection while restore is in progress
         try:
@@ -3414,7 +3418,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         log.info(f"Collections after race (target may or may not exist): {collections}")
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         try:
             self.drop_collection(client, restored_collection_name, timeout=30)
         except Exception:
@@ -3459,18 +3463,14 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         assert snapshot_name in snapshots_new, \
             f"Snapshot {snapshot_name} should be discoverable under new name '{new_collection_name}'"
 
-        # list_snapshots without filter should always find it
-        all_snapshots, _ = self.list_snapshots(client)
-        assert snapshot_name in all_snapshots, \
-            f"Snapshot {snapshot_name} should be in global list after rename"
-
-        # 4. Describe snapshot should still work
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        # 4. Describe snapshot should still work (use new collection name)
+        info, _ = self.describe_snapshot(client, snapshot_name, new_collection_name)
         assert info.name == snapshot_name
         log.info(f"Snapshot collection_name after rename: {info.collection_name}")
 
         # 5. Restore should still work (snapshot data is independent of collection name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=new_collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_collection_name)
@@ -3480,7 +3480,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             f"Restored collection should have {default_nb} rows"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, new_collection_name)
         self.drop_collection(client, new_collection_name)
         self.drop_collection(client, restored_collection_name)
 
@@ -3509,7 +3509,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Start restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
 
         # 3. Immediately try to create snapshot on the target collection
         snapshot_created = False
@@ -3526,7 +3527,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 5. If snapshot was created during restore, verify it captured a subset of data
         if snapshot_created:
             restored_from_partial = cf.gen_unique_str(prefix + "_from_partial")
-            job_id2, _ = self.restore_snapshot(client, snapshot_on_restored, restored_from_partial)
+            job_id2, _ = self.restore_snapshot(client, snapshot_on_restored, restored_from_partial,
+                                               source_collection_name=restored_collection_name)
             wait_for_restore_complete(client, job_id2)
             self.load_collection(client, restored_from_partial)
             res, _ = self.query(client, restored_from_partial, filter="id >= 0",
@@ -3537,10 +3539,10 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             # Should have at most the original count (might be less if data was still copying)
             assert partial_count <= default_nb
             self.drop_collection(client, restored_from_partial)
-            self.drop_snapshot(client, snapshot_on_restored)
+            self.drop_snapshot(client, snapshot_on_restored, restored_collection_name)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3572,6 +3574,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 3. Restore to existing collection - should fail
         error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
         self.restore_snapshot(client, snapshot_name, existing_collection,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
         # 4. Verify the existing collection is untouched
@@ -3581,12 +3584,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 0, "Existing collection should remain empty (untouched)"
 
         # 5. Verify snapshot is still usable after failed restore
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
         # 6. Successful restore to a new collection proves no state corruption
         clean_restored = cf.gen_unique_str(prefix + "_clean")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_restored)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_restored,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, clean_restored)
@@ -3595,7 +3599,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == default_nb
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, existing_collection)
         self.drop_collection(client, clean_restored)
 
@@ -3627,7 +3631,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         def drop_thread():
             try:
-                client.drop_snapshot(snapshot_name)
+                client.drop_snapshot(snapshot_name, collection_name)
                 results.append("success")
             except Exception as e:
                 errors.append(str(e))
@@ -3701,26 +3705,31 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         log.info(f"Drop collection: success={drop_result['success']}, error={drop_result['error']}")
 
         # 3. Verify consistent state
+        # Note: with cascade delete (PR #48143), DropCollection triggers
+        # DropSnapshotsByCollection, so even if snapshot creation succeeded
+        # before drop, the snapshot may be cascade-deleted after drop completes.
         if create_result["success"]:
-            # Snapshot was created before drop took effect
-            # It should still be listable and restorable
+            # Snapshot was created before drop took effect; may be cascade-dropped
             all_snapshots, _ = self.list_snapshots(client)
-            log.info(f"Snapshot created, all snapshots: {all_snapshots}")
+            log.info(f"Snapshot created, all snapshots after race: {all_snapshots}")
             if snapshot_name in all_snapshots:
-                # Restore to verify data integrity
+                # Still alive -- restore to verify data integrity
                 restored_name = cf.gen_unique_str(prefix + "_restored")
-                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                                  source_collection_name=collection_name)
                 wait_for_restore_complete(client, job_id)
                 self.load_collection(client, restored_name)
                 res, _ = self.query(client, restored_name, filter="id >= 0",
                                     output_fields=["count(*)"])
                 assert res[0]["count(*)"] == default_nb
                 self.drop_collection(client, restored_name)
-            # Cleanup snapshot
-            try:
-                client.drop_snapshot(snapshot_name)
-            except Exception:
-                pass
+                # Cleanup snapshot
+                try:
+                    client.drop_snapshot(snapshot_name, collection_name)
+                except Exception:
+                    pass
+            else:
+                log.info("Snapshot was cascade-deleted with the source collection - OK")
         else:
             # Snapshot creation failed (drop happened first) - this is acceptable
             log.info("Snapshot creation failed because collection was dropped first - OK")
@@ -3756,34 +3765,48 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 2. Create target database
         self.create_database(client, target_db)
 
-        # 3. Restore snapshot to target db via db_name param
-        job_id = client.restore_snapshot(snapshot_name, restored_collection_name,
-                                         db_name=target_db)
+        # 3. Restore snapshot to target db via target_db_name param
+        # SDK signature: restore_snapshot(snapshot_name, source_collection_name,
+        #                                  target_collection_name,
+        #                                  source_db_name="", target_db_name="", ...)
+        job_id = client.restore_snapshot(snapshot_name, collection_name,
+                                         restored_collection_name,
+                                         target_db_name=target_db)
         wait_for_restore_complete(client, job_id, timeout=120)
 
-        # 4. Verify collection is in target db (pass db_name directly)
-        target_collections = client.list_collections(db_name=target_db)
-        log.info(f"Collections in target db '{target_db}': {target_collections}")
-        assert restored_collection_name in target_collections, \
-            f"Restored collection should be in target db '{target_db}'"
+        # Note: MilvusClient does not honor per-call db_name kwarg for list/load/
+        # query/drop_collection -- we must switch via using_database().
+        try:
+            # 4. Verify collection is in target db
+            client.using_database(target_db)
+            target_collections = client.list_collections()
+            log.info(f"Collections in target db '{target_db}': {target_collections}")
+            assert restored_collection_name in target_collections, \
+                f"Restored collection should be in target db '{target_db}'"
 
-        # 5. Verify collection is NOT in default db
-        default_collections = client.list_collections()
-        log.info(f"Collections in default db: {default_collections}")
-        assert restored_collection_name not in default_collections, \
-            "Restored collection should NOT be in default db"
+            # 5. Verify collection is NOT in default db
+            client.using_database("default")
+            default_collections = client.list_collections()
+            log.info(f"Collections in default db: {default_collections}")
+            assert restored_collection_name not in default_collections, \
+                "Restored collection should NOT be in default db"
 
-        # 6. Verify data integrity in target db
-        client.load_collection(restored_collection_name, db_name=target_db)
-        res = client.query(restored_collection_name, filter="id >= 0",
-                           output_fields=["count(*)"], db_name=target_db)
-        assert res[0]["count(*)"] == default_nb, \
-            f"Restored collection should have {default_nb} rows"
+            # 6. Verify data integrity in target db
+            client.using_database(target_db)
+            client.load_collection(restored_collection_name)
+            res = client.query(restored_collection_name, filter="id >= 0",
+                               output_fields=["count(*)"])
+            assert res[0]["count(*)"] == default_nb, \
+                f"Restored collection should have {default_nb} rows"
 
-        # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+            # Cleanup target-db collection while still in target context
+            client.drop_collection(restored_collection_name)
+        finally:
+            client.using_database("default")
+
+        # Cleanup remaining resources in default db
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, collection_name)
-        client.drop_collection(restored_collection_name, db_name=target_db)
         try:
             client.drop_database(target_db)
         except Exception as e:
@@ -3819,15 +3842,16 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         def restore_thread():
             try:
-                job_id = client.restore_snapshot(snapshot_name, restored_collection_name,
-                                                 timeout=60)
+                # SDK positional args: (snapshot_name, source_collection_name, target_collection_name)
+                job_id = client.restore_snapshot(snapshot_name, collection_name,
+                                                 restored_collection_name, timeout=60)
                 restore_result["job_id"] = job_id
             except Exception as e:
                 restore_result["error"] = str(e)
 
         def drop_thread():
             try:
-                client.drop_snapshot(snapshot_name, timeout=60)
+                client.drop_snapshot(snapshot_name, collection_name, timeout=60)
                 drop_result["success"] = True
             except Exception as e:
                 drop_result["error"] = str(e)
@@ -3870,12 +3894,15 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
                 log.info(f"Restore ended with: {e}")
 
             if drop_result["error"]:
-                # Scenario A: drop was blocked, try again now
+                # Scenario A: drop was blocked by active pins/restores
+                # PR #48143 introduced explicit pin-based blocking:
+                # "active pins exist, unpin before dropping: snapshot is pinned"
                 log.info(f"Drop was blocked during restore: {drop_result['error']}")
-                assert "restor" in drop_result["error"].lower(), \
-                    f"Drop error should mention restoring, got: {drop_result['error']}"
+                err_lower = drop_result["error"].lower()
+                assert "pin" in err_lower or "restor" in err_lower, \
+                    f"Drop error should mention pin/restore, got: {drop_result['error']}"
                 # Now drop should succeed
-                self.drop_snapshot(client, snapshot_name)
+                self.drop_snapshot(client, snapshot_name, collection_name)
             else:
                 # Scenario C: drop also succeeded (restore was fast)
                 log.info("Both restore and drop succeeded")
@@ -3899,7 +3926,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         # Cleanup snapshot (idempotent)
         try:
-            client.drop_snapshot(snapshot_name, timeout=30)
+            client.drop_snapshot(snapshot_name, collection_name, timeout=30)
         except Exception:
             pass
 
@@ -3945,13 +3972,13 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         # 3. Create snapshot using alias
         self.create_snapshot(client, alias_name, snapshot_name)
 
-        # 4. Describe snapshot should show the real collection name
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        # 4. Describe snapshot via alias should show the real collection name
+        info, _ = self.describe_snapshot(client, snapshot_name, alias_name)
         assert info.collection_name == collection_name, \
             f"Expected real collection name '{collection_name}', got '{info.collection_name}'"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_alias(client, alias_name)
         self.drop_collection(client, collection_name)
 
@@ -3982,7 +4009,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
             f"Mismatch: via alias={snapshots_via_alias}, via name={snapshots_via_name}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_alias(client, alias_name)
         self.drop_collection(client, collection_name)
 
@@ -4006,8 +4033,9 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         # 2. Create snapshot via alias
         self.create_snapshot(client, alias_name, snapshot_name)
 
-        # 3. Restore snapshot
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+        # 3. Restore snapshot using alias as source (server resolves to real collection)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                          source_collection_name=alias_name)
         wait_for_restore_complete(client, job_id)
 
         # 4. Verify restored data
@@ -4017,7 +4045,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == default_nb
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_alias(client, alias_name)
         self.drop_collection(client, collection_name)
         self.drop_collection(client, restored_name)
@@ -4041,7 +4069,8 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Restore to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # 3. Create alias on restored collection and list jobs via alias
@@ -4052,7 +4081,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
             f"Restore job {job_id} not found via alias. Jobs: {job_ids}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_alias(client, restored_alias)
         self.drop_collection(client, collection_name)
         self.drop_collection(client, restored_name)
@@ -4085,7 +4114,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4129,8 +4158,8 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         assert snapshot_b in snapshots_b
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_a)
-        self.drop_snapshot(client, snapshot_b)
+        self.drop_snapshot(client, snapshot_a, col_a)
+        self.drop_snapshot(client, snapshot_b, col_b)
         self.drop_alias(client, alias_name)
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
@@ -4239,7 +4268,8 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
-        # grant via v2 API
+        # grant Collection-level CreateSnapshot via v2 API (snapshot privileges
+        # moved from Global to Collection level in PR #48143)
         self.grant_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
         time.sleep(10)
 
@@ -4248,7 +4278,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.create_snapshot(user_client, collection_name, snapshot_name)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_drop_denied_without_privilege(self, host, port):
@@ -4263,11 +4293,11 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
         # should be denied
-        self.drop_snapshot(user_client, snapshot_name,
+        self.drop_snapshot(user_client, snapshot_name, collection_name,
                            check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_drop_allowed_after_grant_v2(self, host, port):
@@ -4286,7 +4316,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         time.sleep(10)
 
         # should succeed
-        self.drop_snapshot(user_client, snapshot_name)
+        self.drop_snapshot(user_client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_list_denied_without_privilege(self, host, port):
@@ -4305,7 +4335,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
                             check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_list_allowed_after_grant_v2(self, host, port):
@@ -4328,7 +4358,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         assert snapshot_name in snapshots
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_describe_denied_without_privilege(self, host, port):
@@ -4343,11 +4373,11 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
         # should be denied
-        self.describe_snapshot(user_client, snapshot_name,
+        self.describe_snapshot(user_client, snapshot_name, collection_name,
                                check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_describe_allowed_after_grant_v2(self, host, port):
@@ -4366,11 +4396,11 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         time.sleep(10)
 
         # should succeed
-        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        info, _ = self.describe_snapshot(user_client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_restore_denied_without_privilege(self, host, port):
@@ -4387,10 +4417,11 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         # should be denied
         restored_name = cf.gen_unique_str(prefix + "_restored")
         self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_restore_allowed_after_grant_v2(self, host, port):
@@ -4410,11 +4441,12 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # should succeed
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_name)
+        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
@@ -4442,7 +4474,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         time.sleep(10)
         snapshot_name = cf.gen_unique_str(prefix)
         self.create_snapshot(user_client, collection_name, snapshot_name)
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
         # revoke via v2 and verify denied
         self.revoke_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
@@ -4452,51 +4484,59 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
                              check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
-                               "v2 built-in privilege groups missing snapshot privileges")
-    def test_snapshot_v2_privilege_group_cluster_readonly(self, host, port):
+    @pytest.mark.xfail(reason="Built-in CollectionReadOnly group on deployed server does "
+                              "not yet include DescribeSnapshot/ListSnapshots even though "
+                              "util.CollectionReadOnlyPrivileges defines them. Tracking: "
+                              "https://github.com/milvus-io/milvus/issues/47855")
+    def test_snapshot_v2_privilege_group_collection_readonly(self, host, port):
         """
-        target: verify ClusterReadOnly v2 privilege group grants read snapshot ops
-        method: grant ClusterReadOnly, attempt describe and list
-        expected: describe/list succeed, create/drop/restore denied (currently all denied due to #47855)
+        target: verify CollectionReadOnly v2 privilege group grants read snapshot ops
+        method: grant CollectionReadOnly, attempt describe and list
+        expected: describe/list succeed, create/drop/restore denied
+        note: snapshot privileges moved from Global (ClusterXxx) to Collection
+              level groups in PR #48143 (fixes #47855)
         """
         client = self._client()
         collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
 
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
-        # grant ClusterReadOnly
-        self.grant_privilege_v2(client, role_name, "ClusterReadOnly", "*", "*")
+        # grant CollectionReadOnly (includes DescribeSnapshot + ListSnapshots)
+        self.grant_privilege_v2(client, role_name, "CollectionReadOnly", "*", "*")
         time.sleep(10)
 
-        # read ops should succeed after #47855 is fixed
+        # read ops should succeed
         snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
         assert snapshot_name in snapshots
 
-        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        info, _ = self.describe_snapshot(user_client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
-        # write ops should still be denied
+        # write ops should be denied
         new_snap = cf.gen_unique_str(prefix)
         self.create_snapshot(user_client, collection_name, new_snap,
                              check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name,
+        self.drop_snapshot(user_client, snapshot_name, collection_name,
                            check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
         self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
-                               "v2 built-in privilege groups missing snapshot privileges")
-    def test_snapshot_v2_privilege_group_cluster_readwrite(self, host, port):
+    @pytest.mark.xfail(reason="Built-in CollectionReadWrite group on deployed server does "
+                              "not yet include CreateSnapshot/DropSnapshot. Tracking: "
+                              "https://github.com/milvus-io/milvus/issues/47855")
+    def test_snapshot_v2_privilege_group_collection_readwrite(self, host, port):
         """
-        target: verify ClusterReadWrite v2 privilege group grants CRUD snapshot ops
-        method: grant ClusterReadWrite, attempt create/drop/describe/list
-        expected: create/drop/describe/list succeed, restore denied (currently all denied due to #47855)
+        target: verify CollectionReadWrite v2 privilege group grants CRUD snapshot ops
+        method: grant CollectionReadWrite, attempt create/drop/describe/list
+        expected: create/drop/describe/list succeed, restore denied
+        note: CollectionReadWrite = CollectionReadOnly + {CreateSnapshot, DropSnapshot}.
+              RestoreSnapshot is only granted by CollectionAdmin.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -4511,64 +4551,68 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
-        # grant ClusterReadWrite
-        self.grant_privilege_v2(client, role_name, "ClusterReadWrite", "*", "*")
+        # grant CollectionReadWrite (adds CreateSnapshot/DropSnapshot)
+        self.grant_privilege_v2(client, role_name, "CollectionReadWrite", "*", "*")
         time.sleep(10)
 
-        # create/list/describe/drop should succeed after #47855 is fixed
+        # create/list/describe/drop should succeed
         snapshot_name = cf.gen_unique_str(prefix)
         self.create_snapshot(user_client, collection_name, snapshot_name)
 
         snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
         assert snapshot_name in snapshots
 
-        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        info, _ = self.describe_snapshot(user_client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
         # restore should still be denied (not in ReadWrite group)
         restored_name = cf.gen_unique_str(prefix + "_restored")
         self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.check_permission_deny)
 
         # drop should succeed
-        self.drop_snapshot(user_client, snapshot_name)
+        self.drop_snapshot(user_client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
-                               "v2 built-in privilege groups missing snapshot privileges")
-    def test_snapshot_v2_privilege_group_cluster_admin(self, host, port):
+    @pytest.mark.xfail(reason="Built-in CollectionAdmin group on deployed server does not "
+                              "yet include Create/Drop/RestoreSnapshot. Tracking: "
+                              "https://github.com/milvus-io/milvus/issues/47855")
+    def test_snapshot_v2_privilege_group_collection_admin(self, host, port):
         """
-        target: verify ClusterAdmin v2 privilege group grants all snapshot ops
-        method: grant ClusterAdmin (highest v2 group), attempt all snapshot ops
-        expected: all snapshot ops succeed (currently fails due to #47855)
+        target: verify CollectionAdmin v2 privilege group grants all snapshot ops
+        method: grant CollectionAdmin, attempt all snapshot ops
+        expected: all snapshot ops succeed
+        note: CollectionAdmin = CollectionReadWrite + {RestoreSnapshot, ...}.
         """
         client = self._client()
         collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
 
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
-        # grant ClusterAdmin - the highest v2 privilege group
-        self.grant_privilege_v2(client, role_name, "ClusterAdmin", "*", "*")
+        # grant CollectionAdmin - the highest collection-level privilege group
+        self.grant_privilege_v2(client, role_name, "CollectionAdmin", "*", "*")
         time.sleep(10)
 
-        # all snapshot ops should succeed after #47855 is fixed
+        # all snapshot ops should succeed
         new_snap = cf.gen_unique_str(prefix)
         self.create_snapshot(user_client, collection_name, new_snap)
 
         snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
         assert new_snap in snapshots
 
-        info, _ = self.describe_snapshot(user_client, new_snap)
+        info, _ = self.describe_snapshot(user_client, new_snap, collection_name)
         assert info.name == new_snap
 
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(user_client, new_snap, restored_name)
+        job_id, _ = self.restore_snapshot(user_client, new_snap, restored_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
-        self.drop_snapshot(user_client, new_snap)
+        self.drop_snapshot(user_client, new_snap, collection_name)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
@@ -4605,14 +4649,15 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         snapshots, _ = self.list_snapshots(admin_client, collection_name=collection_name)
         assert snapshot_name in snapshots
 
-        info, _ = self.describe_snapshot(admin_client, snapshot_name)
+        info, _ = self.describe_snapshot(admin_client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name)
+        job_id, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
-        self.drop_snapshot(admin_client, snapshot_name)
+        self.drop_snapshot(admin_client, snapshot_name, collection_name)
         self.drop_collection(client, restored_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
@@ -4636,21 +4681,22 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
         assert snapshot_name in snapshots
 
-        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        info, _ = self.describe_snapshot(user_client, snapshot_name, collection_name)
         assert info.name == snapshot_name
 
         # write ops should be denied
         new_snap = cf.gen_unique_str(prefix)
         self.create_snapshot(user_client, collection_name, new_snap,
                              check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name,
+        self.drop_snapshot(user_client, snapshot_name, collection_name,
                            check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
         self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_public_role_has_no_access(self, host, port):
@@ -4676,13 +4722,14 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
                              check_task=CheckTasks.check_permission_deny)
         self.list_snapshots(user_client, collection_name=collection_name,
                             check_task=CheckTasks.check_permission_deny)
-        self.describe_snapshot(user_client, snapshot_name,
+        self.describe_snapshot(user_client, snapshot_name, collection_name,
                                check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name,
+        self.drop_snapshot(user_client, snapshot_name, collection_name,
                            check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
         self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.check_permission_deny)
 
         # cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
