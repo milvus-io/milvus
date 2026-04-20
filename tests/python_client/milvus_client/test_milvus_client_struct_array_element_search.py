@@ -6076,3 +6076,538 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
                 "err_msg": "only group by primary key is supported for element-level search",
             },
         )
+
+
+# ==================== Test Case 10: StructArray Index-Access in search() (PR #48987) ====================
+
+
+@pytest.mark.xdist_group("TestMilvusClientStructArrayIndexAccessSearch")
+class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
+    """search() filter coverage for the same predicates verified by query in
+    TestMilvusClientStructArrayIndexAccess (PR #48987 + companion array ops).
+
+    Verification strategy:
+    - normal_vector uses FLAT index -> brute-force, recall=1.0 (exact ID set
+      assertions are independent of ANN behavior).
+    - Controlled rows share the same normal_vector as the query vector so they
+      sit at COSINE=1.0 (top of the result list); inert background rows use
+      diverse seeds -> always lower similarity.
+    - limit is set well above the controlled row count, so all controlled
+      rows that pass the filter are guaranteed to be returned.
+    - Each case still has >= 3500 rows total: 3000 sealed + 500 growing inert
+      background, controlled rows split across both segments.
+    """
+
+    SEARCH_VEC_SEED = 424242
+    SEARCH_LIMIT = 200
+
+    def _create_schema(self, client, dim=default_dim):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA", datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+        return schema
+
+    def _query_vec(self):
+        return _seed_vector(self.SEARCH_VEC_SEED)
+
+    def _make_row(self, row_id, struct_elements):
+        """Controlled row: normal_vector == query vec so it sits at COSINE=1.0."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": self._query_vec(),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000 + j),
+                    "int_val": elem["int_val"],
+                    "str_val": elem.get("str_val", f"r{row_id}_e{j}"),
+                    "color": elem.get("color", "Red"),
+                }
+                for j, elem in enumerate(struct_elements)
+            ],
+        }
+
+    def _make_inert_row(self, row_id):
+        """Background row with diverse vector (low similarity to query vec)
+        and a single struct element that never matches controlled predicates."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [{
+                "embedding": _seed_vector(row_id * 1000),
+                "int_val": 0,
+                "str_val": f"inert_{row_id}",
+                "color": "Inert",
+            }],
+        }
+
+    def _setup_collection(self, client, collection_name, controlled_rows):
+        """3000 sealed inert + first half of controlled (sealed) +
+        500 growing inert + second half of controlled (growing).
+        normal_vector uses FLAT for recall=1.0."""
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="FLAT", metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="FLAT", metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+
+        half = len(controlled_rows) // 2
+        sealed_part = controlled_rows[:half]
+        growing_part = controlled_rows[half:]
+        if sealed_part:
+            self.insert(client, collection_name, sealed_part)
+        self.flush(client, collection_name)
+
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
+                      for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+        if growing_part:
+            self.insert(client, collection_name, growing_part)
+
+        self.load_collection(client, collection_name)
+
+    def _setup_collection_split(self, client, collection_name,
+                                 sealed_rows, growing_rows):
+        """Same as _setup_collection but with explicit sealed/growing row groups."""
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="FLAT", metric_type="COSINE",
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="FLAT", metric_type="COSINE",
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+        if sealed_rows:
+            self.insert(client, collection_name, sealed_rows)
+        self.flush(client, collection_name)
+
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
+                      for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+        if growing_rows:
+            self.insert(client, collection_name, growing_rows)
+
+        self.load_collection(client, collection_name)
+
+    def _search_ids(self, client, collection_name, expr, limit=None):
+        """Run search() with given filter, return sorted unique controlled IDs."""
+        results, check = self.search(
+            client, collection_name,
+            data=[self._query_vec()],
+            anns_field="normal_vector",
+            search_params={"metric_type": "COSINE"},
+            filter=expr,
+            limit=limit or self.SEARCH_LIMIT,
+            output_fields=["id"],
+        )
+        assert check, expr
+        return sorted({hit["id"] for hit in results[0] if hit["id"] < 100})
+
+    # ---- 10.1 search filter: structA[i][sub_field] == ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_eq(self):
+        """
+        target: structA[i][sub_field] == X usable as search() filter, exact recall
+        expected: hits exactly == predicted ID set (FLAT recall=1.0)
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_eq")
+
+        rows = [
+            self._make_row(0, [{"int_val": 10}, {"int_val": 20}]),
+            self._make_row(1, [{"int_val": 100}, {"int_val": 200}]),
+            self._make_row(2, [{"int_val": 100}]),
+            self._make_row(3, [{"int_val": 50}, {"int_val": 100}]),
+            self._make_row(4, [{"int_val": 999}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] == 100',
+        )
+        assert ids == [1, 2], f"Expected [1, 2], got {ids}"
+
+    # ---- 10.2 search filter: comparison operators ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_comparison_operators(self):
+        """target: !=, >, >=, <, <= as search() filter, all exact."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_cmp")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && structA[0][int_val] != 30', [0, 1, 3, 4]),
+            ('id < 100 && structA[0][int_val] > 30', [3, 4]),
+            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4]),
+            ('id < 100 && structA[0][int_val] < 30', [0, 1]),
+            ('id < 100 && structA[0][int_val] <= 30', [0, 1, 2]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.3 search filter: IN / NOT IN ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_in_not_in(self):
+        """target: IN / NOT IN as search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_in")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] in [10, 30, 50, 999]',
+        )
+        assert ids == [0, 2, 4], f"IN expected [0,2,4], got {ids}"
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] not in [10, 30, 50]',
+        )
+        assert ids == [1, 3], f"NOT IN expected [1,3], got {ids}"
+
+    # ---- 10.4 search filter: range (forward + reverse) ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_index_access_range(self):
+        """target: forward and reverse range syntax as search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_range")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && 20 < structA[0][int_val] < 40', [2]),
+            ('id < 100 && 20 <= structA[0][int_val] <= 40', [1, 2, 3]),
+            ('id < 100 && 40 > structA[0][int_val] > 20', [2]),
+            ('id < 100 && 40 >= structA[0][int_val] >= 20', [1, 2, 3]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.5 search filter: string sub-field ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_string_subfield(self):
+        """target: VARCHAR sub-field index access in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_str")
+
+        rows = [
+            self._make_row(0, [{"int_val": 1, "str_val": "apple"}]),
+            self._make_row(1, [{"int_val": 2, "str_val": "banana"}]),
+            self._make_row(2, [{"int_val": 3, "str_val": "apple"}]),
+            self._make_row(3, [{"int_val": 4, "str_val": "cherry"}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][str_val] == "apple"',
+        )
+        assert ids == [0, 2]
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][str_val] in ["banana", "cherry"]',
+        )
+        assert ids == [1, 3]
+
+    # ---- 10.6 search filter: compound across indices ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_compound_indices(self):
+        """target: structA[0]... && structA[1]... compound predicate in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_compound")
+
+        rows = [
+            self._make_row(0, [{"int_val": 100}, {"int_val": 1}]),
+            self._make_row(1, [{"int_val": 100}, {"int_val": 50}]),
+            self._make_row(2, [{"int_val": 10}, {"int_val": 1}]),
+            self._make_row(3, [{"int_val": 200}, {"int_val": 5}]),
+            self._make_row(4, [{"int_val": 60}, {"int_val": 9}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] > 50 && structA[1][int_val] < 10',
+        )
+        assert ids == [0, 3, 4]
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && (structA[0][int_val] > 150 || structA[1][int_val] == 50)',
+        )
+        assert ids == [1, 3]
+
+    # ---- 10.7 search filter: array_contains exact ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_array_contains_exact(self):
+        """target: array_contains(structA[sub_field], v) in search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_ac")
+
+        rows = [
+            self._make_row(0, [{"int_val": 100}]),
+            self._make_row(1, [{"int_val": 200}, {"int_val": 201}]),
+            self._make_row(2, [{"int_val": 301}, {"int_val": 302}]),
+            self._make_row(3, [{"int_val": 200}, {"int_val": 999}]),
+            self._make_row(4, [{"int_val": 700}, {"int_val": 100}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && array_contains(structA[int_val], 100)', [0, 4]),
+            ('id < 100 && array_contains(structA[int_val], 200)', [1, 3]),
+            ('id < 100 && array_contains(structA[int_val], 999)', [3]),
+            ('id < 100 && array_contains(structA[int_val], 12345)', []),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.8 search filter: array_contains_all / _any ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_array_contains_all_any(self):
+        """target: array_contains_all and array_contains_any in search()."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_acall")
+
+        def _e(s):
+            return {"int_val": 0, "str_val": s}
+
+        rows = [
+            self._make_row(0, [_e("Red")]),
+            self._make_row(1, [_e("Red"), _e("Blue")]),
+            self._make_row(2, [_e("Blue"), _e("Green")]),
+            self._make_row(3, [_e("Red"), _e("Blue"), _e("Green")]),
+            self._make_row(4, [_e("Red"), _e("Green")]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        # ALL
+        cases_all = [
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue"])',
+             [1, 3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue", "Green"])',
+             [3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Yellow"])', []),
+        ]
+        for expr, expected in cases_all:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+        # ANY
+        cases_any = [
+            ('id < 100 && array_contains_any(structA[str_val], ["Red", "Yellow"])',
+             [0, 1, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Blue", "Green"])',
+             [1, 2, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Yellow", "Magenta"])',
+             []),
+        ]
+        for expr, expected in cases_any:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.9 search filter: array_length exact ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_array_length_exact(self):
+        """target: array_length(structA[sub_field]) ==/>=/< in search() filter."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_arrlen")
+
+        rows = [
+            self._make_row(i, [{"int_val": j} for j in range(i + 1)])
+            for i in range(5)
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && array_length(structA[int_val]) == 3', [2]),
+            ('id < 100 && array_length(structA[int_val]) >= 4', [3, 4]),
+            ('id < 100 && array_length(structA[int_val]) < 3', [0, 1]),
+        ]
+        for expr, expected in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 10.10 search per-segment consistency ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_sealed_growing_consistency(self):
+        """
+        target: search() filter produces equivalent per-segment results when
+                matching rows live in sealed vs growing.
+        method: mirrored controlled groups (sealed ids 0..4, growing ids 5..9
+                with identical first-element int_val pattern).
+        expected: per-segment subsets are exact and isomorphic.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_segments")
+
+        pattern = [10, 20, 30, 40, 50]
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}]) for i, v in enumerate(pattern)
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate(pattern)
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        cases = [
+            ('id < 100 && structA[0][int_val] == 30', [2], [7]),
+            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4], [7, 8, 9]),
+            ('id < 100 && structA[0][int_val] in [10, 50]', [0, 4], [5, 9]),
+        ]
+        for expr, exp_sealed, exp_growing in cases:
+            ids = self._search_ids(client, collection_name, expr)
+            sealed_part = [i for i in ids if i < 5]
+            growing_part = [i for i in ids if 5 <= i < 100]
+            assert sealed_part == exp_sealed, (
+                f"{expr}: sealed expected {exp_sealed}, got {sealed_part}"
+            )
+            assert growing_part == exp_growing, (
+                f"{expr}: growing expected {exp_growing}, got {growing_part}"
+            )
+            assert [i + 5 for i in sealed_part] == growing_part, (
+                f"{expr}: sealed/growing not mirrored: "
+                f"sealed={sealed_part} growing={growing_part}"
+            )
+
+    # ---- 10.11 search after delete ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_after_delete(self):
+        """target: search filter reflects deletions across both segments."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_delete")
+
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] >= 30',
+        )
+        assert ids == [2, 3, 4, 7, 8, 9]
+
+        # Delete 4 (sealed match), 7 (growing match), 0 (non-matching)
+        self.delete(client, collection_name, ids=[4, 7, 0])
+        import time
+        time.sleep(1)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] >= 30',
+        )
+        assert ids == [2, 3, 8, 9], f"After delete expected [2,3,8,9], got {ids}"
+
+    # ---- 10.12 search after upsert ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_index_access_after_upsert(self):
+        """target: search filter reflects upsert that changes the indexed value."""
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_search_upsert")
+
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] >= 30',
+        )
+        assert ids == [2, 3, 4, 7, 8, 9]
+
+        # id 1 sealed (20 -> 100, becomes match)
+        # id 9 growing (50 -> 5, drops out)
+        upserts = [
+            self._make_row(1, [{"int_val": 100}]),
+            self._make_row(9, [{"int_val": 5}]),
+        ]
+        self.upsert(client, collection_name, upserts)
+        import time
+        time.sleep(1)
+
+        ids = self._search_ids(
+            client, collection_name,
+            'id < 100 && structA[0][int_val] >= 30',
+        )
+        assert ids == [1, 2, 3, 4, 7, 8], (
+            f"After upsert expected [1,2,3,4,7,8], got {ids}"
+        )
