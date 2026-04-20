@@ -75,16 +75,6 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetStatsTaskState(s.cluster, s.taskID))
 	})
 
-	s.Run("storeStatsExecutionCost", func() {
-		s.manager.StoreStatsTaskExecutionStart(s.cluster, s.taskID, 100, 2)
-		s.manager.StoreStatsTaskExecutionEnd(s.cluster, s.taskID, 170, 70)
-		info := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
-		s.Equal(int64(100), info.ExecStartMs)
-		s.Equal(int64(170), info.ExecEndMs)
-		s.Equal(int64(70), info.CostTimeMs)
-		s.Equal(int64(2), info.CostCPUNum)
-	})
-
 	s.Run("storeStatsResult", func() {
 		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
@@ -130,14 +120,6 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.Equal(int64(3), taskInfo.SegID)
 		s.Equal("ch1", taskInfo.InsertChannel)
 		s.Equal(int64(65535), taskInfo.NumRows)
-		s.Equal(int64(100), taskInfo.ExecStartMs)
-		s.Equal(int64(170), taskInfo.ExecEndMs)
-		s.Equal(int64(70), taskInfo.CostTimeMs)
-		s.Equal(int64(2), taskInfo.CostCPUNum)
-
-		taskInfo.CostTimeMs = 999
-		reloaded := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
-		s.Equal(int64(70), reloaded.CostTimeMs)
 	})
 
 	s.Run("deleteStatsTaskInfos", func() {
@@ -164,23 +146,4 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	info.CostCPUNum = 999
 	reloaded := s.manager.GetIndexTaskInfo(s.cluster, buildID)
 	s.Equal(int64(4), reloaded.CostCPUNum)
-}
-
-func (s *statsTaskInfoSuite) Test_AnalyzeTaskCostMethods() {
-	taskID := int64(300)
-	s.manager.LoadOrStoreAnalyzeTask(s.cluster, taskID, &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress})
-
-	s.manager.StoreAnalyzeTaskExecutionStart(s.cluster, taskID, 333, 1)
-	s.manager.StoreAnalyzeTaskExecutionEnd(s.cluster, taskID, 444, 111)
-
-	info := s.manager.GetAnalyzeTaskInfo(s.cluster, taskID)
-	s.Require().NotNil(info)
-	s.Equal(int64(333), info.ExecStartMs)
-	s.Equal(int64(444), info.ExecEndMs)
-	s.Equal(int64(111), info.CostTimeMs)
-	s.Equal(int64(1), info.CostCPUNum)
-
-	info.CostTimeMs = 999
-	reloaded := s.manager.GetAnalyzeTaskInfo(s.cluster, taskID)
-	s.Equal(int64(111), reloaded.CostTimeMs)
 }

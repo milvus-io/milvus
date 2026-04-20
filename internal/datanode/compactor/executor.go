@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -43,7 +42,6 @@ type Executor interface {
 	Slots() int64
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
-	GetTaskCost(planID int64) (costTimeMs int64, costCPUNum int64, ok bool)
 }
 
 // taskState represents the state of a compaction task
@@ -53,13 +51,9 @@ type Executor interface {
 //
 // Once a task reaches completed/failed state, it stays there until removed
 type taskState struct {
-	compactor   Compactor
-	state       datapb.CompactionTaskState
-	result      *datapb.CompactionPlanResult
-	execStartMs int64
-	execEndMs   int64
-	costTimeMs  int64
-	costCPUNum  int64
+	compactor Compactor
+	state     datapb.CompactionTaskState
+	result    *datapb.CompactionPlanResult
 }
 
 type executor struct {
@@ -83,18 +77,6 @@ func NewExecutor() *executor {
 		taskCh:     make(chan Compactor, maxTaskQueueNum),
 		usingSlots: 0,
 	}
-}
-
-// estimateCompactionCPUNum approximates the number of CPU threads a compaction
-// task consumes. Clustering compaction runs majkmeans training inside knowhere
-// and saturates the shared build thread pool (sized to NumCPU). Mix and L0
-// compactions are predominantly serial pipelines today; they report 1 as a
-// placeholder until their thread usage is profiled.
-func estimateCompactionCPUNum(compactionType datapb.CompactionType) int64 {
-	if compactionType == datapb.CompactionType_ClusteringCompaction {
-		return taskcost.FullMachineCPUNum()
-	}
-	return 1
 }
 
 func getTaskSlotUsage(task Compactor) int64 {
@@ -153,7 +135,7 @@ func (e *executor) Slots() int64 {
 }
 
 // completeTask updates task state to completed and adjusts slot usage
-func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult, execEndMs, costTimeMs int64) {
+func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResult) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -167,8 +149,6 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		} else {
 			task.state = datapb.CompactionTaskState_failed
 		}
-		task.execEndMs = execEndMs
-		task.costTimeMs = costTimeMs
 
 		// Publish filesystem metrics after compaction task completion
 		storageConfig := task.compactor.GetStorageConfig()
@@ -222,30 +202,17 @@ func (e *executor) executeTask(task Compactor) {
 		zap.String("type", task.GetCompactionType().String()),
 	)
 
-	startMs := taskcost.NowMs()
-	costCPUNum := estimateCompactionCPUNum(task.GetCompactionType())
-	e.mu.Lock()
-	if state, exists := e.tasks[task.GetPlanID()]; exists {
-		state.execStartMs = startMs
-		state.costCPUNum = costCPUNum
-	}
-	e.mu.Unlock()
-
-	log.Info("start to execute compaction", zap.Int64("costCPUNum", costCPUNum))
+	log.Info("start to execute compaction")
 
 	result, err := task.Compact()
 	if err != nil {
-		endMs := taskcost.NowMs()
-		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-		log.Warn("compaction task failed", zap.Error(err), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
-		e.completeTask(task.GetPlanID(), nil, endMs, costTimeMs)
+		log.Warn("compaction task failed", zap.Error(err))
+		e.completeTask(task.GetPlanID(), nil)
 		return
 	}
 
-	endMs := taskcost.NowMs()
-	costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
 	// Update task with result
-	e.completeTask(task.GetPlanID(), result, endMs, costTimeMs)
+	e.completeTask(task.GetPlanID(), result)
 
 	// Emit metrics
 	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
@@ -274,7 +241,7 @@ func (e *executor) executeTask(task Compactor) {
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))
-	log.Info("end to execute compaction", zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
+	log.Info("end to execute compaction")
 }
 
 func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {
@@ -283,17 +250,6 @@ func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {
 		return []*datapb.CompactionPlanResult{result}
 	}
 	return e.getAllCompactionResults()
-}
-
-func (e *executor) GetTaskCost(planID int64) (costTimeMs int64, costCPUNum int64, ok bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	task, exists := e.tasks[planID]
-	if !exists {
-		return 0, 0, false
-	}
-	return task.costTimeMs, task.costCPUNum, true
 }
 
 func (e *executor) getCompactionResult(planID int64) *datapb.CompactionPlanResult {

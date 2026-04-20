@@ -41,21 +41,8 @@ func TestCalcCostTimeMs(t *testing.T) {
 	assert.Equal(t, int64(0), CalcCostTimeMs(200, 100), "end before start returns 0")
 }
 
-func TestEstimateConcurrentWorkers(t *testing.T) {
-	assert.Equal(t, int64(4), EstimateConcurrentWorkers(4, 10), "parallel under cap")
-	assert.Equal(t, int64(10), EstimateConcurrentWorkers(20, 10), "parallel over cap")
-	assert.Equal(t, int64(1), EstimateConcurrentWorkers(0, 10), "zero parallel bumps to 1")
-	assert.Equal(t, int64(5), EstimateConcurrentWorkers(5, 0), "zero cap returns parallel unchanged")
-	assert.Equal(t, int64(5), EstimateConcurrentWorkers(5, -1), "negative cap returns parallel unchanged")
-}
-
-func TestFullMachineCPUNum(t *testing.T) {
-	assert.Equal(t, int64(hardware.GetCPUNum()), FullMachineCPUNum())
-	assert.Greater(t, FullMachineCPUNum(), int64(0))
-}
-
 func TestEstimateIndexBuildCPUNum(t *testing.T) {
-	assert.Equal(t, FullMachineCPUNum(), EstimateIndexBuildCPUNum(true),
+	assert.Equal(t, int64(hardware.GetCPUNum()), EstimateIndexBuildCPUNum(true),
 		"vector index saturates knowhere build pool")
 	assert.Equal(t, int64(1), EstimateIndexBuildCPUNum(false),
 		"all scalar indexes currently build single-threaded")

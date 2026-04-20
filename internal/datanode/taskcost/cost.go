@@ -33,39 +33,20 @@ func CalcCostTimeMs(startMs, endMs int64) int64 {
 	return endMs - startMs
 }
 
-func EstimateConcurrentWorkers(parallel, poolCap int64) int64 {
-	if parallel <= 0 {
-		parallel = 1
-	}
-	if poolCap <= 0 {
-		return parallel
-	}
-	if parallel > poolCap {
-		return poolCap
-	}
-	return parallel
-}
-
-// FullMachineCPUNum returns hardware.GetCPUNum() — the upper bound used for
-// tasks that saturate knowhere's / segcore's shared build thread pool
-// (vector index builds, analyze k-means training, clustering compaction).
-func FullMachineCPUNum() int64 {
-	return int64(hardware.GetCPUNum())
-}
-
 // EstimateIndexBuildCPUNum returns the approximate number of CPU threads an
 // index build task consumes during execution.
 //
 // Vector indexes go through knowhere's build thread pool (sized to NumCPU
-// in cluster mode, see internal/datanode/index/init_segcore.go:74). All
-// current scalar indexes build single-threaded: the tantivy wrapper
-// hardcodes 1 thread (internal/core/thirdparty/tantivy/tantivy-wrapper.h:23
-// — covers INVERTED / NGRAM / TEXT_MATCH / JSON_INVERTED), and the rest
-// (BITMAP / STL_SORT / STRING_SORT / MARISA / HYBRID / RTREE) are plain
-// loops with no thread pool / OpenMP / std::async.
+// in cluster mode, see internal/datanode/index/init_segcore.go:74), so they
+// report hardware.GetCPUNum(). All current scalar indexes build
+// single-threaded: the tantivy wrapper hardcodes 1 thread
+// (internal/core/thirdparty/tantivy/tantivy-wrapper.h:23 — covers INVERTED /
+// NGRAM / TEXT_MATCH / JSON_INVERTED), and the rest (BITMAP / STL_SORT /
+// STRING_SORT / MARISA / HYBRID / RTREE) are plain loops with no thread
+// pool / OpenMP / std::async. They therefore report 1.
 func EstimateIndexBuildCPUNum(isVectorIndex bool) int64 {
 	if isVectorIndex {
-		return FullMachineCPUNum()
+		return int64(hardware.GetCPUNum())
 	}
 	return 1
 }

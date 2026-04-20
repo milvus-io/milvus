@@ -124,10 +124,6 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	assert.NotNil(t, info)
 	assert.Equal(t, indexpb.JobState_JobStateFinished, info.State)
 	assert.Equal(t, []int64{1, 2}, info.KeptSegments)
-	assert.Greater(t, info.ExecStartMs, int64(0))
-	assert.Greater(t, info.ExecEndMs, int64(0))
-	assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
-	assert.Equal(t, int64(1), info.CostCPUNum)
 }
 
 func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
@@ -164,10 +160,6 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	assert.NotNil(t, info)
 	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
 	assert.Equal(t, expectedError.Error(), info.FailReason)
-	assert.Greater(t, info.ExecStartMs, int64(0))
-	assert.Greater(t, info.ExecEndMs, int64(0))
-	assert.GreaterOrEqual(t, info.CostTimeMs, int64(0))
-	assert.Equal(t, int64(1), info.CostCPUNum)
 }
 
 func TestExternalCollectionManager_CancelTask(t *testing.T) {

@@ -231,23 +231,6 @@ type AnalyzeTaskInfo struct {
 	State         indexpb.JobState
 	FailReason    string
 	CentroidsFile string
-	ExecStartMs   int64
-	ExecEndMs     int64
-	CostTimeMs    int64
-	CostCPUNum    int64
-}
-
-func (a *AnalyzeTaskInfo) Clone() *AnalyzeTaskInfo {
-	return &AnalyzeTaskInfo{
-		Cancel:        a.Cancel,
-		State:         a.State,
-		FailReason:    a.FailReason,
-		CentroidsFile: a.CentroidsFile,
-		ExecStartMs:   a.ExecStartMs,
-		ExecEndMs:     a.ExecEndMs,
-		CostTimeMs:    a.CostTimeMs,
-		CostCPUNum:    a.CostCPUNum,
-	}
 }
 
 func (m *TaskManager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo) *AnalyzeTaskInfo {
@@ -285,26 +268,6 @@ func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Un
 	}
 }
 
-func (m *TaskManager) StoreAnalyzeTaskExecutionStart(clusterID string, taskID typeutil.UniqueID, startMs int64, costCPUNum int64) {
-	key := Key{ClusterID: clusterID, TaskID: taskID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if task, ok := m.analyzeTasks[key]; ok {
-		task.ExecStartMs = startMs
-		task.CostCPUNum = costCPUNum
-	}
-}
-
-func (m *TaskManager) StoreAnalyzeTaskExecutionEnd(clusterID string, taskID typeutil.UniqueID, endMs int64, costTimeMs int64) {
-	key := Key{ClusterID: clusterID, TaskID: taskID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if task, ok := m.analyzeTasks[key]; ok {
-		task.ExecEndMs = endMs
-		task.CostTimeMs = costTimeMs
-	}
-}
-
 func (m *TaskManager) StoreAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID typeutil.UniqueID,
@@ -324,7 +287,12 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 	defer m.stateLock.Unlock()
 
 	if info, ok := m.analyzeTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
-		return info.Clone()
+		return &AnalyzeTaskInfo{
+			Cancel:        info.Cancel,
+			State:         info.State,
+			FailReason:    info.FailReason,
+			CentroidsFile: info.CentroidsFile,
+		}
 	}
 	return nil
 }
@@ -425,10 +393,6 @@ type StatsTaskInfo struct {
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
 	Manifest         string
-	ExecStartMs      int64
-	ExecEndMs        int64
-	CostTimeMs       int64
-	CostCPUNum       int64
 }
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
@@ -448,10 +412,6 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
 		Manifest:         s.Manifest,
-		ExecStartMs:      s.ExecStartMs,
-		ExecEndMs:        s.ExecEndMs,
-		CostTimeMs:       s.CostTimeMs,
-		CostCPUNum:       s.CostCPUNum,
 	}
 }
 
@@ -554,26 +514,6 @@ func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.Uniq
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
-	}
-}
-
-func (m *TaskManager) StoreStatsTaskExecutionStart(clusterID string, taskID typeutil.UniqueID, startMs int64, costCPUNum int64) {
-	key := Key{ClusterID: clusterID, TaskID: taskID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if task, ok := m.statsTasks[key]; ok {
-		task.ExecStartMs = startMs
-		task.CostCPUNum = costCPUNum
-	}
-}
-
-func (m *TaskManager) StoreStatsTaskExecutionEnd(clusterID string, taskID typeutil.UniqueID, endMs int64, costTimeMs int64) {
-	key := Key{ClusterID: clusterID, TaskID: taskID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if task, ok := m.statsTasks[key]; ok {
-		task.ExecEndMs = endMs
-		task.CostTimeMs = costTimeMs
 	}
 }
 

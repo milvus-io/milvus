@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
-	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -664,108 +663,6 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		props := taskcommon.NewProperties(resp.GetProperties())
 		s.Equal(int64(80), props.GetCostTime())
 		s.Equal(int64(3), props.GetCostCPUNum())
-	})
-
-	s.Run("query stats task with cost", func() {
-		s.node.taskManager.LoadOrStoreStatsTask("cluster-0", 102, &index.StatsTaskInfo{State: indexpb.JobState_JobStateFinished})
-		s.node.taskManager.StoreStatsTaskExecutionStart("cluster-0", 102, 200, 1)
-		s.node.taskManager.StoreStatsTaskExecutionEnd("cluster-0", 102, 260, 60)
-
-		req := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.Stats,
-				taskcommon.TaskIDKey:    "102",
-			},
-		}
-		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
-		props := taskcommon.NewProperties(resp.GetProperties())
-		s.Equal(int64(60), props.GetCostTime())
-		s.Equal(int64(1), props.GetCostCPUNum())
-	})
-
-	s.Run("query analyze task with cost", func() {
-		s.node.taskManager.LoadOrStoreAnalyzeTask("cluster-0", 103, &index.AnalyzeTaskInfo{State: indexpb.JobState_JobStateFinished})
-		s.node.taskManager.StoreAnalyzeTaskExecutionStart("cluster-0", 103, 300, 1)
-		s.node.taskManager.StoreAnalyzeTaskExecutionEnd("cluster-0", 103, 390, 90)
-
-		req := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.Analyze,
-				taskcommon.TaskIDKey:    "103",
-			},
-		}
-		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
-		props := taskcommon.NewProperties(resp.GetProperties())
-		s.Equal(int64(90), props.GetCostTime())
-		s.Equal(int64(1), props.GetCostCPUNum())
-	})
-
-	s.Run("query compaction task with cost", func() {
-		clusterID := "cluster-0"
-		planID := int64(104)
-
-		mockC := compactor.NewMockCompactor(s.T())
-		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
-		mockC.EXPECT().GetCollection().Return(int64(1)).Maybe()
-		mockC.EXPECT().GetChannelName().Return("ch-cost")
-		mockC.EXPECT().GetSlotUsage().Return(int64(2)).Times(2)
-		mockC.EXPECT().Compact().Return(&datapb.CompactionPlanResult{
-			PlanID: planID,
-			State:  datapb.CompactionTaskState_completed,
-		}, nil)
-		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
-
-		succeed, err := s.node.compactionExecutor.Enqueue(mockC)
-		s.True(succeed)
-		s.NoError(err)
-
-		s.Eventually(func() bool {
-			req := &workerpb.QueryTaskRequest{
-				Properties: map[string]string{
-					taskcommon.ClusterIDKey: clusterID,
-					taskcommon.TypeKey:      taskcommon.Compaction,
-					taskcommon.TaskIDKey:    "104",
-				},
-			}
-			resp, err := s.node.QueryTask(s.ctx, req)
-			if merr.CheckRPCCall(resp, err) != nil {
-				return false
-			}
-			props := taskcommon.NewProperties(resp.GetProperties())
-			return props.GetCostTime() >= 0 && props.GetCostCPUNum() == 1
-		}, 3*time.Second, 20*time.Millisecond)
-	})
-
-	s.Run("query external collection task with cost", func() {
-		clusterID := "cluster-0"
-		taskID := int64(105)
-		_, cancel := context.WithCancel(s.ctx)
-		s.node.externalCollectionManager.LoadOrStore(clusterID, taskID, &external.TaskInfo{
-			Cancel:       cancel,
-			State:        indexpb.JobState_JobStateFinished,
-			CostTimeMs:   77,
-			CostCPUNum:   1,
-			KeptSegments: []int64{1},
-		})
-
-		req := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: clusterID,
-				taskcommon.TypeKey:      taskcommon.ExternalCollection,
-				taskcommon.TaskIDKey:    "105",
-			},
-		}
-		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
-		props := taskcommon.NewProperties(resp.GetProperties())
-		s.Equal(int64(77), props.GetCostTime())
-		s.Equal(int64(1), props.GetCostCPUNum())
 	})
 
 	s.Run("invalid task type", func() {

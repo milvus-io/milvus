@@ -174,62 +174,6 @@ func UpdateSegmentResult(result *datapb.CopySegmentResult) UpdateAction {
 	}
 }
 
-func UpdateExecutionStart(startMs int64) UpdateAction {
-	return func(task Task) {
-		switch t := task.(type) {
-		case *PreImportTask:
-			t.execStartMs = startMs
-		case *ImportTask:
-			t.execStartMs = startMs
-		case *L0PreImportTask:
-			t.execStartMs = startMs
-		case *L0ImportTask:
-			t.execStartMs = startMs
-		case *CopySegmentTask:
-			t.execStartMs = startMs
-		}
-	}
-}
-
-func UpdateExecutionEnd(endMs int64, costTimeMs int64) UpdateAction {
-	return func(task Task) {
-		switch t := task.(type) {
-		case *PreImportTask:
-			t.execEndMs = endMs
-			t.costTimeMs = costTimeMs
-		case *ImportTask:
-			t.execEndMs = endMs
-			t.costTimeMs = costTimeMs
-		case *L0PreImportTask:
-			t.execEndMs = endMs
-			t.costTimeMs = costTimeMs
-		case *L0ImportTask:
-			t.execEndMs = endMs
-			t.costTimeMs = costTimeMs
-		case *CopySegmentTask:
-			t.execEndMs = endMs
-			t.costTimeMs = costTimeMs
-		}
-	}
-}
-
-func UpdateCostCPUNum(costCPUNum int64) UpdateAction {
-	return func(task Task) {
-		switch t := task.(type) {
-		case *PreImportTask:
-			t.costCPUNum = costCPUNum
-		case *ImportTask:
-			t.costCPUNum = costCPUNum
-		case *L0PreImportTask:
-			t.costCPUNum = costCPUNum
-		case *L0ImportTask:
-			t.costCPUNum = costCPUNum
-		case *CopySegmentTask:
-			t.costCPUNum = costCPUNum
-		}
-	}
-}
-
 type Task interface {
 	Execute() []*conc.Future[any]
 	GetJobID() int64
@@ -243,10 +187,6 @@ type Task interface {
 	GetSchema() *schemapb.CollectionSchema
 	GetSlots() int64
 	GetBufferSize() int64
-	GetExecStartMs() int64
-	GetExecEndMs() int64
-	GetCostTime() int64
-	GetCostCPUNum() int64
 	Cancel()
 	Clone() Task
 }

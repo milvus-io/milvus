@@ -245,53 +245,44 @@ func (sched *TaskScheduler) processTask(t Task) {
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
 
-	costCPUNum := int64(1)
-	startMs := taskcost.NowMs()
-	switch task := t.(type) {
-	case *indexBuildTask:
-		costCPUNum = taskcost.EstimateIndexBuildCPUNum(task.IsVectorIndex())
-		task.manager.StoreIndexTaskExecutionStart(task.req.GetClusterID(), task.req.GetBuildID(), startMs, costCPUNum)
-	case *statsTask:
-		// TODO: profile stats pipelines (sort/text/json) — leave at 1 until actual thread usage is known.
-		task.manager.StoreStatsTaskExecutionStart(task.req.GetClusterID(), task.req.GetTaskID(), startMs, costCPUNum)
-	case *analyzeTask:
-		// analyze runs k-means training inside knowhere and saturates the build thread pool.
-		costCPUNum = taskcost.FullMachineCPUNum()
-		task.manager.StoreAnalyzeTaskExecutionStart(task.req.GetClusterID(), task.req.GetTaskID(), startMs, costCPUNum)
+	var (
+		indexTask  *indexBuildTask
+		costCPUNum int64
+		startMs    int64
+	)
+	if t, ok := t.(*indexBuildTask); ok {
+		indexTask = t
+		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
+		startMs = taskcost.NowMs()
+		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), startMs, costCPUNum)
 	}
 
 	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()), zap.Int64("costCPUNum", costCPUNum))
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			endMs := taskcost.NowMs()
-			costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-			switch task := t.(type) {
-			case *indexBuildTask:
-				task.manager.StoreIndexTaskExecutionEnd(task.req.GetClusterID(), task.req.GetBuildID(), endMs, costTimeMs)
-			case *statsTask:
-				task.manager.StoreStatsTaskExecutionEnd(task.req.GetClusterID(), task.req.GetTaskID(), endMs, costTimeMs)
-			case *analyzeTask:
-				task.manager.StoreAnalyzeTaskExecutionEnd(task.req.GetClusterID(), task.req.GetTaskID(), endMs, costTimeMs)
+			if indexTask != nil {
+				endMs := taskcost.NowMs()
+				costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+				indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
+				log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
+			} else {
+				log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
 			}
-			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
 			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
 	}
-	endMs := taskcost.NowMs()
-	costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
-	switch task := t.(type) {
-	case *indexBuildTask:
-		task.manager.StoreIndexTaskExecutionEnd(task.req.GetClusterID(), task.req.GetBuildID(), endMs, costTimeMs)
-	case *statsTask:
-		task.manager.StoreStatsTaskExecutionEnd(task.req.GetClusterID(), task.req.GetTaskID(), endMs, costTimeMs)
-	case *analyzeTask:
-		task.manager.StoreAnalyzeTaskExecutionEnd(task.req.GetClusterID(), task.req.GetTaskID(), endMs, costTimeMs)
+	if indexTask != nil {
+		endMs := taskcost.NowMs()
+		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+		indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		log.Ctx(t.Ctx()).Debug("process task completed", zap.String("task", t.Name()), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
+	} else {
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		log.Ctx(t.Ctx()).Debug("process task completed", zap.String("task", t.Name()))
 	}
-	t.SetState(indexpb.JobState_JobStateFinished, "")
-
-	log.Ctx(t.Ctx()).Debug("process task completed", zap.String("task", t.Name()), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
 
 	// Publish filesystem metrics after index task completion
 	// Only publish for index build tasks (not stats or analyze tasks)

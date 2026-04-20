@@ -130,7 +130,7 @@ func TestCompactionExecutor(t *testing.T) {
 		}
 
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
@@ -150,14 +150,6 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.True(t, exists)
 		assert.Equal(t, datapb.CompactionTaskState_completed, task.state)
 		assert.Equal(t, result, task.result)
-		assert.Greater(t, task.execStartMs, int64(0))
-		assert.Greater(t, task.execEndMs, int64(0))
-		assert.GreaterOrEqual(t, task.costTimeMs, int64(0))
-		assert.Equal(t, int64(1), task.costCPUNum)
-		costTime, costCPU, ok := ex.GetTaskCost(planID)
-		assert.True(t, ok)
-		assert.Equal(t, task.costTimeMs, costTime)
-		assert.Equal(t, task.costCPUNum, costCPU)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 
@@ -167,7 +159,7 @@ func TestCompactionExecutor(t *testing.T) {
 
 		planID := int64(2)
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
@@ -187,10 +179,6 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.True(t, exists)
 		assert.Equal(t, datapb.CompactionTaskState_failed, task.state)
 		assert.Nil(t, task.result)
-		assert.Greater(t, task.execStartMs, int64(0))
-		assert.Greater(t, task.execEndMs, int64(0))
-		assert.GreaterOrEqual(t, task.costTimeMs, int64(0))
-		assert.Equal(t, int64(1), task.costCPUNum)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 
@@ -371,7 +359,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, slotUsage, ex.Slots())
 
 		result := &datapb.CompactionPlanResult{PlanID: planID}
-		ex.completeTask(planID, result, 120, 20)
+		ex.completeTask(planID, result)
 
 		assert.Equal(t, int64(0), ex.Slots())
 
@@ -397,7 +385,7 @@ func TestCompactionExecutor(t *testing.T) {
 			state:     datapb.CompactionTaskState_executing,
 		}
 
-		ex.completeTask(1, nil, 130, 30)
+		ex.completeTask(1, nil)
 
 		assert.Equal(t, int64(0), ex.Slots())
 	})
@@ -407,9 +395,9 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 
 		planID := int64(1)
-		mockC.EXPECT().GetPlanID().Return(planID).Times(4)
+		mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 		mockC.EXPECT().GetSlotUsage().Return(int64(5)).Times(2)
-		mockC.EXPECT().GetCollection().Return(int64(1)).Maybe()
+		mockC.EXPECT().GetCollection().Return(int64(1))
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
@@ -454,7 +442,7 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, planID := range planIDs {
 			mockC := NewMockCompactor(t)
 			mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-			mockC.EXPECT().GetPlanID().Return(planID).Times(4)
+			mockC.EXPECT().GetPlanID().Return(planID).Times(3)
 			mockC.EXPECT().GetCollection().Return(int64(100))
 			mockC.EXPECT().GetChannelName().Return("ch1")
 			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
@@ -514,7 +502,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, int64(8), ex.Slots())
 
 		result := &datapb.CompactionPlanResult{PlanID: planID}
-		ex.completeTask(planID, result, 120, 20)
+		ex.completeTask(planID, result)
 
 		assert.Equal(t, int64(0), ex.Slots())
 
