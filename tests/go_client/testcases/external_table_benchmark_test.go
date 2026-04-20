@@ -21,6 +21,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -154,6 +155,19 @@ func forEachScaleConfig(t *testing.T, fn func(t *testing.T, cfg benchConfig)) {
 			t.Logf("=== Scale: %s Config: %s ===", scale, cfg)
 			fn(t, cfg)
 		})
+	}
+}
+
+// skipIfMinIOUnreachable skips the test when MinIO cannot service a bucket
+// existence check, so benchmark runs without a MinIO deployment (e.g. local
+// laptop without dependencies) report as Skipped instead of failing later
+// at the upload step with an opaque network error.
+func skipIfMinIOUnreachable(ctx context.Context, t *testing.T, mc *miniogo.Client, bucket string) {
+	t.Helper()
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := mc.BucketExists(checkCtx, bucket); err != nil {
+		t.Skipf("MinIO unreachable (bucket=%s): %v", bucket, err)
 	}
 }
 
@@ -317,6 +331,34 @@ func (r *benchReport) writeMarkdownReport(t *testing.T) {
 	}
 	buf.WriteString("\n")
 
+	// Benchmark descriptions
+	buf.WriteString("## Benchmark Descriptions\n\n")
+	buf.WriteString("| ID | Name | Description |\n")
+	buf.WriteString("|:--:|------|-------------|\n")
+	buf.WriteString("| B1 | CreateCollection | Create external collection (simple & multi-type schema) |\n")
+	buf.WriteString("| B2 | Refresh | Full refresh: discover all Parquet files and create segments |\n")
+	buf.WriteString("| B3 | IncrementalRefresh | Add a new file then refresh; measures delta detection cost |\n")
+	buf.WriteString("| B4 | IndexBuilding | Build scalar (id, value) and HNSW vector indexes |\n")
+	buf.WriteString("| B5 | LoadCollection | Load collection into memory (release then re-load) |\n")
+	buf.WriteString("| B6 | CountQuery | `count(*)` query |\n")
+	buf.WriteString("| B7 | ScalarFilter | Scalar filter at various selectivities (1 row / 1% / 10% / 25%) |\n")
+	buf.WriteString("| B8 | VectorSearch | ANN search with varying topK (5 / 10 / 50 / 100), output `id` only |\n")
+	buf.WriteString("| B9 | HybridSearch | Vector search + scalar range filter (10% / 50% selectivity) |\n")
+	buf.WriteString("| B10 | MultiVectorSearch | Batch vector search with nq = 1 / 5 / 10 / 50 |\n")
+	buf.WriteString("| B11 | Pagination | Search with offset 0 / 100 / 1K / 5K / 10K, limit 100 |\n")
+	buf.WriteString("| B12 | OutputFields | Query returning different field combos (id / scalar / vector / all) |\n")
+	buf.WriteString("| B13 | ExternalVsRegular | Same queries on external table vs regular table side-by-side |\n")
+	buf.WriteString("| B15 | ManyFiles | Refresh with 100 small files (same total rows) |\n")
+	buf.WriteString("| B16 | LargeSingleFile | Refresh with 1 large file (same total rows) |\n")
+	buf.WriteString("| B17 | ConcurrentSearch | Concurrent vector search throughput (ops/s) |\n")
+	buf.WriteString("| B19 | IdempotentRefresh | Consecutive refreshes with no data change |\n")
+	buf.WriteString("| B20 | MultiDataTypes | 9-field schema (Bool/Int/Float/VarChar/Vec) refresh + queries |\n")
+	buf.WriteString("| B21 | UseTakeForOutput | Compare bulkLoad (useTakeForOutput=false) vs take (=true): LoadCollection + cold search topK=5 all fields |\n")
+	buf.WriteString("\n")
+	buf.WriteString("> **Note:** All query benchmarks (B6-B13, B17, B20) are **cold queries** — no warmup round is discarded. ")
+	buf.WriteString("Output fetch path is controlled by `queryNode.externalCollection.useTakeForOutput` (default: `true`). ")
+	buf.WriteString("B21 explicitly tests both values.\n\n")
+
 	// Per-scale detailed results
 	for _, scale := range scales {
 		if multiScale {
@@ -341,9 +383,16 @@ func (r *benchReport) writeMarkdownReport(t *testing.T) {
 		buf.WriteString("\n")
 	}
 
-	// Multi-scale comparison table
+	// Multi-scale comparison & scalability analysis (combined table)
 	if multiScale {
-		buf.WriteString("## Scale Comparison\n\n")
+		buf.WriteString("## Scale Comparison & Scalability Analysis\n\n")
+
+		smallestScale := scales[0]
+		largestScale := scales[len(scales)-1]
+		dataRatio := float64(r.configs[largestScale].TotalRows) / float64(r.configs[smallestScale].TotalRows)
+		buf.WriteString(fmt.Sprintf("**Data scale ratio** (%s → %s): **%.1fx** (%d → %d rows)\n\n",
+			smallestScale, largestScale, dataRatio,
+			r.configs[smallestScale].TotalRows, r.configs[largestScale].TotalRows))
 
 		// Collect unique benchmark names in order
 		var benchNames []string
@@ -370,17 +419,12 @@ func (r *benchReport) writeMarkdownReport(t *testing.T) {
 		for _, s := range scales {
 			buf.WriteString(fmt.Sprintf(" %s (Mean) |", s))
 		}
-		if len(scales) >= 2 {
-			buf.WriteString(fmt.Sprintf(" Ratio (%s/%s) |", scales[len(scales)-1], scales[0]))
-		}
-		buf.WriteString("\n|-----------|")
+		buf.WriteString(" Ratio | Scaling | Assessment |\n")
+		buf.WriteString("|-----------|")
 		for range scales {
 			buf.WriteString("------------|")
 		}
-		if len(scales) >= 2 {
-			buf.WriteString("------------|")
-		}
-		buf.WriteString("\n")
+		buf.WriteString(":---:|:---:|:---:|\n")
 
 		// Rows
 		for _, name := range benchNames {
@@ -397,50 +441,30 @@ func (r *benchReport) writeMarkdownReport(t *testing.T) {
 					buf.WriteString(" - |")
 				}
 			}
-			if len(scales) >= 2 && firstMean > 0 {
-				ratio := float64(lastMean) / float64(firstMean)
-				buf.WriteString(fmt.Sprintf(" %.2fx |", ratio))
-			} else if len(scales) >= 2 {
-				buf.WriteString(" - |")
+			if firstMean > 0 {
+				latRatio := float64(lastMean) / float64(firstMean)
+				var scaling, assessment string
+				switch {
+				case latRatio <= 1.2:
+					scaling = "O(1)"
+					assessment = "Excellent"
+				case latRatio <= dataRatio*0.5:
+					scaling = "Sub-linear"
+					assessment = "Good"
+				case latRatio <= dataRatio*1.2:
+					scaling = "Linear"
+					assessment = "Expected"
+				default:
+					scaling = "Super-linear"
+					assessment = "Needs investigation"
+				}
+				buf.WriteString(fmt.Sprintf(" %.2fx | %s | %s |", latRatio, scaling, assessment))
+			} else {
+				buf.WriteString(" - | - | - |")
 			}
 			buf.WriteString("\n")
 		}
 		buf.WriteString("\n")
-
-		// Scalability analysis
-		buf.WriteString("## Scalability Analysis\n\n")
-		smallestScale := scales[0]
-		largestScale := scales[len(scales)-1]
-		dataRatio := float64(r.configs[largestScale].TotalRows) / float64(r.configs[smallestScale].TotalRows)
-		buf.WriteString(fmt.Sprintf("**Data scale ratio** (%s → %s): **%.1fx** (%d → %d rows)\n\n",
-			smallestScale, largestScale, dataRatio,
-			r.configs[smallestScale].TotalRows, r.configs[largestScale].TotalRows))
-		buf.WriteString("| Benchmark | Latency Ratio | Scaling | Assessment |\n")
-		buf.WriteString("|-----------|:---:|:---:|:---:|\n")
-		for _, name := range benchNames {
-			small := lookup[name][smallestScale]
-			large := lookup[name][largestScale]
-			if small == nil || large == nil || small.Stats.Mean == 0 {
-				continue
-			}
-			latRatio := float64(large.Stats.Mean) / float64(small.Stats.Mean)
-			var scaling, assessment string
-			switch {
-			case latRatio <= 1.2:
-				scaling = "O(1)"
-				assessment = "Excellent"
-			case latRatio <= dataRatio*0.5:
-				scaling = "Sub-linear"
-				assessment = "Good"
-			case latRatio <= dataRatio*1.2:
-				scaling = "Linear"
-				assessment = "Expected"
-			default:
-				scaling = "Super-linear"
-				assessment = "Needs investigation"
-			}
-			buf.WriteString(fmt.Sprintf("| %s | %.2fx | %s | %s |\n", name, latRatio, scaling, assessment))
-		}
 	}
 
 	buf.WriteString("\n## Summary\n\n")
@@ -589,9 +613,7 @@ func newBenchEnvWithConfig(t *testing.T, cfg benchConfig) *benchEnv {
 
 	minioCfg := getMinIOConfig()
 	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("Failed to create MinIO client: %v", err)
-	}
+	require.NoError(t, err)
 
 	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
 	if err != nil || !exists {
@@ -1789,6 +1811,133 @@ func benchMultiDataTypes(t *testing.T, env *benchEnv) {
 	require.Equal(t, "str_0042", varcharVal)
 
 	t.Log("B20: All data types verified successfully")
+}
+
+// ============================================================================
+// B21: Access Mode Comparison (load / lazyLoad / take)
+// ============================================================================
+
+func TestBenchmarkExternalYYAccessMode(t *testing.T) {
+	forEachScaleConfig(t, func(t *testing.T, cfg benchConfig) {
+		ctx := hp.CreateContext(t, time.Second*3600)
+		mc := hp.CreateDefaultMilvusClient(ctx, t)
+		minioCfg := getMinIOConfig()
+		minioClient, err := newMinIOClient(minioCfg)
+		require.NoError(t, err)
+		skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+		// Prepare data once
+		collName := common.GenRandomString("bench_mode", 6)
+		extPath := fmt.Sprintf("external-bench/%s", collName)
+		for i := 0; i < cfg.NumFiles; i++ {
+			data, err := generateParquetBytesWithDim(cfg.RowsPerFile, int64(i)*cfg.RowsPerFile, cfg.VecDim)
+			require.NoError(t, err)
+			objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
+			uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+		}
+		t.Cleanup(func() {
+			cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		})
+
+		// Connect to etcd for runtime config changes
+		etcdEndpoint := envOrDefault("ETCD_ENDPOINTS", "localhost:2379")
+		etcdPrefix := envOrDefault("ETCD_ROOT_PATH", "by-dev")
+		etcdClient, err := clientv3.New(clientv3.Config{
+			Endpoints:   []string{etcdEndpoint},
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			t.Skipf("Failed to connect etcd: %v", err)
+		}
+		defer etcdClient.Close()
+
+		// Part8 replaced the legacy "accessMode" enum (load/lazyLoad/take) with a
+		// boolean useTakeForOutput. This benchmark now compares take=true vs
+		// take=false instead of three modes.
+		setUseTake := func(useTake string) {
+			key := etcdPrefix + "/config/queryNode/externalCollection/useTakeForOutput"
+			_, err := etcdClient.Put(ctx, key, useTake)
+			require.NoError(t, err)
+			t.Logf("Set useTakeForOutput=%s", useTake)
+			time.Sleep(2 * time.Second) // wait for config refresh
+		}
+
+		// Save original and restore at cleanup
+		origKey := etcdPrefix + "/config/queryNode/externalCollection/useTakeForOutput"
+		origResp, _ := etcdClient.Get(ctx, origKey)
+		t.Cleanup(func() {
+			if len(origResp.Kvs) > 0 {
+				_, _ = etcdClient.Put(context.Background(), origKey, string(origResp.Kvs[0].Value))
+			} else {
+				_, _ = etcdClient.Delete(context.Background(), origKey)
+			}
+		})
+
+		vec := make([]float32, cfg.VecDim)
+		for i := range vec {
+			vec[i] = float32(i) * 0.1
+		}
+
+		// modeLabel is used purely for benchmark naming so existing report parsers
+		// (B21_LoadCollection_<label>) keep working.
+		modes := []struct{ label, useTake string }{
+			{"bulkLoad", "false"}, // useTakeForOutput=false: bulk-fetch into segcore (legacy "load"/"lazyLoad")
+			{"take", "true"},      // useTakeForOutput=true:  per-row take() at query time
+		}
+		for _, mode := range modes {
+			t.Run("mode_"+mode.label, func(t *testing.T) {
+				setUseTake(mode.useTake)
+
+				// Create collection per mode
+				modeColl := fmt.Sprintf("%s_%s", collName, mode.label)
+				schema := entity.NewSchema().
+					WithName(modeColl).
+					WithExternalSource(extPath).
+					WithExternalSpec(`{"format":"parquet"}`).
+					WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+					WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+					WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(cfg.VecDim)).WithExternalField("embedding"))
+
+				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(modeColl, schema))
+				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(modeColl))
+				})
+
+				refreshAndWait(ctx, t, mc, modeColl)
+				indexAndLoadCollectionWithScalarAndVector(ctx, t, mc, modeColl, cfg.TotalRows)
+
+				// Release and re-load to measure load time under this access mode
+				err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(modeColl))
+				require.NoError(t, err)
+				time.Sleep(2 * time.Second)
+
+				// Measure LoadCollection
+				loadStart := time.Now()
+				loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(modeColl))
+				common.CheckErr(t, err, true)
+				err = loadTask.Await(ctx)
+				common.CheckErr(t, err, true)
+				loadDuration := time.Since(loadStart)
+
+				benchName := fmt.Sprintf("B21_LoadCollection_%s", mode.label)
+				t.Logf("=== %s === rows=%d duration=%v", benchName, cfg.TotalRows, loadDuration)
+				recordSingleMeasurement(t, benchName, loadDuration, fmt.Sprintf("mode=%s rows=%d", mode.label, cfg.TotalRows))
+
+				// Measure cold search topK=5 with all output fields
+				searchName := fmt.Sprintf("B21_ColdSearch_topK5_allFields_%s", mode.label)
+				measureLatency(t, searchName, cfg.QueryIterations, func() {
+					searchRes, err := mc.Search(ctx, client.NewSearchOption(modeColl, 5,
+						[]entity.Vector{entity.FloatVector(vec)}).
+						WithConsistencyLevel(entity.ClStrong).
+						WithANNSField("embedding").
+						WithOutputFields("id", "value", "embedding"))
+					common.CheckErr(t, err, true)
+					require.Greater(t, searchRes[0].ResultCount, 0)
+				})
+			})
+		}
+	})
 }
 
 // ============================================================================

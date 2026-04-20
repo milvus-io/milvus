@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1273,6 +1274,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          SearchResult& results) const {
         return TryTakeForSearch(plan, seg_offsets, size, results);
     }
+
+    // Test-only: set use_take_for_output flag.
+    void
+    SetUseTakeForOutputForTesting(bool val) {
+        use_take_for_output_ = val;
+    }
 #endif
 
  private:
@@ -1343,10 +1350,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
 
+    // When true, use take() API for output field retrieval from external storage.
+    bool use_take_for_output_{false};
+
     // milvus storage internal api reader instance (NOT thread-safe).
     // Load-time access (get_chunk_reader, SetReader) is safe: single-threaded,
     // completes before the segment is visible to queries.
-    // Query-time access (take) must be serialized via reader_mutex_.
+    // Query-time access (take) must be serialized via reader_mutex_ — concurrent
+    // retrieve/search workers can hit the same segment at the same time.
     std::unique_ptr<milvus_storage::api::Reader> reader_;
     mutable std::mutex reader_mutex_;
 
