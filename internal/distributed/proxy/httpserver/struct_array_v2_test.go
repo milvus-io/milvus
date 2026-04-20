@@ -149,6 +149,66 @@ func TestStructArrayFieldSchema_GetProto(t *testing.T) {
 	}
 	_, err = dup.GetProto(ctx)
 	assert.Error(t, err)
+
+	// Reject nullable sub-field.
+	nullable := StructArrayFieldSchema{
+		FieldName: "bad_nullable",
+		Fields: []FieldSchema{
+			{
+				FieldName:       "sub_null",
+				DataType:        "Array",
+				ElementDataType: "Int32",
+				Nullable:        true,
+			},
+		},
+	}
+	_, err = nullable.GetProto(ctx)
+	assert.Error(t, err)
+
+	// Reject sub-field with defaultValue.
+	withDefault := StructArrayFieldSchema{
+		FieldName: "bad_default",
+		Fields: []FieldSchema{
+			{
+				FieldName:       "sub_default",
+				DataType:        "Array",
+				ElementDataType: "Int32",
+				DefaultValue:    float64(1),
+			},
+		},
+	}
+	_, err = withDefault.GetProto(ctx)
+	assert.Error(t, err)
+
+	// Reject partition key in sub-field.
+	partKey := StructArrayFieldSchema{
+		FieldName: "bad_part",
+		Fields: []FieldSchema{
+			{
+				FieldName:       "sub_part",
+				DataType:        "Array",
+				ElementDataType: "Int32",
+				IsPartitionKey:  true,
+			},
+		},
+	}
+	_, err = partKey.GetProto(ctx)
+	assert.Error(t, err)
+
+	// Reject clustering key in sub-field.
+	clusterKey := StructArrayFieldSchema{
+		FieldName: "bad_cluster",
+		Fields: []FieldSchema{
+			{
+				FieldName:       "sub_cluster",
+				DataType:        "Array",
+				ElementDataType: "Int32",
+				IsClusteringKey: true,
+			},
+		},
+	}
+	_, err = clusterKey.GetProto(ctx)
+	assert.Error(t, err)
 }
 
 func TestParseStructArrayRow_Scalar(t *testing.T) {

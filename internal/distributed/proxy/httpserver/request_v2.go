@@ -657,6 +657,16 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 				"sub-field %s of struct %s cannot be primary / partition / clustering key",
 				sub.FieldName, sf.FieldName)
 		}
+		if subProto.Nullable {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot be nullable",
+				sub.FieldName, sf.FieldName)
+		}
+		if subProto.DefaultValue != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot set defaultValue",
+				sub.FieldName, sf.FieldName)
+		}
 		if _, dup := subNames[subProto.Name]; dup {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
