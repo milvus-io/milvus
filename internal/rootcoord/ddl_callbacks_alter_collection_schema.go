@@ -61,6 +61,15 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	}
 	functionSchema := funcSchemas[0]
 
+	// Physical backfill is currently only implemented for BM25 functions in the datanode
+	// backfill_compactor. Proxy performs the same check; this is a defense-in-depth guard
+	// for requests that bypass the Proxy (e.g. direct gRPC to RootCoord).
+	if addRequest.GetDoPhysicalBackfill() && functionSchema.GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg(
+			"physical backfill is currently only supported for BM25 functions, got %s",
+			functionSchema.GetType().String())
+	}
+
 	if len(fieldInfos) == 0 {
 		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty")
 	}

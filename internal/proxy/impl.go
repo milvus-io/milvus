@@ -969,10 +969,20 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	// TODO(#48808): gate AddCollectionField against in-progress backfill once segment schema-version
-	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Currently the backfill
-	// policy updates segment schema versions on a tick, so a rapid second AddCollectionField
-	// can arrive before the tick fires and be incorrectly rejected by the gate.
+	// Prevent concurrent schema-change requests (AddCollectionField / AlterCollectionSchema)
+	// on the same collection from racing past the schema version consistency gate.
+	collKey := request.GetDbName() + "/" + request.GetCollectionName()
+	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"another schema-change request is already in progress for collection %s", request.GetCollectionName())), nil
+	}
+	defer node.alterSchemaInFlight.Delete(collKey)
+
+	// Block until all segments have caught up to the current schema version,
+	// preventing a new field addition while a previous backfill is still in progress.
+	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+		return merr.Status(err), nil
+	}
 
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
@@ -1119,7 +1129,17 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 }
 
 // checkSchemaVersionConsistency checks if all segments have consistent schema version
-// Returns error if schema version consistency proportion is less than 100%
+// Returns error if schema version consistency proportion is less than 100%.
+//
+// NOTE: this is a Proxy-local fast-path check only. The `alterSchemaInFlight` map
+// on the Proxy is per-instance, so in a multi-Proxy deployment two concurrent
+// schema-change requests routed to different Proxy instances each see their own
+// empty local map and both pass this check before either has bumped the schema
+// version, allowing the race through. The authoritative cluster-wide consistency
+// gate lives at RootCoord and is enforced after acquiring the collection resource
+// key lock — see checkSchemaVersionConsistencyAtRootCoord in rootcoord, added by
+// companion PR #48989. This Proxy-side check remains as a cheap early reject to
+// avoid unnecessary RootCoord round-trips on the common single-Proxy path.
 func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
