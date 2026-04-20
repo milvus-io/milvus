@@ -1074,6 +1074,10 @@ func TestProxy(t *testing.T) {
 
 	// an int64 field (pk) & a float vector field
 	schema := constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
+	// Mark the struct field nullable so we can exercise the "struct column omitted" insert path below.
+	for _, s := range schema.StructArrayFields {
+		s.Nullable = true
+	}
 	createCollectionReq := constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
 
 	t.Run("create collection", func(t *testing.T) {
@@ -1446,6 +1450,9 @@ func TestProxy(t *testing.T) {
 	})
 
 	var insertedIDs []int64
+	var omittedStructIDs []int64
+	var mixedStructIDs []int64
+	mixedValidHalf := rowNum / 2 // rows [0, mixedValidHalf) valid; [mixedValidHalf, rowNum) null
 	t.Run("insert", func(t *testing.T) {
 		req := constructTestCollectionInsertRequest(dbName, collectionName, floatVecField, binaryVecField, structField, schema, rowNum, dim)
 
@@ -1462,6 +1469,56 @@ func TestProxy(t *testing.T) {
 		default:
 			t.Fatalf("Unexpected ID type")
 		}
+
+		// Second insert: omit the nullable struct column entirely (Go-SDK scenario).
+		// Exercises checkAndFlattenStructFieldData's "skip + let downstream backfill" path.
+		omitReq := &milvuspb.InsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				newFloatVectorFieldData(floatVecField, rowNum, dim),
+				newBinaryVectorFieldData(binaryVecField, rowNum, dim),
+			},
+			HashKeys: testutils.GenerateHashKeys(rowNum),
+			NumRows:  uint32(rowNum),
+		}
+		omitResp, err := proxy.Insert(ctx, omitReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, omitResp.GetStatus().GetErrorCode(),
+			"reason: %s", omitResp.GetStatus().GetReason())
+		assert.Equal(t, int64(rowNum), omitResp.InsertCnt)
+		omittedStructIDs = omitResp.GetIDs().GetIntId().GetData()
+		assert.NotEmpty(t, omittedStructIDs)
+
+		// Third insert: struct present, but row-level ValidData mask marks half of
+		// the rows null. Exercises the hasDataCount > 0 path + user-supplied ValidData,
+		// which is the default pymilvus traffic shape.
+		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
+		mask := make([]bool, rowNum)
+		for i := 0; i < mixedValidHalf; i++ {
+			mask[i] = true
+		}
+		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
+			sf.ValidData = mask
+		}
+		mixedReq := &milvuspb.InsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				newFloatVectorFieldData(floatVecField, rowNum, dim),
+				newBinaryVectorFieldData(binaryVecField, rowNum, dim),
+				mixedStruct,
+			},
+			HashKeys: testutils.GenerateHashKeys(rowNum),
+			NumRows:  uint32(rowNum),
+		}
+		mixedResp, err := proxy.Insert(ctx, mixedReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, mixedResp.GetStatus().GetErrorCode(),
+			"reason: %s", mixedResp.GetStatus().GetReason())
+		assert.Equal(t, int64(rowNum), mixedResp.InsertCnt)
+		mixedStructIDs = mixedResp.GetIDs().GetIntId().GetData()
+		assert.Len(t, mixedStructIDs, rowNum)
 	})
 
 	// TODO(dragondriver): proxy.Delete()
@@ -1510,7 +1567,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum), rowNumStr)
+		// Two inserts above: one with full struct data + one with the struct column omitted.
+		assert.Equal(t, strconv.Itoa(3*rowNum), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -1790,6 +1848,63 @@ func TestProxy(t *testing.T) {
 		assert.True(t, loaded)
 	})
 
+	t.Run("query rows with omitted struct return null", func(t *testing.T) {
+		if !loaded {
+			t.Skip("collection not loaded")
+		}
+		subI32Name := typeutil.ConcatStructFieldName(structField, subFieldI32)
+		subFVecName := typeutil.ConcatStructFieldName(structField, subFieldFVec)
+
+		// Row from the "struct column omitted" insert must come back null.
+		resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Expr:           fmt.Sprintf("%s in [%d]", int64Field, omittedStructIDs[0]),
+			OutputFields:   []string{subI32Name, subFVecName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode(),
+			"reason: %s", resp.GetStatus().GetReason())
+		for _, fd := range resp.GetFieldsData() {
+			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+				continue
+			}
+			for i, v := range fd.GetValidData() {
+				assert.False(t, v, "row %d of sub-field %s should be null", i, fd.GetFieldName())
+			}
+		}
+
+		// Row-level mixed-null batch: first half valid, second half null via ValidData.
+		cases := []struct {
+			pk         int64
+			expectNull bool
+			label      string
+		}{
+			{mixedStructIDs[0], false, "mixed-valid row"},
+			{mixedStructIDs[rowNum-1], true, "mixed-null row"},
+		}
+		for _, c := range cases {
+			qresp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Expr:           fmt.Sprintf("%s in [%d]", int64Field, c.pk),
+				OutputFields:   []string{subI32Name, subFVecName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, qresp.GetStatus().GetErrorCode(),
+				"%s reason: %s", c.label, qresp.GetStatus().GetReason())
+			for _, fd := range qresp.GetFieldsData() {
+				if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+					continue
+				}
+				for i, v := range fd.GetValidData() {
+					assert.Equal(t, !c.expectNull, v,
+						"%s: sub-field %s row %d ValidData", c.label, fd.GetFieldName(), i)
+				}
+			}
+		}
+	})
+
 	t.Run("show in-memory collections", func(t *testing.T) {
 		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base:            nil,
@@ -1881,7 +1996,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum), rowNumStr)
+		assert.Equal(t, strconv.Itoa(3*rowNum), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -2342,6 +2457,48 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+
+		// Upsert an existing row with the nullable struct column omitted. The row
+		// previously had full struct data; after this upsert it should come back null.
+		// task_upsert.go also calls checkAndFlattenStructFieldData — same code path as insert.
+		pkCol := newScalarFieldData(schema.Fields[0], int64Field, 1)
+		pkCol.GetScalars().GetLongData().Data = []int64{insertedIDs[0]}
+		omitUpsertReq := &milvuspb.UpsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				pkCol,
+				newFloatVectorFieldData(floatVecField, 1, dim),
+				newBinaryVectorFieldData(binaryVecField, 1, dim),
+			},
+			HashKeys: testutils.GenerateHashKeys(1),
+			NumRows:  uint32(1),
+		}
+		omitUpsertResp, err := proxy.Upsert(ctx, omitUpsertReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, omitUpsertResp.GetStatus().GetErrorCode(),
+			"reason: %s", omitUpsertResp.GetStatus().GetReason())
+		assert.Equal(t, int64(1), omitUpsertResp.UpsertCnt)
+
+		subI32Name := typeutil.ConcatStructFieldName(structField, subFieldI32)
+		subFVecName := typeutil.ConcatStructFieldName(structField, subFieldFVec)
+		qresp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Expr:           fmt.Sprintf("%s in [%d]", int64Field, insertedIDs[0]),
+			OutputFields:   []string{subI32Name, subFVecName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, qresp.GetStatus().GetErrorCode(),
+			"reason: %s", qresp.GetStatus().GetReason())
+		for _, fd := range qresp.GetFieldsData() {
+			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
+				continue
+			}
+			for i, v := range fd.GetValidData() {
+				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
+			}
+		}
 	})
 
 	t.Run("release partition", func(t *testing.T) {
