@@ -282,7 +282,8 @@ class FileManagerImpl : public milvus::FileManager {
                                              : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
         boost::filesystem::path path1;
-        if (index_meta_.index_store_path_version >= 1) {
+        if (index_meta_.index_store_path_version >=
+            milvus::proto::index::INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
             // v1: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
             path1 = std::to_string(field_meta_.collection_id) + "/" +
                     std::to_string(field_meta_.partition_id) + "/" +
