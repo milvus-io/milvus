@@ -5,6 +5,7 @@ option go_package="github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb";
 
 import "common.proto";
 import "schema.proto";
+import "index_coord.proto";
 
 message TypeParams {
   repeated common.KeyValuePair params = 1;
@@ -110,9 +111,8 @@ message BuildIndexInfo {
   string external_source = 33;
   string external_spec = 34;
   // Path format version for index files on object storage.
-  // 0 = legacy (index_files/{buildID}/{indexVersion}/{partID}/{segID}),
-  // 1 = collection-partitioned (index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}).
-  int32 index_store_path_version = 35;
+  // See milvus.proto.index.IndexStorePathVersion for value semantics.
+  milvus.proto.index.IndexStorePathVersion index_store_path_version = 35;
 }
 
 message StoragePluginContext {
