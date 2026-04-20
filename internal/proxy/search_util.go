@@ -568,13 +568,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
 
-	// 8. parse order_by_fields
+	// 7. parse order_by_fields
 	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	// 9. validate iterator + order_by combination is not allowed
+	// 8. validate iterator + order_by combination is not allowed
 	if isIterator && len(orderByFields) > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"order_by is not supported when using search iterator")
