@@ -874,13 +874,13 @@ func (s *SessionSuite) TestSessionLifetime() {
 	s.Require().NoError(err)
 	s.Equal(string(resp.Kvs[0].Value), string(str))
 
-	ttlResp, err := s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	ttlResp, err := s.client.TimeToLive(ctx, *session.LeaseID)
 	s.Require().NoError(err)
 	s.Greater(ttlResp.TTL, int64(0))
 
 	session.GoingStop()
 	resp, err = s.client.Get(ctx, session.getCompleteKey())
-	s.Require().True(session.SessionRaw.Stopping)
+	s.Require().True(session.Stopping)
 	s.Require().NoError(err)
 	s.Equal(1, len(resp.Kvs))
 	str, err = json.Marshal(session.SessionRaw)
@@ -894,7 +894,7 @@ func (s *SessionSuite) TestSessionLifetime() {
 	s.Require().NoError(err)
 	s.Equal(0, len(resp.Kvs))
 
-	ttlResp, err = s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	ttlResp, err = s.client.TimeToLive(ctx, *session.LeaseID)
 	s.Require().NoError(err)
 	s.Equal(int64(-1), ttlResp.TTL)
 }
@@ -909,7 +909,7 @@ func TestForceKill(t *testing.T) {
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */
+	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */ //nolint:gosec // os.Args[0] is the test binary, not user input
 	cmd.Env = append(os.Environ(), "TEST_EXIT=1")
 
 	err := cmd.Run()
@@ -932,4 +932,26 @@ func testForceKill(serverName string) {
 
 	// trigger a force kill
 	etcdCli.Revoke(context.Background(), *session.LeaseID)
+}
+
+func TestGetResourceGroupName(t *testing.T) {
+	t.Run("nil server labels returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: nil}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("empty server labels returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{}}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("missing resource group label returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{"OTHER_LABEL": "value"}}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("valid resource group label returns value", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{LabelResourceGroup: "my_rg"}}
+		assert.Equal(t, "my_rg", s.GetResourceGroupName())
+	})
 }

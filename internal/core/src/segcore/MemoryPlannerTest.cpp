@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "arrow/api.h"
+#include <folly/CancellationToken.h>
+#include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
@@ -307,4 +309,43 @@ TEST(LoadCellBatchAsync, EmptyCells) {
     auto futures = LoadCellBatchAsync(
         nullptr, {}, MakeMockReaderFactory(), channel, 128 << 20);
     EXPECT_EQ(futures.size(), 0);
+}
+
+TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 8 * MB},
+        {1, 0, 1, 1, 8 * MB},
+        {2, 0, 2, 1, 8 * MB},
+        {3, 0, 3, 1, 8 * MB},
+    };
+
+    folly::CancellationSource source;
+    milvus::OpContext op_ctx(source.getToken());
+    auto channel = std::make_shared<CellReaderChannel>(1);
+    auto futures = LoadCellBatchAsync(
+        &op_ctx, specs, MakeMockReaderFactory(), channel, 128 * MB);
+
+    ASSERT_EQ(futures.size(), 1);
+
+    std::shared_ptr<CellLoadResult> cell_data;
+    ASSERT_TRUE(channel->pop(cell_data));
+    ASSERT_NE(cell_data, nullptr);
+    EXPECT_EQ(cell_data->cid, 0);
+
+    source.requestCancellation();
+
+    size_t received = 1;
+    while (channel->pop(cell_data)) {
+        ASSERT_NE(cell_data, nullptr);
+        ++received;
+    }
+
+    try {
+        futures[0].get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    EXPECT_LT(received, specs.size());
 }

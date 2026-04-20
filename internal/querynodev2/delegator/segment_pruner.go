@@ -336,3 +336,80 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 		}
 	}
 }
+
+// PruneSealedSegmentsByPKFilter prunes sealedSegments in-place by evaluating the
+// PK predicate from serializedExprPlan against each segment's bloom-filter candidate.
+// Segments whose candidate data proves they cannot contain a matching PK are removed.
+// Workers that end up with no segments are skipped entirely by organizeSubTask.
+func PruneSealedSegmentsByPKFilter(
+	ctx context.Context,
+	serializedExprPlan []byte,
+	pkFilter int32,
+	sealedSegments []SnapshotItem,
+	collectionID int64,
+	queryType string,
+) {
+	if pkFilter == common.PkFilterNoPkFilter {
+		return
+	}
+
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(serializedExprPlan, plan); err != nil {
+		log.Ctx(ctx).Warn("PruneSealedSegmentsByPKFilter: failed to unmarshal plan, skipping",
+			zap.Error(err))
+		return
+	}
+
+	expr := BuildPKFilterExpr(plan, pkFilter)
+	if expr == nil {
+		return
+	}
+
+	totalCount := 0
+	skippedCount := 0
+
+	for idx, item := range sealedSegments {
+		totalCount += len(item.Segments)
+
+		// Collect candidates with valid BF data as PKFilterTargets.
+		targets := make([]PKFilterTarget, 0, len(item.Segments))
+		for _, entry := range item.Segments {
+			if entry.Candidate != nil {
+				targets = append(targets, entry.Candidate)
+			}
+		}
+
+		ids, all := CheckPKFilter(expr, targets)
+		if all {
+			continue
+		}
+
+		newSegs := make([]SegmentEntry, 0, len(item.Segments))
+		for _, entry := range item.Segments {
+			if entry.Candidate == nil || ids.Contain(entry.SegmentID) {
+				newSegs = append(newSegs, entry)
+			} else {
+				skippedCount++
+			}
+		}
+		item.Segments = newSegs
+		sealedSegments[idx] = item
+	}
+
+	observePKFilterMetrics(collectionID, queryType, totalCount, skippedCount)
+}
+
+func observePKFilterMetrics(collectionID int64, queryType string, totalCount, skippedCount int) {
+	nodeID := paramtable.GetStringNodeID()
+	collectionIDLabel := fmt.Sprint(collectionID)
+
+	metrics.QueryNodeSegmentFilterTotalSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(totalCount))
+	metrics.QueryNodeSegmentFilterSkippedSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(skippedCount))
+	metrics.QueryNodeSegmentFilterHitSegmentNum.
+		WithLabelValues(nodeID, collectionIDLabel, queryType).
+		Observe(float64(totalCount - skippedCount))
+}

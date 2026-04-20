@@ -117,7 +117,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	info, err := svr.getDataNodeMetrics(ctx, req, 100)
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.Name)
 
 	info, err = svr.getDataNodeMetrics(ctx, req, 101)
 	assert.NoError(t, err)
@@ -160,7 +160,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 
 	// return unexpected
 	dn = mocks.NewMockDataNodeClient(t)
@@ -172,7 +172,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
 	assert.NoError(t, err)
 	assert.True(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 
 	// success
 	dn = mocks.NewMockDataNodeClient(t)
@@ -203,7 +203,7 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.False(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.Name)
 }
 
 func TestGetSyncTaskMetrics(t *testing.T) {

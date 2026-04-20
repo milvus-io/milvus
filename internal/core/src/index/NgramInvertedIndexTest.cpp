@@ -120,8 +120,6 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
-    // loads the filesystem from the singleton rather than FileManagerContext.
     auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
     arrow_fs_conf.storage_type = "local";
     arrow_fs_conf.root_path = root_path;
@@ -179,7 +177,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
 
-        auto create_index_result = index->Upload();
+        auto create_index_result = index->UploadUnified({});
         auto memSize = create_index_result->GetMemSize();
         index_size = create_index_result->GetSerializedSize();
         ASSERT_GT(memSize, 0);
@@ -196,7 +194,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         auto ngram_params = index::NgramParams{true, 2, 4};
         auto index =
             std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
-        index->Load(milvus::tracer::TraceContext{}, config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
@@ -231,6 +229,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             {milvus::index::MIN_GRAM, "2"},
             {milvus::index::MAX_GRAM, "4"},
             {milvus::LOAD_PRIORITY, "HIGH"},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
         };
         milvus::segcore::LoadIndexInfo load_index_info{};
         load_index_info.collection_id = collection_id;
@@ -445,8 +444,6 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
-    // loads the filesystem from the singleton rather than FileManagerContext.
     auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
     arrow_fs_conf.storage_type = "local";
     arrow_fs_conf.root_path = root_path;
@@ -504,7 +501,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
 
-        auto create_index_result = index->Upload();
+        auto create_index_result = index->UploadUnified({});
         index_files = create_index_result->GetIndexFiles();
     }
 
@@ -515,6 +512,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             {milvus::index::MIN_GRAM, "2"},
             {milvus::index::MAX_GRAM, "4"},
             {milvus::LOAD_PRIORITY, "HIGH"},
+            {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
         };
         milvus::segcore::LoadIndexInfo load_index_info{};
         load_index_info.collection_id = collection_id;
@@ -1656,7 +1654,7 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
         auto index =
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
-        auto result = index->Upload();
+        auto result = index->UploadUnified({});
         index_files = result->GetIndexFiles();
     }
 
@@ -1669,7 +1667,7 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
         index::NgramParams{.loading_index = true, .min_gram = 2, .max_gram = 4};
     auto ngram_index =
         std::make_unique<index::NgramInvertedIndex>(ctx, load_ngram_params);
-    ngram_index->Load(milvus::tracer::TraceContext{}, load_config);
+    ngram_index->LoadUnified(load_config);
 
     // Build Tantivy index for comparison
     std::vector<std::string> data_vec(data.begin(), data.end());
@@ -1937,7 +1935,7 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
         auto index =
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
-        auto result = index->Upload();
+        auto result = index->UploadUnified({});
         index_files = result->GetIndexFiles();
     }
 
@@ -1949,7 +1947,7 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
         index::NgramParams{.loading_index = true, .min_gram = 2, .max_gram = 4};
     auto ngram_index =
         std::make_unique<index::NgramInvertedIndex>(ctx, load_ngram_params);
-    ngram_index->Load(milvus::tracer::TraceContext{}, load_config);
+    ngram_index->LoadUnified(load_config);
 
     std::vector<std::string> data_vec(data.begin(), data.end());
 

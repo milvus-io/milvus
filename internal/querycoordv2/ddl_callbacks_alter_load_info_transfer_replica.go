@@ -34,10 +34,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 	}
 	defer broadcaster.Close()
 
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetSourceResourceGroup()); !ok {
+	if ok := s.meta.ContainResourceGroup(ctx, req.GetSourceResourceGroup()); !ok {
 		return merr.WrapErrResourceGroupNotFound(req.GetSourceResourceGroup())
 	}
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetTargetResourceGroup()); !ok {
+	if ok := s.meta.ContainResourceGroup(ctx, req.GetTargetResourceGroup()); !ok {
 		return merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup())
 	}
 	if req.GetSourceResourceGroup() == req.GetTargetResourceGroup() {

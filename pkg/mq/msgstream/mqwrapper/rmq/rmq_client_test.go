@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 	exitCode := func() int {
 		paramtable.Init()
 		pt := paramtable.Get()
-		pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+		pt.Save(pt.MQCfg.EnablePursuitMode.Key, "false")
 
 		rand.Seed(time.Now().UnixNano())
 		dir, _ := os.MkdirTemp("", "milvus_rmq_test_*")

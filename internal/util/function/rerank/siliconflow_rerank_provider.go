@@ -38,7 +38,7 @@ type siliconflowProvider struct {
 	params            map[string]any
 }
 
-func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.SiliconflowAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 	return &provider, nil
 }
 
-func (provider *siliconflowProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *siliconflowProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
 	if err != nil {
 		return nil, err

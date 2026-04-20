@@ -729,7 +729,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 
 // Note: The returned model.Collection is read-only. Do NOT modify it directly,
 // as it may cause unexpected behavior or inconsistencies.
-func filterUnavailable(coll *model.Collection) *model.Collection {
+func filterUnavailablePartition(coll *model.Collection) *model.Collection {
 	clone := coll.ShallowClone()
 	// pick available partitions.
 	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
@@ -756,7 +756,7 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 	if !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
@@ -769,7 +769,16 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	var coll *model.Collection
 	coll, ok := mt.collID2Meta[collectionID]
-	if !ok || coll == nil || !coll.Available() || coll.CreateTime > ts {
+	// Use UpdateTimestamp (not CreateTime) for cache invalidation.
+	// This is a bug fix for time-travel correctness, not merely an enhancement for backfill:
+	// collID2Meta always holds the *latest* collection state.  After a schema alteration (e.g.
+	// AlterCollectionSchema), the in-memory entry has a schema that didn't exist at timestamps
+	// before the alteration.  The old code compared against CreateTime, so a time-travel query
+	// at T where CreateTime < T < AlterTime would incorrectly serve the altered schema from the
+	// in-memory cache instead of falling back to the catalog for the historical version.
+	// Comparing against UpdateTimestamp ensures the cache is bypassed for any ts that predates
+	// the last schema modification, fixing time-travel semantics for all schema-altering DDLs.
+	if !ok || coll == nil || !coll.Available() || coll.UpdateTimestamp > ts {
 		// travel meta information from catalog.
 		ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 		db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
@@ -796,7 +805,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 		return nil, merr.WrapErrCollectionNotFound(dbName, coll.Name)
 	}
 
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
@@ -873,7 +882,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	if coll == nil || !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
@@ -1019,7 +1028,6 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		// collection not exists, return directly.
 		return errAlterCollectionNotFound
 	}
-
 	oldColl := coll.Clone()
 	newColl := coll.Clone()
 	newColl.ApplyUpdates(header, body)
@@ -1067,6 +1075,8 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		zap.Int64("oldCollectionID", oldColl.CollectionID),
 		zap.Bool("dbChanged", dbChanged),
 		zap.Uint64("ts", newColl.UpdateTimestamp),
+		zap.Bool("doPhysicalBackfill", newColl.DoPhysicalBackfill),
+		zap.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil
 }
@@ -2014,6 +2024,9 @@ func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.Re
 	// check if grant can be restored
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if util.IsAnyWord(privName) {
+			continue
+		}
 		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
 			return errors.Newf("privilege [%s] does not exist", privName)
 		}

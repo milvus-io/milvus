@@ -149,6 +149,13 @@ func (p *grpcConfig) GetClusterTLSConfig(clusterID string) (caPemPath, clientPem
 	return
 }
 
+// GetClusterAuthority returns the gRPC :authority header for CDC outbound connections.
+// Reads from grpc.clusters.<clusterID>.authority.
+// Returns empty string if not configured.
+func (p *grpcConfig) GetClusterAuthority(clusterID string) string {
+	return p.base.Get("grpc.clusters." + clusterID + ".authority")
+}
+
 // GetAddress return grpc address
 func (p *grpcConfig) GetAddress() string {
 	return p.IP + ":" + p.Port.GetValue()
@@ -169,7 +176,7 @@ type GrpcServerConfig struct {
 }
 
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultServerMaxSendSize, 10)
 	p.ServerMaxSendSize = ParamItem{
@@ -250,7 +257,7 @@ type GrpcClientConfig struct {
 }
 
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
-	p.grpcConfig.init(domain, base)
+	p.init(domain, base)
 
 	maxSendSize := strconv.FormatInt(DefaultClientMaxSendSize, 10)
 	p.ClientMaxSendSize = ParamItem{

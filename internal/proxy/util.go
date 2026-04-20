@@ -655,12 +655,12 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	}
 
 	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
-		return fmt.Errorf("Fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
+		return fmt.Errorf("fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
 	}
 
 	if field.ElementType == schemapb.DataType_ArrayOfStruct || field.ElementType == schemapb.DataType_ArrayOfVector ||
 		field.ElementType == schemapb.DataType_Array {
-		return fmt.Errorf("Nested array is not supported %s", field.Name)
+		return fmt.Errorf("nested array is not supported %s", field.Name)
 	}
 
 	if field.DataType == schemapb.DataType_Array {
@@ -670,7 +670,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	} else {
 		// ArrayOfVector: support FloatVector, Float16Vector, BFloat16Vector, Int8Vector, BinaryVector
 		if !typeutil.IsFixDimVectorType(field.GetElementType()) {
-			return fmt.Errorf("Unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
+			return fmt.Errorf("unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
 		}
 
 		err = validateDimension(field)
@@ -1217,12 +1217,8 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	return &fieldData, nil
 }
 
-func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
-	validData := make([]bool, len(data))
-	for i := range validData {
-		validData[i] = true
-	}
-	return &schemapb.FieldData{
+func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *schemapb.FieldData {
+	fd := &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
 		Field: &schemapb.FieldData_Scalars{
@@ -1235,8 +1231,23 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
-		ValidData: validData,
 	}
+
+	// Only set ValidData when the $meta field is nullable or has a default value.
+	// For 2.5 collections (non-nullable, no default), CheckValidData expects
+	// len(ValidData)==0, so we must NOT set it.
+	for _, f := range schema.Fields {
+		if f.GetIsDynamic() && (f.GetNullable() || f.GetDefaultValue() != nil) {
+			validData := make([]bool, len(data))
+			for i := range validData {
+				validData[i] = true
+			}
+			fd.ValidData = validData
+			break
+		}
+	}
+
+	return fd
 }
 
 // validateFieldDataColumns validates that all required fields are present and no unknown fields exist.
@@ -1248,12 +1259,12 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 	expectColumnNum := 0
 
 	// Count expected columns
-	for _, field := range schema.CollectionSchema.GetFields() {
-		if !(typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema)) {
+	for _, field := range schema.GetFields() {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) && !typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-	for _, structField := range schema.CollectionSchema.GetStructArrayFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		expectColumnNum += len(structField.GetFields())
 	}
 
@@ -1289,14 +1300,15 @@ func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) 
 		fieldData.Type = fieldSchema.DataType
 
 		// Set the ElementType because it may not be set in the insert request.
-		if fieldData.Type == schemapb.DataType_Array {
+		switch fieldData.Type {
+		case schemapb.DataType_Array:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
 			if !ok || fd.Scalars.GetArrayData() == nil {
 				return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
 					fieldData.FieldName, schema.Name)
 			}
 			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-		} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+		case schemapb.DataType_ArrayOfVector:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
 			if !ok || fd.Vectors.GetVectorArray() == nil {
 				return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
@@ -2509,7 +2521,7 @@ func doCheckDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgst
 	for i := range defaultData {
 		defaultData[i] = []byte("{}")
 	}
-	dynamicData := autoGenDynamicFieldData(defaultData)
+	dynamicData := autoGenDynamicFieldData(schema, defaultData)
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
 	return nil
 }
@@ -2529,7 +2541,7 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.InsertRequest.Namespace)
+	err := common.CheckNamespace(schema, insertMsg.Namespace)
 	if err != nil {
 		return err
 	}
@@ -2547,8 +2559,8 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	for _, fieldData := range insertMsg.FieldsData {
 		if fieldData.FieldId == namespaceField.FieldID {
 			ns := ""
-			if insertMsg.InsertRequest.Namespace != nil {
-				ns = *insertMsg.InsertRequest.Namespace
+			if insertMsg.Namespace != nil {
+				ns = *insertMsg.Namespace
 			}
 			scalars := fieldData.GetScalars()
 			if scalars == nil {
@@ -2570,7 +2582,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 
 	// set namespace field data
 	namespaceData := make([]string, insertMsg.NRows())
-	namespace := *insertMsg.InsertRequest.Namespace
+	namespace := *insertMsg.Namespace
 	for i := range namespaceData {
 		namespaceData[i] = namespace
 	}
@@ -3114,7 +3126,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

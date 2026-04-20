@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -24,12 +25,13 @@ import (
 )
 
 type rankParams struct {
-	limit           int64
-	offset          int64
-	roundDecimal    int64
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
+	limit            int64
+	offset           int64
+	roundDecimal     int64
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -58,6 +60,13 @@ func (r *rankParams) GetGroupByFieldId() int64 {
 		return r.groupByFieldId
 	}
 	return -1
+}
+
+func (r *rankParams) GetGroupByFieldName() string {
+	if r != nil {
+		return r.groupByFieldName
+	}
+	return ""
 }
 
 func (r *rankParams) GetGroupSize() int64 {
@@ -100,11 +109,27 @@ type OrderByField struct {
 }
 
 type SearchInfo struct {
-	planInfo      *planpb.QueryInfo
-	offset        int64
-	isIterator    bool
-	collectionID  int64
-	orderByFields []OrderByField
+	planInfo        *planpb.QueryInfo
+	offset          int64
+	isIterator      bool
+	collectionID    int64
+	orderByFields   []OrderByField
+	iterativeFilter bool
+}
+
+// DetermineSearchType classifies the search based on the parsed search info
+// and whether a filter expression is present. The caller supplies hasFilter
+// because the DSL/expression is not available inside parseSearchInfo.
+func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
+	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
+	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0
+	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
+		return internalpb.SearchType_DEFAULT
+	}
+	if hasFilter {
+		return internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+	}
+	return internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
 }
 
 // parseOrderByFields parses the order_by_fields parameter from search params.
@@ -502,6 +527,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var jsonPath string
 	var jsonType schemapb.DataType
 	var strictCast bool
+	var isRangeSearch bool
+	var isIterativeFilter bool
 	if isAdvanced {
 		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
@@ -524,7 +551,14 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
 	}
-	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+
+	isRangeSearch = gjson.Get(searchParamStr, radiusKey).Exists()
+	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if !isRangeSearch && gjson.Get(searchParamStr, rangeFilterKey).Exists() {
+		return nil, merr.WrapErrParameterInvalid("range_filter", "",
+			"range_filter requires radius to be set; range_filter alone is not a valid range search parameter")
+	}
+	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
 	}
@@ -539,12 +573,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if annsFieldName != "" {
 		annField := typeutil.GetFieldByName(schema, annsFieldName)
 		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if strings.Contains(searchParamStr, radiusKey) {
+			if isRangeSearch {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 
-			if groupByFieldId > 0 {
+			// For hybrid search (rankInfo != nil), group by on vector array is not supported.
+			// For simple search, group by validation is handled in initSearchRequest()
+			// where placeholder type is available to distinguish element-level vs embedding list.
+			if groupByFieldId > 0 && rankParams != nil {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
@@ -583,10 +620,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
-		offset:        offset,
-		isIterator:    isIterator,
-		collectionID:  collectionId,
-		orderByFields: orderByFields,
+		offset:          offset,
+		isIterator:      isIterator,
+		collectionID:    collectionId,
+		orderByFields:   orderByFields,
+		iterativeFilter: isIterativeFilter,
 	}, nil
 }
 
@@ -595,7 +633,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
 		if !ok {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			return nil, fmt.Errorf("field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
 	}
@@ -682,12 +720,13 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 type groupByInfo struct {
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
-	jsonPath        string
-	jsonType        schemapb.DataType
-	strictCast      bool
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
+	jsonPath         string
+	jsonType         schemapb.DataType
+	strictCast       bool
 }
 
 func (g *groupByInfo) GetGroupByFieldId() int64 {
@@ -695,6 +734,13 @@ func (g *groupByInfo) GetGroupByFieldId() int64 {
 		return g.groupByFieldId
 	}
 	return 0
+}
+
+func (g *groupByInfo) GetGroupByFieldName() string {
+	if g != nil {
+		return g.groupByFieldName
+	}
+	return ""
 }
 
 func (g *groupByInfo) GetGroupSize() int64 {
@@ -814,6 +860,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		return nil, err
 	}
 	ret.groupByFieldId = groupByFieldId
+	ret.groupByFieldName = groupByFieldName
 	if jsonPath != "" {
 		ret.jsonPath = jsonPath
 	}
@@ -934,12 +981,13 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	return &rankParams{
-		limit:           limit,
-		offset:          offset,
-		roundDecimal:    roundDecimal,
-		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
-		groupSize:       groupByInfo.GetGroupSize(),
-		strictGroupSize: groupByInfo.GetStrictGroupSize(),
+		limit:            limit,
+		offset:           offset,
+		roundDecimal:     roundDecimal,
+		groupByFieldId:   groupByInfo.GetGroupByFieldId(),
+		groupByFieldName: groupByInfo.GetGroupByFieldName(),
+		groupSize:        groupByInfo.GetGroupSize(),
+		strictGroupSize:  groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 

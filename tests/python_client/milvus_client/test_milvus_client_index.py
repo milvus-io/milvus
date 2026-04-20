@@ -466,7 +466,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 6. insert
         collection_info = self.describe_collection(client, collection_name)[0]
-        rows = cf.gen_row_data_by_schema(nb=2000, schema=collection_info, start=0)
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=collection_info, start=0)
         self.insert(client, collection_name, rows)
         # 7. load collection
         self.load_collection(client, collection_name)

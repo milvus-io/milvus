@@ -186,7 +186,8 @@ func (suite *AnalyzeTaskSuite) serializeData() ([]*storage.Blob, error) {
 }
 
 func (suite *AnalyzeTaskSuite) TestAnalyze() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is deferred below
+	defer cancel()
 	req := &workerpb.AnalyzeRequest{
 		ClusterID:    "test",
 		TaskID:       1,

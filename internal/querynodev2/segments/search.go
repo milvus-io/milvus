@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -48,11 +47,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			return err
 		}
 		searchResults[idx] = searchResult
-		elapsed := tr.ElapseSpan().Milliseconds()
+		elapsed := float64(tr.ElapseSpan().Microseconds()) / 1000.0
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(nodeIDStr,
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+			metrics.SearchLabel, searchLabel).Observe(elapsed)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(nodeIDStr,
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(elapsed / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
@@ -116,12 +115,12 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64, plan *planpb.PlanNode) ([]*SearchResult, []Segment, error) {
+func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
 
-	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs, plan)
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -131,12 +130,12 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64, plan *planpb.PlanNode) ([]*SearchResult, []Segment, error) {
+func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
 
-	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs, plan)
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
 	}

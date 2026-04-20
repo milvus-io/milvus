@@ -134,7 +134,7 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 	worker cluster.Worker,
 ) error {
 	// after L0 segment feature
-	// growing segemnts should have load stream delete as well
+	// growing segments should have load stream delete as well
 	deleteScope := querypb.DataScope_All
 	switch candidate.Type() {
 	case commonpb.SegmentState_Sealed:
@@ -275,8 +275,8 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(bfCost.Microseconds()) / 1000.0)
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData []*DeleteData) {
@@ -353,7 +353,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 // applyDeleteBatch handles delete record and apply them to corresponding workers in batch.

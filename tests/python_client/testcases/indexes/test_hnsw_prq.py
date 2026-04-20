@@ -12,7 +12,7 @@ success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"M": 16, "efConstruction": 200, "m": 64, "nbits": 8, "nrq":1}
 default_search_params = {"ef": 64, "refine_k": 1}
 

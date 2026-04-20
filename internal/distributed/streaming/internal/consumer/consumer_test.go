@@ -27,7 +27,8 @@ func TestResumableConsumer(t *testing.T) {
 	c.EXPECT().Error().Return(errors.New("test"))
 	c.EXPECT().Close().Return(nil)
 	rc := NewResumableConsumer(func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error) {
-		if i == 0 {
+		switch i {
+		case 0:
 			i++
 			result := opts.MessageHandler.Handle(message.HandleParam{
 				Ctx: context.Background(),
@@ -45,7 +46,7 @@ func TestResumableConsumer(t *testing.T) {
 			assert.True(t, result.MessageHandled)
 			assert.NoError(t, result.Error)
 			return c, nil
-		} else if i == 1 {
+		case 1:
 			i++
 			return nil, errors.New("test")
 		}

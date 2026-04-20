@@ -77,7 +77,8 @@ class ManifestGroupTranslator
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
         bool eager_load,
-        const std::string& warmup_policy);
+        const std::string& warmup_policy,
+        const std::string& cache_key_suffix = "");
     ~ManifestGroupTranslator() = default;
 
     /**

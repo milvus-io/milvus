@@ -68,7 +68,7 @@ func FromCompactionState(s datapb.CompactionTaskState) State {
 	switch s {
 	case datapb.CompactionTaskState_pipelining:
 		return Init
-	case datapb.CompactionTaskState_executing:
+	case datapb.CompactionTaskState_executing, datapb.CompactionTaskState_analyzing:
 		return InProgress
 	case datapb.CompactionTaskState_completed, datapb.CompactionTaskState_meta_saved,
 		datapb.CompactionTaskState_statistic, datapb.CompactionTaskState_indexing, datapb.CompactionTaskState_cleaned:

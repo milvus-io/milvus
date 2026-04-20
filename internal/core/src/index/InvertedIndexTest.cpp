@@ -85,7 +85,8 @@ struct ChunkManagerWrapper {
             cm_->Remove(file);
         }
 
-        boost::filesystem::remove_all(cm_->GetRootPath());
+        boost::system::error_code ec;
+        boost::filesystem::remove_all(cm_->GetRootPath(), ec);
     }
 
     void
@@ -216,6 +217,7 @@ test_run() {
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = nb;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
@@ -244,7 +246,7 @@ test_run() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(milvus::tracer::TraceContext{}, config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {
@@ -611,6 +613,7 @@ test_string() {
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = nb;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
@@ -639,7 +642,7 @@ test_string() {
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index->Load(milvus::tracer::TraceContext{}, config);
+        index->LoadUnified(config);
 
         auto cnt = index->Count();
         if (has_lack_binlog_row_) {

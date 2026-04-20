@@ -819,7 +819,7 @@ func TestInsertLongDocument(t *testing.T) {
 	_, err := mc.Insert(ctx, milvusclient.NewColumnBasedInsertOption(schema.CollectionName).WithVarcharColumn("document", documents))
 
 	// should fail with long document when truncate is false
-	common.CheckErr(t, err, false, "Call service failed")
+	common.CheckErr(t, err, false, "call service failed")
 }
 
 // TestInvalidEndpointHandling tests various invalid endpoint scenarios

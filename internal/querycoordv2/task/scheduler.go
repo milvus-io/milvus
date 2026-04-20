@@ -554,14 +554,15 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 		taskType := GetTaskType(task)
-		if taskType == TaskTypeGrow {
+		switch taskType {
+		case TaskTypeGrow:
 			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
 			nodesWithChannel := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
 			replicaNodeMap := utils.GroupNodesByReplica(task.ctx, scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
-		} else if taskType == TaskTypeMove {
+		case TaskTypeMove:
 			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
 			_, ok := lo.Find(delegatorList, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
 			if !ok {
@@ -609,7 +610,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
-	replica := scheduler.meta.ReplicaManager.Get(scheduler.ctx, replicaID)
+	replica := scheduler.meta.Get(scheduler.ctx, replicaID)
 	if replica == nil {
 		return nil
 	}
@@ -658,7 +659,7 @@ func (scheduler *taskScheduler) promote(task Task) error {
 		zap.String("source", task.Source().String()),
 	)
 
-	if err := scheduler.check(task); err != nil {
+	if err := scheduler.check(task, true); err != nil {
 		log.Info("failed to promote task", zap.Error(err))
 		return err
 	}
@@ -754,7 +755,7 @@ func (scheduler *taskScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
 
 func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
 	if len(filters) == 0 {
-		scheduler.segmentTasks.Len()
+		return scheduler.segmentTasks.Len()
 	}
 
 	// rewrite this with for loop
@@ -937,7 +938,7 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 	if task.IsFinished(scheduler.distMgr) {
 		task.SetStatus(TaskStatusSucceeded)
 	} else {
-		if err := scheduler.check(task); err != nil {
+		if err := scheduler.check(task, false); err != nil {
 			task.Cancel(err)
 		}
 	}
@@ -968,10 +969,10 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	return executor.Execute(task, step)
 }
 
-func (scheduler *taskScheduler) check(task Task) error {
+func (scheduler *taskScheduler) check(task Task, checkDistExist bool) error {
 	err := task.Context().Err()
 	if err == nil {
-		err = scheduler.checkStale(task)
+		err = scheduler.checkStale(task, checkDistExist)
 	}
 
 	return err
@@ -1127,7 +1128,7 @@ func WrapTaskLog(task Task, fields ...zap.Field) []zap.Field {
 	return res
 }
 
-func (scheduler *taskScheduler) checkStale(task Task) error {
+func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error {
 	log := log.Ctx(task.Context()).With(
 		zap.String("task", task.String()),
 	)
@@ -1136,7 +1137,7 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
 	var replica *meta.Replica
 	if task.ReplicaID() != -1 {
-		replica = scheduler.meta.ReplicaManager.Get(scheduler.ctx, task.ReplicaID())
+		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
 		if replica == nil {
 			log.Warn("task stale due to replica not found")
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())
@@ -1144,18 +1145,23 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 	}
 
 	// For segment grow tasks, check if segment is already loaded in dist.
-	// This prevents duplicate load tasks when checker generates tasks using stale dist snapshot
-	// but dist has been updated before the task is processed.
-	if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
-		existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
-			meta.WithCollectionID(task.CollectionID()),
-			meta.WithReplica(replica),
-			meta.WithSegmentID(segmentTask.SegmentID()),
-		)
-		if len(existsInDist) > 0 {
-			log.Info("task stale due to segment already loaded in dist",
-				zap.Int64("segmentID", segmentTask.SegmentID()))
-			return merr.WrapErrServiceInternal("segment already loaded in dist")
+	// This prevents duplicate load RPCs when the checker creates tasks from a stale dist snapshot
+	// but the segment has already been loaded before the task is dispatched.
+	// Only checked during promote (waitQueue → processQueue), not during preProcess,
+	// because during preProcess the segment may have been loaded by this task's own in-flight RPC,
+	// and canceling the task would kill that RPC with a misleading "context canceled" error.
+	if checkDistExist {
+		if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
+			existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
+				meta.WithCollectionID(task.CollectionID()),
+				meta.WithReplica(replica),
+				meta.WithSegmentID(segmentTask.SegmentID()),
+			)
+			if len(existsInDist) > 0 {
+				log.Info("task stale due to segment already loaded in dist",
+					zap.Int64("segmentID", segmentTask.SegmentID()))
+				return merr.WrapErrServiceInternal("segment already loaded in dist")
+			}
 		}
 	}
 

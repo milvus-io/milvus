@@ -104,7 +104,7 @@ struct UnaryElementFuncForMatch {
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res) {
         static_assert(
             filter_type == FilterType::sequential,
@@ -126,7 +126,7 @@ struct UnaryElementFuncForMatch {
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res,
                const TargetBitmap& bitmap_input,
                int start_cursor,
@@ -163,7 +163,7 @@ struct UnaryElementFunc {
     operator()(const T* src,
                size_t size,
                TargetBitmapView res,
-               IndexInnerType val) {
+               const IndexInnerType& val) {
         static_assert(filter_type == FilterType::sequential,
                       "this override operator() of UnaryElementFunc does not "
                       "support FilterType::random");
@@ -230,7 +230,7 @@ struct UnaryElementFunc {
     void
     operator()(const T* src,
                size_t size,
-               IndexInnerType val,
+               const IndexInnerType& val,
                TargetBitmapView res,
                const TargetBitmap& bitmap_input,
                size_t start_cursor,
@@ -368,7 +368,7 @@ struct UnaryElementFuncForArray {
     operator()(const ArrayView* src,
                const bool* valid_data,
                size_t size,
-               ValueType val,
+               const ValueType& val,
                int index,
                TargetBitmapView res,
                TargetBitmapView valid_res,

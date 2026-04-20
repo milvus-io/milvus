@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
@@ -59,7 +60,7 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Append(s, kv[i+1])
+			md.Append(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -76,7 +77,7 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Set(s, kv[i+1])
+			md.Set(s, kv[i+1]) //nolint:gosec // G602: bounds guaranteed by even-length check above
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -150,4 +151,19 @@ func MergeContext(ctx1 context.Context, ctx2 context.Context) (context.Context, 
 		stop()
 		cancel(context.Canceled)
 	}
+}
+
+type queryLabelKey struct{}
+
+// WithQueryLabel sets the query label in context for metrics differentiation.
+func WithQueryLabel(ctx context.Context, label string) context.Context {
+	return context.WithValue(ctx, queryLabelKey{}, label)
+}
+
+// GetQueryLabel returns the query label from context, defaulting to "query".
+func GetQueryLabel(ctx context.Context) string {
+	if v, ok := ctx.Value(queryLabelKey{}).(string); ok && v != "" {
+		return v
+	}
+	return metrics.QueryLabel
 }

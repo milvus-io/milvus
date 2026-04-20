@@ -59,7 +59,7 @@ func createTestBalanceChecker() *BalanceChecker {
 
 	// Initialize global balancer factory for testing
 	balance.ResetGlobalBalancerFactoryForTest()
-	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, metaInstance, targetMgr)
+	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, targetMgr)
 
 	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
 }
@@ -460,7 +460,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
@@ -547,7 +547,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPrio
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
@@ -606,7 +606,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 	}
 
 	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
-		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
@@ -1730,13 +1730,14 @@ func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections
 		// Collection 2: one channel not serviceable
 		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
 			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
-				if collectionID == 1 {
+				switch collectionID {
+				case 1:
 					// All serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
 					}
-				} else if collectionID == 2 {
+				case 2:
 					// One not serviceable
 					return []*meta.DmChannel{
 						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},

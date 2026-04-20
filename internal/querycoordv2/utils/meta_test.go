@@ -57,15 +57,15 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
-	m.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
-	m.ResourceManager.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg3", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
@@ -77,13 +77,13 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 			Hostname: "localhost",
 		}))
 		if i%3 == 0 {
-			m.ResourceManager.HandleNodeUp(ctx, int64(i))
+			m.HandleNodeUp(ctx, int64(i))
 		}
 		if i%3 == 1 {
-			m.ResourceManager.HandleNodeUp(ctx, int64(i))
+			m.HandleNodeUp(ctx, int64(i))
 		}
 		if i%3 == 2 {
-			m.ResourceManager.HandleNodeUp(ctx, int64(i))
+			m.HandleNodeUp(ctx, int64(i))
 		}
 	}
 
@@ -149,8 +149,8 @@ func TestReassignReplicaToRG_ScaleUpTransfersToSmallestRG(t *testing.T) {
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 
 	// Setup: 1 replica in __default_resource_group
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(100, 1))
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.PutCollection(ctx, CreateTestCollection(100, 1))
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            10,
 			CollectionID:  100,
@@ -162,7 +162,7 @@ func TestReassignReplicaToRG_ScaleUpTransfersToSmallestRG(t *testing.T) {
 
 	// Create rg_for_replica_1, rg_for_replica_2, rg_for_replica_3
 	for _, rg := range []string{"rg_for_replica_1", "rg_for_replica_2", "rg_for_replica_3"} {
-		m.ResourceManager.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
+		m.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
 			Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 		})
@@ -198,13 +198,13 @@ func TestReassignReplicaToRG_ScaleDownPreservesSmallestRG(t *testing.T) {
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 
 	// Setup: 3 replicas in rg1/rg2/rg3
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(100, 3))
+	m.PutCollection(ctx, CreateTestCollection(100, 3))
 	for i, rg := range []string{"rg_for_replica_1", "rg_for_replica_2", "rg_for_replica_3"} {
-		m.ResourceManager.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
+		m.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
 			Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 		})
-		m.ReplicaManager.Put(ctx, meta.NewReplica(
+		m.Put(ctx, meta.NewReplica(
 			&querypb.Replica{
 				ID:            int64(10 + i),
 				CollectionID:  100,
@@ -245,13 +245,13 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(1, 2))
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(2, 2))
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.PutCollection(ctx, CreateTestCollection(1, 2))
+	m.PutCollection(ctx, CreateTestCollection(2, 2))
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  1,
@@ -261,7 +261,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            2,
 			CollectionID:  1,
@@ -271,7 +271,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            3,
 			CollectionID:  2,
@@ -281,7 +281,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            4,
 			CollectionID:  2,
@@ -314,11 +314,11 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 
 	collectionID := int64(1000)
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(collectionID, 2))
+	m.PutCollection(ctx, CreateTestCollection(collectionID, 2))
 
 	// Create rg1 first and fill it completely before creating rg2,
 	// so that HandleNodeUp assigns nodes to the correct RG.
-	m.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
@@ -330,13 +330,13 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 			Address:  "127.0.0.1",
 			Hostname: "localhost",
 		}))
-		m.ResourceManager.HandleNodeUp(ctx, int64(i))
+		m.HandleNodeUp(ctx, int64(i))
 	}
-	rg1 := m.ResourceManager.GetResourceGroup(ctx, "rg1")
+	rg1 := m.GetResourceGroup(ctx, "rg1")
 	require.Equal(t, 0, rg1.MissingNumOfNodes(), "rg1 should be fully ready")
 
 	// Now create rg2 (new, nodes not ready yet)
-	m.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
@@ -347,14 +347,14 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 		Address:  "127.0.0.1",
 		Hostname: "localhost",
 	}))
-	m.ResourceManager.HandleNodeUp(ctx, 3)
+	m.HandleNodeUp(ctx, 3)
 
 	// Verify rg2 is missing nodes
-	rg2 := m.ResourceManager.GetResourceGroup(ctx, "rg2")
+	rg2 := m.GetResourceGroup(ctx, "rg2")
 	require.Equal(t, 1, rg2.MissingNumOfNodes(), "rg2 should be missing 1 node")
 
 	// Put existing replica in rg1 (has RW nodes, should recover normally)
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  collectionID,
@@ -364,24 +364,24 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 	))
 
 	// Spawn a new replica in rg2 with NeedWaitRGReady option
-	newReplicas, err := m.ReplicaManager.Spawn(ctx, collectionID, map[string]int{"rg2": 1}, nil, commonpb.LoadPriority_LOW, meta.WithNeedWaitRGReady())
+	newReplicas, err := m.Spawn(ctx, collectionID, map[string]int{"rg2": 1}, nil, commonpb.LoadPriority_LOW, meta.WithNeedWaitRGReady())
 	require.NoError(t, err)
 	require.Len(t, newReplicas, 1)
 	newReplicaID := newReplicas[0].GetID()
 
 	// Verify the new replica has the NeedWaitRGReady flag set
-	newReplica := m.ReplicaManager.Get(ctx, newReplicaID)
+	newReplica := m.Get(ctx, newReplicaID)
 	require.True(t, newReplica.NeedWaitRGReady(), "newly spawned replica should have NeedWaitRGReady flag")
 
 	// First recovery: rg2 is not ready (missing 1 node), new replica should NOT get nodes
 	RecoverReplicaOfCollection(ctx, m, collectionID)
 
-	newReplica = m.ReplicaManager.Get(ctx, newReplicaID)
+	newReplica = m.Get(ctx, newReplicaID)
 	assert.Empty(t, newReplica.GetRWNodes(), "new replica should have no RW nodes while RG is not ready")
 	assert.True(t, newReplica.NeedWaitRGReady(), "flag should still be set since no nodes were assigned")
 
 	// Existing replica in rg1 should still have its nodes
-	existingReplica := m.ReplicaManager.Get(ctx, 1)
+	existingReplica := m.Get(ctx, 1)
 	assert.Len(t, existingReplica.GetRWNodes(), 2, "existing replica should keep its nodes")
 
 	// Now add the second node to rg2 (RG becomes ready)
@@ -390,15 +390,15 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 		Address:  "127.0.0.1",
 		Hostname: "localhost",
 	}))
-	m.ResourceManager.HandleNodeUp(ctx, 4)
+	m.HandleNodeUp(ctx, 4)
 
-	rg2 = m.ResourceManager.GetResourceGroup(ctx, "rg2")
+	rg2 = m.GetResourceGroup(ctx, "rg2")
 	require.Equal(t, 0, rg2.MissingNumOfNodes(), "rg2 should now be fully ready")
 
 	// Second recovery: rg2 is ready, new replica should now get all nodes and flag should be cleared
 	RecoverReplicaOfCollection(ctx, m, collectionID)
 
-	newReplica = m.ReplicaManager.Get(ctx, newReplicaID)
+	newReplica = m.Get(ctx, newReplicaID)
 	assert.Len(t, newReplica.GetRWNodes(), 2, "new replica should now have 2 RW nodes")
 	assert.False(t, newReplica.NeedWaitRGReady(), "flag should be explicitly cleared after first node assignment")
 }
@@ -416,10 +416,10 @@ func TestRecoverReplicaOfCollection_ExistingReplicaNotAffectedByMissingNodes(t *
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 
 	collectionID := int64(2000)
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(collectionID, 1))
+	m.PutCollection(ctx, CreateTestCollection(collectionID, 1))
 
 	// Create RG with 3 requested nodes but only 2 available (simulates rolling update)
-	m.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
 	})
@@ -430,11 +430,11 @@ func TestRecoverReplicaOfCollection_ExistingReplicaNotAffectedByMissingNodes(t *
 			Address:  "127.0.0.1",
 			Hostname: "localhost",
 		}))
-		m.ResourceManager.HandleNodeUp(ctx, int64(i))
+		m.HandleNodeUp(ctx, int64(i))
 	}
 
 	// Existing replica (has RW nodes, does NOT have NeedWaitRGReady flag)
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  collectionID,
@@ -444,13 +444,13 @@ func TestRecoverReplicaOfCollection_ExistingReplicaNotAffectedByMissingNodes(t *
 	))
 
 	// rg1 is missing 1 node
-	rg1 := m.ResourceManager.GetResourceGroup(ctx, "rg1")
+	rg1 := m.GetResourceGroup(ctx, "rg1")
 	require.Equal(t, 1, rg1.MissingNumOfNodes())
 
 	// Recovery should still work for existing replica (no NeedWaitRGReady flag)
 	RecoverReplicaOfCollection(ctx, m, collectionID)
 
-	existingReplica := m.ReplicaManager.Get(ctx, 1)
+	existingReplica := m.Get(ctx, 1)
 	assert.Len(t, existingReplica.GetRWNodes(), 2, "existing replica should keep its nodes during rolling update")
 }
 
@@ -467,21 +467,21 @@ func TestSpawnWithoutWaitRGReadyOption(t *testing.T) {
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 
 	collectionID := int64(3000)
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(collectionID, 1))
+	m.PutCollection(ctx, CreateTestCollection(collectionID, 1))
 
-	m.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
 
 	// Spawn without WithNeedWaitRGReady — should NOT set the flag
-	replicas, err := m.ReplicaManager.Spawn(ctx, collectionID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW)
+	replicas, err := m.Spawn(ctx, collectionID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW)
 	require.NoError(t, err)
 	require.Len(t, replicas, 1)
 	assert.False(t, replicas[0].NeedWaitRGReady(), "spawn without option should not set NeedWaitRGReady")
 
 	// Spawn with WithNeedWaitRGReady — should set the flag
-	replicas2, err := m.ReplicaManager.Spawn(ctx, collectionID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW, meta.WithNeedWaitRGReady())
+	replicas2, err := m.Spawn(ctx, collectionID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW, meta.WithNeedWaitRGReady())
 	require.NoError(t, err)
 	require.Len(t, replicas2, 1)
 	assert.True(t, replicas2[0].NeedWaitRGReady(), "spawn with option should set NeedWaitRGReady")
@@ -499,13 +499,13 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
-	m.ResourceManager.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
+	m.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
 	})
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(1, 2))
-	m.CollectionManager.PutCollection(ctx, CreateTestCollection(2, 2))
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.PutCollection(ctx, CreateTestCollection(1, 2))
+	m.PutCollection(ctx, CreateTestCollection(2, 2))
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            1,
 			CollectionID:  1,
@@ -515,7 +515,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            2,
 			CollectionID:  1,
@@ -525,7 +525,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            3,
 			CollectionID:  2,
@@ -535,7 +535,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		typeutil.NewUniqueSet(),
 	))
 
-	m.ReplicaManager.Put(ctx, meta.NewReplica(
+	m.Put(ctx, meta.NewReplica(
 		&querypb.Replica{
 			ID:            4,
 			CollectionID:  2,
@@ -551,7 +551,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 			Address:  "127.0.0.1",
 			Hostname: "localhost",
 		}))
-		m.ResourceManager.HandleNodeUp(ctx, nodeID)
+		m.HandleNodeUp(ctx, nodeID)
 	}
 	RecoverAllCollection(m)
 

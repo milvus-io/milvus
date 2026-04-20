@@ -103,6 +103,7 @@ type Cache interface {
 
 type collectionInfo struct {
 	collID                typeutil.UniqueID
+	dbName                string
 	schema                *schemaInfo
 	partInfo              *partitionInfos
 	createdTimestamp      uint64
@@ -494,6 +495,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
 			collID:                collection.CollectionID,
+			dbName:                collection.GetDbName(),
 			schema:                schemaInfo,
 			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
@@ -502,7 +504,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			partitionKeyIsolation: isolation,
 			queryMode:             queryMode,
 			updateTimestamp:       collection.UpdateTimestamp,
-			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
 			pChannels:             collection.PhysicalChannelNames,
 			numPartitions:         collection.NumPartitions,
@@ -526,6 +528,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
+		dbName:                collection.GetDbName(),
 		schema:                schemaInfo,
 		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:      collection.CreatedTimestamp,
@@ -534,7 +537,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		partitionKeyIsolation: isolation,
 		queryMode:             queryMode,
 		updateTimestamp:       collection.UpdateTimestamp,
-		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+		collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 		vChannels:             collection.VirtualChannelNames,
 		pChannels:             collection.PhysicalChannelNames,
 		numPartitions:         collection.NumPartitions,

@@ -47,15 +47,28 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		Topks:      make([]int64, 0, nq),
 	}
 
-	// Check element-level consistency: all results must have ElementIndices or none
-	hasElementIndices := searchResultData[0].ElementIndices != nil
-	for i, data := range searchResultData {
-		if (data.ElementIndices != nil) != hasElementIndices {
-			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
-				hasElementIndices, i, data.ElementIndices != nil)
+	// Determine element-level flag: any result having ElementIndices means element-level search.
+	hasElementIndices := false
+	for _, data := range searchResultData {
+		if data.ElementIndices != nil {
+			hasElementIndices = true
+			break
 		}
 	}
 	if hasElementIndices {
+		for i, data := range searchResultData {
+			// If any result has ElementIndices, all results must have ElementIndices or no doc is hit in the segment
+			if data.ElementIndices == nil {
+				ids := data.GetIds()
+				// When a segment returns 0 hits, C++ reduce creates an empty LongArray
+				// which proto3 serializes as absent (nil). Back-fill for uniformity.
+				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
+					data.ElementIndices = &schemapb.LongArray{}
+				} else {
+					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+				}
+			}
+		}
 		ret.ElementIndices = &schemapb.LongArray{
 			Data: make([]int64, 0),
 		}
@@ -163,15 +176,28 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		Topks:      make([]int64, 0, nq),
 	}
 
-	// Check element-level consistency: all results must have ElementIndices or none
-	hasElementIndices := searchResultData[0].ElementIndices != nil
-	for i, data := range searchResultData {
-		if (data.ElementIndices != nil) != hasElementIndices {
-			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
-				hasElementIndices, i, data.ElementIndices != nil)
+	// Determine element-level flag: any result having ElementIndices means element-level search.
+	hasElementIndices := false
+	for _, data := range searchResultData {
+		if data.ElementIndices != nil {
+			hasElementIndices = true
+			break
 		}
 	}
 	if hasElementIndices {
+		// If any result has ElementIndices, all results must have ElementIndices or no doc is hit in the segment
+		for i, data := range searchResultData {
+			if data.ElementIndices == nil {
+				ids := data.GetIds()
+				// When a segment returns 0 hits, C++ reduce creates an empty LongArray
+				// which proto3 serializes as absent (nil). Back-fill for uniformity.
+				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
+					data.ElementIndices = &schemapb.LongArray{}
+				} else {
+					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+				}
+			}
+		}
 		ret.ElementIndices = &schemapb.LongArray{
 			Data: make([]int64, 0),
 		}

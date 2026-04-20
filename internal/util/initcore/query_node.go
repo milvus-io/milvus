@@ -77,6 +77,13 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
+	visibilityEnabled := paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()
+	bloomEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
+	C.SegcoreSetVisibilityFilterEnabled(C.bool(visibilityEnabled))
+	if !visibilityEnabled && bloomEnabled {
+		log.Warn("visibilityFilterEnabled=false with bloomFilterEnabled=true: deletes are forwarded via bloom filter but never applied — consider disabling bloom filter to save memory")
+	}
+
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
@@ -153,7 +160,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
-	InitLocalChunkManager(localDataRootPath)
+	if err := InitLocalChunkManager(localDataRootPath); err != nil {
+		return err
+	}
 
 	err := InitRemoteChunkManager(paramtable.Get())
 	if err != nil {

@@ -276,6 +276,13 @@ class FieldParams(BasePrams):
     is_clustering_key: bool = None
     nullable: bool = None
 
+    # warmup (tiered storage)
+    warmup: str = None
+
+    # text match (varchar with analyzer)
+    enable_analyzer: bool = None
+    enable_match: bool = None
+
 
 @dataclass
 class IndexPrams(BasePrams):
@@ -309,6 +316,13 @@ class DefaultVectorIndexParams:
     def IVF_FLAT(field: str, nlist: int = 1024, metric_type=MetricType.L2):
         return {
             field: IndexPrams(index_type=IndexName.IVF_FLAT, params={"nlist": nlist}, metric_type=metric_type)
+        }
+
+    @staticmethod
+    def IVF_PQ(field: str, nlist: int = 1024, m: int = 8, nbits: int = 8, metric_type=MetricType.L2):
+        return {
+            field: IndexPrams(index_type=IndexName.IVF_PQ, params={"nlist": nlist, "m": m, "nbits": nbits},
+                              metric_type=metric_type)
         }
 
     @staticmethod
@@ -359,6 +373,138 @@ class DefaultVectorIndexParams:
             field: IndexPrams(index_type=IndexName.SPARSE_INVERTED_INDEX, params={"drop_ratio_build": drop_ratio_build},
                               metric_type=metric_type)
         }
+
+
+class DefaultIndexSearchParams:
+    @staticmethod
+    def FLAT(**kwargs):
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        return {
+            "metric_type": metric_type,
+            "params": {}
+        }
+
+    @staticmethod
+    def IVF_FLAT(**kwargs):
+        """
+        nprobe: [1, nlist]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        nprobe = max(1, int(kwargs.get("nlist", 256)) // 8)
+        return {
+            "metric_type": metric_type,
+            "params": {"nprobe": nprobe}
+        }
+
+    @staticmethod
+    def IVF_PQ(**kwargs):
+        """
+        nprobe: [1, nlist]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        nprobe = max(1, int(kwargs.get("nlist", 256)) // 8)
+        return {
+            "metric_type": metric_type,
+            "params": {"nprobe": nprobe}
+        }
+
+    @staticmethod
+    def IVF_SQ8(**kwargs):
+        """
+        nprobe: [1, nlist]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        nprobe = max(1, int(kwargs.get("nlist", 256)) // 8)
+        return {
+            "metric_type": metric_type,
+            "params": {"nprobe": nprobe}
+        }
+
+    @staticmethod
+    def HNSW(**kwargs):
+        """
+        ef: [top_k, int_max]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        limit = kwargs.get("limit", 64)
+        ef = max(limit, 128)
+        return {
+            "metric_type": metric_type,
+            "params": {"ef": ef}
+        }
+
+    @staticmethod
+    def SCANN(**kwargs):
+        """
+        nprobe: [1, nlist]
+        reorder_k: [top_k, ∞]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        nprobe = max(1, int(kwargs.get("nlist", 256)) // 8)
+        limit = kwargs.get("limit", 64)
+        reorder_k = max(limit, 128)
+        return {
+            "metric_type": metric_type,
+            "params": {"nprobe": nprobe, "reorder_k": reorder_k}
+        }
+
+    @staticmethod
+    def DISKANN(**kwargs):
+        """
+        search_list: [top_k, int_max]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.L2)
+        limit = kwargs.get("limit", 64)
+        search_list = max(limit, 128)
+        return {
+            "metric_type": metric_type,
+            "params": {"search_list": search_list}
+        }
+
+    @staticmethod
+    def BIN_FLAT(**kwargs):
+        metric_type = kwargs.get("metric_type", MetricType.JACCARD)
+        return {
+            "metric_type": metric_type,
+            "params": {}
+        }
+
+    @staticmethod
+    def BIN_IVF_FLAT(**kwargs):
+        """
+        nprobe: [1, nlist]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.JACCARD)
+        nprobe = max(1, int(kwargs.get("nlist", 256)) // 8)
+        return {
+            "metric_type": metric_type,
+            "params": {"nprobe": nprobe}
+        }
+
+    @staticmethod
+    def SPARSE_WAND(**kwargs):
+        """
+        drop_ratio_search: [0.0, 1.0]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.IP)
+        drop_ratio_search = kwargs.get("drop_ratio_build", 0.2)
+        return {
+            "metric_type": metric_type,
+            "params": {"drop_ratio_search": drop_ratio_search}
+        }
+
+    @staticmethod
+    def SPARSE_INVERTED_INDEX(**kwargs):
+        """
+        drop_ratio_search: [0.0, 1.0]
+        """
+        metric_type = kwargs.get("metric_type", MetricType.IP)
+        drop_ratio_search = kwargs.get("drop_ratio_build", 0.2)
+        return {
+            "metric_type": metric_type,
+            "params": {"drop_ratio_search": drop_ratio_search}
+        }
+
 
 class DefaultScalarIndexParams:
 
@@ -419,6 +565,16 @@ class DefaultVectorSearchParams:
 
     @staticmethod
     def IVF_FLAT(metric_type=MetricType.L2, nprobe: int = 32, inside_params: SearchInsidePrams = None, **kwargs):
+        inside_params_dict = {"nprobe": nprobe}
+        if inside_params is not None:
+            inside_params_dict.update(inside_params.to_dict)
+
+        sp = SearchPrams(params=inside_params_dict, metric_type=metric_type).to_dict
+        sp.update(kwargs)
+        return sp
+
+    @staticmethod
+    def IVF_PQ(metric_type=MetricType.L2, nprobe: int = 16, inside_params: SearchInsidePrams = None, **kwargs):
         inside_params_dict = {"nprobe": nprobe}
         if inside_params is not None:
             inside_params_dict.update(inside_params.to_dict)

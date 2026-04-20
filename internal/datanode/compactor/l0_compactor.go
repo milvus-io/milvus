@@ -324,6 +324,14 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 					Channel:   t.plan.GetChannel(),
 					Manifest:  newManifest,
 					NumOfRows: int64(len(deletes.pks)),
+					// Delta summary for compaction trigger decisions (no path, only stats)
+					Deltalogs: []*datapb.FieldBinlog{{
+						Binlogs: []*datapb.Binlog{{
+							LogID:      logID,
+							EntriesNum: int64(len(deletes.pks)),
+							MemorySize: int64(writer.GetWrittenUncompressed()),
+						}},
+					}},
 				}, nil
 			}
 			// V1: Return deltalog in FieldBinlog format
@@ -428,7 +436,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 	}
 
 	allDelta, err := compaction.ComposeDeleteDataFromSegments(ctx, pkField.DataType, l0Segments,
-		storage.WithDownloader(t.BinlogIO.Download),
+		storage.WithDownloader(t.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("L0 compaction compose delete data fail", zap.Error(err))

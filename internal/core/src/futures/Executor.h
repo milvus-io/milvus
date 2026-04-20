@@ -27,4 +27,10 @@ const int HIGH = 0;
 folly::CPUThreadPoolExecutor*
 getGlobalCPUExecutor();
 
+folly::CPUThreadPoolExecutor*
+getSearchCPUExecutor();
+
+folly::CPUThreadPoolExecutor*
+getLoadCPUExecutor();
+
 };  // namespace milvus::futures

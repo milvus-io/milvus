@@ -21,9 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -200,9 +203,9 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 
 		options := &BuildIndexOptions{
 			TantivyMemory:                0,
-			JsonStatsMaxShreddingColumns: 256,
-			JsonStatsShreddingRatio:      0.3,
-			JsonStatsWriteBatchSize:      81920,
+			JSONStatsMaxShreddingColumns: 256,
+			JSONStatsShreddingRatio:      0.3,
+			JSONStatsWriteBatchSize:      81920,
 		}
 		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "")
 
@@ -274,4 +277,98 @@ func genRowWithBM25(magic int64) map[int64]interface{} {
 
 func getMilvusBirthday() time.Time {
 	return time.Date(2019, time.Month(5), 30, 0, 0, 0, 0, time.UTC)
+}
+
+// nullable JSON may have no insert column binlog; getInsertFiles should allow empty paths (aligned with text index).
+func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mgr := NewTaskManager(ctx)
+	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:              "c1",
+		TaskID:                 1,
+		CollectionID:           100,
+		PartitionID:            101,
+		TargetSegmentID:        102,
+		SegmentID:              103,
+		InsertChannel:          "ch",
+		TaskVersion:            1,
+		JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		StorageConfig:          &indexpb.StorageConfig{RootPath: "/root"},
+		SubJobType:             indexpb.StatsSubJob_JsonKeyIndexJob,
+		StorageVersion:         1,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 201, Name: "j", DataType: schemapb.DataType_JSON, Nullable: true},
+			},
+		},
+	}
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+
+	insertBinlogs := []*datapb.FieldBinlog{
+		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
+	}
+
+	var gotInsertFiles []string
+	m := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+		gotInsertFiles = info.InsertFiles
+		return &indexcgowrapper.JSONKeyStatsResult{Files: map[string]int64{}}, nil
+	}).Build()
+	defer m.UnPatch()
+
+	err := st.createJSONKeyStats(ctx, req.GetStorageConfig(),
+		req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(),
+		req.GetTaskVersion(), req.GetTaskID(),
+		common.JSONStatsDataFormatVersion,
+		insertBinlogs, 256, 0.3, 81920)
+	require.NoError(t, err)
+	require.Empty(t, gotInsertFiles)
+}
+
+func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mgr := NewTaskManager(ctx)
+	mgr.LoadOrStoreStatsTask("c1", 2, &StatsTaskInfo{SegID: 10})
+
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:              "c1",
+		TaskID:                 2,
+		CollectionID:           100,
+		PartitionID:            101,
+		TargetSegmentID:        102,
+		SegmentID:              103,
+		InsertChannel:          "ch",
+		TaskVersion:            1,
+		JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		StorageConfig:          &indexpb.StorageConfig{RootPath: "/root"},
+		SubJobType:             indexpb.StatsSubJob_JsonKeyIndexJob,
+		StorageVersion:         1,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 201, Name: "j", DataType: schemapb.DataType_JSON, Nullable: false},
+			},
+		},
+	}
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil)
+
+	insertBinlogs := []*datapb.FieldBinlog{
+		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
+	}
+
+	err := st.createJSONKeyStats(ctx, req.GetStorageConfig(),
+		req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(),
+		req.GetTaskVersion(), req.GetTaskID(),
+		common.JSONStatsDataFormatVersion,
+		insertBinlogs, 256, 0.3, 81920)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "field binlog not found for field 201")
 }

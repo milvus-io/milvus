@@ -207,6 +207,7 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 			IndexInfo:          s.GetIndexInfo(),
 			JSONStatsField:     s.GetJsonStatsInfo(),
 			ManifestPath:       s.GetManifestPath(),
+			DataVersion:        s.DataVersion,
 		})
 	}
 
@@ -289,7 +290,7 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
-			collectionIDs.Insert(ch.VchannelInfo.CollectionID)
+			collectionIDs.Insert(ch.CollectionID)
 		}
 		dh.notifyFunc(collectionIDs.Collect()...)
 	}

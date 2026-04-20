@@ -39,6 +39,11 @@ class TimestampIndex {
                timestamp_barriers_.size() * sizeof(Timestamp);
     }
 
+    Timestamp
+    get_max_timestamp() const {
+        return max_timestamp_;
+    }
+
  private:
     // numSlice
     std::vector<int64_t> lengths_;

@@ -160,7 +160,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	defer broadcaster.Close()
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
+	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return err
 	}
 	// Build import message without deprecated MsgBase

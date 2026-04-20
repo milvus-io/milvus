@@ -142,7 +142,7 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
-		suite.server.meta.ResourceManager.HandleNodeUp(suite.ctx, suite.nodes[i].ID)
+		suite.server.meta.HandleNodeUp(suite.ctx, suite.nodes[i].ID)
 		suite.expectLoadAndReleasePartitions(suite.nodes[i])
 	}
 
@@ -198,7 +198,7 @@ func (suite *ServerSuite) TestNodeUp() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
+			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
 			if replica == nil {
 				return false
 			}
@@ -228,7 +228,7 @@ func (suite *ServerSuite) TestNodeDown() {
 			return false
 		}
 		for _, collection := range suite.collections {
-			replica := suite.server.meta.ReplicaManager.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
+			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
 			if replica != nil {
 				return false
 			}
@@ -412,9 +412,10 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 
 		// Mock meta.CollectionManager.GetCollection to return different collections
 		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			if collectionID == 1001 {
+			switch collectionID {
+			case 1001:
 				return mockCollection1
-			} else if collectionID == 1002 {
+			case 1002:
 				return mockCollection2
 			}
 			return nil
@@ -573,7 +574,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 		if status == querypb.LoadStatus_Loaded {
 			collection.LoadPercentage = 100
 		}
-		collection.CollectionLoadInfo.Status = status
+		collection.Status = status
 		suite.server.meta.PutCollection(suite.ctx, collection)
 
 		partitions := suite.server.meta.GetPartitionsByCollection(suite.ctx, collectionID)
@@ -583,7 +584,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 			if status == querypb.LoadStatus_Loaded {
 				partition.LoadPercentage = 100
 			}
-			partition.PartitionLoadInfo.Status = status
+			partition.Status = status
 			suite.server.meta.PutPartition(suite.ctx, partition)
 		}
 	}

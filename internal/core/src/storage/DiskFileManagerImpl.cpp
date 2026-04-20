@@ -54,6 +54,7 @@
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
+#include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -101,7 +102,7 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
-    std::string remote_prefix = GetRemoteIndexObjectPrefixV2();
+    std::string remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name;
 }
 
@@ -564,6 +565,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         FetchRawData();
     }
 
+    // For vector arrays, num_rows should be the total flattened vector count,
+    // not the number of emb_lists, because DiskANN reads this from the data file header.
+    if (is_vector_array) {
+        num_rows = static_cast<uint32_t>(offsets.back());
+    }
+
     // write num_rows and dim value to file header
     write_offset = 0;
     local_chunk_manager->Write(
@@ -574,23 +581,23 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
-        AssertInfo(offsets.size() == num_rows + 1,
-                   "offsets size is not equal to num_rows + 1: offset size {}, "
-                   "num_rows {}",
-                   offsets.size(),
-                   num_rows);
+        AssertInfo(
+            offsets.size() >= 2 && offsets.front() == 0,
+            "invalid emb_list offsets: size {}, front {}",
+            offsets.size(),
+            offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
                                 .value();
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,
@@ -830,6 +837,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                          is_vector_array ? &offsets : nullptr);
     }
 
+    // For vector arrays, num_rows should be the total flattened vector count,
+    // not the number of emb_lists, because DiskANN reads this from the data file header.
+    if (is_vector_array) {
+        num_rows = static_cast<uint32_t>(offsets.back());
+    }
+
     // write num_rows and dim value to file header
     write_offset = 0;
     local_chunk_manager->Write(
@@ -840,11 +853,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
-        AssertInfo(offsets.size() == num_rows + 1,
-                   "offsets size is not equal to num_rows + 1: offset size {}, "
-                   "num_rows {}",
-                   offsets.size(),
-                   num_rows);
+        AssertInfo(
+            offsets.size() >= 2 && offsets.front() == 0,
+            "invalid emb_list offsets: size {}, front {}",
+            offsets.size(),
+            offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
@@ -852,12 +865,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,
@@ -1032,24 +1045,96 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
+    if (storage_version == STORAGE_V3) {
+        return cache_opt_field_to_disk_v3(config);
+    }
+    if (storage_version == STORAGE_V2) {
+        return cache_opt_field_to_disk_v2(config);
+    }
+
+    // legacy path
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return "";
+    }
+    auto fields_map = opt_fields.value();
+    const uint32_t num_of_fields = fields_map.size();
+    if (0 == num_of_fields) {
+        return "";
+    } else if (num_of_fields > 1) {
+        ThrowInfo(
+            ErrorCode::NotImplemented,
+            "vector index build with multiple fields is not supported yet");
+    }
+
+    auto segment_id = GetFieldDataMeta().segment_id;
+    auto vec_field_id = GetFieldDataMeta().field_id;
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_data_path = storage::GenFieldRawDataPathPrefix(
+                               local_chunk_manager, segment_id, vec_field_id) +
+                           std::string(VEC_OPT_FIELDS);
+    local_chunk_manager->CreateFile(local_data_path);
+    uint64_t write_offset = 0;
+    WriteOptFieldsIvfMeta(
+        local_chunk_manager, local_data_path, num_of_fields, write_offset);
+
+    std::unordered_set<int64_t> actual_field_ids;
+    for (auto& [field_id, tup] : fields_map) {
+        const auto& field_type = std::get<1>(tup);
+
+        auto& field_paths = std::get<3>(tup);
+        if (0 == field_paths.size()) {
+            LOG_WARN("optional field {} has no data", field_id);
+            return "";
+        }
+
+        SortByPath(field_paths);
+        std::vector<FieldDataPtr> field_datas =
+            FetchFieldData(rcm_.get(), field_paths);
+
+        if (WriteOptFieldIvfData(field_type,
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
+            actual_field_ids.insert(field_id);
+        }
+    }
+
+    if (actual_field_ids.size() != num_of_fields) {
+        write_offset = 0;
+        WriteOptFieldsIvfMeta(local_chunk_manager,
+                              local_data_path,
+                              actual_field_ids.size(),
+                              write_offset);
+        if (actual_field_ids.empty()) {
+            return "";
+        }
+    }
+
+    return local_data_path;
+}
+
+std::string
+DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
     auto opt_fields =
         index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     if (!opt_fields.has_value()) {
         return "";
     }
 
-    std::vector<std::vector<std::string>> remote_files_storage_v2;
-    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
-        auto segment_insert_files =
-            index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
-                config, SEGMENT_INSERT_FILES_KEY);
-        AssertInfo(segment_insert_files.has_value(),
-                   "segment insert files is empty when build index while "
-                   "caching opt fields");
-        remote_files_storage_v2 = segment_insert_files.value();
-        for (auto& remote_files : remote_files_storage_v2) {
-            SortByPath(remote_files);
-        }
+    auto segment_insert_files =
+        index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+            config, SEGMENT_INSERT_FILES_KEY);
+    AssertInfo(segment_insert_files.has_value(),
+               "segment insert files is empty when build index while "
+               "caching opt fields");
+    auto remote_files_storage_v2 = segment_insert_files.value();
+    for (auto& remote_files : remote_files_storage_v2) {
+        SortByPath(remote_files);
     }
 
     auto fields_map = opt_fields.value();
@@ -1079,25 +1164,95 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
         const auto& field_type = std::get<1>(tup);
         const auto& element_type = std::get<2>(tup);
 
-        std::vector<FieldDataPtr> field_datas;
-        // fetch scalar data from storage v2
-        if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
-            field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
-                                                     field_id,
-                                                     field_type,
-                                                     element_type,
-                                                     1,
-                                                     fs_);
-        } else {  // original way
-            auto& field_paths = std::get<3>(tup);
-            if (0 == field_paths.size()) {
-                LOG_WARN("optional field {} has no data", field_id);
-                return "";
-            }
+        auto field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
+                                                      field_id,
+                                                      field_type,
+                                                      element_type,
+                                                      1,
+                                                      fs_);
 
-            SortByPath(field_paths);
-            field_datas = FetchFieldData(rcm_.get(), field_paths);
+        if (WriteOptFieldIvfData(field_type,
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
+            actual_field_ids.insert(field_id);
         }
+    }
+
+    if (actual_field_ids.size() != num_of_fields) {
+        write_offset = 0;
+        WriteOptFieldsIvfMeta(local_chunk_manager,
+                              local_data_path,
+                              actual_field_ids.size(),
+                              write_offset);
+        if (actual_field_ids.empty()) {
+            return "";
+        }
+    }
+
+    return local_data_path;
+}
+
+std::string
+DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return "";
+    }
+    auto fields_map = opt_fields.value();
+    const uint32_t num_of_fields = fields_map.size();
+    if (0 == num_of_fields) {
+        return "";
+    } else if (num_of_fields > 1) {
+        ThrowInfo(
+            ErrorCode::NotImplemented,
+            "vector index build with multiple fields is not supported yet");
+    }
+
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    AssertInfo(manifest.has_value() && manifest.value() != "",
+               "[StorageV3] manifest path is empty when build index");
+    auto manifest_path_str = manifest.value();
+    AssertInfo(loon_ffi_properties_ != nullptr,
+               "[StorageV3] loon ffi properties is null when build index "
+               "with manifest");
+
+    auto segment_id = GetFieldDataMeta().segment_id;
+    auto vec_field_id = GetFieldDataMeta().field_id;
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_data_path = storage::GenFieldRawDataPathPrefix(
+                               local_chunk_manager, segment_id, vec_field_id) +
+                           std::string(VEC_OPT_FIELDS);
+    local_chunk_manager->CreateFile(local_data_path);
+    uint64_t write_offset = 0;
+    WriteOptFieldsIvfMeta(
+        local_chunk_manager, local_data_path, num_of_fields, write_offset);
+
+    std::unordered_set<int64_t> actual_field_ids;
+    for (auto& [field_id, tup] : fields_map) {
+        const auto& field_type = std::get<1>(tup);
+        const auto& element_type = std::get<2>(tup);
+
+        // compose field schema for optional field
+        proto::schema::FieldSchema field_schema;
+        field_schema.set_fieldid(field_id);
+        field_schema.set_nullable(true);  // use always nullable
+        milvus::storage::FieldDataMeta field_meta{field_meta_.collection_id,
+                                                  field_meta_.partition_id,
+                                                  field_meta_.segment_id,
+                                                  field_id,
+                                                  field_schema};
+        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                     loon_ffi_properties_,
+                                                     field_meta,
+                                                     field_type,
+                                                     1,  // scalar field
+                                                     element_type);
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,

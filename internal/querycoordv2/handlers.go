@@ -50,7 +50,7 @@ import (
 // may come from different replica group. We only need these shards to form a replica that serves query
 // requests.
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
-	for _, replica := range s.meta.ReplicaManager.GetByCollection(s.ctx, collectionID) {
+	for _, replica := range s.meta.GetByCollection(s.ctx, collectionID) {
 		isAvailable := true
 		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
@@ -438,6 +438,11 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 				},
 			})
 			continue
+		}
+		// If this query node is embedded in a streaming node, relabel it as streamingnode.
+		if nodeInfo := s.nodeMgr.Get(infos.ID); nodeInfo != nil && nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+			infos.Type = typeutil.StreamingNodeRole
+			infos.Name = metricsinfo.ConstructComponentName(typeutil.StreamingNodeRole, infos.ID)
 		}
 		topo.ConnectedNodes = append(topo.ConnectedNodes, infos)
 	}

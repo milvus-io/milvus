@@ -375,6 +375,19 @@ class QueryContext : public Context {
         return bitset_is_element_level_;
     }
 
+    // Set by MvccNode when no filtering is needed (sealed, no filter,
+    // no deletes, no TTL). VectorSearchNode checks this to pass empty
+    // BitsetView to Knowhere (IDSelectorAll fast path).
+    void
+    set_all_rows_visible(bool v) {
+        all_rows_visible_ = v;
+    }
+
+    bool
+    get_all_rows_visible() const {
+        return all_rows_visible_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -414,6 +427,9 @@ class QueryContext : public Context {
     // Whether the current bitset has been converted to element-level
     // Set by ElementFilterBitsNode after conversion, checked by VectorSearchNode
     bool bitset_is_element_level_{false};
+
+    // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
+    bool all_rows_visible_{false};
 };
 
 // Represent the state of one thread of query execution.

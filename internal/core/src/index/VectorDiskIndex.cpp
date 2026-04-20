@@ -148,7 +148,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to Deserialize index, " + KnowhereStatusString(stat));
+                  "failed to Deserialize index, {}",
+                  KnowhereStatusString(stat));
     span_load_engine->End();
 
     auto local_chunk_manager =
@@ -181,7 +182,8 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to serialize index, " + KnowhereStatusString(stat));
+                  "failed to serialize index, {}",
+                  KnowhereStatusString(stat));
     }
     auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalFileSize(),
@@ -239,9 +241,9 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_BUILD_THREAD_NUM);
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
@@ -263,7 +265,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build disk index, " + KnowhereStatusString(stat));
+                  "failed to build disk index, {}",
+                  KnowhereStatusString(stat));
 
     // Add valid_data file to index if it was created (nullable vector field)
     if (local_chunk_manager->Exist(valid_data_path)) {
@@ -285,6 +288,10 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     knowhere::Json build_config;
     build_config.update(config);
+
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    build_config[EMB_LIST] = is_embedding_list;
+
     // set data path
     auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
     auto field_id = file_manager_->GetFieldDataMeta().field_id;
@@ -299,9 +306,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
         auto num_threads = GetValueFromConfig<std::string>(
             build_config, DISK_ANN_BUILD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_BUILD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_BUILD_THREAD_NUM);
         build_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
     }
@@ -338,18 +345,23 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
             "offset";
         local_chunk_manager->CreateFile(offsets_path);
 
-        // Calculate the number of offsets (num_rows + 1)
-        // We need to find the actual number by looking at the data
-        uint32_t num_rows =
-            static_cast<uint32_t>(milvus::GetDatasetRows(dataset));
-        uint32_t num_offsets = num_rows + 1;
+        // GetDatasetRows returns total flattened vector count for vector arrays,
+        // not the number of emb_lists. Count actual offsets by scanning the array
+        // until we reach the terminal element (== total_vectors).
+        size_t total_vectors =
+            static_cast<size_t>(milvus::GetDatasetRows(dataset));
+        size_t num_offsets = 0;
+        while (offsets[num_offsets] < total_vectors) {
+            num_offsets++;
+        }
+        num_offsets++;  // include the terminal element (== total_vectors)
 
         // Write offsets to file
-        // Format: [num_offsets][offsets_data]
+        // Format: [num_offsets (size_t)][offsets_data (size_t array)]
         int64_t write_pos = 0;
         local_chunk_manager->Write(
-            offsets_path, write_pos, &num_offsets, sizeof(uint32_t));
-        write_pos += sizeof(uint32_t);
+            offsets_path, write_pos, &num_offsets, sizeof(size_t));
+        write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(
             offsets_path,
@@ -363,7 +375,8 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build index, " + KnowhereStatusString(stat));
+                  "failed to build index, {}",
+                  KnowhereStatusString(stat));
 
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
@@ -540,9 +553,9 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         // set threads number
         auto num_threads = GetValueFromConfig<std::string>(
             load_config, DISK_ANN_LOAD_THREAD_NUM);
-        AssertInfo(
-            num_threads.has_value(),
-            "param " + std::string(DISK_ANN_LOAD_THREAD_NUM) + "is empty");
+        AssertInfo(num_threads.has_value(),
+                   "param {} is empty",
+                   DISK_ANN_LOAD_THREAD_NUM);
         load_config[DISK_ANN_THREADS_NUM] =
             std::atoi(num_threads.value().c_str());
 

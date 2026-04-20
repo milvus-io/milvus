@@ -127,7 +127,7 @@ PhyProjectNode::GetOutput() {
                                                  true);
         auto column_vector = std::make_shared<ColumnVector>(
             std::move(field_data), std::move(valid_map));
-        column_vectors.emplace_back(column_vector);
+        column_vectors.emplace_back(std::move(column_vector));
     }
     is_finished_ = true;
     auto row_vector = std::make_shared<RowVector>(std::move(column_vectors));

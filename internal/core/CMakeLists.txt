@@ -54,7 +54,24 @@ else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+# Use -g1 (minimal debug info) for Release to speed up compile & link;
+# full -g for Debug/RelWithDebInfo where detailed debugging matters.
+if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g1")
+else ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+endif ()
+
+# Use pipes between compiler stages instead of temp files (faster I/O)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe")
+
+# Enable hardware popcnt for all compilation units on x86_64.
+# PopCountHelper in bitset/detail/popcount.h is header-only; without this flag,
+# __builtin_popcountll falls back to __popcountdi2 software emulation.
+if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mpopcnt")
+endif()
 
 if (CMAKE_COMPILER_IS_GNUCC)
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11.99)
@@ -70,6 +87,19 @@ endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
+
+# ---- Split DWARF (Linux only) ----
+# Moves debug info into .dwo files, dramatically reducing .o file sizes
+# and link time. Requires GCC 4.8+ or Clang 3.7+.
+if (LINUX AND NOT USE_ASAN STREQUAL "ON")
+    check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
+    if (HAS_SPLIT_DWARF)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
+        message(STATUS "Using -gsplit-dwarf for faster linking")
+    endif ()
+endif ()
+
 
 # **************************** Build time, type and code version ****************************
 get_current_time( BUILD_TIME )
@@ -88,6 +118,15 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
+
+# Unity (jumbo) build: merge multiple .cpp files per target into fewer
+# translation units, dramatically reducing redundant header parsing.
+if ( MILVUS_UNITY_BUILD )
+    set( CMAKE_UNITY_BUILD ON )
+    # ~8 sources per unity chunk is a good balance between speed and memory.
+    set( CMAKE_UNITY_BUILD_BATCH_SIZE 8 )
+    message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
+endif ()
 
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED on )
@@ -115,12 +154,52 @@ set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
 set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 
 # **************************** Dependencies ****************************
+# Conan 2: CMakeToolchain sets CMAKE_PREFIX_PATH via toolchain file
+# CMakeDeps generates <pkg>-config.cmake files for find_package()
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan )
-include( ${CMAKE_BINARY_DIR}/conan/conanbuildinfo.cmake )
-set( CONAN_DISABLE_CHECK_COMPILER ON )
-conan_basic_setup( KEEP_RPATHS )
 
-set( CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${CONAN_PROTOBUF_ROOT})
+find_package(Protobuf REQUIRED)
+find_package(Boost REQUIRED)
+find_package(glog REQUIRED)
+find_package(folly REQUIRED)
+find_package(RocksDB REQUIRED)
+find_package(Arrow REQUIRED)
+find_package(gRPC REQUIRED)
+find_package(opentelemetry-cpp REQUIRED)
+find_package(google-cloud-cpp REQUIRED)
+find_package(prometheus-cpp REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(nlohmann_json REQUIRED)
+find_package(fmt REQUIRED)
+find_package(re2 REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(CURL REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(lz4 REQUIRED)
+find_package(zstd REQUIRED)
+find_package(Snappy REQUIRED)
+find_package(roaring REQUIRED)
+find_package(marisa REQUIRED)
+find_package(geos REQUIRED)
+find_package(ICU REQUIRED COMPONENTS uc)
+find_package(xxHash REQUIRED)
+find_package(TBB REQUIRED)
+find_package(libsodium REQUIRED)
+find_package(double-conversion REQUIRED)
+find_package(gflags REQUIRED)
+find_package(xsimd REQUIRED)
+find_package(unordered_dense REQUIRED)
+find_package(absl REQUIRED)
+find_package(RapidJSON REQUIRED)
+find_package(simde REQUIRED)
+find_package(LibLZMA REQUIRED)
+find_package(RdKafka REQUIRED)
+find_package(GTest REQUIRED)
+find_package(benchmark REQUIRED)
+find_package(googleapis REQUIRED)
+find_package(libavrocpp REQUIRED)
+find_package(AWSSDK REQUIRED)
+find_package(Azure REQUIRED)
 
 include( CTest )
 include( BuildUtils )

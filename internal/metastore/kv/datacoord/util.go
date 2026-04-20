@@ -369,10 +369,6 @@ func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
 }
 
-func buildUpdateExternalCollectionTaskKey(taskID int64) string {
-	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
-}
-
 func buildExternalCollectionRefreshJobKey(jobID int64) string {
 	return fmt.Sprintf("%s/%d", ExternalCollectionRefreshJobPrefix, jobID)
 }

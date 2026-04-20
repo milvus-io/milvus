@@ -16,9 +16,23 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
+
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
+
+// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
+// milvus-storage does not expose structured error codes, so callers cannot
+// distinguish a recoverable concurrent-transaction conflict from a hard IO
+// error. We treat all loon failures as retryable for now and rely on a
+// bounded retry budget plus outer error handling to keep the worst case
+// finite.
+//
+// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
+// this sentinel to only the concurrent-transaction case (FailResolver) and
+// let other errors propagate immediately as retry.Unrecoverable.
+var ErrLoonTransient = errors.New("loon FFI transient error")
 
 // Property keys - matching milvus-storage/properties.h
 const (
@@ -314,7 +328,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return fmt.Errorf("FFI operation failed: %s", errStr)
+		return errors.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
 	}
 	return nil
 }

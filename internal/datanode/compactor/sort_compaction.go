@@ -204,6 +204,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	loadDeltaCost := time.Since(phaseStart)
@@ -262,6 +263,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	defer rr.Close()
@@ -271,6 +273,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn("sort failed", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	if sortTimings == nil {
@@ -477,7 +480,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				}, nil
 			}
 			resultSegment.Manifest = newManifest
-			textStatsLogs = nil
+			// Dual-write: V3 segments store text index stats in both manifest and segment metadata.
+			// Manifest is the source of truth at load time; metadata acts as a placeholder so that
+			// needDoTextIndex() in stats_inspector.go won't trigger a redundant TextIndexJob.
 		}
 		resultSegment.TextStatsLogs = textStatsLogs
 	}

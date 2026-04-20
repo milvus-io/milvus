@@ -245,7 +245,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(ctx, fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function non_existent_function not exists")
+	suite.Contains(err.Error(), "function non_existent_function not exists")
 }
 
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCollection_InputFieldNotExists() {
@@ -412,7 +412,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Old version function's output field non_existent_output not exists")
+	suite.Contains(err.Error(), "old version function's output field non_existent_output not exists")
 }
 
 // Test with empty collections and functions
@@ -429,7 +429,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Function test_function not exists")
+	suite.Contains(err.Error(), "function test_function not exists")
 }
 
 // Test max function ID calculation

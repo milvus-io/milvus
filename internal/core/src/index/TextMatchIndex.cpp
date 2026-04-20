@@ -104,14 +104,15 @@ TextMatchIndex::Upload(const Config& config) {
 
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
+        auto path_str = iter->path().string();
         if (boost::filesystem::is_directory(*iter)) {
-            LOG_WARN("{} is a directory", iter->path().string());
+            LOG_WARN("{} is a directory", path_str);
         } else {
-            LOG_INFO("trying to add text log: {}", iter->path().string());
-            AssertInfo(disk_file_manager_->AddTextLog(iter->path().string()),
+            LOG_INFO("trying to add text log: {}", path_str);
+            AssertInfo(disk_file_manager_->AddTextLog(path_str),
                        "failed to add text log: {}",
-                       iter->path().string());
-            LOG_INFO("text log: {} added", iter->path().string());
+                       path_str);
+            LOG_INFO("text log: {} added", path_str);
         }
     }
 
@@ -163,7 +164,7 @@ TextMatchIndex::Load(const Config& config) {
         if (filename.size() > 3 &&
             filename.substr(filename.size() - 3) == ".v3") {
             LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
-            InvertedIndexTantivy<std::string>::LoadV3(config);
+            InvertedIndexTantivy<std::string>::LoadUnified(config);
             return;
         }
     }
@@ -239,7 +240,7 @@ void
 TextMatchIndex::AddNullSealed(int64_t offset) {
     null_offset_.push_back(offset);
     // still need to add null to make offset is correct
-    std::string empty = "";
+    static const std::string empty;
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
@@ -286,7 +287,7 @@ TextMatchIndex::BuildIndexFromFieldData(
                     null_offset_.push_back(offset);
                     // add empty array doc to register offset in tantivy,
                     // same as AddNullSealed
-                    std::string empty = "";
+                    static const std::string empty;
                     wrapper_->add_array_data(&empty, 0, offset);
                 } else {
                     wrapper_->add_data(

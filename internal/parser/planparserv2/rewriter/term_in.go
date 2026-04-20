@@ -42,7 +42,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldUseInExprWithPK(g.col.GetDataType(), len(g.values), g.col.GetIsPrimaryKey()) {
+		if len(g.values) >= 2 {
 			g.values = sortGenericValues(g.values)
 			out = append(out, newTermExpr(g.col, g.values))
 		} else {
@@ -92,7 +92,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldUseInExprWithPK(g.col.GetDataType(), len(g.values), g.col.GetIsPrimaryKey()) {
+		if len(g.values) >= 2 {
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -103,90 +103,6 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 		}
 	}
 	return out
-}
-
-// splitTermToOrEquals converts TermExpr(in [v1, v2, ...]) to
-// v == v1 OR v == v2 OR ... (left-associative binary OR tree).
-func splitTermToOrEquals(expr *planpb.TermExpr) *planpb.Expr {
-	col := expr.GetColumnInfo()
-	values := expr.GetValues()
-
-	if len(values) == 0 {
-		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
-	}
-
-	equals := make([]*planpb.Expr, len(values))
-	for i, val := range values {
-		equals[i] = &planpb.Expr{
-			Expr: &planpb.Expr_UnaryRangeExpr{
-				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: col,
-					Op:         planpb.OpType_Equal,
-					Value:      val,
-				},
-			},
-		}
-	}
-
-	if len(equals) == 1 {
-		return equals[0]
-	}
-
-	result := equals[0]
-	for i := 1; i < len(equals); i++ {
-		result = &planpb.Expr{
-			Expr: &planpb.Expr_BinaryExpr{
-				BinaryExpr: &planpb.BinaryExpr{
-					Left:  result,
-					Right: equals[i],
-					Op:    planpb.BinaryExpr_LogicalOr,
-				},
-			},
-		}
-	}
-	return result
-}
-
-// splitTermToAndNotEquals converts NOT(in [v1, v2, ...]) to
-// v != v1 AND v != v2 AND ... (left-associative binary AND tree).
-func splitTermToAndNotEquals(expr *planpb.TermExpr) *planpb.Expr {
-	col := expr.GetColumnInfo()
-	values := expr.GetValues()
-
-	if len(values) == 0 {
-		return notExpr(&planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}})
-	}
-
-	notEquals := make([]*planpb.Expr, len(values))
-	for i, val := range values {
-		notEquals[i] = &planpb.Expr{
-			Expr: &planpb.Expr_UnaryRangeExpr{
-				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: col,
-					Op:         planpb.OpType_NotEqual,
-					Value:      val,
-				},
-			},
-		}
-	}
-
-	if len(notEquals) == 1 {
-		return notEquals[0]
-	}
-
-	result := notEquals[0]
-	for i := 1; i < len(notEquals); i++ {
-		result = &planpb.Expr{
-			Expr: &planpb.Expr_BinaryExpr{
-				BinaryExpr: &planpb.BinaryExpr{
-					Left:  result,
-					Right: notEquals[i],
-					Op:    planpb.BinaryExpr_LogicalAnd,
-				},
-			},
-		}
-	}
-	return result
 }
 
 func notExpr(child *planpb.Expr) *planpb.Expr {
@@ -351,8 +267,8 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		if g.term == nil || len(g.eqIdxs) == 0 {
 			continue
 		}
-		// union all equal values into term set
-		union := g.term.GetValues()
+		// union all equal values into term set; copy to avoid aliasing proto's backing array
+		union := append([]*planpb.GenericValue(nil), g.term.GetValues()...)
 		for i, ev := range g.eqVals {
 			union = append(union, ev)
 			used[g.eqIdxs[i]] = true
@@ -436,13 +352,13 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 		comparable := true
 		for _, tv := range termVals {
 			if g.lower != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.lower)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.lower))) {
 					comparable = false
 					break
 				}
 			}
 			if comparable && g.upper != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.upper)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.upper))) {
 					comparable = false
 					break
 				}

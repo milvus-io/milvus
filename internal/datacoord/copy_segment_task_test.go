@@ -18,19 +18,23 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -673,4 +677,145 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta)
 	s.Error(syncErr)
 	s.Contains(syncErr.Error(), "catalog error")
+}
+
+func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
+	// Arrange: snapshot data has segment 1, but task maps from segment 999 which doesn't exist
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, PartitionId: 10},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	// Mock ReadSnapshotData to return our test data
+	mock1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mock1.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 999, TargetSegmentId: 2001, PartitionId: 10}, // 999 not in snapshot
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	// Act
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	// Assert
+	assert.Nil(t, req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "source segment 999 not found")
+}
+
+func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
+	// Arrange: snapshot data with segment that has vector, text, and JSON key indexes
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 3001, FieldID: 100, IndexID: 1001},
+				},
+				TextIndexFiles: map[int64]*datapb.TextIndexStats{
+					200: {FieldID: 200, BuildID: 4001},
+				},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+					300: {FieldID: 300, BuildID: 5001},
+				},
+			},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	mock1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mock1.UnPatch()
+
+	// Mock allocator to return sequential IDs starting from 9001
+	nextID := int64(9001)
+	alloc := &struct{ allocator.Allocator }{}
+	mock2 := mockey.Mock((*struct{ allocator.Allocator }).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Mock Params access
+	mock3 := mockey.Mock(createStorageConfig).Return(nil).Build()
+	defer mock3.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		alloc:        alloc,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 10},
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	// Act
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, req)
+	assert.Len(t, req.Targets, 1)
+
+	newBuildIDs := req.Targets[0].GetNewBuildIds()
+	// Should have 3 entries: one for vector index (3001), one for text (4001), one for JSON (5001)
+	assert.Len(t, newBuildIDs, 3)
+	assert.Contains(t, newBuildIDs, int64(3001))
+	assert.Contains(t, newBuildIDs, int64(4001))
+	assert.Contains(t, newBuildIDs, int64(5001))
+
+	// All new IDs should be distinct and >= 9001
+	seenIDs := make(map[int64]bool)
+	for _, newID := range newBuildIDs {
+		assert.True(t, newID >= 9001, "new build ID should be allocated by allocator")
+		assert.False(t, seenIDs[newID], "new build IDs should be unique")
+		seenIDs[newID] = true
+	}
 }

@@ -54,10 +54,11 @@ func InitExecExpressionFunctionFactory() {
 	C.InitExecExpressionFunctionFactory()
 }
 
-func InitLocalChunkManager(path string) {
+func InitLocalChunkManager(path string) error {
 	CLocalRootPath := C.CString(path)
 	defer C.free(unsafe.Pointer(CLocalRootPath))
-	C.InitLocalChunkManagerSingleton(CLocalRootPath)
+	status := C.InitLocalChunkManagerSingleton(CLocalRootPath)
+	return HandleCStatus(&status, "InitLocalChunkManagerSingleton failed")
 }
 
 func InitTraceConfig(params *paramtable.ComponentParam) {
@@ -321,12 +322,13 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		return err
 	}
 	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
-	if deprecatedCacheWarmupPolicy == "sync" {
+	switch deprecatedCacheWarmupPolicy {
+	case "sync":
 		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
 		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
-	} else if deprecatedCacheWarmupPolicy == "async" {
+	case "async":
 		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
@@ -424,12 +426,13 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 		return err
 	}
 	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
-	if deprecatedCacheWarmupPolicy == "sync" {
+	switch deprecatedCacheWarmupPolicy {
+	case "sync":
 		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
 		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
-	} else if deprecatedCacheWarmupPolicy == "async" {
+	case "async":
 		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())

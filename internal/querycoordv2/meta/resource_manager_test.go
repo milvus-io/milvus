@@ -679,11 +679,12 @@ func TestGetResourceGroupsJSON(t *testing.T) {
 	assert.Len(t, resourceGroups, 2)
 
 	checkResult := func(rg *metricsinfo.ResourceGroup) {
-		if rg.Name == "rg1" {
+		switch rg.Name {
+		case "rg1":
 			assert.ElementsMatch(t, []int64{1, 2}, rg.Nodes)
-		} else if rg.Name == "rg2" {
+		case "rg2":
 			assert.ElementsMatch(t, []int64{3, 4}, rg.Nodes)
-		} else {
+		default:
 			assert.Failf(t, "unexpected resource group name", "unexpected resource group name %s", rg.Name)
 		}
 	}

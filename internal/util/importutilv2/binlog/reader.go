@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -109,7 +110,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
 			"Valid paths length should be one or two, but got paths:%s", paths))
 	}
-	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
+	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
 		return err
 	}
@@ -158,7 +159,15 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 2 {
 		return nil
 	}
-	deltaLogs, _, err := storage.ListAllChunkWithPrefix(context.Background(), r.cm, paths[1], true)
+	var deltaLogs []string
+	err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, paths[1], true, r.retryAttempts,
+		func() {
+			deltaLogs = nil
+		},
+		func(chunkInfo *storage.ChunkObjectInfo) bool {
+			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
+			return true
+		})
 	if err != nil {
 		return err
 	}

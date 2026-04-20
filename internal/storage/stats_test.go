@@ -17,6 +17,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -262,4 +264,84 @@ func TestMarshalStats(t *testing.T) {
 		common.Endian.PutUint64(b, uint64(i))
 		assert.True(t, stat1[0].BF.Test(b))
 	}
+}
+
+func TestBM25Stats_MemSize(t *testing.T) {
+	stats := NewBM25Stats()
+	baseSize := stats.MemSize()
+	assert.Equal(t, int64(120), baseSize)
+
+	// Add tokens and verify size grows
+	for i := uint32(0); i < 100; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	assert.Equal(t, int64(120+100*bm25StatsPerEntryBytes), stats.MemSize())
+}
+
+func TestBM25Stats_DeserializeFromReader(t *testing.T) {
+	t.Run("roundtrip", func(t *testing.T) {
+		original := NewBM25Stats()
+		for i := uint32(0); i < 50; i++ {
+			original.Append(map[uint32]float32{i: 1})
+		}
+
+		data, err := original.Serialize()
+		assert.NoError(t, err)
+
+		restored := NewBM25Stats()
+		err = restored.DeserializeFromReader(bytes.NewReader(data))
+		assert.NoError(t, err)
+		assert.Equal(t, original.NumRow(), restored.NumRow())
+		assert.Equal(t, original.GetAvgdl(), restored.GetAvgdl())
+	})
+
+	t.Run("accumulate_multiple", func(t *testing.T) {
+		s1 := NewBM25Stats()
+		s1.Append(map[uint32]float32{1: 1, 2: 1})
+		d1, _ := s1.Serialize()
+
+		s2 := NewBM25Stats()
+		s2.Append(map[uint32]float32{2: 1, 3: 1})
+		d2, _ := s2.Serialize()
+
+		merged := NewBM25Stats()
+		assert.NoError(t, merged.DeserializeFromReader(bytes.NewReader(d1)))
+		assert.NoError(t, merged.DeserializeFromReader(bytes.NewReader(d2)))
+		assert.Equal(t, int64(2), merged.NumRow())
+	})
+
+	t.Run("truncated_header", func(t *testing.T) {
+		// Only 10 bytes, header needs 20 (version + numRow + tokenNum)
+		data := make([]byte, 10)
+		restored := NewBM25Stats()
+		err := restored.DeserializeFromReader(bytes.NewReader(data))
+		assert.Error(t, err)
+	})
+
+	t.Run("truncated_value", func(t *testing.T) {
+		// Valid header + key but truncated value
+		buf := new(bytes.Buffer)
+		binary.Write(buf, common.Endian, int32(0))   // version
+		binary.Write(buf, common.Endian, int64(1))   // numRow
+		binary.Write(buf, common.Endian, int64(1))   // numToken
+		binary.Write(buf, common.Endian, uint32(42)) // key
+		binary.Write(buf, common.Endian, int16(1))   // truncated value (2 bytes instead of 4)
+
+		restored := NewBM25Stats()
+		err := restored.DeserializeFromReader(buf)
+		assert.Error(t, err)
+	})
+
+	t.Run("empty_tokens", func(t *testing.T) {
+		// Valid header, zero tokens
+		buf := new(bytes.Buffer)
+		binary.Write(buf, common.Endian, int32(0)) // version
+		binary.Write(buf, common.Endian, int64(5)) // numRow
+		binary.Write(buf, common.Endian, int64(0)) // numToken
+
+		restored := NewBM25Stats()
+		err := restored.DeserializeFromReader(buf)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(5), restored.NumRow())
+	})
 }

@@ -405,6 +405,7 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+    int32 data_version = 25;
 }
 
 message FieldIndexInfo {
@@ -479,6 +480,8 @@ message SearchRequest {
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
     int32 total_channel_num = 6;
+    // If true, only execute filter and return valid counts per segment (two-stage search stage 1).
+    bool filter_only = 7;
 }
 
 message QueryRequest {
@@ -696,8 +699,11 @@ message SegmentVersionInfo {
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
-    map<int64, JsonStatsInfo> json_stats_info = 11; 
+    map<int64, JsonStatsInfo> json_stats_info = 11;
     string manifest_path = 12;
+    // optional so QueryCoord can distinguish "not reported" (old QueryNode)
+    // from an explicit zero value during a mixed-version rollout.
+    optional int32 data_version = 13;
 }
 
 message ChannelVersionInfo {

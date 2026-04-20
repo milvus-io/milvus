@@ -96,7 +96,7 @@ func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.Funct
 	}
 
 	if err := f.Check(context.Background()); err != nil {
-		return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
+		return fmt.Errorf("check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
 	}
 	return nil
 }
@@ -151,7 +151,7 @@ func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, run
 		}
 	}
 	if len(inputs) != len(runner.GetSchema().InputFieldIds) {
-		return nil, errors.New("Input field not found")
+		return nil, errors.New("input field not found")
 	}
 
 	tr := timerecord.NewTimeRecorder("function ProcessInsert")
@@ -230,10 +230,10 @@ func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runne
 func (executor *FunctionExecutor) prcessSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	runner, exist := executor.runners[req.FieldId]
 	if !exist {
-		return fmt.Errorf("Can not found function in field %d", req.FieldId)
+		return fmt.Errorf("can not found function in field %d", req.FieldId)
 	}
 	if req.Nq > int64(runner.MaxBatch()) {
-		return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
+		return fmt.Errorf("nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
 	}
 	if newHolder, err := executor.processSingleSearch(ctx, runner, req.GetPlaceholderGroup()); err != nil {
 		return err
@@ -250,7 +250,7 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(ctx context.Context, req *
 	for idx, sub := range req.GetSubReqs() {
 		if runner, exist := executor.runners[sub.FieldId]; exist {
 			if sub.Nq > int64(runner.MaxBatch()) {
-				return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
+				return fmt.Errorf("nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
 			wg.Add(1)
 			go func(runner Runner, idx int64, placeholderGroup []byte) {
@@ -290,7 +290,7 @@ func (executor *FunctionExecutor) processSingleBulkInsert(ctx context.Context, r
 	for idx, id := range runner.GetSchema().InputFieldIds {
 		field, exist := data.Data[id]
 		if !exist {
-			return nil, fmt.Errorf("Can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
+			return nil, fmt.Errorf("can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
 		}
 		inputs = append(inputs, field)
 	}

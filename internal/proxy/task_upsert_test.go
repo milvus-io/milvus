@@ -476,11 +476,11 @@ func TestUpsertTask_Function(t *testing.T) {
 
 	// process failed
 	{
-		oldRows := task.upsertMsg.InsertMsg.InsertRequest.NumRows
-		task.upsertMsg.InsertMsg.InsertRequest.NumRows = 10000
+		oldRows := task.upsertMsg.InsertMsg.NumRows
+		task.upsertMsg.InsertMsg.NumRows = 10000
 		err = task.insertPreExecute(ctx)
 		assert.Error(t, err)
-		task.upsertMsg.InsertMsg.InsertRequest.NumRows = oldRows
+		task.upsertMsg.InsertMsg.NumRows = oldRows
 	}
 }
 
@@ -3065,5 +3065,109 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		validData := metaField.GetValidData()
 		assert.Equal(t, 3, len(validData),
 			"queryPreExecute auto-fills ValidData, merge produces correct length 3")
+	})
+
+	t.Run("v25 schema (non-nullable $meta) upsert should not fail", func(t *testing.T) {
+		// 2.5-style schema: $meta is NOT nullable and has NO default value.
+		// After upgrading to 2.6, existing collections retain this schema.
+		// queryPreExecute must NOT unconditionally fill ValidData for $meta,
+		// because CheckValidData expects len(ValidData)==0 for non-nullable fields.
+		v25Schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name:               "test_v25_compat",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+				{
+					FieldID: 102, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON,
+					IsDynamic: true,
+					Nullable:  false, // 2.5 style: NOT nullable
+					// No DefaultValue — 2.5 style
+				},
+			},
+		})
+
+		meta1, _ := json.Marshal(map[string]interface{}{"color": "gold"})
+		meta2, _ := json.Marshal(map[string]interface{}{"color": "silver"})
+		meta3, _ := json.Marshal(map[string]interface{}{"color": "bronze"})
+
+		upsertData := []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+			},
+			{
+				FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{meta1, meta2, meta3}},
+				}}},
+				// No ValidData — SDK behavior
+			},
+		}
+
+		existMeta1, _ := json.Marshal(map[string]interface{}{"color": "red"})
+		existMeta2, _ := json.Marshal(map[string]interface{}{"color": "blue"})
+		mockQueryResult := &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+				},
+				{
+					FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+				},
+				{
+					FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{existMeta1, existMeta2}},
+					}}},
+				},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: v25Schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: upsertData,
+				NumRows:    3,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: upsertData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+			node: &Proxy{},
+		}
+
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		err := task.queryPreExecute(context.Background())
+		assert.NoError(t, err, "queryPreExecute should not fail for 2.5-style non-nullable $meta")
+
+		var metaField *schemapb.FieldData
+		for _, f := range task.insertFieldData {
+			if f.GetFieldName() == common.MetaFieldName {
+				metaField = f
+				break
+			}
+		}
+		assert.NotNil(t, metaField)
+		metaData := metaField.GetScalars().GetJsonData().GetData()
+		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
+		// For non-nullable $meta, ValidData should remain empty (not auto-filled)
+		assert.Empty(t, metaField.GetValidData(),
+			"non-nullable $meta should NOT have ValidData auto-filled")
 	})
 }

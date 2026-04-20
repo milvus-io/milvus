@@ -149,7 +149,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 		case <-ticker.C:
 			si.triggerTextStatsTask()
 			si.triggerBM25StatsTask()
-			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
+			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
 		}
 	}
 }
@@ -175,7 +175,7 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
 		return false
@@ -241,7 +241,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 	}
 }
 
-func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
+func (si *statsInspector) triggerJSONKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
 		if collection == nil || collection.IsExternal() {
@@ -255,7 +255,7 @@ func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger 
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+			return needDoJSONKeyIndex(seg, needTriggerFieldIDs)
 		}))
 		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
 			lastJSONStatsLastTrigger = time.Now().Unix()

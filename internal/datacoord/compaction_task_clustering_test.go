@@ -74,7 +74,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
 		start := s.mockID.Load()
-		end := s.mockID.Add(int64(x))
+		end := s.mockID.Add(x)
 		return start, end, nil
 	}).Maybe()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {
@@ -549,6 +549,18 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_statistic, task.GetTaskProto().GetState())
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorkerSkipAnalyzing() {
+	s.Run("QueryTaskOnWorker skips when state is analyzing", func() {
+		task := s.generateBasicTask(true) // vector clustering key
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
+		cluster := session.NewMockCluster(s.T())
+		// No QueryCompaction mock — if QueryTaskOnWorker calls it, the mock will panic.
+		task.QueryTaskOnWorker(cluster)
+		// State should remain analyzing, not be reset to pipelining.
+		s.Equal(datapb.CompactionTaskState_analyzing, task.GetTaskProto().GetState())
 	})
 }
 

@@ -107,7 +107,7 @@ jobs:
           if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
             ln -s ${BREW_PREFIX}/opt/llvm@17 ${BREW_PREFIX}/opt/llvm
           fi
-          pip3 install conan==1.66.0
+          pip3 install conan==2.25.1
           make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v4

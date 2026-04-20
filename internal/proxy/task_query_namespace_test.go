@@ -51,7 +51,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 
 		task := &queryTask{
 			Condition:       NewTaskCondition(context.Background()),
-			RetrieveRequest: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
+			RetrieveRequest: &internalpb.RetrieveRequest{QueryLabel: "query", Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}},
 			ctx:             context.Background(),
 			request:         &milvuspb.QueryRequest{CollectionName: "test_collection", Expr: "id > 0"},
 			result:          &milvuspb.QueryResults{Status: merr.Success()},

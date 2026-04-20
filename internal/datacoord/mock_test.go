@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -61,7 +60,7 @@ func NewMetaMemoryKV() *metaMemoryKV {
 }
 
 func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
+	keys, values, err := mm.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}
@@ -233,12 +232,6 @@ func (m *mockMixCoord) FlushAll(ctx context.Context, req *datapb.FlushAllRequest
 
 func (m *mockMixCoord) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	panic("implement me")
-}
-
-func (m *mockMixCoord) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	return &datapb.CreateExternalCollectionResponse{
-		Status: merr.Success(),
-	}, nil
 }
 
 func (m *mockMixCoord) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
@@ -1064,6 +1057,14 @@ func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.Get
 }
 
 func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

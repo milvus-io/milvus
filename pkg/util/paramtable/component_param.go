@@ -303,6 +303,8 @@ type commonConfig struct {
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
+	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
+	BloomFilterEnabled        ParamItem `refreshable:"false"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
@@ -343,6 +345,7 @@ type commonConfig struct {
 	ClusterID              ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+	SearchRequeryPolicy       ParamItem `refreshable:"true"`
 	QNFileResourceMode        ParamItem `refreshable:"true"`
 	DNFileResourceMode        ParamItem `refreshable:"true"`
 
@@ -1095,6 +1098,24 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
+	p.VisibilityFilterEnabled = ParamItem{
+		Key:          "common.visibilityFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.",
+		Export:       true,
+	}
+	p.VisibilityFilterEnabled.Init(base.mgr)
+
+	p.BloomFilterEnabled = ParamItem{
+		Key:          "common.bloomFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "whether to load and apply bloom filter/pk stats on querynode",
+		Export:       true,
+	}
+	p.BloomFilterEnabled.Init(base.mgr)
+
 	p.BloomFilterSize = ParamItem{
 		Key:          "common.bloomFilterSize",
 		Version:      "2.3.2",
@@ -1351,6 +1372,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       false,
 	}
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
+
+	p.SearchRequeryPolicy = ParamItem{
+		Key:          "common.requery.searchPolicy",
+		Version:      "2.6.15",
+		DefaultValue: "OutputVector",
+		Doc:          `the policy to decide when to do requery in search, support "always", "outputvector" and "outputfields"`,
+		Export:       false,
+	}
+	p.SearchRequeryPolicy.Init(base.mgr)
 
 	p.QNFileResourceMode = ParamItem{
 		Key:          "common.fileResource.mode.queryNode",
@@ -3411,6 +3441,8 @@ type queryNodeConfig struct {
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
+	EnableResultZeroCopy ParamItem `refreshable:"true"`
+
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
 	DowngradeTsafe            ParamItem `refreshable:"true"`
@@ -3468,7 +3500,7 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
-	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
+	EnableSegmentFilter            ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -3479,19 +3511,30 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk ParamItem `refreshable:"true"`
+	IDFPreload        ParamItem `refreshable:"true"`
+	IDFReadBufferSize ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
-	p.IDFEnableDisk = ParamItem{
-		Key:          "queryNode.idfOracle.enableDisk",
-		Version:      "2.6.0",
+	p.IDFPreload = ParamItem{
+		Key:          "queryNode.idfOracle.preload",
+		Version:      "2.6.8",
 		Export:       true,
 		DefaultValue: "true",
+		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
-	p.IDFEnableDisk.Init(base.mgr)
+	p.IDFPreload.Init(base.mgr)
+
+	p.IDFReadBufferSize = ParamItem{
+		Key:          "queryNode.idfOracle.readBufferSize",
+		Version:      "2.6.14",
+		Export:       true,
+		DefaultValue: "4194304",
+		Doc:          "Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.",
+	}
+	p.IDFReadBufferSize.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -3784,7 +3827,7 @@ If set to 0, time based eviction is disabled.`,
 	p.TieredLoadingTimeoutMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
 		Version:      "2.6.10",
-		DefaultValue: "0",
+		DefaultValue: "-1",
 		Doc:          "Loading timeout in milliseconds for cache slot loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
 		Export:       false,
 	}
@@ -4263,6 +4306,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.TopKMergeRatio.Init(base.mgr)
 
+	p.EnableResultZeroCopy = ParamItem{
+		Key:          "queryNode.search.enableResultZeroCopy",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.",
+		Export:       true,
+	}
+	p.EnableResultZeroCopy.Init(base.mgr)
+
 	p.CPURatio = ParamItem{
 		Key:          "queryNode.scheduler.cpuRatio",
 		Version:      "2.0.0",
@@ -4615,13 +4667,15 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
-	p.EnableSparseFilterInQuery = ParamItem{
-		Key:          "queryNode.enableSparseFilterInQuery",
-		Version:      "2.6.2",
+	p.EnableSegmentFilter = ParamItem{
+		Key:          "queryNode.enableSegmentFilter",
+		FallbackKeys: []string{"queryNode.enableSparseFilterInQuery"},
+		Version:      "2.6.11",
 		DefaultValue: "true",
-		Doc:          "Enable use sparse filter in query.",
+		Doc:          "Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).",
+		Export:       true,
 	}
-	p.EnableSparseFilterInQuery.Init(base.mgr)
+	p.EnableSegmentFilter.Init(base.mgr)
 
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",
@@ -4754,16 +4808,19 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection      ParamItem `refreshable:"false"`
-	GCInterval                   ParamItem `refreshable:"false"`
-	GCMissingTolerance           ParamItem `refreshable:"false"`
-	GCDropTolerance              ParamItem `refreshable:"false"`
-	GCRemoveConcurrent           ParamItem `refreshable:"false"`
-	GCScanIntervalInHour         ParamItem `refreshable:"false"`
-	GCSlowDownCPUUsageThreshold  ParamItem `refreshable:"false"`
-	SnapshotPendingTimeout       ParamItem `refreshable:"true"`
-	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
-	EnableActiveStandby          ParamItem `refreshable:"false"`
+	EnableGarbageCollection                ParamItem `refreshable:"false"`
+	GCInterval                             ParamItem `refreshable:"false"`
+	GCMissingTolerance                     ParamItem `refreshable:"false"`
+	GCDropTolerance                        ParamItem `refreshable:"false"`
+	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
+	GCScanIntervalInHour                   ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout                 ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
+	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
+	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
+	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -5376,8 +5433,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerDeltalogMaxNum = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMaxNum",
 		Version:      "2.4.0",
-		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30",
-		DefaultValue: "30",
+		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000",
+		DefaultValue: "1000",
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
@@ -5629,6 +5686,49 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc:          "The interval for loading snapshot RefIndex from S3",
 	}
 	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
+
+	p.SnapshotRefIndexLoadTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.refIndexLoadTimeout",
+		Version:      "2.6.15",
+		DefaultValue: "30s",
+		Doc: "Per-snapshot timeout for loading RefIndex from S3 inside the loader loop. " +
+			"A single hung S3 read must not block the loader Range, otherwise no other " +
+			"snapshot's RefIndex can be loaded and GC remains in fail-closed coarse block " +
+			"for every collection with a snapshot, leaking storage. On timeout the RefIndex " +
+			"is marked Failed and will be retried on the next loader tick.",
+	}
+	p.SnapshotRefIndexLoadTimeout.Init(base.mgr)
+
+	p.SnapshotMaxCompactionProtectionSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.maxCompactionProtectionSeconds",
+		Version:      "2.6.10",
+		DefaultValue: "604800",
+		Doc:          "Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)",
+		Export:       true,
+	}
+	p.SnapshotMaxCompactionProtectionSeconds.Init(base.mgr)
+
+	p.SnapshotRestorePinTTLSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.restorePinTTLSeconds",
+		Version:      "2.6.11",
+		DefaultValue: "86400",
+		Doc: "TTL (seconds) for pins claimed by snapshot restore jobs on the source snapshot. " +
+			"Acts as a safety-net reaper for orphan pins left behind by crashed datacoord / " +
+			"failed job creation. Default 86400 (24h) is sized well above the worst-case restore " +
+			"wall time — restore copies segments by S3 object reference (no data rewrite), so even " +
+			"multi-TB restores complete in minutes. Minimum enforced value is 300s — values ≤0 " +
+			"(which would create permanent pins with no admin recovery API) and values below 300s " +
+			"are coerced to the default.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 300 {
+				return "86400"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotRestorePinTTLSeconds.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
@@ -6776,6 +6876,12 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// primary resource group
+	PrimaryResourceGroup ParamItem `refreshable:"true"`
+
+	// strict resource group isolation mode for streaming query node assignment
+	StrictResourceGroupIsolationEnabled ParamItem `refreshable:"true"`
+
 	// scanner
 	WALScannerPauseConsumption ParamItem `refreshable:"true"`
 
@@ -6861,6 +6967,34 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// primary resource group
+	p.PrimaryResourceGroup = ParamItem{
+		Key:     "streaming.primaryResourceGroup",
+		Version: "2.6.10",
+		Doc: `The resource group name that WAL should be loaded on.
+When this is set, only streaming nodes with the matching resource group label will be used for WAL operations.
+The resource group label is set via environment variable MILVUS_SERVER_LABEL_RESOURCE_GROUP.
+If empty, streaming nodes from all resource groups can be used.`,
+		DefaultValue: "",
+		Export:       false,
+	}
+	p.PrimaryResourceGroup.Init(base.mgr)
+
+	// strict resource group isolation mode for streaming query node assignment
+	p.StrictResourceGroupIsolationEnabled = ParamItem{
+		Key:     "streaming.strictResourceGroupIsolation.enabled",
+		Version: "2.6.10",
+		Doc: `Enable strict resource group isolation mode for streaming query node assignment.
+When enabled, streaming query nodes will only be assigned to replicas within their own resource group.
+If streaming node resource groups do not cover all replica resource groups, replicas without matching
+streaming nodes will not receive any streaming query node assignment.
+When disabled (default), if resource group isolation cannot be satisfied, all streaming nodes will be
+pooled together and assigned fairly across all replicas regardless of resource group boundaries.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.StrictResourceGroupIsolationEnabled.Init(base.mgr)
+
 	// scanner
 	p.WALScannerPauseConsumption = ParamItem{
 		Key:     "streaming.walScanner.pauseConsumption",

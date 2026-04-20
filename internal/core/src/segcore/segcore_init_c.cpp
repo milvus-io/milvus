@@ -57,6 +57,13 @@ SegcoreSetEnableGeometryCache(const bool value) {
 }
 
 extern "C" void
+SegcoreSetVisibilityFilterEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_visibility_filter_enabled(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
@@ -257,7 +264,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          cache_cell_unaccessed_survival_time,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
-         disk_path_str,
+         std::move(disk_path_str),
          loading_resource_factor},
         std::chrono::milliseconds(loading_timeout_ms),
         std::chrono::milliseconds(warmup_loading_timeout_ms),

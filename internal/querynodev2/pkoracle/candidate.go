@@ -56,6 +56,14 @@ type Candidate interface {
 	// Stats returns PK statistics (min/max PK) if available, nil otherwise.
 	Stats() *storage.PkStatistics
 
+	// GetMinPk returns the global minimum PK across all statistics (current + historical),
+	// or nil if no statistics are available.
+	GetMinPk() *storage.PrimaryKey
+
+	// GetMaxPk returns the global maximum PK across all statistics (current + historical),
+	// or nil if no statistics are available.
+	GetMaxPk() *storage.PrimaryKey
+
 	// Charge charges memory resources consumed by this candidate.
 	// No-op is valid for candidates without trackable resources.
 	Charge()

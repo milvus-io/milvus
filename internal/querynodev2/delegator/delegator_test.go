@@ -770,7 +770,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		results, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -787,7 +787,8 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(),
+				QueryLabel: "query",
+				Base:       commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
@@ -824,7 +825,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -861,7 +862,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -873,7 +874,7 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		})
 
@@ -889,7 +890,7 @@ func (s *DelegatorSuite) TestQuery() {
 		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -903,7 +904,7 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -981,7 +982,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 				DmlChannels: []string{s.vchannelName},
 			}, server)
 			s.NoError(err)
@@ -1018,7 +1019,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(),
+				QueryLabel: "query",
+				Base:       commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
@@ -1036,6 +1038,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				Base:               commonpbutil.NewMsgBase(),
 				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)),
 			},
@@ -1062,7 +1065,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
@@ -1115,7 +1118,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 				DmlChannels: []string{s.vchannelName},
 			}, server)
 			server.Send(&internalpb.RetrieveResults{
@@ -1152,7 +1155,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		}, server)
 
@@ -1172,7 +1175,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
@@ -1188,7 +1191,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 
@@ -1770,7 +1773,7 @@ func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 
 		// Query should fail when not ready
 		_, err = sd.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 		s.Error(err)
@@ -1804,7 +1807,7 @@ func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 
 		// Query should fail when stopped
 		_, err = sd.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 		s.Error(err)
@@ -1961,22 +1964,21 @@ func TestNewRowCountBasedEvaluator_SearchAndQueryTasks(t *testing.T) {
 		successSegments := typeutil.NewSet[int64]()
 		successSegments.Insert(1, 2) // 3000 rows out of 6000 total = 0.5
 		failureSegments := []int64{3}
-		errors := []error{errors.New("segment 3 failed")}
+		testErrors := []error{errors.New("segment 3 failed")}
 
-		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, errors)
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
 		assert.False(t, shouldReturn) // 0.5 < 0.8, should not return partial
 		assert.Equal(t, 0.5, accessedRatio)
 
-		// Test Query task - success segments meet required ratio
+		// Test Query task - Query never allows partial results (only Search does)
 		successSegments = typeutil.NewSet[int64]()
-		successSegments.Insert(1, 2, 3) // 6000 rows out of 6000 total = 1.0
-		failureSegments = []int64{}
-		errors = []error{}
+		successSegments.Insert(1, 2) // 3000 rows out of 6000 total = 0.5
+		failureSegments = []int64{3}
+		testErrors = []error{errors.New("segment 3 failed")}
 
-		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, errors)
-		assert.True(t, shouldReturn)
-		assert.True(t, accessedRatio >= 0.8) // All segments succeeded
-		assert.Equal(t, 1.0, accessedRatio)
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "Query should never return partial results")
+		assert.Equal(t, 0.0, accessedRatio) // ratio forced to 1.0, early return
 	})
 }
 
@@ -2032,15 +2034,134 @@ func TestNewRowCountBasedEvaluator_PartialResultAcceptance(t *testing.T) {
 		assert.False(t, shouldReturn) // 0.6 < 0.7, should not return partial
 		assert.Equal(t, 0.6, accessedRatio)
 
-		// Test case: 90% data available (should accept partial result)
+		// Test case: 90% data available with Search (should accept partial result)
 		successSegments = typeutil.NewSet[int64]()
 		successSegments.Insert(2, 3, 4) // 9000 rows out of 10000 = 0.9
 		failureSegments = []int64{1}
 		testErrors = []error{errors.New("segment 1 failed")}
 
-		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
-		assert.True(t, shouldReturn) // 0.9 > 0.7, should return partial
+		shouldReturn, accessedRatio = evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn) // 0.9 >= 0.7, should return partial for Search
 		assert.Equal(t, 0.9, accessedRatio)
+
+		// Test case: same 90% with Query (should NOT accept partial result)
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "Query should never return partial results")
+		assert.Equal(t, 0.0, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_ZeroRatioBoundary(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_ZeroRatioBoundary", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 1000,
+			2: 2000,
+			3: 3000,
+			4: 4000,
+		}
+		// Total: 10000 rows
+
+		// Mock ratio=0.0: search should never fail, even with empty results
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.0).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// All segments failed (accessedDataRatio=0.0, ratio=0.0)
+		// 0.0 >= 0.0 should return true
+		successSegments := typeutil.NewSet[int64]()
+		failureSegments := []int64{1, 2, 3, 4}
+		testErrors := []error{
+			errors.New("node 1 failed"),
+			errors.New("node 2 failed"),
+			errors.New("node 3 failed"),
+			errors.New("node 4 failed"),
+		}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "ratio=0.0 with all segments failed should still return partial result")
+		assert.Equal(t, 0.0, accessedRatio)
+
+		// Some segments succeeded (accessedDataRatio=0.3 > 0.0)
+		successSegments = typeutil.NewSet[int64]()
+		successSegments.Insert(1, 2) // 3000/10000 = 0.3
+		failureSegments = []int64{3, 4}
+		testErrors = []error{errors.New("node 3 failed"), errors.New("node 4 failed")}
+
+		shouldReturn, accessedRatio = evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn)
+		assert.Equal(t, 0.3, accessedRatio)
+
+		// Query task with ratio=0.0 and all failed - Query never allows partial
+		successSegments = typeutil.NewSet[int64]()
+		failureSegments = []int64{1, 2, 3, 4}
+		testErrors = []error{errors.New("all failed")}
+
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "Query should never return partial results, even with ratio=0.0")
+		assert.Equal(t, 0.0, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_ExactRatioBoundary(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_ExactRatioBoundary", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 5000,
+			2: 5000,
+		}
+		// Total: 10000 rows
+
+		// Mock ratio=0.5: exactly 50% available should pass
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.5).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// Exactly 50% data available (accessedDataRatio=0.5, ratio=0.5)
+		// 0.5 >= 0.5 should return true
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1) // 5000/10000 = 0.5
+		failureSegments := []int64{2}
+		testErrors := []error{errors.New("segment 2 failed")}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "exact ratio boundary (0.5 >= 0.5) should return partial result")
+		assert.Equal(t, 0.5, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_QueryStreamDisablesPartialResult(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_QueryStreamDisablesPartialResult", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 5000,
+			2: 5000,
+		}
+		// Total: 10000 rows
+
+		// Even with ratio=0.0, QueryStream should NOT return partial results
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.0).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// 50% data available, ratio=0.0, but taskType=QueryStream
+		// QueryStream must NOT allow partial results (used by delete-by-expr)
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1) // 5000/10000 = 0.5
+		failureSegments := []int64{2}
+		testErrors := []error{errors.New("segment 2 failed")}
+
+		shouldReturn, _ := evaluator("QueryStream", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "QueryStream should never return partial results, even with ratio=0.0")
+
+		// Query also does NOT allow partial results (only Search does)
+		shouldReturn, _ = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "Query should never return partial results, even with ratio=0.0")
+
+		// Only Search allows partial results
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "Search should allow partial results with ratio=0.0")
+		assert.Equal(t, 0.5, accessedRatio)
 	})
 }
 

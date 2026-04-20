@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
 type SearchReduceUtilTestSuite struct {
@@ -339,6 +341,198 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 		// Scores are negated back for negatively related metrics
 		s.Equal([]float32{1, 2, 3, 4}, results.Results.GetScores(),
 			"metric %s: Scores should be distances in ascending order", metricType)
+	}
+}
+
+func (s *SearchReduceUtilTestSuite) TestDecodeSearchResultsSupportsResultDataAndBlob() {
+	blobData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+		Scores:     []float32{0.8},
+		Topks:      []int64{1},
+	}
+	blob, err := proto.Marshal(blobData)
+	s.NoError(err)
+
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{20}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	decoded, err := decodeSearchResults(context.Background(), []*internalpb.SearchResults{
+		{ResultData: resultData},
+		{SlicedBlob: blob},
+		{},
+	})
+	s.NoError(err)
+	s.Len(decoded, 2)
+	s.Same(resultData, decoded[0])
+	s.True(proto.Equal(blobData, decoded[1]))
+}
+
+// TestReduceAdvanceGroupBy_SingleShardScoreNegation verifies that the
+// single-shard early-return path in reduceAdvanceGroupBy applies the same
+// metric-direction-aware score negation as the multi-shard path.
+//
+// segcore (segment_c.cpp:302-307) negates distances for "smaller is better"
+// metrics so its internal representation is "larger is better". The proxy
+// is responsible for negating again at the reduce stage so downstream code
+// sees the metric's natural direction (smaller is better for L2/HAMMING/
+// JACCARD; larger is better for COSINE/IP/BM25).
+//
+// Historically the single-shard early return passed segcore's data through
+// unchanged, while the multi-shard path applied negation at the end of the
+// function. This created a shard-count-dependent behavior: 1-shard
+// collections returned -L2, multi-shard collections returned +L2. Chain
+// rerank then applied its normalization (1 − 2·atan(d)/π) to the negated
+// values, producing a monotonically inverted score and silently flipping
+// the result ordering — only manifesting when the metric is distance-class
+// AND group_by is enabled AND the collection has a single shard.
+func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardScoreNegation() {
+	cases := []struct {
+		name           string
+		metric         string
+		inputScores    []float32 // as returned by segcore (negated for distance metrics)
+		expectedScores []float32 // after proxy reduce, in metric's natural direction
+	}{
+		{
+			name:           "L2 distances are re-negated to natural smaller=better direction",
+			metric:         "L2",
+			inputScores:    []float32{-0.1, -0.5, -1.0},
+			expectedScores: []float32{0.1, 0.5, 1.0},
+		},
+		{
+			name:           "HAMMING distances are re-negated",
+			metric:         "HAMMING",
+			inputScores:    []float32{-2, -5, -8},
+			expectedScores: []float32{2, 5, 8},
+		},
+		{
+			name:           "JACCARD distances are re-negated",
+			metric:         "JACCARD",
+			inputScores:    []float32{-0.2, -0.4, -0.6},
+			expectedScores: []float32{0.2, 0.4, 0.6},
+		},
+		{
+			name:           "COSINE scores pass through unchanged (positively related)",
+			metric:         "COSINE",
+			inputScores:    []float32{0.9, 0.7, 0.5},
+			expectedScores: []float32{0.9, 0.7, 0.5},
+		},
+		{
+			name:           "IP scores pass through unchanged (positively related)",
+			metric:         "IP",
+			inputScores:    []float32{2.0, 1.5, 1.0},
+			expectedScores: []float32{2.0, 1.5, 1.0},
+		},
+	}
+
+	for _, tc := range cases {
+		struts.Run(tc.name, func() {
+			n := int64(len(tc.inputScores))
+			data := &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       n,
+				Topks:      []int64{n},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+					},
+				},
+				// fresh copy so we don't mutate test fixture across runs
+				Scores: append([]float32(nil), tc.inputScores...),
+				GroupByFieldValue: &schemapb.FieldData{
+					Type:      schemapb.DataType_VarChar,
+					FieldName: "category",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"A", "B", "A"},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			result, err := reduceAdvanceGroupBy(context.Background(),
+				[]*schemapb.SearchResultData{data}, 1, n, schemapb.DataType_Int64, tc.metric)
+			struts.NoError(err)
+			struts.NotNil(result)
+			struts.Equal(tc.expectedScores, result.Results.GetScores(),
+				"%s: single-shard early return must match multi-shard score-direction handling", tc.name)
+		})
+	}
+}
+
+// TestReduceAdvanceGroupBy_SingleShardMatchesMultiShard pins the invariant
+// that single-shard and multi-shard paths produce identical score directions
+// for the same input. Without the negation fix the single-shard path
+// returned -L2 while the multi-shard path returned +L2 — same metric, same
+// data, different output, depending only on shard count.
+func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardMatchesMultiShard() {
+	makeShard := func(ids []int64, scores []float32, groups []string) *schemapb.SearchResultData {
+		return &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       int64(len(ids)),
+			Topks:      []int64{int64(len(ids))},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: append([]int64(nil), ids...)},
+				},
+			},
+			Scores: append([]float32(nil), scores...),
+			GroupByFieldValue: &schemapb.FieldData{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: "category",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: append([]string(nil), groups...),
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// segcore-negated L2 distances; same data fed to both paths
+	ids := []int64{1, 2, 3}
+	scores := []float32{-0.1, -0.5, -1.0}
+	groups := []string{"A", "B", "A"}
+
+	singleShardResult, err := reduceAdvanceGroupBy(context.Background(),
+		[]*schemapb.SearchResultData{makeShard(ids, scores, groups)},
+		1, 3, schemapb.DataType_Int64, "L2")
+	struts.Require().NoError(err)
+
+	// Force the multi-shard path by passing two identical shards.
+	// Both paths should produce scores in the same direction (positive L2).
+	multiShardResult, err := reduceAdvanceGroupBy(context.Background(),
+		[]*schemapb.SearchResultData{
+			makeShard(ids, scores, groups),
+			makeShard([]int64{4, 5, 6}, []float32{-0.2, -0.4, -0.8}, []string{"A", "B", "A"}),
+		},
+		1, 3, schemapb.DataType_Int64, "L2")
+	struts.Require().NoError(err)
+
+	// Both paths must produce strictly positive scores (i.e., negation
+	// applied). Without the fix, singleShardResult would have negative
+	// scores, breaking this invariant.
+	for _, s := range singleShardResult.Results.GetScores() {
+		struts.GreaterOrEqual(s, float32(0), "single-shard L2 score must be in natural direction (>=0); got %v", s)
+	}
+	for _, s := range multiShardResult.Results.GetScores() {
+		struts.GreaterOrEqual(s, float32(0), "multi-shard L2 score must be in natural direction (>=0); got %v", s)
 	}
 }
 

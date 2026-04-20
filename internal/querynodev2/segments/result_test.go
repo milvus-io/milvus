@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -298,6 +299,154 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	// costs should aggregate across both included results
 	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+}
+
+func (suite *ResultSuite) TestEncodeSearchResultData_ZeroCopySwitch() {
+	ctx := context.Background()
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+
+	srd := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	paramtable.Get().Save(key, "false")
+	encodedBlob, err := EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encodedBlob.GetResultData())
+	suite.NotNil(encodedBlob.GetSlicedBlob())
+
+	paramtable.Get().Save(key, "true")
+	encodedZeroCopy, err := EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encodedZeroCopy.GetSlicedBlob())
+	suite.Same(srd, encodedZeroCopy.GetResultData())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_AdvancedPreservesResultData() {
+	nq := int64(1)
+	topK := int64(1)
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	reducedRes, err := ReduceSearchOnQueryNode(context.Background(), []*internalpb.SearchResults{
+		{
+			MetricType:         metric.IP,
+			NumQueries:         nq,
+			TopK:               topK,
+			ResultData:         resultData,
+			ScannedRemoteBytes: 10,
+			ScannedTotalBytes:  20,
+		},
+	}, reduce.NewReduceSearchResultInfo(nq, topK).
+		WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64).WithAdvance(true))
+	suite.NoError(err)
+	suite.Len(reducedRes.GetSubResults(), 1)
+	suite.Same(resultData, reducedRes.GetSubResults()[0].GetResultData())
+	suite.Nil(reducedRes.GetSubResults()[0].GetSlicedBlob())
+}
+
+func (suite *ResultSuite) TestDecodeSearchResults_ResultDataAndBlob() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(1)
+
+	// ResultData path (pre-decoded, zero-copy)
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	// SlicedBlob path (legacy marshaled)
+	blobData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{20}}}},
+		Scores:     []float32{0.8},
+		Topks:      []int64{1},
+	}
+	blob, err := proto.Marshal(blobData)
+	suite.NoError(err)
+
+	decoded, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{
+		{ResultData: resultData}, // zero-copy path
+		{SlicedBlob: blob},       // legacy path
+		{},                       // empty — should be skipped
+		{SlicedBlob: nil},        // nil blob — should be skipped
+	})
+	suite.NoError(err)
+	suite.Len(decoded, 2)
+	suite.Same(resultData, decoded[0])            // zero-copy: same pointer
+	suite.True(proto.Equal(blobData, decoded[1])) // blob: equal content
+}
+
+func (suite *ResultSuite) TestReduceSearchResults_FilterIncludesResultData() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(1)
+
+	resultData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	// Single result with ResultData only (no SlicedBlob) — should pass filter and use shortcut return
+	out, err := ReduceSearchResults(ctx, []*internalpb.SearchResults{
+		{
+			MetricType: metric.IP,
+			NumQueries: nq,
+			TopK:       topK,
+			ResultData: resultData,
+		},
+		nil, // should be filtered out
+		{},  // no data — should be filtered out
+	}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	suite.Same(resultData, out.GetResultData())
+}
+
+func (suite *ResultSuite) TestEncodeSearchResultData_EmptyResult() {
+	ctx := context.Background()
+
+	// nil searchResultData — should produce neither SlicedBlob nor ResultData
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+
+	paramtable.Get().Save(key, "true")
+	encoded, err := EncodeSearchResultData(ctx, nil, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encoded.GetResultData())
+	suite.Nil(encoded.GetSlicedBlob())
+
+	// empty IDs — should produce neither
+	srd := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{},
+		Scores:     []float32{},
+		Topks:      []int64{0},
+	}
+	encoded, err = EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Nil(encoded.GetResultData())
+	suite.Nil(encoded.GetSlicedBlob())
 }
 
 func TestResult_MergeRequestCost(t *testing.T) {

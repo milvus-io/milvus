@@ -96,7 +96,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} mode=RelWithDebInfo build-cpp && chmod -R a+rwx /home/milvus/.conan"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} mode=RelWithDebInfo build-cpp && chmod -R a+rwx /home/milvus/.conan2"
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code

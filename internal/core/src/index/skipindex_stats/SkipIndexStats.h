@@ -539,10 +539,10 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
                             std::string max,
                             BloomFilterPtr bloom_filter,
                             BloomFilterPtr ngram_bloom_filter)
-        : min_(min),
-          max_(max),
-          bloom_filter_(bloom_filter),
-          ngram_bloom_filter_(ngram_bloom_filter) {
+        : min_(std::move(min)),
+          max_(std::move(max)),
+          bloom_filter_(std::move(bloom_filter)),
+          ngram_bloom_filter_(std::move(ngram_bloom_filter)) {
         this->has_value_ = true;
     }
 

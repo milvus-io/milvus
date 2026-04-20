@@ -53,6 +53,7 @@ import (
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -83,15 +84,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
 	tso := mocktso.NewAllocator(t)
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
+			catalog:     rootcoord.NewCatalog(catalogKV),
 			names:       testDB,
 			aliases:     newNameDb(),
 			dbName2Meta: make(map[string]*model.Database),
@@ -111,6 +110,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		return nil
 	})
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
+		return nil
+	})
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
 		return nil
 	})
 
@@ -134,7 +136,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 			result := results[mutableMsg.VChannel()]
 			immutableMsg := mutableMsg.WithTimeTick(result.TimeTick).WithLastConfirmed(result.LastConfirmedMessageID).IntoImmutableMessage(result.MessageID)
 			wg.Add(1)
-			go func() {
+			go func() { //nolint:gosec // context.Background is intentional for retries in test
 				defer wg.Done()
 				retry.Do(context.Background(), func() error {
 					return registry.CallMessageAckOnceCallbacks(context.Background(), immutableMsg)
@@ -247,6 +249,44 @@ func TestRootCoord_AlterDatabase(t *testing.T) {
 		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("validate resource group failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return []string{"rg1"}, nil
+			},
+		}))
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{
+			DbName: "db",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.DatabaseResourceGroups, Value: "rg2"},
+			},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrResourceGroupNotFound)
+	})
+}
+
+func TestCore_validateResourceGroups(t *testing.T) {
+	t.Run("invalid level", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		err := c.validateResourceGroups(context.Background(), nil, "invalid")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid level")
+	})
+
+	t.Run("broker error", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return nil, errors.New("broker error")
+			},
+		}))
+
+		err := c.validateResourceGroups(context.Background(), []*commonpb.KeyValuePair{
+			{Key: common.CollectionResourceGroups, Value: "rg1"},
+		}, "collection")
+		require.Error(t, err)
 	})
 }
 
@@ -1293,6 +1333,23 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
+
+	t.Run("validate resource group failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return []string{"rg1"}, nil
+			},
+		}))
+		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionResourceGroups, Value: "rg2"},
+			},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrResourceGroupNotFound)
+	})
 }
 
 func TestRootCoord_AddCollectionFunction(t *testing.T) {
@@ -1388,6 +1445,38 @@ func TestRootCoord_AlterCollectionFunction(t *testing.T) {
 		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AlterCollectionSchema(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(fmt.Errorf("mock broadcast error")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
 	})
 }
 

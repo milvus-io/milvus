@@ -45,7 +45,7 @@ func (r *CacheLoadRecord) getBytes() float64 {
 
 // Finish finishes the record.
 func (r *CacheLoadRecord) Finish(err error) {
-	r.baseRecord.finish(err)
+	r.finish(err)
 	getGlobalObserver().Observe(r)
 }
 
@@ -74,14 +74,15 @@ func (r *CacheEvictRecord) getBytes() float64 {
 
 // Finish finishes the record.
 func (r *CacheEvictRecord) Finish(err error) {
-	r.baseRecord.finish(err)
+	r.finish(err)
 	getGlobalObserver().Observe(r)
 }
 
 // NewQuerySegmentAccessRecord creates a new QuerySegmentMetricRecorder.
-func NewQuerySegmentAccessRecord(label SegmentLabel) QuerySegmentAccessRecord {
+func NewQuerySegmentAccessRecord(label SegmentLabel, queryLabel string) QuerySegmentAccessRecord {
 	return QuerySegmentAccessRecord{
 		segmentAccessRecord: newSegmentAccessRecord(label),
+		queryLabel:          queryLabel,
 	}
 }
 
@@ -95,6 +96,7 @@ func NewSearchSegmentAccessRecord(label SegmentLabel) SearchSegmentAccessRecord 
 // QuerySegmentAccessRecord records the metrics of a query segment.
 type QuerySegmentAccessRecord struct {
 	*segmentAccessRecord
+	queryLabel string
 }
 
 func (r QuerySegmentAccessRecord) Finish(err error) {

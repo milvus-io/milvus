@@ -44,6 +44,9 @@ type SearchPlan struct {
 }
 
 func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
+	if len(expr) == 0 {
+		return nil, errors.New("empty expression plan")
+	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
@@ -83,6 +86,7 @@ type SearchRequest struct {
 	consistencyLevel      commonpb.ConsistencyLevel
 	collectionTTL         typeutil.Timestamp
 	entityTTLPhysicalTime typeutil.Timestamp
+	filterOnly            bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -120,15 +124,18 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		return nil, errors.Wrap(err, "get fieldID from plan failed")
 	}
 
+	cl := req.GetReq().GetConsistencyLevel()
+
 	return &SearchRequest{
 		plan:                  plan,
 		cPlaceholderGroup:     cPlaceholderGroup,
 		msgID:                 req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:         int64(fieldID),
 		mvccTimestamp:         req.GetReq().GetMvccTimestamp(),
-		consistencyLevel:      req.GetReq().GetConsistencyLevel(),
+		consistencyLevel:      cl,
 		collectionTTL:         req.GetReq().GetCollectionTtlTimestamps(),
 		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
+		filterOnly:            req.GetFilterOnly(),
 	}, nil
 }
 
@@ -147,6 +154,10 @@ func (req *SearchRequest) Plan() *SearchPlan {
 
 func (req *SearchRequest) SearchFieldID() int64 {
 	return req.searchFieldID
+}
+
+func (req *SearchRequest) FilterOnly() bool {
+	return req.filterOnly
 }
 
 func (req *SearchRequest) Delete() {

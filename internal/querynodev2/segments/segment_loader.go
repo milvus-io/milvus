@@ -87,8 +87,8 @@ type Loader interface {
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
-	// LoadBM25Stats loads BM25 statslog for RemoteSegment
-	LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error)
+	// GetChunkManager returns the chunk manager for remote storage access.
+	GetChunkManager() storage.ChunkManager
 
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context,
@@ -396,7 +396,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 						zap.Int64("segmentID2", collidingID),
 						zap.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
 				}
-			} else {
+			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
 				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
 				if err != nil {
 					return errors.Wrap(err, "At LoadBloomFilter")
@@ -633,49 +633,8 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 	return nil
 }
 
-func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error) {
-	segmentNum := len(infos)
-	if segmentNum == 0 {
-		return nil, nil
-	}
-
-	log.Info("start loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int("segmentNum", segmentNum))
-
-	loadedStats := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
-	loadRemoteBM25Func := func(idx int) error {
-		loadInfo := infos[idx]
-		segmentID := loadInfo.SegmentID
-		stats := make(map[int64]*storage.BM25Stats)
-
-		log.Info("loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int64("segment", segmentID))
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
-		if err != nil {
-			log.Warn("load remote segment bm25 stats paths failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
-			return err
-		}
-		err = loader.loadBm25Stats(ctx, segmentID, stats, logpaths)
-		if err != nil {
-			log.Warn("load remote segment bm25 stats failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
-			return err
-		}
-		loadedStats.Insert(segmentID, stats)
-		return nil
-	}
-
-	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteBM25Func, "loadRemoteBM25Func")
-	if err != nil {
-		// no partial success here
-		log.Warn("failed to load bm25 stats for remote segment", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
-	}
-
-	return loadedStats, nil
+func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
+	return loader.cm
 }
 
 // load single bloom filter
@@ -683,6 +642,15 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("segmentIDs", loadInfo.GetSegmentID()))
+
+	partitionID := loadInfo.PartitionID
+	segmentID := loadInfo.SegmentID
+	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
+
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		log.Info("skip loading bloom filter for remote segment because bloom filter is disabled")
+		return bfs, nil
+	}
 
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
@@ -693,10 +661,6 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	pkField := GetPkField(collection.Schema())
 
 	log.Info("start loading remote...", zap.Int("segmentNum", 1))
-
-	partitionID := loadInfo.PartitionID
-	segmentID := loadInfo.SegmentID
-	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 
 	// For external collections, return empty bloom filter set.
 	// External collections use ExternalSegmentCandidate for PK checking (set on segment)
@@ -740,6 +704,20 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, nil
 	}
 
+	// Phase 1: always create metadata-only stubs (segmentID / partitionID / type).
+	// This gives callers valid candidates even when BF data is not loaded,
+	// so partition filtering and type-based delete-scope logic never need nil guards.
+	bfSets := make([]*pkoracle.BloomFilterSet, segmentNum)
+	for i, info := range infos {
+		bfSets[i] = pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+	}
+
+	// Phase 2: load BF stats into the stubs (skip when disabled or external collection).
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		log.Info("bloom filter disabled: returning metadata-only stubs")
+		return bfSets, nil
+	}
+
 	collection := loader.manager.Collection.Get(collectionID)
 	if collection == nil {
 		err := merr.WrapErrCollectionNotFound(collectionID)
@@ -748,6 +726,11 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	}
 	pkField := GetPkField(collection.Schema())
 	pkFieldID := pkField.GetFieldID()
+
+	// External collections use ExternalSegmentCandidate for PK checking and have no stats logs.
+	if typeutil.IsExternalCollection(collection.Schema()) {
+		return bfSets, nil
+	}
 
 	// Calculate total memory size needed for bloom filters (PK stats)
 	var totalMemorySize int64
@@ -781,37 +764,24 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 
 	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))
 
-	loadedBfs := typeutil.NewConcurrentSet[*pkoracle.BloomFilterSet]()
-	isExternal := typeutil.IsExternalCollection(collection.Schema())
 	loadRemoteFunc := func(idx int) error {
 		loadInfo := infos[idx]
-		partitionID := loadInfo.PartitionID
-		segmentID := loadInfo.SegmentID
-		bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, commonpb.SegmentState_Sealed)
-
-		// For external collections, return empty bloom filter set
-		// External collections don't have stats logs and use ExternalSegmentCandidate for PK checking
-		if isExternal {
-			loadedBfs.Insert(bfs)
-			return nil
-		}
+		bfs := bfSets[idx]
 
 		log.Info("loading bloom filter for remote...")
 		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
 		if err != nil {
 			return err
 		}
-		err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs)
+		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs)
 		if err != nil {
 			log.Warn("load remote segment bloom filter failed",
-				zap.Int64("partitionID", partitionID),
-				zap.Int64("segmentID", segmentID),
+				zap.Int64("partitionID", bfs.Partition()),
+				zap.Int64("segmentID", bfs.ID()),
 				zap.Error(err),
 			)
 			return err
 		}
-		loadedBfs.Insert(bfs)
-
 		return nil
 	}
 
@@ -822,14 +792,12 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 
-	result := loadedBfs.Collect()
-
 	// Charge loaded resource for bloom filters
-	for _, bfs := range result {
+	for _, bfs := range bfSets {
 		bfs.Charge()
 	}
 
-	return result, nil
+	return bfSets, nil
 }
 
 func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*IndexedFieldInfo, []*datapb.FieldBinlog) {
@@ -1239,29 +1207,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-
-	for _, indexPath := range indexInfo.IndexFilePaths {
-		if path.Base(indexPath) != storage.IndexParamsKey {
-			filteredPaths = append(filteredPaths, indexPath)
-		}
-	}
-
-	indexInfo.IndexFilePaths = filteredPaths
-	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
-	if err != nil {
-		return err
-	}
-
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
-	}
-
-	return segment.LoadIndex(ctx, indexInfo, fieldType)
-}
-
 func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segmentID),
@@ -1305,6 +1250,29 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 	}
 
 	return nil
+}
+
+func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
+	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
+
+	for _, indexPath := range indexInfo.IndexFilePaths {
+		if path.Base(indexPath) != storage.IndexParamsKey {
+			filteredPaths = append(filteredPaths, indexPath)
+		}
+	}
+
+	indexInfo.IndexFilePaths = filteredPaths
+	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
+	if err != nil {
+		return err
+	}
+
+	collection := loader.manager.Collection.Get(segment.Collection())
+	if collection == nil {
+		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
+	}
+
+	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,
@@ -1413,26 +1381,32 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return nil
 	}
 
-	for _, deltalog := range deltaLogs {
-		err := func() error {
-			opts := []storage.RwOption{
-				storage.WithDownloader(
-					func(ctx context.Context, paths []string) ([][]byte, error) {
-						return loader.cm.MultiRead(ctx, paths)
-					},
-				),
-			}
-			paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
-				return binlog.GetLogPath()
-			})
-			reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+	// For V3 (manifest) segments, Deltalogs is a pathless placeholder used only
+	// for compaction-trigger decisions. The real delta data is referenced by
+	// the manifest and loaded below.
+	isV3 := loadInfo.GetManifestPath() != ""
+	if !isV3 {
+		for _, deltalog := range deltaLogs {
+			err := func() error {
+				opts := []storage.RwOption{
+					storage.WithDownloader(
+						func(ctx context.Context, paths []string) ([][]byte, error) {
+							return loader.cm.MultiRead(ctx, paths)
+						},
+					),
+				}
+				paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
+					return binlog.GetLogPath()
+				})
+				reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+				if err != nil {
+					return err
+				}
+				return readDeltaRecords(reader)
+			}()
 			if err != nil {
 				return err
 			}
-			return readDeltaRecords(reader)
-		}()
-		if err != nil {
-			return err
 		}
 	}
 

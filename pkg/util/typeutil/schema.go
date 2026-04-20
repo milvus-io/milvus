@@ -2095,6 +2095,8 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
+			case nil:
+				// nullable vector field where all rows are null — no vector data to merge
 			default:
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
@@ -2343,6 +2345,13 @@ func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.Fi
 	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == fieldID {
 			return field
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				return field
+			}
 		}
 	}
 	return nil
@@ -3042,7 +3051,7 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 	for _, fieldID := range fieldIDs {
 		if f, exists := fieldIDFuncMapping[fieldID]; exists {
 			if f.Type == schemapb.FunctionType_BM25 {
-				return nil, fmt.Errorf("Attempt to insert bm25 function output field")
+				return nil, fmt.Errorf("attempt to insert bm25 function output field")
 			}
 			if !allowNonBM25Outputs {
 				return nil, fmt.Errorf("Insert data has function output field, but collection's property `collection.function.allowInsertNonBM25FunctionOutputs` is not enable")
@@ -3073,7 +3082,7 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 }
 
 func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_SparseFloatVector {
 		return false
 	}
 
@@ -3100,7 +3109,7 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 }
 
 func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_BinaryVector) {
+	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_BinaryVector {
 		return false
 	}
 

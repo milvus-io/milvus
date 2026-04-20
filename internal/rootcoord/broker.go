@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -60,6 +61,7 @@ type Broker interface {
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
 	BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error
+	ShowResourceGroups(ctx context.Context) ([]string, error)
 }
 
 type ServerBroker struct {
@@ -255,13 +257,15 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	dcReq := &datapb.AlterCollectionRequest{
 		CollectionID: collectionID,
 		Schema: &schemapb.CollectionSchema{
-			Name:              colMeta.Name,
-			Description:       colMeta.Description,
-			AutoID:            colMeta.AutoID,
-			Fields:            model.MarshalFieldModels(colMeta.Fields),
-			StructArrayFields: model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
-			Functions:         model.MarshalFunctionModels(colMeta.Functions),
-			Properties:        colMeta.Properties,
+			Name:               colMeta.Name,
+			Description:        colMeta.Description,
+			AutoID:             colMeta.AutoID,
+			Fields:             model.MarshalFieldModels(colMeta.Fields),
+			StructArrayFields:  model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
+			Functions:          model.MarshalFunctionModels(colMeta.Functions),
+			Properties:         colMeta.Properties,
+			Version:            colMeta.SchemaVersion,
+			DoPhysicalBackfill: colMeta.DoPhysicalBackfill,
 		},
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
@@ -269,7 +273,6 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 		DbID:           db.ID,
 		VChannels:      colMeta.VirtualChannelNames,
 	}
-
 	resp, err := b.s.mixCoord.BroadcastAlteredCollection(ctx, dcReq)
 	if err != nil {
 		return err
@@ -278,8 +281,27 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
-	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", collectionID), zap.Any("props", colMeta.Properties), zap.Any("field", colMeta.Fields))
+	log.Ctx(ctx).Info("done to broadcast request to alter collection",
+		zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", dcReq.GetCollectionID()),
+		zap.Any("props", colMeta.Properties), zap.Any("fields", colMeta.Fields),
+		zap.Int32("schemaVersion", colMeta.SchemaVersion), zap.Bool("doPhysicalBackfill", colMeta.DoPhysicalBackfill))
 	return nil
+}
+
+func (b *ServerBroker) ShowResourceGroups(ctx context.Context) ([]string, error) {
+	resp, err := b.s.mixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ListResourceGroups),
+			commonpbutil.WithSourceID(b.s.session.GetServerID()),
+		),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+	return resp.GetResourceGroups(), nil
 }
 
 func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {

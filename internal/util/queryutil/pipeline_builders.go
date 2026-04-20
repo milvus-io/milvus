@@ -54,22 +54,22 @@ func BuildQueryReducePipeline(
 	} else if hasGroupBy {
 		return buildGroupByReducePipeline(name, schema, topK, groupByFieldIDs, aggregates), nil
 	} else if hasOrderBy {
-		return buildOrderByReducePipeline(name, topK, orderByFields, maxOutputSize), nil
+		return buildOrderByReducePipeline(name, schema, topK, orderByFields, maxOutputSize), nil
 	}
-	return buildPlainReducePipeline(name, topK, reduceType, maxOutputSize), nil
+	return buildPlainReducePipeline(name, schema, topK, reduceType, maxOutputSize), nil
 }
 
 // buildPlainReducePipeline: [ReduceByPKTS(topK)] → output
-func buildPlainReducePipeline(name string, topK int64, reduceType reduce.IReduceType, maxOutputSize int64) *Pipeline {
+func buildPlainReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, reduceType reduce.IReduceType, maxOutputSize int64) *Pipeline {
 	b := NewPipelineBuilder(name)
-	b.Add(OpReduceByPKTS, pin(), pout(), NewReduceByPKWithTimestampOperator(reduceType, maxOutputSize, topK))
+	b.Add(OpReduceByPKTS, pin(), pout(), NewReduceByPKWithTimestampOperator(reduceType, maxOutputSize, topK, schema))
 	return b.Build()
 }
 
 // buildOrderByReducePipeline: [DeduplicatePK] → [OrderByLimit(topK)] → output
-func buildOrderByReducePipeline(name string, topK int64, orderByFields []*orderby.OrderByField, maxOutputSize int64) *Pipeline {
+func buildOrderByReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, orderByFields []*orderby.OrderByField, maxOutputSize int64) *Pipeline {
 	b := NewPipelineBuilder(name)
-	b.Add(OpDeduplicatePK, pin(), pch(ChannelDeduped), NewDeduplicatePKOperator(maxOutputSize))
+	b.Add(OpDeduplicatePK, pin(), pch(ChannelDeduped), NewDeduplicatePKOperator(maxOutputSize, schema))
 	b.Add(OpOrderByLimit, pch(ChannelDeduped), pout(), NewOrderByLimitOperator(orderByFields, topK))
 	return b.Build()
 }

@@ -214,9 +214,9 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     auto rows = rows_end - rows_begin;
     auto cell_bytes = value_size * rows;
     if (use_mmap_) {
-        return {{0, cell_bytes}, {0, cell_bytes}};
+        return {{0, cell_bytes}, {0, 0}};
     } else {
-        return {{cell_bytes, 0}, {cell_bytes, 0}};
+        return {{cell_bytes, 0}, {0, 0}};
     }
 }
 

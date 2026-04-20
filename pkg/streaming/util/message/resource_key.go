@@ -131,19 +131,23 @@ func NewExclusivePrivilegeResourceKey() ResourceKey {
 }
 
 // NewSharedSnapshotNameResourceKey creates a shared snapshot name resource key.
-func NewSharedSnapshotNameResourceKey(snapshotName string) ResourceKey {
+// Snapshots are unique per-collection, so the key is namespaced by collectionID
+// to avoid false contention across collections that happen to reuse a name.
+func NewSharedSnapshotNameResourceKey(collectionID int64, snapshotName string) ResourceKey {
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainSnapshotName,
-		Key:    snapshotName,
+		Key:    fmt.Sprintf("%d:%s", collectionID, snapshotName),
 		Shared: true,
 	}
 }
 
 // NewExclusiveSnapshotNameResourceKey creates an exclusive snapshot name resource key.
-func NewExclusiveSnapshotNameResourceKey(snapshotName string) ResourceKey {
+// Snapshots are unique per-collection, so the key is namespaced by collectionID
+// to avoid false contention across collections that happen to reuse a name.
+func NewExclusiveSnapshotNameResourceKey(collectionID int64, snapshotName string) ResourceKey {
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainSnapshotName,
-		Key:    snapshotName,
+		Key:    fmt.Sprintf("%d:%s", collectionID, snapshotName),
 		Shared: false,
 	}
 }

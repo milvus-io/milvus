@@ -303,7 +303,7 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context, colle
 	}
 
 	// filter replicas with RONodes or channelRONodes
-	replicas := b.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := b.meta.GetByCollection(ctx, collectionID)
 	ret := make([]int64, 0)
 	for _, replica := range replicas {
 		if filterReplicaWithRONodes(replica, 0) {
@@ -319,7 +319,7 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context, colle
 //
 // Returns a slice of all replica IDs for the collection.
 func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collectionID int64) []int64 {
-	replicas := b.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := b.meta.GetByCollection(ctx, collectionID)
 	return lo.Map(replicas, func(replica *meta.Replica, _ int) int64 {
 		return replica.GetID()
 	})
@@ -351,7 +351,7 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 
 	segmentPlans, channelPlans := make([]assign.SegmentAssignPlan, 0), make([]assign.ChannelAssignPlan, 0)
 	for _, rid := range replicas {
-		replica := b.meta.ReplicaManager.Get(ctx, rid)
+		replica := b.meta.Get(ctx, rid)
 		if replica == nil {
 			continue
 		}
