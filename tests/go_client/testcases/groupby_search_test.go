@@ -465,6 +465,8 @@ func TestSearchGroupByUnsupportedIndex(t *testing.T) {
 
 // FLOAT, DOUBLE, JSON, ARRAY
 func TestSearchGroupByUnsupportedDataType(t *testing.T) {
+	t.Parallel()
+
 	idxHnsw := index.NewHNSWIndex(entity.L2, 8, 96)
 	mc, ctx, collName := prepareDataForGroupBySearch(t, 1, 1000, idxHnsw, true)
 
@@ -481,11 +483,15 @@ func TestSearchGroupByUnsupportedDataType(t *testing.T) {
 
 // groupBy + iterator -> not supported
 func TestSearchGroupByIterator(t *testing.T) {
+	t.Parallel()
+
 	// TODO: sdk support
 }
 
 // groupBy + range search -> not supported
 func TestSearchGroupByRangeSearch(t *testing.T) {
+	t.Parallel()
+
 	t.Skipf("https://github.com/milvus-io/milvus/issues/38846")
 	idxHnsw := index.NewHNSWIndex(entity.COSINE, 8, 96)
 	mc, ctx, collName := prepareDataForGroupBySearch(t, 1, 1000, idxHnsw, true)
@@ -501,5 +507,7 @@ func TestSearchGroupByRangeSearch(t *testing.T) {
 
 // groupBy + advanced search
 func TestSearchGroupByHybridSearch(t *testing.T) {
+	t.Parallel()
+
 	t.Skipf("Waiting for HybridSearch implemention")
 }

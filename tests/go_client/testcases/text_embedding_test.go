@@ -27,6 +27,8 @@ func newTextEmbeddingFieldsOption(autoId bool) hp.FieldOptions {
 
 // TestCreateCollectionWithTextEmbedding tests basic collection creation with text embedding function
 func TestCreateCollectionWithTextEmbedding(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -49,6 +51,8 @@ func TestCreateCollectionWithTextEmbedding(t *testing.T) {
 
 // TestCreateCollectionWithTextEmbeddingTwice tests creating collection twice with same schema
 func TestCreateCollectionWithTextEmbeddingTwice(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -89,6 +93,8 @@ func TestCreateCollectionWithTextEmbeddingTwice(t *testing.T) {
 
 // TestCreateCollectionUnsupportedEndpoint tests creation with unsupported endpoint
 func TestCreateCollectionUnsupportedEndpoint(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -115,6 +121,8 @@ func TestCreateCollectionUnsupportedEndpoint(t *testing.T) {
 
 // TestCreateCollectionUnmatchedDim tests creation with mismatched dimension
 func TestCreateCollectionUnmatchedDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -145,6 +153,8 @@ func TestCreateCollectionUnmatchedDim(t *testing.T) {
 
 // TestInsertWithTextEmbedding tests basic data insertion with text embedding
 func TestInsertWithTextEmbedding(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -183,6 +193,8 @@ func TestInsertWithTextEmbedding(t *testing.T) {
 
 // TestInsertWithTruncateParams tests insertion with different truncate parameters
 func TestInsertWithTruncateParams(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name                string
 		truncate            bool
@@ -317,6 +329,8 @@ func TestInsertWithTruncateParams(t *testing.T) {
 
 // TestVerifyEmbeddingConsistency verifies that Milvus text embedding function produces same results as direct TEI calls
 func TestVerifyEmbeddingConsistency(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -411,6 +425,8 @@ func TestVerifyEmbeddingConsistency(t *testing.T) {
 
 // TestUpsertTextFieldUpdatesEmbedding tests that upserting text field updates embedding
 func TestUpsertTextFieldUpdatesEmbedding(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -508,6 +524,8 @@ func TestUpsertTextFieldUpdatesEmbedding(t *testing.T) {
 
 // TestDeleteAndSearch tests that deleted text cannot be searched
 func TestDeleteAndSearch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -569,6 +587,8 @@ func TestDeleteAndSearch(t *testing.T) {
 
 // TestSearchWithTextEmbedding tests search functionality with text embedding
 func TestSearchWithTextEmbedding(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -613,6 +633,8 @@ func TestSearchWithTextEmbedding(t *testing.T) {
 
 // TestSearchWithEmptyQuery tests search with empty query (should fail)
 func TestSearchWithEmptyQuery(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -641,6 +663,8 @@ func TestSearchWithEmptyQuery(t *testing.T) {
 
 // TestHybridSearchTextEmbeddingBM25 tests hybrid search combining TEI text embedding and BM25
 func TestHybridSearchTextEmbeddingBM25(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -774,6 +798,8 @@ func TestHybridSearchTextEmbeddingBM25(t *testing.T) {
 
 // TestInsertEmptyDocument tests insertion with empty document
 func TestInsertEmptyDocument(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -791,6 +817,8 @@ func TestInsertEmptyDocument(t *testing.T) {
 
 // TestInsertLongDocument tests insertion with very long document
 func TestInsertLongDocument(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -824,6 +852,8 @@ func TestInsertLongDocument(t *testing.T) {
 
 // TestInvalidEndpointHandling tests various invalid endpoint scenarios
 func TestInvalidEndpointHandling(t *testing.T) {
+	t.Parallel()
+
 	testCases := []struct {
 		name     string
 		endpoint string
@@ -866,6 +896,8 @@ func TestInvalidEndpointHandling(t *testing.T) {
 
 // TestMissingRequiredParameters tests creation with missing required parameters
 func TestMissingRequiredParameters(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -909,6 +941,8 @@ func TestMissingRequiredParameters(t *testing.T) {
 
 // TestConcurrentOperations tests concurrent text embedding operations
 func TestConcurrentOperations(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2) // longer timeout for concurrent ops
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
