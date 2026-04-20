@@ -90,8 +90,8 @@ StringIndexMarisa::ComputeByteSize() {
     }
 
     // CSR index + offsets
-    total += csr_index_.capacity() * sizeof(size_t);
-    total += csr_offsets_.capacity() * sizeof(size_t);
+    total += csr_index_.capacity() * sizeof(uint64_t);
+    total += csr_offsets_.capacity() * sizeof(uint64_t);
 
     cached_byte_size_ = total;
 }
@@ -109,8 +109,8 @@ StringIndexMarisa::CalculateTotalSize() const {
     size += str_ids_.size() * sizeof(int64_t);
 
     // CSR index + offsets
-    size += csr_index_.size() * sizeof(size_t);
-    size += csr_offsets_.size() * sizeof(size_t);
+    size += csr_index_.size() * sizeof(uint64_t);
+    size += csr_offsets_.size() * sizeof(uint64_t);
 
     return size;
 }
@@ -225,7 +225,7 @@ StringIndexMarisa::Serialize(const Config& config) {
     close(fd);
     remove(file.c_str());
 
-    auto str_ids_len = str_ids_.size() * sizeof(size_t);
+    auto str_ids_len = str_ids_.size() * sizeof(int64_t);
     std::shared_ptr<uint8_t[]> str_ids(new uint8_t[str_ids_len]);
     memcpy(str_ids.get(), str_ids_.data(), str_ids_len);
 
@@ -285,7 +285,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
-    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
+    str_ids_.resize(str_ids_len / sizeof(int64_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
     str_ids_ptr_ = str_ids_.data();
     str_ids_size_ = str_ids_.size();
@@ -696,8 +696,8 @@ StringIndexMarisa::fill_offsets() {
     // Pass 2: fill offsets
     csr_offsets_.resize(csr_index_[csr_num_keys_]);
     // Use a temporary copy of starts for scatter
-    std::vector<size_t> write_pos(csr_index_.begin(),
-                                  csr_index_.begin() + csr_num_keys_);
+    std::vector<uint64_t> write_pos(csr_index_.begin(),
+                                    csr_index_.begin() + csr_num_keys_);
     for (size_t offset = 0; offset < str_ids_size_; offset++) {
         auto str_id = str_ids_ptr_[offset];
         if (valid_str_id(str_id)) {
@@ -788,16 +788,16 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     close(fd);
 
     // Write str_ids
-    auto str_ids_len = str_ids_.size() * sizeof(size_t);
+    auto str_ids_len = str_ids_.size() * sizeof(int64_t);
     writer->WriteEntry(MARISA_STR_IDS, str_ids_.data(), str_ids_len);
 
     // Persist CSR index + offsets
     writer->WriteEntry(MARISA_CSR_INDEX,
                        csr_index_.data(),
-                       csr_index_.size() * sizeof(size_t));
+                       csr_index_.size() * sizeof(uint64_t));
     writer->WriteEntry(MARISA_CSR_OFFSETS,
                        csr_offsets_.data(),
-                       csr_offsets_.size() * sizeof(size_t));
+                       csr_offsets_.size() * sizeof(uint64_t));
     writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
@@ -925,13 +925,13 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             csr_mmap_data_ = static_cast<char*>(mapped);
             csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
 
-            csr_index_ptr_ = reinterpret_cast<const size_t*>(csr_mmap_data_);
+            csr_index_ptr_ = reinterpret_cast<const uint64_t*>(csr_mmap_data_);
             csr_offsets_ptr_ =
-                reinterpret_cast<const size_t*>(csr_mmap_data_ + idx_bytes);
+                reinterpret_cast<const uint64_t*>(csr_mmap_data_ + idx_bytes);
         } else {
             // memory path: stream into vectors
             auto idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
-            csr_index_.resize(idx_bytes / sizeof(size_t));
+            csr_index_.resize(idx_bytes / sizeof(uint64_t));
             size_t wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
@@ -942,7 +942,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 });
 
             auto off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
-            csr_offsets_.resize(off_bytes / sizeof(size_t));
+            csr_offsets_.resize(off_bytes / sizeof(uint64_t));
             wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {

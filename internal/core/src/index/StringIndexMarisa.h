@@ -171,11 +171,11 @@ class StringIndexMarisa : public StringIndex {
     std::unique_ptr<MmapFileRAII> str_ids_mmap_raii_;  // file cleanup
 
     // CSR (Compressed Sparse Row) format for str_id → offsets mapping.
-    // csr_index_[key_id] .. csr_index_[key_id+1] = range in csr_offsets_
-    std::vector<size_t> csr_index_;    // size = num_keys + 1 (memory mode)
-    std::vector<size_t> csr_offsets_;  // size = total_num_rows (memory mode)
-    const size_t* csr_index_ptr_ = nullptr;    // read accessor (vec or mmap)
-    const size_t* csr_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
+    // csr_index_[key_id] .. csr_index_[key_id+1] = range in csr_offsets_.
+    std::vector<uint64_t> csr_index_;    // size = num_keys + 1 (memory mode)
+    std::vector<uint64_t> csr_offsets_;  // size = total_num_rows (memory mode)
+    const uint64_t* csr_index_ptr_ = nullptr;    // read accessor (vec or mmap)
+    const uint64_t* csr_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
     size_t csr_num_keys_ = 0;
     char* csr_mmap_data_ = nullptr;  // mmap region for csr_index + csr_offsets
     int64_t csr_mmap_size_ = 0;
