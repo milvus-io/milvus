@@ -30,7 +30,6 @@
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
-#include "query/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -157,11 +156,13 @@ class VectorIterator {
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
  public:
+    // Pass nullptr for VECTOR_ARRAY element-level search: the iterator
+    // returns element IDs, which will be processed by IArrayOffsets.
     ChunkMergeIterator(int chunk_count,
-                       const milvus::OffsetMapping& offset_mapping,
+                       const milvus::OffsetMapping* offset_mapping,
                        const std::vector<int64_t>& total_rows_until_chunk = {},
                        bool larger_is_closer = false)
-        : offset_mapping_(&offset_mapping),
+        : offset_mapping_(offset_mapping),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
@@ -264,7 +265,7 @@ struct SearchResult {
         int chunk_count,
         const std::vector<int64_t>& total_rows_until_chunk,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
-        const milvus::OffsetMapping& offset_mapping,
+        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "

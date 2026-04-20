@@ -10,6 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -462,9 +463,30 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, _, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+
+		// Hybrid search does not yet support vector array (embedding list) fields:
+		// placeholder type is per sub-request and element-level vs embedding-list-level
+		// differentiation is not wired up on this path. Reject range search / iterator /
+		// group by on such fields here; plain top-K stays allowed for now (unchanged
+		// behavior).
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if t.rankParams.GetGroupByFieldId() > 0 {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if subIsIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
 		}
 
 		ignoreGrowing := t.IgnoreGrowing
@@ -775,13 +797,28 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 
-	// For ArrayOfVector fields with group by:
-	// 1. Embedding list search does not support group by
-	// 2. Element-level search only supports group by PK (doc-level dedup)
-	if queryInfo.GetGroupByFieldId() > 0 {
-		annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
-		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if isEmbeddingListPlaceholderType(placeholderType) {
+	// For ArrayOfVector fields, the placeholder type decides the search semantics:
+	// - Element-level (plain vector placeholder): behaves like a normal single-vector
+	//   search; supports range search, iterator, and group by primary key.
+	// - Embedding-list-level (multi-search-multi): does not support range search,
+	//   iterator, or group by (other than the PK case above).
+	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
+	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
+
+		if isEmbList {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for multi-search-multi on embedding list fields")
+			}
+			if t.isIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for multi-search-multi on embedding list fields")
+			}
+		}
+
+		if queryInfo.GetGroupByFieldId() > 0 {
+			if isEmbList {
 				return merr.WrapErrParameterInvalid("", "",
 					"group by is not supported for multi-search-multi on embedding list fields")
 			}

@@ -180,10 +180,6 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     }
 
     if (search_cfg.contains(RADIUS)) {
-        AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                   "Vector array(embedding list) is not supported for range "
-                   "search");
-
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
