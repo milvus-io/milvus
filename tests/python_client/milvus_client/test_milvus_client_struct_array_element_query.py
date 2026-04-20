@@ -3385,3 +3385,986 @@ class TestMilvusClientStructArrayElementMatchQuery(TestMilvusClientV2Base):
         assert has_sealed and has_growing, "Should have results from both segments"
 
 
+# ==================== Test Case 9: StructArray Index Access (PR #48987) ====================
+
+
+@pytest.mark.xdist_group("TestMilvusClientStructArrayIndexAccess")
+class TestMilvusClientStructArrayIndexAccess(TestMilvusClientV2Base):
+    """Test struct_arr[index][sub_field] index-access syntax (PR #48987).
+
+    The new syntax accesses a fixed positional element of a struct array's
+    sub-field, e.g. ``structA[0][int_val] > 100`` selects rows whose 1st
+    struct element has int_val > 100.
+
+    Coverage:
+    - Comparison operators (==, !=, >, >=, <, <=)
+    - IN / NOT IN
+    - Forward range ``a < expr < b`` and reverse range ``b > expr > a``
+    - String sub-field access
+    - Cross-index conditions (structA[0]... AND structA[1]...)
+    - Combination with doc-level filter
+    - Out-of-bounds index (rows shorter than the requested index do not match)
+    - Negative cases for invalid sub-field / parent field / unsupported swapped form
+    - Use inside search() filter
+    - array_length(structA[sub_field]) and rejection of array_length on indexed form
+
+    Data layout per case (>= 3500 rows total, sealed + growing both populated):
+    - Sealed segment:  3000 inert background rows (id 100000..102999)
+                       + first half of controlled rows -> flushed
+    - Growing segment: 500 inert background rows (id 103000..103499)
+                       + remaining controlled rows -> not flushed
+    Inert rows have struct array length 1 with int_val=0 / color="Inert" so
+    they never match controlled predicates; assertions are scoped to id < 100.
+    """
+
+    def _create_schema(self, client, dim=default_dim):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "structA", datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=default_capacity,
+        )
+        return schema
+
+    def _make_row(self, row_id, struct_elements):
+        """Build a row with explicit struct elements (in order)."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000 + j),
+                    "int_val": elem["int_val"],
+                    "str_val": elem.get("str_val", f"r{row_id}_e{j}"),
+                    "color": elem.get("color", "Red"),
+                }
+                for j, elem in enumerate(struct_elements)
+            ],
+        }
+
+    def _make_inert_row(self, row_id):
+        """Background row that does not match any controlled filter.
+        Single-element struct array with int_val=0, str_val=inert_X, color=Inert."""
+        return {
+            "id": row_id,
+            "doc_int": row_id,
+            "normal_vector": _seed_vector(row_id + 999999),
+            "structA": [{
+                "embedding": _seed_vector(row_id * 1000),
+                "int_val": 0,
+                "str_val": f"inert_{row_id}",
+                "color": "Inert",
+            }],
+        }
+
+    def _setup_collection_split(self, client, collection_name,
+                                 sealed_rows, growing_rows):
+        """Setup with explicit sealed/growing controlled row groups.
+
+        Layout (>= 3500 rows total):
+        - Sealed: 3000 inert background + sealed_rows -> flushed
+        - Growing: 500 inert background + growing_rows -> not flushed
+        """
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+        if sealed_rows:
+            self.insert(client, collection_name, sealed_rows)
+        self.flush(client, collection_name)
+
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
+                      for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+        if growing_rows:
+            self.insert(client, collection_name, growing_rows)
+
+        self.load_collection(client, collection_name)
+
+    def _setup_collection(self, client, collection_name, controlled_rows):
+        """Setup with sealed + growing background data + controlled rows split
+        across both segments.
+
+        Layout (>= 3500 rows total):
+        - Sealed: 3000 inert background (id 100000..102999)
+                  + first half of controlled_rows -> flushed
+        - Growing: 500 inert background (id 103000..103499)
+                   + second half of controlled_rows -> not flushed
+        """
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="structA[embedding]", index_type="HNSW",
+            metric_type="COSINE", params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        # 1) Sealed inert background: 3000 rows
+        bg_start = 100000
+        for start in range(0, default_nb, insert_batch_size):
+            batch = [self._make_inert_row(bg_start + start + k)
+                     for k in range(insert_batch_size)]
+            self.insert(client, collection_name, batch)
+
+        # 2) Half of controlled rows -> sealed
+        half = len(controlled_rows) // 2
+        sealed_part = controlled_rows[:half]
+        growing_part = controlled_rows[half:]
+        if sealed_part:
+            self.insert(client, collection_name, sealed_part)
+        self.flush(client, collection_name)
+
+        # 3) Growing inert background: 500 rows
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
+                      for k in range(default_growing_nb)]
+        self.insert(client, collection_name, growing_bg)
+
+        # 4) Remaining controlled rows -> growing
+        if growing_part:
+            self.insert(client, collection_name, growing_part)
+
+        self.load_collection(client, collection_name)
+
+    # ---- 9.1 Equality on indexed sub-field ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_index_access_query_eq(self):
+        """
+        target: structA[0][int_val] == X selects rows whose 1st element matches
+        method: build 5 rows with distinct first-element int_val
+        expected: only the row with matching first element returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_eq")
+
+        rows = [
+            self._make_row(0, [{"int_val": 10}, {"int_val": 20}]),
+            self._make_row(1, [{"int_val": 100}, {"int_val": 200}]),
+            self._make_row(2, [{"int_val": 100}]),                   # first elem also 100
+            self._make_row(3, [{"int_val": 50}, {"int_val": 100}]),  # 100 at index 1, not 0
+            self._make_row(4, [{"int_val": 999}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] == 100',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        ids = sorted({r["id"] for r in results})
+        assert ids == [1, 2], f"Expected [1, 2], got {ids}"
+
+    # ---- 9.2 Inequality + greater/less than ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_index_access_query_comparison_operators(self):
+        """
+        target: !=, >, >=, <, <= all work on structA[i][int_val]
+        method: same dataset, different operators
+        expected: each operator returns the exact expected ID set
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_cmp")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && structA[0][int_val] != 30', [0, 1, 3, 4]),
+            ('id < 100 && structA[0][int_val] > 30', [3, 4]),
+            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4]),
+            ('id < 100 && structA[0][int_val] < 30', [0, 1]),
+            ('id < 100 && structA[0][int_val] <= 30', [0, 1, 2]),
+        ]
+        for expr, expected in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=100,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 9.3 IN / NOT IN ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_index_access_query_in_not_in(self):
+        """
+        target: IN / NOT IN on structA[i][int_val]
+        method: filter against a literal list
+        expected: exact ID set returned for each
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_in")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] in [10, 30, 50, 999]',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [0, 2, 4]
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] not in [10, 30, 50]',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 3]
+
+    # ---- 9.4 Forward range a < expr < b ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_index_access_query_range_forward(self):
+        """
+        target: range syntax 'lo < structA[0][int_val] < hi'
+        method: open and closed bounds
+        expected: only rows in the range returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_range_fwd")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        # Open: 20 < x < 40 -> only 30 (inert int_val=0 excluded)
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && 20 < structA[0][int_val] < 40',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [2]
+
+        # Closed: 20 <= x <= 40 -> 20, 30, 40
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && 20 <= structA[0][int_val] <= 40',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 2, 3]
+
+    # ---- 9.5 Reverse range b > expr > a ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_range_reverse(self):
+        """
+        target: reverse range syntax 'hi > structA[0][int_val] > lo'
+        method: open and closed bounds
+        expected: only rows in the range returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_range_rev")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        # Open: 40 > x > 20 -> only 30
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && 40 > structA[0][int_val] > 20',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [2]
+
+        # Closed: 40 >= x >= 20 -> 20, 30, 40
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && 40 >= structA[0][int_val] >= 20',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 2, 3]
+
+    # ---- 9.6 String sub-field ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_index_access_query_string_subfield(self):
+        """
+        target: index-access on VARCHAR sub-field (==, !=, IN)
+        method: build rows with distinct str_val per first element
+        expected: exact ID set returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_str")
+
+        rows = [
+            self._make_row(0, [{"int_val": 1, "str_val": "apple"}]),
+            self._make_row(1, [{"int_val": 2, "str_val": "banana"}]),
+            self._make_row(2, [{"int_val": 3, "str_val": "apple"}]),
+            self._make_row(3, [{"int_val": 4, "str_val": "cherry"}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][str_val] == "apple"',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [0, 2]
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][str_val] in ["banana", "cherry"]',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 3]
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][str_val] != "apple"',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 3]
+
+    # ---- 9.7 Compound conditions across indices ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_compound_indices(self):
+        """
+        target: combine two index-access predicates with AND/OR
+        method: structA[0][int_val] > X && structA[1][int_val] < Y
+        expected: both element positions evaluated independently
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_compound")
+
+        # int_val pairs:           [a, b]
+        rows = [
+            self._make_row(0, [{"int_val": 100}, {"int_val": 1}]),    # a>50, b<10  -> match
+            self._make_row(1, [{"int_val": 100}, {"int_val": 50}]),   # a>50, b>=10 -> no
+            self._make_row(2, [{"int_val": 10}, {"int_val": 1}]),     # a<=50       -> no
+            self._make_row(3, [{"int_val": 200}, {"int_val": 5}]),    # match
+            self._make_row(4, [{"int_val": 60}, {"int_val": 9}]),     # match
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] > 50 && structA[1][int_val] < 10',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [0, 3, 4]
+
+        # OR variant — wrap with id-bound to keep inert rows out
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && (structA[0][int_val] > 150 || structA[1][int_val] == 50)',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [1, 3]
+
+    # ---- 9.8 Combined with doc-level filter ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_with_doc_filter(self):
+        """
+        target: doc-level scalar filter combined with index-access predicate
+        method: 'id >= 2 && structA[0][int_val] >= 30'
+        expected: both predicates applied
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_doc")
+
+        rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id >= 2 && structA[0][int_val] >= 30',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        assert sorted({r["id"] for r in results}) == [2, 3, 4]
+
+    # ---- 9.9 Index out of bounds ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_out_of_range(self):
+        """
+        target: requesting an index larger than the row's struct array length
+        method: query structA[3][int_val] across rows of varying length
+        expected: rows with fewer elements do not match; query does not error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_oob")
+
+        rows = [
+            self._make_row(0, [{"int_val": 10}]),                            # length 1
+            self._make_row(1, [{"int_val": 10}, {"int_val": 20}]),           # length 2
+            self._make_row(2, [{"int_val": 1}, {"int_val": 2},
+                               {"int_val": 3}, {"int_val": 99}]),            # length 4 -> index 3 = 99
+            self._make_row(3, [{"int_val": 1}, {"int_val": 2},
+                               {"int_val": 3}, {"int_val": 100}]),           # length 4 -> index 3 = 100
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        results, check = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[3][int_val] >= 99',
+            output_fields=["id"], limit=100,
+        )
+        assert check
+        ids = sorted({r["id"] for r in results})
+        assert ids == [2, 3], (
+            f"Only rows with >=4 elements at index 3 should match, got {ids}"
+        )
+
+    # ---- 9.10 Negative cases ----
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_index_access_query_invalid_expressions(self):
+        """
+        target: invalid index-access expressions are rejected
+        method: non-existent parent field, non-existent sub-field, swapped form
+        expected: server returns parameter-invalid error (does not crash)
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_invalid")
+
+        rows = [self._make_row(0, [{"int_val": 10}])]
+        self._setup_collection(client, collection_name, rows)
+
+        # parent field does not exist -> server reports "struct field not found"
+        self.query(
+            client, collection_name,
+            filter='non_existent[0][int_val] > 0',
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100,
+                         ct.err_msg: "struct field not found"},
+        )
+
+        # sub-field does not exist on structA
+        self.query(
+            client, collection_name,
+            filter='structA[0][not_a_field] > 0',
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100,
+                         ct.err_msg: "struct field not found"},
+        )
+
+        # swapped form: sub-field name first, then numeric index — grammar
+        # rejects it as an invalid expression, not as a missing field.
+        self.query(
+            client, collection_name,
+            filter='structA[int_val][0] > 0',
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100,
+                         ct.err_msg: "invalid expression"},
+        )
+
+    # ---- 9.11 Use inside search() filter ----
+
+    # ---- 9.12 array_length on struct sub-field (companion path of PR #48987) ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_length_on_struct_subfield(self):
+        """
+        target: array_length(structA[sub_field]) returns the per-row element count
+        method: build rows with distinct struct array lengths
+        expected: equality / range filters on array_length match the exact rows
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_arrlen")
+
+        # Row i has (i+1) struct elements (lengths: 1, 2, 3, 4, 5)
+        rows = [
+            self._make_row(i, [{"int_val": j} for j in range(i + 1)])
+            for i in range(5)
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        # inert background rows have struct length=1, so combine with id<100
+        # to keep assertions on the controlled set exact.
+        cases = [
+            ('id < 100 && array_length(structA[int_val]) == 3', [2]),
+            ('id < 100 && array_length(structA[int_val]) >= 4', [3, 4]),
+            ('id < 100 && array_length(structA[int_val]) < 3', [0, 1]),
+        ]
+        for expr, expected in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=100,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 9.13 array_length(structA[i][sub_field]) is NOT supported by grammar ----
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_array_length_on_struct_index_field_rejected(self):
+        """
+        target: array_length only accepts Identifier | JSONIdentifier |
+                StructFieldIdentifier — the indexed form structA[0][sub_field]
+                refers to a single element, not an array, so it must be rejected.
+        method: send array_length(structA[0][int_val]) and expect a parser/param
+                error (not a crash)
+        expected: server returns parameter-invalid / parser error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_arrlen_neg")
+
+        rows = [self._make_row(0, [{"int_val": 10}])]
+        self._setup_collection(client, collection_name, rows)
+
+        # Grammar lists allowed forms in the parser error message; assert the
+        # indexed form is rejected as a parse mismatch.
+        self.query(
+            client, collection_name,
+            filter='array_length(structA[0][int_val]) == 1',
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100,
+                         ct.err_msg: "mismatched input"},
+        )
+
+    # ---- 9.14 Per-segment consistency: same predicate on sealed-only / growing-only ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_sealed_growing_consistency(self):
+        """
+        target: index-access predicate must yield equivalent results regardless
+                of whether matching rows live in a sealed or growing segment.
+        method: build two mirrored controlled groups with identical first-element
+                int_val pattern, place group A in sealed (flushed) and group B
+                in growing (not flushed). After querying:
+                  - the sealed-side IDs must equal the predicted sealed expectation
+                  - the growing-side IDs must equal the predicted growing expectation
+                  - both halves must mirror each other
+        expected: per-segment subsets are exact and isomorphic.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_segments")
+
+        # Identical int_val pattern; sealed ids 0..4 / growing ids 5..9
+        pattern = [10, 20, 30, 40, 50]
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}]) for i, v in enumerate(pattern)
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate(pattern)
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        cases = [
+            ('id < 100 && structA[0][int_val] == 30', [2], [7]),
+            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4], [7, 8, 9]),
+            ('id < 100 && structA[0][int_val] in [10, 50]', [0, 4], [5, 9]),
+            ('id < 100 && 20 < structA[0][int_val] < 50', [2, 3], [7, 8]),
+        ]
+        for expr, exp_sealed, exp_growing in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=200,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            sealed_part = [i for i in ids if i < 5]
+            growing_part = [i for i in ids if 5 <= i < 100]
+            assert sealed_part == exp_sealed, (
+                f"{expr}: sealed expected {exp_sealed}, got {sealed_part}"
+            )
+            assert growing_part == exp_growing, (
+                f"{expr}: growing expected {exp_growing}, got {growing_part}"
+            )
+            # Mirroring: each sealed id i has growing counterpart i+5
+            assert [i + 5 for i in sealed_part] == growing_part, (
+                f"{expr}: sealed/growing pattern is not mirrored: "
+                f"sealed={sealed_part} growing={growing_part}"
+            )
+
+    # ---- 9.15 After delete: deleted matching rows disappear ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_after_delete(self):
+        """
+        target: index-access predicate reflects deletions correctly
+        method: baseline query -> delete a matching row and a non-matching row
+                -> requery, both sealed and growing controlled rows are exercised
+        expected: deleted matching IDs are absent; non-matching deletes do not
+                  affect the result; surviving matches are unchanged.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_delete")
+
+        # Spread across sealed (0..4) and growing (5..9) using split helper
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline: structA[0][int_val] >= 30 -> [2,3,4,7,8,9]
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] >= 30',
+            output_fields=["id"], limit=200,
+        )
+        assert sorted({r["id"] for r in results}) == [2, 3, 4, 7, 8, 9]
+
+        # Delete matching id 4 (sealed) and 7 (growing); also delete id 0 (non-matching)
+        self.delete(client, collection_name, ids=[4, 7, 0])
+        import time
+        time.sleep(1)  # give delete time to propagate
+
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] >= 30',
+            output_fields=["id"], limit=200,
+        )
+        ids = sorted({r["id"] for r in results})
+        assert ids == [2, 3, 8, 9], (
+            f"After deleting [4,7,0], expected [2,3,8,9], got {ids}"
+        )
+
+        # Sanity: id 0 (non-matching) really gone from any-id query as well
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100',
+            output_fields=["id"], limit=200,
+        )
+        all_ids = sorted({r["id"] for r in results})
+        assert 0 not in all_ids and 4 not in all_ids and 7 not in all_ids, (
+            f"Deleted IDs leaked: {all_ids}"
+        )
+
+    # ---- 9.16 After upsert: indexed sub-field changes are reflected ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_access_query_after_upsert(self):
+        """
+        target: upserting a row's struct array updates the indexed sub-field
+                value seen by structA[i][sub_field] predicates.
+        method: baseline query -> upsert two rows (one sealed, one growing) so
+                that the first-element int_val crosses the predicate threshold
+                in both directions -> requery.
+        expected:
+          - row 1 (sealed, was 20 -> now 100) becomes a new match
+          - row 9 (growing, was 50 -> now 5) drops out
+          - all unchanged rows keep their match status
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_upsert")
+
+        sealed_rows = [
+            self._make_row(i, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": v}])
+            for i, v in enumerate([10, 20, 30, 40, 50])
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline: structA[0][int_val] >= 30 -> [2,3,4,7,8,9]
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] >= 30',
+            output_fields=["id"], limit=200,
+        )
+        assert sorted({r["id"] for r in results}) == [2, 3, 4, 7, 8, 9]
+
+        # Upsert: id 1 sealed (20 -> 100, becomes match)
+        #         id 9 growing (50 -> 5, drops out)
+        upserts = [
+            self._make_row(1, [{"int_val": 100}]),
+            self._make_row(9, [{"int_val": 5}]),
+        ]
+        self.upsert(client, collection_name, upserts)
+        import time
+        time.sleep(1)
+
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && structA[0][int_val] >= 30',
+            output_fields=["id"], limit=200,
+        )
+        ids = sorted({r["id"] for r in results})
+        assert ids == [1, 2, 3, 4, 7, 8], (
+            f"After upserting id1->100, id9->5, expected [1,2,3,4,7,8], got {ids}"
+        )
+
+    # NOTE: search() filter coverage for index-access / array_contains /
+    # array_length lives in test_milvus_client_struct_array_element_search.py
+    # (TestMilvusClientStructArrayIndexAccessSearch).
+
+    # ====================================================================
+    # Companion correctness tests for array_contains / array_contains_all /
+    # array_contains_any / array_length on struct sub-fields. The earlier
+    # cases (Test Case 1) only verify "no false positives" by walking through
+    # returned hits; the cases below add exact `==` ground-truth assertions
+    # so any false negative also fails the test.
+    # ====================================================================
+
+    # ---- 9.17 array_contains exact correctness ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_array_contains_exact_correctness(self):
+        """
+        target: array_contains(structA[sub_field], v) returns the EXACT row set
+                that has v among the sub-field values (no false positives AND
+                no false negatives).
+        method: build controlled rows where the target value appears in some
+                rows multiple times, in some rows not at all, and at varying
+                element positions; assert ids == expected.
+        expected: precise ID set match for int + varchar sub-fields.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_ac_exact")
+
+        # int_val coverage:
+        #   row 0: [100]                            -> contains 100
+        #   row 1: [200, 201]                       -> contains 200
+        #   row 2: [301, 302, 303]                  -> contains none of {100,200,999}
+        #   row 3: [200, 999]                       -> contains 200 AND 999
+        #   row 4: [700, 100]                       -> contains 100 (at index 1)
+        rows = [
+            self._make_row(0, [{"int_val": 100}]),
+            self._make_row(1, [{"int_val": 200}, {"int_val": 201}]),
+            self._make_row(2, [{"int_val": 301}, {"int_val": 302}, {"int_val": 303}]),
+            self._make_row(3, [{"int_val": 200}, {"int_val": 999}]),
+            self._make_row(4, [{"int_val": 700}, {"int_val": 100}]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && array_contains(structA[int_val], 100)', [0, 4]),
+            ('id < 100 && array_contains(structA[int_val], 200)', [1, 3]),
+            ('id < 100 && array_contains(structA[int_val], 999)', [3]),
+            ('id < 100 && array_contains(structA[int_val], 12345)', []),
+        ]
+        for expr, expected in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=200,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 9.18 array_contains_all exact correctness ----
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_array_contains_all_exact_correctness(self):
+        """
+        target: array_contains_all(structA[sub_field], [v1, v2, ...]) returns
+                exactly the rows whose sub-field values contain ALL of vi.
+        method: controlled rows with overlapping subsets of {Red, Blue, Green};
+                assert exact ID set per query.
+        expected: precise ID set match.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_acall_exact")
+
+        # str_val coverage (int_val filler is irrelevant):
+        #   row 0: [Red]                       -> {Red}
+        #   row 1: [Red, Blue]                 -> {Red, Blue}
+        #   row 2: [Blue, Green]               -> {Blue, Green}
+        #   row 3: [Red, Blue, Green]          -> {Red, Blue, Green}
+        #   row 4: [Red, Green]                -> {Red, Green}
+        def _e(s):
+            return {"int_val": 0, "str_val": s}
+
+        rows = [
+            self._make_row(0, [_e("Red")]),
+            self._make_row(1, [_e("Red"), _e("Blue")]),
+            self._make_row(2, [_e("Blue"), _e("Green")]),
+            self._make_row(3, [_e("Red"), _e("Blue"), _e("Green")]),
+            self._make_row(4, [_e("Red"), _e("Green")]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            ('id < 100 && array_contains_all(structA[str_val], ["Red"])',
+             [0, 1, 3, 4]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue"])',
+             [1, 3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue", "Green"])',
+             [3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Yellow"])',
+             []),
+        ]
+        for expr, expected in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=200,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 9.19 array_contains_any exact correctness ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_contains_any_exact_correctness(self):
+        """
+        target: array_contains_any(structA[sub_field], [v1, v2, ...]) returns
+                exactly the rows whose sub-field values intersect with the list.
+        method: same controlled dataset as 9.18; query with various lists.
+        expected: precise ID set match.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_acany_exact")
+
+        def _e(s):
+            return {"int_val": 0, "str_val": s}
+
+        rows = [
+            self._make_row(0, [_e("Red")]),
+            self._make_row(1, [_e("Red"), _e("Blue")]),
+            self._make_row(2, [_e("Blue"), _e("Green")]),
+            self._make_row(3, [_e("Red"), _e("Blue"), _e("Green")]),
+            self._make_row(4, [_e("Red"), _e("Green")]),
+        ]
+        self._setup_collection(client, collection_name, rows)
+
+        cases = [
+            # Red OR Yellow -> rows containing Red
+            ('id < 100 && array_contains_any(structA[str_val], ["Red", "Yellow"])',
+             [0, 1, 3, 4]),
+            # Blue OR Green -> rows containing either
+            ('id < 100 && array_contains_any(structA[str_val], ["Blue", "Green"])',
+             [1, 2, 3, 4]),
+            # only colors absent from controlled data
+            ('id < 100 && array_contains_any(structA[str_val], ["Yellow", "Magenta"])',
+             []),
+        ]
+        for expr, expected in cases:
+            results, check = self.query(
+                client, collection_name,
+                filter=expr, output_fields=["id"], limit=200,
+            )
+            assert check, expr
+            ids = sorted({r["id"] for r in results})
+            assert ids == expected, f"{expr}: expected {expected}, got {ids}"
+
+    # ---- 9.20 array_length after delete & upsert ----
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_array_length_after_delete_and_upsert(self):
+        """
+        target: array_length predicate stays correct after delete and upsert
+                (length-changing) on rows in both sealed and growing segments.
+        method: baseline query -> delete one matching row in each segment ->
+                requery -> upsert two rows (one growing in, one growing out
+                of the predicate by changing struct array length) -> requery.
+        expected: per-step exact ID set match.
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_arrlen_du")
+
+        # length: sealed [1,2,3,4,5] (ids 0..4), growing [1,2,3,4,5] (ids 5..9)
+        sealed_rows = [
+            self._make_row(i, [{"int_val": j} for j in range(i + 1)])
+            for i in range(5)
+        ]
+        growing_rows = [
+            self._make_row(i + 5, [{"int_val": j} for j in range(i + 1)])
+            for i in range(5)
+        ]
+        self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
+
+        # Baseline: length>=3 -> [2,3,4,7,8,9]
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && array_length(structA[int_val]) >= 3',
+            output_fields=["id"], limit=200,
+        )
+        assert sorted({r["id"] for r in results}) == [2, 3, 4, 7, 8, 9]
+
+        # Delete one matching row in each segment: 4 (sealed), 8 (growing)
+        self.delete(client, collection_name, ids=[4, 8])
+        import time
+        time.sleep(1)
+
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && array_length(structA[int_val]) >= 3',
+            output_fields=["id"], limit=200,
+        )
+        assert sorted({r["id"] for r in results}) == [2, 3, 7, 9]
+
+        # Upsert: id 0 (length 1 -> 5, becomes match)
+        #         id 9 (length 5 -> 1, drops out)
+        upserts = [
+            self._make_row(0, [{"int_val": j} for j in range(5)]),  # length 5
+            self._make_row(9, [{"int_val": 0}]),                    # length 1
+        ]
+        self.upsert(client, collection_name, upserts)
+        time.sleep(1)
+
+        results, _ = self.query(
+            client, collection_name,
+            filter='id < 100 && array_length(structA[int_val]) >= 3',
+            output_fields=["id"], limit=200,
+        )
+        ids = sorted({r["id"] for r in results})
+        assert ids == [0, 2, 3, 7], (
+            f"After upserting id0->len5, id9->len1, expected [0,2,3,7], got {ids}"
+        )
