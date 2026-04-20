@@ -78,6 +78,8 @@ var (
 
 // resetMessageAckCallbacks resets the message ack callbacks.
 func resetMessageAckCallbacks() {
+	messageAckCallbacksMu.Lock()
+	defer messageAckCallbacksMu.Unlock()
 	messageAckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckCallback]{
 		message.MessageTypeImportV1:              syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeBatchUpdateManifestV2: syncutil.NewFuture[messageInnerAckCallback](),
