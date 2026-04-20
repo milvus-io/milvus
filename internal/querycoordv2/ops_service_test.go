@@ -449,8 +449,8 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	nodes, err := suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.meta.HandleNodeUp(ctx, 1)
+	nodes, err := suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Contains(nodes, int64(1))
 	// test success
@@ -460,7 +460,7 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	nodes, err = suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.NotContains(nodes, int64(1))
 
@@ -469,7 +469,7 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	})
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
-	nodes, err = suite.meta.ResourceManager.GetNodes(ctx, meta.DefaultResourceGroupName)
+	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Contains(nodes, int64(1))
 }
@@ -501,7 +501,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	replicaID := int64(1)
 	nodes := []int64{1, 2, 3, 4}
 	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 	collection := utils.CreateTestCollection(collectionID, 1)
 	partition := utils.CreateTestPartition(partitionID, collectionID)
 	suite.meta.PutCollection(ctx, collection, partition)
@@ -616,7 +616,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.HandleNodeUp(ctx, node)
+		suite.meta.HandleNodeUp(ctx, node)
 	}
 
 	// test transfer segment success, expect generate 1 balance segment task
@@ -752,7 +752,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	replicaID := int64(1)
 	nodes := []int64{1, 2, 3, 4}
 	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 	collection := utils.CreateTestCollection(collectionID, 1)
 	partition := utils.CreateTestPartition(partitionID, collectionID)
 	suite.meta.PutCollection(ctx, collection, partition)
@@ -869,7 +869,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.HandleNodeUp(ctx, node)
+		suite.meta.HandleNodeUp(ctx, node)
 	}
 
 	// test transfer channel success, expect generate 1 balance channel task

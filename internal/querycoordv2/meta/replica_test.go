@@ -452,9 +452,10 @@ func (suite *ReplicaSuite) TestTryBalanceNodeForChannelUnbalancedToBalanced() {
 	countOfChannelsWith2Nodes := 0
 	countOfChannelsWith1Node := 0
 	for _, count := range nodeCountPerChannel {
-		if count == 2 {
+		switch count {
+		case 2:
 			countOfChannelsWith2Nodes++
-		} else if count == 1 {
+		case 1:
 			countOfChannelsWith1Node++
 		}
 	}
@@ -718,9 +719,10 @@ func (suite *ReplicaSuite) TestCalculateOptimalAssignments() {
 	countsOfThree := 0
 	for _, count := range assignments {
 		totalAssigned += count
-		if count == 2 {
+		switch count {
+		case 2:
 			countsOfTwo++
-		} else if count == 3 {
+		case 3:
 			countsOfThree++
 		}
 	}

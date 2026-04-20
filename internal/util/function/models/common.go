@@ -209,7 +209,7 @@ func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 	}
 
 	if dim != 0 && dim != fieldDim {
-		return 0, fmt.Errorf("Function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params.", fieldName, fieldDim, dim)
+		return 0, fmt.Errorf("function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params", fieldName, fieldDim, dim)
 	}
 	return dim, nil
 }
@@ -297,25 +297,25 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 	var res T
 	err = json.Unmarshal(body, &res)
 	if err != nil {
-		return nil, fmt.Errorf("Call service failed, unmarshal response failed, errs:[%v]", err)
+		return nil, fmt.Errorf("call service failed, unmarshal response failed, errs:[%v]", err)
 	}
 	return &res, err
 }
 
 func send(req *http.Request) ([]byte, error) {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from configured model endpoints, not user input
 	if err != nil {
-		return nil, fmt.Errorf("Call service failed, errs:[%v]", err)
+		return nil, fmt.Errorf("call service failed, errs:[%v]", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Call service failed, read response failed, errs:[%v]", err)
+		return nil, fmt.Errorf("call service failed, read response failed, errs:[%v]", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Call service failed, errs:[%s, %s]", resp.Status, body)
+		return nil, fmt.Errorf("call service failed, errs:[%s, %s]", resp.Status, body)
 	}
 	return body, nil
 }

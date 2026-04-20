@@ -702,6 +702,6 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
             }
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "Function input field cannot be nullable: field reranker_field"}
+        error = {ct.err_code: 65535, ct.err_msg: "function input field cannot be nullable: field reranker_field"}
         self.search(client, collection_name, [vectors[0]], ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)

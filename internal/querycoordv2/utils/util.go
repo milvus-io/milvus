@@ -115,13 +115,13 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 }
 
 func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
-	percentage := m.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
 		return err
 	}
-	collection := m.CollectionManager.GetCollection(ctx, collectionID)
+	collection := m.GetCollection(ctx, collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
 		// when collection is loaded, regard collection as readable, set percentage == 100
 		percentage = 100
@@ -147,7 +147,7 @@ func GetShardLeadersWithChannels(
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
-	replicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	replicas := m.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 

@@ -72,9 +72,10 @@ func (lbe *LogicalBinaryExpr) Eval(evalCtx *EvalCtx) *bitset.BitSet {
 	}
 
 	// 4. and/or left/right results
-	if lbe.op == planpb.BinaryExpr_LogicalAnd {
+	switch lbe.op {
+	case planpb.BinaryExpr_LogicalAnd:
 		leftRes.InPlaceIntersection(rightRes)
-	} else if lbe.op == planpb.BinaryExpr_LogicalOr {
+	case planpb.BinaryExpr_LogicalOr:
 		leftRes.InPlaceUnion(rightRes)
 	}
 	return leftRes

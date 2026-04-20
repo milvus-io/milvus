@@ -662,11 +662,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for _, v := range vs {
 			offset++
 
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
 			}
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
 				return errors.New("unexpected error")
@@ -974,8 +974,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+		remained      int64 = 0
+		analyzeResult       = make(map[interface{}]int64, 0)
 	)
 	for {
 		v, err := pkIter.NextValue()

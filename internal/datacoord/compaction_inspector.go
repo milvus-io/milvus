@@ -245,7 +245,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)
-	// 2. no avaiable slots
+	// 2. no available slots
 	for {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
@@ -408,7 +408,7 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
-				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
+				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(context.TODO(), task)
 					log.Ctx(context.TODO()).Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))

@@ -48,7 +48,7 @@ type pendingBroadcastTask struct {
 // Execute can be repeated called until the task is done.
 // Same semantics as the `Poll` operation in eventloop.
 func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
-	if err := b.broadcastTask.InitializeRecovery(ctx); err != nil {
+	if err := b.InitializeRecovery(ctx); err != nil {
 		b.Logger().Warn("broadcast task initialize recovery failed", zap.Error(err))
 		return err
 	}
@@ -70,7 +70,7 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	}
 	if len(b.pendingMessages) == 0 {
 		// trigger a fast ack operation when the broadcast operation is done.
-		if err := b.broadcastTask.FastAck(ctx, b.appendResult); err != nil {
+		if err := b.FastAck(ctx, b.appendResult); err != nil {
 			b.Logger().Warn("broadcast task save task failed", zap.Error(err))
 			return err
 		}

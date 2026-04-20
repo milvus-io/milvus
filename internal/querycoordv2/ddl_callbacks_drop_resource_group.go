@@ -41,13 +41,13 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 		defer broadcaster.Close()
 	}
 
-	replicas := s.meta.ReplicaManager.GetByResourceGroup(ctx, req.GetResourceGroup())
+	replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
 		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
 		return errors.Wrap(err,
 			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()))
 	}
-	if err := s.meta.ResourceManager.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil {
+	if err := s.meta.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil {
 		return err
 	}
 
@@ -66,5 +66,5 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 }
 
 func (c *DDLCallbacks) dropResourceGroupV2AckCallback(ctx context.Context, result message.BroadcastResultDropResourceGroupMessageV2) error {
-	return c.meta.ResourceManager.DropResourceGroup(ctx, result.Message.Header().ResourceGroupName)
+	return c.meta.DropResourceGroup(ctx, result.Message.Header().ResourceGroupName)
 }

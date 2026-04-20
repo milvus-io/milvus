@@ -39,7 +39,7 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored in availableCancel and called in Close()
 	roWAL := &roWALAdaptorImpl{
 		roWALImpls:      basicWAL,
 		lifetime:        typeutil.NewLifetime(),
@@ -80,7 +80,7 @@ func adaptImplsToRWWAL(
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 	}
-	wal.writeMetrics.SetLogger(wal.roWALAdaptorImpl.Logger())
+	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
 	return wal
 }

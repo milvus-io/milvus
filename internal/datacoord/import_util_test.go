@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -208,7 +207,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
 
-	broker := broker2.NewMockBroker(t)
+	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
@@ -351,7 +350,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		return id, id + n, nil
 	})
 
-	broker := broker2.NewMockBroker(t)
+	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
@@ -798,7 +797,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	assert.NoError(t, err)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             100,
 			IsImporting:    true,
@@ -808,7 +807,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{10},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             110,
 			IsImporting:    true,
@@ -818,7 +817,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{11},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             120,
 			IsImporting:    true,
@@ -833,7 +832,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             200,
 			IsImporting:    true,
@@ -843,7 +842,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{20},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             210,
 			IsImporting:    true,
@@ -853,7 +852,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{21},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             220,
 			IsImporting:    true,

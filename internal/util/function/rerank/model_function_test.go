@@ -62,19 +62,19 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "unknown"},
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unknow rerank model provider")
+		s.ErrorContains(err, "unknown rerank model provider")
 	}
 
 	{
 		_, err := newProvider([]*commonpb.KeyValuePair{}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Lost rerank params")
+		s.ErrorContains(err, "lost rerank params")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank function lost params endpoint")
+		s.ErrorContains(err, "rerank function lost params endpoint")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -123,7 +123,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank provider: [vllm] is disabled")
+		s.ErrorContains(err, "rerank provider: [vllm] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
@@ -178,7 +178,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank provider: [tei] is disabled")
+		s.ErrorContains(err, "rerank provider: [tei] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
@@ -285,7 +285,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +301,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +354,7 @@ func (s *RerankModelSuite) TestCallTEI() {
 		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call service failed")
+		s.ErrorContains(err, "call service failed")
 	}
 }
 
@@ -472,23 +472,23 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	{
 		functionSchema.InputFieldNames = []string{"text", "ts"}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank model only supports single input")
+		s.ErrorContains(err, "rerank model only supports single input")
 	}
 	{
 		functionSchema.InputFieldNames = []string{"ts"}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank model only support varchar")
+		s.ErrorContains(err, "rerank model only support varchar")
 		functionSchema.InputFieldNames = []string{"text"}
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `NotJson`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Parse rerank params [queries] failed")
+		s.ErrorContains(err, "parse rerank params [queries] failed")
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `[]`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Rerank function lost params queries")
+		s.ErrorContains(err, "rerank function lost params queries")
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `["test"]`}
@@ -503,12 +503,12 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: providerParamName, Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unknow rerank model provider")
+		s.ErrorContains(err, "unknown rerank model provider")
 	}
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: "NotExist", Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Lost rerank params")
+		s.ErrorContains(err, "lost rerank params")
 	}
 }
 
@@ -563,7 +563,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 			s.NoError(err)
 
 			_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
-			s.ErrorContains(err, "Search reaults mismatch rerank inputs")
+			s.ErrorContains(err, "search results mismatch rerank inputs")
 		}
 	}
 

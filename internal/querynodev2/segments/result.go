@@ -437,7 +437,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		return ret, nil
 	}
 
-	var limit int = -1
+	limit := -1
 	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
 		limit = int(param.limit)
 	}

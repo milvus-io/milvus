@@ -90,7 +90,7 @@ func (c *QueryCluster) Start() {
 
 func (c *QueryCluster) Stop() {
 	c.stopOnce.Do(func() {
-		c.clients.closeAll()
+		c.closeAll()
 		close(c.ch)
 		c.wg.Wait()
 	})
@@ -107,10 +107,10 @@ func (c *QueryCluster) updateLoop() {
 			log.Info("cluster closed")
 			return
 		case <-ticker.C:
-			nodes := c.clients.getAllNodeIDs()
+			nodes := c.getAllNodeIDs()
 			for _, id := range nodes {
 				if c.nodeManager.Get(id) == nil {
-					c.clients.close(id)
+					c.close(id)
 				}
 			}
 			// apply dynamic update only when changed
@@ -321,7 +321,7 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 		return WrapErrNodeNotFound(nodeID)
 	}
 
-	cli, err := c.clients.getOrCreate(ctx, node)
+	cli, err := c.getOrCreate(ctx, node)
 	if err != nil {
 		return err
 	}

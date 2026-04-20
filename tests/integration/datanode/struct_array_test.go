@@ -227,7 +227,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 		for i := 0; i < s.rowsPerCollection; i++ {
 			switch fieldData.FieldName {
 			case integration.Int64Field:
-				break
+				// no-op: pk field validation not needed
 			case integration.FloatVecField:
 				for j := 0; j < s.dim; j++ {
 					s.Equal(fieldData.GetVectors().GetFloatVector().Data[j],
@@ -235,7 +235,8 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 				}
 			case integration.StructArrayField:
 				for _, field := range fieldData.GetStructArrays().Fields {
-					if field.FieldName == integration.StructSubInt32Field {
+					switch field.FieldName {
+					case integration.StructSubInt32Field:
 						getData := field.GetScalars().GetArrayData().Data[i]
 						generatedData := s.generatedFieldData[field.FieldId].GetScalars().GetArrayData().Data[i]
 
@@ -245,8 +246,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 						for j := 0; j < arrayLen; j++ {
 							s.Equal(getData.GetIntData().Data[j], generatedData.GetIntData().Data[j])
 						}
-
-					} else if field.FieldName == integration.StructSubFloatVecField {
+					case integration.StructSubFloatVecField:
 						getData := field.GetVectors().GetVectorArray().Data[i]
 						generatedData := s.generatedFieldData[field.FieldId].GetVectors().GetVectorArray().Data[i]
 
@@ -256,7 +256,6 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 						for j := 0; j < length; j++ {
 							s.Equal(getData.GetFloatVector().Data[j], generatedData.GetFloatVector().Data[j])
 						}
-
 					}
 				}
 			default:

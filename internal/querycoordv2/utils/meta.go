@@ -84,25 +84,25 @@ func GroupSegmentsByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager
 // RecoverReplicaOfCollection recovers all replica of collection with latest resource group.
 func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID typeutil.UniqueID) {
 	logger := log.With(zap.Int64("collectionID", collectionID))
-	rgNames := m.ReplicaManager.GetResourceGroupByCollection(ctx, collectionID)
+	rgNames := m.GetResourceGroupByCollection(ctx, collectionID)
 	if rgNames.Len() == 0 {
 		logger.Error("no resource group found for collection")
 		return
 	}
-	rgs, err := m.ResourceManager.GetResourceGroups(ctx, rgNames.Collect())
+	rgs, err := m.GetResourceGroups(ctx, rgNames.Collect())
 	if err != nil {
 		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return
 	}
 
-	if err := m.ReplicaManager.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
+	if err := m.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
 		logger.Warn("fail to set available nodes in replica", zap.Error(err))
 	}
 }
 
 // RecoverAllCollectionrecovers all replica of all collection in resource group.
 func RecoverAllCollection(m *meta.Meta) {
-	for _, collection := range m.CollectionManager.GetAll(context.TODO()) {
+	for _, collection := range m.GetAll(context.TODO()) {
 		RecoverReplicaOfCollection(context.TODO(), m, collection)
 	}
 }
@@ -141,7 +141,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		if !m.ContainResourceGroup(ctx, rgName) {
 			return nil, merr.WrapErrResourceGroupNotFound(rgName)
 		}
-		nodes, err := m.ResourceManager.GetNodes(ctx, rgName)
+		nodes, err := m.GetNodes(ctx, rgName)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +159,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 
 // SpawnReplicasWithReplicaConfig spawns replicas with replica config.
 func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params meta.SpawnWithReplicaConfigParams) ([]*meta.Replica, error) {
-	replicas, err := m.ReplicaManager.SpawnWithReplicaConfig(ctx, params)
+	replicas, err := m.SpawnWithReplicaConfig(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 		return nil, err
 	}
 	// Spawn it in replica manager.
-	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels, loadPriority)
+	replicas, err := m.Spawn(ctx, collection, replicaNumInRG, channels, loadPriority)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func ReassignReplicaToRG(
 		return nil, nil, nil, err
 	}
 
-	replicas := m.ReplicaManager.GetByCollection(context.TODO(), collectionID)
+	replicas := m.GetByCollection(context.TODO(), collectionID)
 	replicasInRG := lo.GroupBy(replicas, func(replica *meta.Replica) string {
 		return replica.GetResourceGroup()
 	})

@@ -47,7 +47,7 @@ func TestProxyRpcLimit(t *testing.T) {
 	assert.NotNil(t, proxy)
 
 	testServer := newProxyTestServer(proxy)
-	testServer.Proxy.SetAddress(p.GetAddress())
+	testServer.SetAddress(p.GetAddress())
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 	defer testServer.grpcServer.Stop()

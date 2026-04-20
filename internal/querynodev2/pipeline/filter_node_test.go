@@ -88,7 +88,7 @@ func (suite *FilterNodeSuite) TestWithLoadCollection() {
 	}
 
 	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
+		return !lo.Contains(suite.excludedSegmentIDs, segmentID) || ts > 1
 	})
 	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)
@@ -125,7 +125,7 @@ func (suite *FilterNodeSuite) TestWithLoadPartation() {
 	}
 
 	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, ts uint64) bool {
-		return !(lo.Contains(suite.excludedSegmentIDs, segmentID) && ts <= 1)
+		return !lo.Contains(suite.excludedSegmentIDs, segmentID) || ts > 1
 	})
 	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything)
 	node := newFilterNode(suite.collectionID, suite.channel, suite.manager, suite.delegator, 8)

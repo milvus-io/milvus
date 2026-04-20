@@ -116,7 +116,7 @@ func (dsw *DeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) error {
 	// Write descriptor
 	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
 	de.PayloadDataType = dsw.fieldSchema.DataType
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -357,8 +357,8 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 	// Write descriptor
 	de := NewBaseDescriptorEvent(dsw.collectionID, dsw.partitionID, dsw.segmentID)
 	de.PayloadDataType = schemapb.DataType_Int64
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
-	de.descriptorEventData.AddExtra(version, MultiField)
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(dsw.rw.writtenUncompressed)))
+	de.AddExtra(version, MultiField)
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -492,7 +492,7 @@ func supportMultiFieldFormat(blobs []*Blob) bool {
 			return false
 		}
 		defer reader.Close()
-		version := reader.descriptorEventData.Extras[version]
+		version := reader.Extras[version]
 		return version != nil && version.(string) == MultiField
 	}
 	return false

@@ -82,7 +82,7 @@ func (s *RRFFunctionSuite) TestNewRRFFuction() {
 	{
 		functionSchema.InputFieldNames = []string{"ts"}
 		_, err := newRRFFunction(schema, functionSchema)
-		s.ErrorContains(err, "The rrf function does not support input parameters")
+		s.ErrorContains(err, "the rrf function does not support input parameters")
 	}
 }
 

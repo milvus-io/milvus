@@ -39,13 +39,14 @@ func TestResumableProducer(t *testing.T) {
 	i := 0
 	ch2 := make(chan struct{})
 	rp := NewResumableProducer(func(ctx context.Context, opts *handler.ProducerOptions) (producer.Producer, error) {
-		if i == 0 {
+		switch i {
+		case 0:
 			i++
 			return p, nil
-		} else if i == 1 {
+		case 1:
 			i++
 			return nil, errors.New("test")
-		} else if i == 2 {
+		case 2:
 			p := mock_producer.NewMockProducer(t)
 			msgID := mock_message.NewMockMessageID(t)
 			p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {

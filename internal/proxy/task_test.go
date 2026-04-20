@@ -1281,7 +1281,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		marshaledSchemaWithTooManyFields, err := proto.Marshal(schemaWithTooManyFields)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = marshaledSchemaWithTooManyFields
+		task.Schema = marshaledSchemaWithTooManyFields
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1307,7 +1307,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		tooManyVectorFieldsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = tooManyVectorFieldsSchema
+		task.Schema = tooManyVectorFieldsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1326,7 +1326,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		noVectorSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = noVectorSchema
+		task.Schema = noVectorSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1337,7 +1337,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		schema.Name = " " // empty
 		emptyNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = emptyNameSchema
+		task.Schema = emptyNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1347,14 +1347,14 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		tooLongNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = tooLongNameSchema
+		task.Schema = tooLongNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		schema.Name = "$" // invalid first char
 		invalidFirstCharSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = invalidFirstCharSchema
+		task.Schema = invalidFirstCharSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1363,7 +1363,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		schema.Fields = append(schema.Fields, schema.Fields[0])
 		duplicatedFieldsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = duplicatedFieldsSchema
+		task.Schema = duplicatedFieldsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1374,7 +1374,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		noPrimaryFieldsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = noPrimaryFieldsSchema
+		task.Schema = noPrimaryFieldsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1385,7 +1385,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		invalidFieldNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = invalidFieldNameSchema
+		task.Schema = invalidFieldNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1398,7 +1398,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		noTypeParamsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = noTypeParamsSchema
+		task.Schema = noTypeParamsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1412,7 +1412,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		noDimSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = noDimSchema
+		task.Schema = noDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1428,7 +1428,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		// Validate default load list
 		skipLoadSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = skipLoadSchema
+		task.Schema = skipLoadSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1446,7 +1446,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		dimNotIntSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = dimNotIntSchema
+		task.Schema = dimNotIntSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1464,7 +1464,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		tooLargeDimSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = tooLargeDimSchema
+		task.Schema = tooLargeDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1478,7 +1478,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		}
 		binaryTooLargeDimSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = binaryTooLargeDimSchema
+		task.Schema = binaryTooLargeDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1501,7 +1501,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		})
 		twoVecFieldsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = twoVecFieldsSchema
+		task.Schema = twoVecFieldsSchema
 		err = task.PreExecute(ctx)
 		if enableMultipleVectorFields {
 			assert.NoError(t, err)
@@ -1517,7 +1517,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		// Test valid StructArrayField
 		validStructSchema, err := proto.Marshal(structArrayFieldSchema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = validStructSchema
+		task.Schema = validStructSchema
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 
@@ -1526,7 +1526,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		invalidStructSchema.StructArrayFields[0].Fields = []*schemapb.FieldSchema{} // Empty fields
 		invalidStructSchemaBytes, err := proto.Marshal(invalidStructSchema)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = invalidStructSchemaBytes
+		task.Schema = invalidStructSchemaBytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1535,7 +1535,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		invalidStructSchema2.StructArrayFields[0].Fields[0].Name = "$invalid" // Invalid field name
 		invalidStructSchema2Bytes, err := proto.Marshal(invalidStructSchema2)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = invalidStructSchema2Bytes
+		task.Schema = invalidStructSchema2Bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1544,7 +1544,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		invalidStructSchema3.StructArrayFields[0].Fields[0].DataType = schemapb.DataType_Int64 // Should be Array or ArrayOfVector
 		invalidStructSchema3Bytes, err := proto.Marshal(invalidStructSchema3)
 		assert.NoError(t, err)
-		task.CreateCollectionRequest.Schema = invalidStructSchema3Bytes
+		task.Schema = invalidStructSchema3Bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -3113,11 +3113,11 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 	err := dct.Execute(ctx)
 	assert.NoError(t, err)
 
-	dct.DropCollectionRequest.CollectionName = "c1"
+	dct.CollectionName = "c1"
 	err = dct.Execute(ctx)
 	assert.Error(t, err)
 
-	dct.DropCollectionRequest.CollectionName = "c2"
+	dct.CollectionName = "c2"
 	err = dct.Execute(ctx)
 	assert.Error(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, dct.result.GetErrorCode())
@@ -3168,11 +3168,11 @@ func Test_truncateCollectionTask_Execute(t *testing.T) {
 	err := tct.Execute(ctx)
 	assert.NoError(t, err)
 
-	tct.TruncateCollectionRequest.CollectionName = "c1"
+	tct.CollectionName = "c1"
 	err = tct.Execute(ctx)
 	assert.Error(t, err)
 
-	tct.TruncateCollectionRequest.CollectionName = "c2"
+	tct.CollectionName = "c2"
 	err = tct.Execute(ctx)
 	assert.Error(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, tct.result.GetStatus().GetErrorCode())
@@ -5915,7 +5915,7 @@ func TestHighlightTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, task.result)
 		assert.Equal(t, expectedResp, task.result)
-		assert.Equal(t, "test_channel", task.GetHighlightRequest.Channel)
+		assert.Equal(t, "test_channel", task.Channel)
 	})
 
 	t.Run("getHighlightOnShardleader rpc error", func(t *testing.T) {

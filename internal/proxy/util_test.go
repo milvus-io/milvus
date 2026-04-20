@@ -3966,7 +3966,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
 	})
 
 	t.Run("JSON not supported in struct", func(t *testing.T) {
@@ -3997,7 +3997,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "Nested array is not supported")
+			assert.Contains(t, err.Error(), "nested array is not supported")
 		}
 	})
 
@@ -4020,7 +4020,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unsupported element type of array field array_vector_with_scalar, now only float vector is supported")
+		assert.Contains(t, err.Error(), "unsupported element type of array field array_vector_with_scalar, now only float vector is supported")
 	})
 
 	t.Run("array of vector missing dimension", func(t *testing.T) {

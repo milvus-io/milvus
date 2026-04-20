@@ -163,7 +163,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_InvalidQueriesJSON() {
 
 	s.Error(err)
 	s.Nil(highlight)
-	s.Contains(err.Error(), "Parse queries failed")
+	s.Contains(err.Error(), "parse queries failed")
 }
 
 func (s *SemanticHighlightSuite) TestNewSemanticHighlight_InvalidInputFieldsJSON() {
@@ -189,7 +189,7 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_InvalidInputFieldsJSON
 
 	s.Error(err)
 	s.Nil(highlight)
-	s.Contains(err.Error(), "Parse input_field failed")
+	s.Contains(err.Error(), "parse input_field failed")
 }
 
 // Note: TestNewSemanticHighlight_FieldNotFound is removed because field validation
@@ -851,7 +851,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_SizeMismatch() {
 	s.Error(err)
 	s.Nil(highlights)
 	s.Nil(scores)
-	s.Contains(err.Error(), "Highlights size must equal to documents size")
+	s.Contains(err.Error(), "highlights size must equal to documents size")
 }
 
 func (s *SemanticHighlightSuite) TestNewSemanticHighlight_MultipleDynamicFields() {
