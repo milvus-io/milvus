@@ -60,9 +60,9 @@ etcd:
   data:
     dir: default.etcd # Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/
   auth:
-    enabled: false # Whether to enable authentication
-    userName:  # username for etcd authentication
-    password:  # password for etcd authentication
+    enabled: true # Whether to enable authentication
+    userName: etcdadmin # username for etcd authentication
+    password: etcdadmin # password for etcd authentication
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
@@ -689,7 +689,7 @@ dataCoord:
         minSize: 8388608 # The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
-        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
+        deltalogMaxNum: 1000 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000
     expiry:
       tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
     backfill:
@@ -729,6 +729,7 @@ dataCoord:
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
+    maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance

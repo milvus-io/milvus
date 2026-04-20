@@ -594,11 +594,12 @@ func (node *QueryNode) handleQueryHookEvent() {
 	onEvent2 := func(event *config.Event) {
 		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
 			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
-			if event.EventType == config.CreateType || event.EventType == config.UpdateType {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType:
 				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
 					log.Warn("failed to refresh hook tuning config", zap.Error(err))
 				}
-			} else if event.EventType == config.DeleteType {
+			case config.DeleteType:
 				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
 					log.Warn("failed to delete hook tuning config", zap.Error(err))
 				}

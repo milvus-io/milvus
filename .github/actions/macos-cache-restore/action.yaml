@@ -49,6 +49,6 @@ runs:
   - name: Restore Conan Cache
     uses: actions/cache/restore@v4
     with:
-      path: ~/.conan
-      key: macos15-arm-conan-${{ steps.conan-cache.outputs.hash }}
-      restore-keys: macos15-arm-conan-
+      path: ~/.conan2
+      key: macos15-arm-conan2-${{ steps.conan-cache.outputs.hash }}
+      restore-keys: macos15-arm-conan2-

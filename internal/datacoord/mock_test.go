@@ -60,7 +60,7 @@ func NewMetaMemoryKV() *metaMemoryKV {
 }
 
 func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
+	keys, values, err := mm.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}
@@ -1057,6 +1057,14 @@ func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.Get
 }
 
 func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

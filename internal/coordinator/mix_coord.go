@@ -223,12 +223,12 @@ func (s *mixCoordImpl) initKVCreator() {
 		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
 			s.metaKVCreator = func() kv.MetaKv {
 				return tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-					tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		} else {
 			s.metaKVCreator = func() kv.MetaKv {
 				return etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-					etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+					etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 			}
 		}
 	}
@@ -302,7 +302,7 @@ func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
 
 func (s *mixCoordImpl) startPosixCleanupTask() {
 	s.posixCleanupStartOnce.Do(func() {
-		ctx, cancel := context.WithCancel(s.ctx)
+		ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // cancel is stored and called in stopPosixCleanupTask
 		s.posixCleanupCancel = cancel
 
 		s.posixCleanupWg.Add(1)
@@ -1300,6 +1300,14 @@ func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.
 
 func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	return s.datacoordServer.ListSnapshots(ctx, req)
+}
+
+func (s *mixCoordImpl) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDataRequest) (*datapb.PinSnapshotDataResponse, error) {
+	return s.datacoordServer.PinSnapshotData(ctx, req)
+}
+
+func (s *mixCoordImpl) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.UnpinSnapshotData(ctx, req)
 }
 
 func (s *mixCoordImpl) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {

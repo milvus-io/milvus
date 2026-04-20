@@ -2529,6 +2529,44 @@ func TestMetaTable_RestoreRBAC(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestMetaTable_CheckIfRBACRestorable_Wildcard(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListRole(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).
+		Return(nil, nil)
+	catalog.EXPECT().ListUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil)
+
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"not_commit": model.NewDatabase(1, "not_commit", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Roles: []*milvuspb.RoleEntity{{Name: "wildcard_role"}},
+			Grants: []*milvuspb.GrantEntity{
+				{
+					Role:       &milvuspb.RoleEntity{Name: "wildcard_role"},
+					Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+					ObjectName: util.AnyWord,
+					DbName:     util.AnyWord,
+					Grantor: &milvuspb.GrantorEntity{
+						User:      &milvuspb.UserEntity{Name: util.UserRoot},
+						Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord},
+					},
+				},
+			},
+		},
+	}
+	assert.NoError(t, mt.CheckIfRBACRestorable(context.TODO(), req))
+}
+
 func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{

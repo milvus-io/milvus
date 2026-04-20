@@ -232,7 +232,7 @@ func TestLastExpireReset(t *testing.T) {
 	// assign segments, set max segment to only 1MB, equalling to 10485 rows
 	var bigRows, smallRows int64 = 10000, 1000
 	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-	initSegment.SegmentInfo.State = commonpb.SegmentState_Dropped
+	initSegment.State = commonpb.SegmentState_Dropped
 	meta.segments.SetSegment(1, initSegment)
 	allocs, _ := segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows, storage.StorageV1)
 	segmentID1, expire1 := allocs[0].SegmentID, allocs[0].ExpireTime
@@ -1126,7 +1126,7 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 		basePath, ver, unmarshalErr := packed.UnmarshalManifestPath(segment.ManifestPath)
 		assert.NoError(t, unmarshalErr)
 		assert.NotEmpty(t, basePath)
-		assert.Equal(t, int64(packed.ManifestEarliest), ver)
+		assert.Equal(t, packed.ManifestEarliest, ver)
 	})
 
 	t.Run("StorageV2 segment has no manifest path", func(t *testing.T) {

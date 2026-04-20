@@ -116,19 +116,19 @@ func NewMinHashFunctionRunner(
 		case NumHashesKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("Param num_hashes:%s is not a number", param.GetValue())
+				return nil, fmt.Errorf("param num_hashes:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return nil, fmt.Errorf("Param num_hashes:%d must be positive", val)
+				return nil, fmt.Errorf("param num_hashes:%d must be positive", val)
 			}
 			numHashes = int(val)
 		case ShingleSizeKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("Param shingle_size:%s is not a number", param.GetValue())
+				return nil, fmt.Errorf("param shingle_size:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return nil, fmt.Errorf("Param shingle_size:%d must be positive", val)
+				return nil, fmt.Errorf("param shingle_size:%d must be positive", val)
 			}
 			shingleSize = int(val)
 		case HashFuncKey:
@@ -138,7 +138,7 @@ func NewMinHashFunctionRunner(
 			case "sha1":
 				hashFunc = HashFuncSHA1
 			default:
-				return nil, fmt.Errorf("Unknown hash function: %s", param.GetValue())
+				return nil, fmt.Errorf("unknown hash function: %s", param.GetValue())
 			}
 		case TokenLevelKey:
 			switch strings.ToLower(param.GetValue()) {
@@ -147,12 +147,12 @@ func NewMinHashFunctionRunner(
 			case "word":
 				useCharToken = false
 			default:
-				return nil, fmt.Errorf("Unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
+				return nil, fmt.Errorf("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
 			}
 		case SeedKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("Param seed:%s is not a number", param.GetValue())
+				return nil, fmt.Errorf("param seed:%s is not a number", param.GetValue())
 			}
 			seed = int(val)
 		}
@@ -240,38 +240,38 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 		case NumHashesKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("Param num_hashes:%s is not a number", param.GetValue())
+				return fmt.Errorf("param num_hashes:%s is not a number", param.GetValue())
 			}
 			numHashes = int(val)
 			if numHashes <= 0 {
-				return fmt.Errorf("Param num_hashes:%d must be positive", numHashes)
+				return fmt.Errorf("param num_hashes:%d must be positive", numHashes)
 			}
 		case ShingleSizeKey:
 			val, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("Param shingle_size:%s is not a number", param.GetValue())
+				return fmt.Errorf("param shingle_size:%s is not a number", param.GetValue())
 			}
 			if val <= 0 {
-				return fmt.Errorf("Param shingle_size:%d must be positive", val)
+				return fmt.Errorf("param shingle_size:%d must be positive", val)
 			}
 		case HashFuncKey:
 			switch strings.ToLower(param.GetValue()) {
 			case "xxhash", "xxhash64", "sha1":
 				// valid hash function
 			default:
-				return fmt.Errorf("Unknown hash function: %s (expected 'xxhash64' or 'sha1')", param.GetValue())
+				return fmt.Errorf("unknown hash function: %s (expected 'xxhash64' or 'sha1')", param.GetValue())
 			}
 		case TokenLevelKey:
 			switch strings.ToLower(param.GetValue()) {
 			case "char", "character", "word":
 				// valid token level
 			default:
-				return fmt.Errorf("Unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
+				return fmt.Errorf("unknown token_level: %s (expected 'char' or 'word')", param.GetValue())
 			}
 		case SeedKey:
 			_, err := strconv.ParseInt(param.GetValue(), 10, 64)
 			if err != nil {
-				return fmt.Errorf("Param seed:%s is not a number", param.GetValue())
+				return fmt.Errorf("param seed:%s is not a number", param.GetValue())
 			}
 		}
 	}

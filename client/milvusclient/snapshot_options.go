@@ -67,20 +67,30 @@ type DropSnapshotOption interface {
 }
 
 type dropSnapshotOption struct {
-	name string
+	name           string
+	dbName         string
+	collectionName string
 }
 
 func (opt *dropSnapshotOption) Request() *milvuspb.DropSnapshotRequest {
 	return &milvuspb.DropSnapshotRequest{
-		Base: &commonpb.MsgBase{},
-		Name: opt.name,
+		Base:           &commonpb.MsgBase{},
+		Name:           opt.name,
+		DbName:         opt.dbName,
+		CollectionName: opt.collectionName,
 	}
 }
 
+func (opt *dropSnapshotOption) WithDbName(dbName string) *dropSnapshotOption {
+	opt.dbName = dbName
+	return opt
+}
+
 // NewDropSnapshotOption creates a new DropSnapshotOption
-func NewDropSnapshotOption(name string) *dropSnapshotOption {
+func NewDropSnapshotOption(name string, collectionName string) *dropSnapshotOption {
 	return &dropSnapshotOption{
-		name: name,
+		name:           name,
+		collectionName: collectionName,
 	}
 }
 
@@ -112,9 +122,10 @@ func (opt *listSnapshotsOption) WithDbName(dbName string) *listSnapshotsOption {
 	return opt
 }
 
-// NewListSnapshotsOption creates a new ListSnapshotsOption
-func NewListSnapshotsOption() *listSnapshotsOption {
-	return &listSnapshotsOption{}
+// NewListSnapshotsOption creates a new ListSnapshotsOption.
+// collectionName is required — the proxy rejects empty collection_name.
+func NewListSnapshotsOption(collectionName string) *listSnapshotsOption {
+	return &listSnapshotsOption{collectionName: collectionName}
 }
 
 // DescribeSnapshotOption interface for describing snapshot options
@@ -123,20 +134,30 @@ type DescribeSnapshotOption interface {
 }
 
 type describeSnapshotOption struct {
-	name string
+	name           string
+	dbName         string
+	collectionName string
 }
 
 func (opt *describeSnapshotOption) Request() *milvuspb.DescribeSnapshotRequest {
 	return &milvuspb.DescribeSnapshotRequest{
-		Base: &commonpb.MsgBase{},
-		Name: opt.name,
+		Base:           &commonpb.MsgBase{},
+		Name:           opt.name,
+		DbName:         opt.dbName,
+		CollectionName: opt.collectionName,
 	}
 }
 
+func (opt *describeSnapshotOption) WithDbName(dbName string) *describeSnapshotOption {
+	opt.dbName = dbName
+	return opt
+}
+
 // NewDescribeSnapshotOption creates a new DescribeSnapshotOption
-func NewDescribeSnapshotOption(name string) *describeSnapshotOption {
+func NewDescribeSnapshotOption(name string, collectionName string) *describeSnapshotOption {
 	return &describeSnapshotOption{
-		name: name,
+		name:           name,
+		collectionName: collectionName,
 	}
 }
 
@@ -146,17 +167,21 @@ type RestoreSnapshotOption interface {
 }
 
 type restoreSnapshotOption struct {
-	dbName         string
-	name           string
-	collectionName string
+	name                 string
+	dbName               string
+	collectionName       string
+	targetDbName         string
+	targetCollectionName string
 }
 
 func (opt *restoreSnapshotOption) Request() *milvuspb.RestoreSnapshotRequest {
 	return &milvuspb.RestoreSnapshotRequest{
-		Base:           &commonpb.MsgBase{},
-		Name:           opt.name,
-		DbName:         opt.dbName,
-		CollectionName: opt.collectionName,
+		Base:                 &commonpb.MsgBase{},
+		Name:                 opt.name,
+		DbName:               opt.dbName,
+		CollectionName:       opt.collectionName,
+		TargetDbName:         opt.targetDbName,
+		TargetCollectionName: opt.targetCollectionName,
 	}
 }
 
@@ -165,11 +190,19 @@ func (opt *restoreSnapshotOption) WithDbName(dbName string) *restoreSnapshotOpti
 	return opt
 }
 
+func (opt *restoreSnapshotOption) WithTargetDbName(targetDbName string) *restoreSnapshotOption {
+	opt.targetDbName = targetDbName
+	return opt
+}
+
 // NewRestoreSnapshotOption creates a new RestoreSnapshotOption
-func NewRestoreSnapshotOption(name string, collectionName string) *restoreSnapshotOption {
+// name: snapshot name, collectionName: the source collection where the snapshot lives,
+// targetCollectionName: the name for the restored collection (must differ from source)
+func NewRestoreSnapshotOption(name string, collectionName string, targetCollectionName string) *restoreSnapshotOption {
 	return &restoreSnapshotOption{
-		name:           name,
-		collectionName: collectionName,
+		name:                 name,
+		collectionName:       collectionName,
+		targetCollectionName: targetCollectionName,
 	}
 }
 
@@ -202,14 +235,21 @@ type ListRestoreSnapshotJobsOption interface {
 }
 
 type listRestoreSnapshotJobsOption struct {
+	dbName         string
 	collectionName string
 }
 
 func (opt *listRestoreSnapshotJobsOption) Request() *milvuspb.ListRestoreSnapshotJobsRequest {
 	return &milvuspb.ListRestoreSnapshotJobsRequest{
 		Base:           &commonpb.MsgBase{},
+		DbName:         opt.dbName,
 		CollectionName: opt.collectionName,
 	}
+}
+
+func (opt *listRestoreSnapshotJobsOption) WithDbName(dbName string) *listRestoreSnapshotJobsOption {
+	opt.dbName = dbName
+	return opt
 }
 
 func (opt *listRestoreSnapshotJobsOption) WithCollectionName(collectionName string) *listRestoreSnapshotJobsOption {
@@ -220,4 +260,62 @@ func (opt *listRestoreSnapshotJobsOption) WithCollectionName(collectionName stri
 // NewListRestoreSnapshotJobsOption creates a new ListRestoreSnapshotJobsOption
 func NewListRestoreSnapshotJobsOption() *listRestoreSnapshotJobsOption {
 	return &listRestoreSnapshotJobsOption{}
+}
+
+// PinSnapshotDataOption interface for pinning snapshot data
+type PinSnapshotDataOption interface {
+	Request() *milvuspb.PinSnapshotDataRequest
+}
+
+type pinSnapshotDataOption struct {
+	name           string
+	dbName         string
+	collectionName string
+	ttlSeconds     int64
+}
+
+func (opt *pinSnapshotDataOption) Request() *milvuspb.PinSnapshotDataRequest {
+	return &milvuspb.PinSnapshotDataRequest{
+		Base:           &commonpb.MsgBase{},
+		Name:           opt.name,
+		DbName:         opt.dbName,
+		CollectionName: opt.collectionName,
+		TtlSeconds:     opt.ttlSeconds,
+	}
+}
+
+func (opt *pinSnapshotDataOption) WithDbName(dbName string) *pinSnapshotDataOption {
+	opt.dbName = dbName
+	return opt
+}
+
+func (opt *pinSnapshotDataOption) WithTTL(ttlSeconds int64) *pinSnapshotDataOption {
+	opt.ttlSeconds = ttlSeconds
+	return opt
+}
+
+// NewPinSnapshotDataOption creates a new PinSnapshotDataOption
+func NewPinSnapshotDataOption(name string, collectionName string) *pinSnapshotDataOption {
+	return &pinSnapshotDataOption{name: name, collectionName: collectionName}
+}
+
+// UnpinSnapshotDataOption interface for unpinning snapshot data
+type UnpinSnapshotDataOption interface {
+	Request() *milvuspb.UnpinSnapshotDataRequest
+}
+
+type unpinSnapshotDataOption struct {
+	pinID int64
+}
+
+func (opt *unpinSnapshotDataOption) Request() *milvuspb.UnpinSnapshotDataRequest {
+	return &milvuspb.UnpinSnapshotDataRequest{
+		Base:  &commonpb.MsgBase{},
+		PinId: opt.pinID,
+	}
+}
+
+// NewUnpinSnapshotDataOption creates a new UnpinSnapshotDataOption
+func NewUnpinSnapshotDataOption(pinID int64) *unpinSnapshotDataOption {
+	return &unpinSnapshotDataOption{pinID: pinID}
 }

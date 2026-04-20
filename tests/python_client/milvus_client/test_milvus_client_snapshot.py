@@ -9,6 +9,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
+from ml_dtypes import bfloat16
 
 
 prefix = "snapshot"
@@ -71,13 +72,13 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         assert snapshot_name in snapshots, f"Snapshot {snapshot_name} not found in list"
 
         # 4. Describe snapshot
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
         assert info.name == snapshot_name
         assert info.collection_name == collection_name
         assert info.create_ts > 0
 
         # 5. Drop snapshot
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
         # 6. Verify snapshot is dropped
         snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
@@ -111,7 +112,8 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 3. Restore snapshot to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         assert job_id > 0, "restore_snapshot should return a valid job_id"
 
         # 4. Wait for restore to complete
@@ -126,7 +128,7 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
             f"Restored collection should have {default_nb} rows, got {restored_count}"
 
         # 6. Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -204,7 +206,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_create_empty_collection(self):
@@ -225,7 +227,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
         assert snapshot_name in snapshots
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
@@ -241,9 +243,9 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
 
-        # SDK validates snapshot_name and raises ParamError
+        # SDK validates snapshot_name and raises ParamError before checking collection_name
         error = {ct.err_code: 1, ct.err_msg: "snapshot_name must be a non-empty string"}
-        self.drop_snapshot(client, snapshot_name,
+        self.drop_snapshot(client, snapshot_name, "",
                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -256,10 +258,12 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         Fixed in PR #47096: Server now validates snapshot names using standard naming rules.
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
 
         # Server validates snapshot name and rejects whitespace-only names
         error = {ct.err_code: 1100, ct.err_msg: "snapshot name should be not empty"}
-        self.drop_snapshot(client, " ",
+        self.drop_snapshot(client, " ", collection_name,
                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -270,10 +274,12 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         expected: should succeed (idempotent behavior)
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
         snapshot_name = cf.gen_unique_str("non_existent")
 
         # Should not raise exception (idempotent)
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
@@ -303,7 +309,7 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
 
         # Cleanup
         for name in snapshot_names:
-            self.drop_snapshot(client, name)
+            self.drop_snapshot(client, name, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_list_by_collection(self):
@@ -330,8 +336,8 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
         assert snapshot_name2 not in snapshots
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name1)
-        self.drop_snapshot(client, snapshot_name2)
+        self.drop_snapshot(client, snapshot_name1, collection_name1)
+        self.drop_snapshot(client, snapshot_name2, collection_name2)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_list_empty(self):
@@ -355,10 +361,12 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
         snapshot_name = cf.gen_unique_str("non_existent")
 
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.describe_snapshot(client, snapshot_name,
+        self.describe_snapshot(client, snapshot_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -376,11 +384,11 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         self.create_snapshot(client, collection_name, snapshot_name, description=description)
 
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
         assert info.description == description
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
@@ -394,11 +402,14 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
         snapshot_name = cf.gen_unique_str("non_existent")
-        collection_name = cf.gen_unique_str(prefix)
+        target_collection_name = cf.gen_unique_str(prefix + "_target")
 
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.restore_snapshot(client, snapshot_name, collection_name,
+        self.restore_snapshot(client, snapshot_name, target_collection_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -422,10 +433,11 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
 
         error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
         self.restore_snapshot(client, snapshot_name, target_collection_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotRestoreState(TestMilvusClientV2Base):
@@ -485,7 +497,8 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data
@@ -497,7 +510,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         assert ids == list(range(100))
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -533,7 +546,8 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data
@@ -543,7 +557,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         assert len(res) == 100
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -582,7 +596,8 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data count
@@ -592,7 +607,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 100
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -630,7 +645,8 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify JSON data
@@ -640,7 +656,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         assert res[0]["metadata"]["key"] == "value_0"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -678,7 +694,8 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
@@ -689,7 +706,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         assert res[0]["dynamic_field_2"] == 0
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -729,7 +746,8 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify partitions are preserved
@@ -746,7 +764,7 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
             assert res[0]["count(*)"] == 100, f"Partition {p_name} should have 100 rows"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -782,7 +800,8 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         self.drop_partition(client, collection_name, partition_name)
 
         # Restore snapshot
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify partition is restored
@@ -797,7 +816,7 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 100
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -836,7 +855,8 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify only 50 rows remain
@@ -846,7 +866,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 50
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -889,7 +909,8 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 150
 
         # Restore snapshot
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Restored collection should only have 100 rows (point-in-time)
@@ -899,7 +920,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 100
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -964,7 +985,8 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         log.info("Created snapshot (without triggering flush)")
 
         # Restore snapshot to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify restored collection data count
@@ -992,7 +1014,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         log.info("Verified: Snapshot does NOT include growing segment data")
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -1035,7 +1057,8 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify index is preserved
@@ -1050,7 +1073,7 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -1083,7 +1106,8 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Query all vectors from restored collection
@@ -1101,7 +1125,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
                     f"Vector mismatch at id={row['id']}, dim={j}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1134,7 +1158,8 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Search on restored collection with same queries
@@ -1150,7 +1175,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
                 f"Search results mismatch for query {i}: original={original_ids}, restored={restored_ids}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1195,7 +1220,8 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Query and verify all scalar values
@@ -1212,7 +1238,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
             assert row["varchar_field"] == f"string_value_{i}", f"varchar_field mismatch at id={i}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -1251,7 +1277,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
                 snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
                 if name in snapshots:
                     results[name] = "accepted"
-                    self.drop_snapshot(client, name)
+                    self.drop_snapshot(client, name, collection_name)
                 else:
                     results[name] = "created but not listed"
             except Exception as e:
@@ -1278,7 +1304,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
             name = "s" * length
             try:
                 self.create_snapshot(client, collection_name, name)
-                self.drop_snapshot(client, name)
+                self.drop_snapshot(client, name, collection_name)
             except Exception as e:
                 found_limit = length
                 log.info(f"Snapshot name length limit is less than {length}: {e}")
@@ -1312,7 +1338,8 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
 
         # Track progress
         progress_values = []
@@ -1342,7 +1369,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         assert final_state.time_cost > 0, "time_cost should be > 0 after completion"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1380,7 +1407,8 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Restore each snapshot and verify correct count
         for i, snapshot_name in enumerate(snapshots):
             restored_name = cf.gen_unique_str(prefix + "_restored")
-            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                                      source_collection_name=collection_name)
             wait_for_restore_complete(client, job_id)
 
             self.load_collection(client, restored_name)
@@ -1394,7 +1422,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
 
         # Cleanup
         for snapshot_name in snapshots:
-            self.drop_snapshot(client, snapshot_name)
+            self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_concurrent_restore(self):
@@ -1428,7 +1456,8 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         for i in range(num_restores):
             restored_name = cf.gen_unique_str(prefix + f"_restored_{i}")
             restored_names.append(restored_name)
-            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                                      source_collection_name=collection_name)
             restore_jobs.append(job_id)
 
         # Wait for all to complete
@@ -1443,7 +1472,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
             self.drop_collection(client, restored_name)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 
@@ -1474,21 +1503,23 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Delete snapshot
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
         # Try to restore - should fail
         error = {ct.err_code: 1, ct.err_msg: "not found"}
         self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                              source_collection_name=collection_name,
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_snapshot_list_after_drop_collection(self):
+    def test_snapshot_cascade_delete_on_drop_collection(self):
         """
-        target: test listing snapshots after source collection is dropped
-        method: create snapshot, drop collection, list snapshots
-        expected: snapshot should still be listable (snapshot is independent)
+        target: test snapshots are cascade deleted when collection is dropped
+        method: create snapshot, drop collection, recreate collection, list snapshots
+        expected: snapshots should be automatically deleted with the collection
 
-        Fixed in PR #47096: Server now handles empty collection_name by listing all snapshots.
+        Changed in PR #48143: snapshot lifecycle is now bound to collection.
+        Dropping a collection cascades to delete all its snapshots.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1505,25 +1536,20 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
 
-        # Drop original collection
+        # Verify snapshot exists before drop
+        snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
+        assert snapshot_name in snapshots, "Snapshot should exist before collection drop"
+
+        # Drop collection - should cascade delete snapshots
         self.drop_collection(client, collection_name)
 
-        # Snapshot should still be listable
-        snapshots, _ = self.list_snapshots(client)
-        assert snapshot_name in snapshots, "Snapshot should exist after collection drop"
+        # Recreate collection with same name (this is a new collection)
+        self.create_collection(client, collection_name, default_dim)
 
-        # Should be able to restore to new collection
-        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        wait_for_restore_complete(client, job_id)
-
-        self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
-        assert res[0]["count(*)"] == 100
-
-        # Cleanup
-        self.drop_snapshot(client, snapshot_name)
-        self.drop_collection(client, restored_collection_name)
+        # Snapshots should not exist for the new collection
+        snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
+        assert len(snapshots) == 0, \
+            "Snapshots should be cascade deleted when collection is dropped"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_schema_consistency_autoID(self):
@@ -1556,7 +1582,8 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify schema of restored collection
@@ -1570,7 +1597,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         self.insert(client, restored_collection_name, new_rows)
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -1629,7 +1656,8 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify all scalar data
@@ -1652,7 +1680,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
             assert row["varchar_field"] == f"string_{i}", f"varchar_field mismatch at id={i}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1698,7 +1726,8 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify array data
@@ -1713,7 +1742,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         assert row["bool_array"] == [j % 2 == 0 for j in range(5)]
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1768,7 +1797,8 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data count
@@ -1784,7 +1814,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         assert len(search_res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1830,7 +1860,8 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify nullable fields
@@ -1855,9 +1886,233 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         assert abs(res[0]["nullable_float"] - 3.5) < 1e-5
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_with_comprehensive_schema(self):
+        """
+        target: test snapshot with comprehensive schema covering all data types
+        method: use gen_all_datatype_collection_schema (all scalars, arrays, vectors,
+                struct array, BM25 function, MinHash function, nullable fields, text match)
+                then snapshot and restore, verify data integrity
+        expected: all field data should be preserved correctly after restore
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Generate comprehensive schema with all data types
+        schema = cf.gen_all_datatype_collection_schema(
+            dim=default_dim,
+            enable_struct_array_field=True,
+            enable_dynamic_field=True,
+            nullable=True
+        )
+
+        # Create indexes for vector fields
+        index_params = client.prepare_index_params()
+        index_params.add_index("float_vector", metric_type="COSINE")
+        index_params.add_index("text_sparse_emb", metric_type="BM25",
+                               index_type="SPARSE_INVERTED_INDEX")
+        index_params.add_index("minhash_emb", metric_type="HAMMING")
+        # Struct array inner vector field also needs index
+        index_params.add_index("array_struct[float_vector]", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        # Generate row data using schema-based data generator
+        nb = 200
+        data = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Verify source collection
+        self.load_collection(client, collection_name)
+        res, _ = self.query(client, collection_name, filter="",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == nb
+
+        # Create snapshot and restore
+        self.create_snapshot(client, collection_name, snapshot_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
+        wait_for_restore_complete(client, job_id)
+
+        # Verify restored data count
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name, filter="",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == nb, \
+            f"Expected {nb} rows, got {res[0]['count(*)']}"
+
+        # Verify text match works (BM25 function preserved)
+        res, _ = self.query(client, restored_collection_name,
+                            filter='TEXT_MATCH(text, "the")',
+                            output_fields=["id", "text"])
+        log.info(f"Text match results: {len(res)} rows")
+
+        # Verify float vector search works
+        rng = np.random.default_rng(seed=19530)
+        search_vectors = [list(rng.random(default_dim))]
+        search_res, _ = self.search(client, restored_collection_name, search_vectors,
+                                    anns_field="float_vector", limit=10,
+                                    output_fields=["id"])
+        assert len(search_res[0]) > 0, "Float vector search should return results"
+
+        # Verify scalar fields are preserved (PK field name is "int64")
+        res, _ = self.query(client, restored_collection_name,
+                            filter="int64 >= 0",
+                            output_fields=["int64", "varchar", "json_field",
+                                           "array_int", "array_bool", "array_struct"],
+                            limit=10)
+        assert len(res) > 0
+        # Check at least one row has non-null array fields
+        has_array_data = False
+        has_struct_data = False
+        for row in res:
+            arr = row.get("array_int")
+            if arr is not None and len(arr) > 0:
+                has_array_data = True
+            struct_arr = row.get("array_struct")
+            if struct_arr is not None and len(struct_arr) > 0:
+                has_struct_data = True
+                assert "name" in struct_arr[0], "Struct element should have 'name'"
+                assert "age" in struct_arr[0], "Struct element should have 'age'"
+        assert has_array_data, "Should have rows with array_int data"
+        assert has_struct_data, "Should have rows with array_struct data"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_with_bfloat16_vector(self):
+        """
+        target: test snapshot with BFloat16 vector type
+        method: create collection with BFloat16Vector field, snapshot and restore
+        expected: BFloat16 vector data should be preserved correctly
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("bfloat16_vector", DataType.BFLOAT16_VECTOR, dim=default_dim)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index("float_vector", metric_type="COSINE")
+        index_params.add_index("bfloat16_vector", metric_type="L2")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            "id": i,
+            "float_vector": list(rng.random(default_dim)),
+            "bfloat16_vector": np.array(rng.random(default_dim), dtype=bfloat16),
+        } for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create snapshot and restore
+        self.create_snapshot(client, collection_name, snapshot_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
+        wait_for_restore_complete(client, job_id)
+
+        # Verify data count
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 100
+
+        # Verify search on bfloat16 vector works
+        search_vectors = [np.array(rng.random(default_dim), dtype=bfloat16)]
+        res, _ = self.search(client, restored_collection_name, search_vectors,
+                             anns_field="bfloat16_vector", limit=10,
+                             output_fields=["id"])
+        assert len(res[0]) == 10
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_with_all_array_element_types(self):
+        """
+        target: test snapshot with all array element types
+        method: create collection with Array[Int8/Int16/Int32/Int64/Float/Double/Bool/VarChar]
+        expected: all array data should be preserved correctly after restore
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("arr_int8", DataType.ARRAY, element_type=DataType.INT8, max_capacity=20)
+        schema.add_field("arr_int16", DataType.ARRAY, element_type=DataType.INT16, max_capacity=20)
+        schema.add_field("arr_int32", DataType.ARRAY, element_type=DataType.INT32, max_capacity=20)
+        schema.add_field("arr_int64", DataType.ARRAY, element_type=DataType.INT64, max_capacity=20)
+        schema.add_field("arr_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=20)
+        schema.add_field("arr_double", DataType.ARRAY, element_type=DataType.DOUBLE, max_capacity=20)
+        schema.add_field("arr_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=20)
+        schema.add_field("arr_varchar", DataType.ARRAY, element_type=DataType.VARCHAR,
+                         max_length=100, max_capacity=20)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index("vector", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params)
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            "id": i,
+            "vector": list(rng.random(default_dim)),
+            "arr_int8": [int(np.int8(j)) for j in range(5)],
+            "arr_int16": [int(np.int16(i * 10 + j)) for j in range(5)],
+            "arr_int32": [i * 100 + j for j in range(5)],
+            "arr_int64": [i * 1000 + j for j in range(5)],
+            "arr_float": [float(i * 0.1 + j * 0.01) for j in range(5)],
+            "arr_double": [float(i * 1.1 + j * 0.11) for j in range(5)],
+            "arr_bool": [j % 2 == 0 for j in range(5)],
+            "arr_varchar": [f"s_{i}_{j}" for j in range(5)],
+        } for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create snapshot and restore
+        self.create_snapshot(client, collection_name, snapshot_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
+        wait_for_restore_complete(client, job_id)
+
+        # Verify data
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id == 5",
+                            output_fields=["arr_int8", "arr_int16", "arr_int32", "arr_int64",
+                                           "arr_float", "arr_double", "arr_bool", "arr_varchar"])
+        assert len(res) == 1
+        row = res[0]
+        assert row["arr_int32"] == [500, 501, 502, 503, 504]
+        assert row["arr_int64"] == [5000, 5001, 5002, 5003, 5004]
+        assert row["arr_bool"] == [True, False, True, False, True]
+        assert row["arr_varchar"] == ["s_5_0", "s_5_1", "s_5_2", "s_5_3", "s_5_4"]
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+        self.drop_collection(client, restored_collection_name)
 
 
 class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
@@ -1897,7 +2152,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify index and search
@@ -1908,7 +2164,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1942,7 +2198,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
@@ -1953,7 +2210,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1987,7 +2244,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
@@ -1998,7 +2256,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2031,7 +2289,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
@@ -2042,7 +2301,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2076,7 +2335,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
@@ -2087,7 +2347,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert len(res[0]) == 10
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2128,7 +2388,8 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify scalar index works with filter
@@ -2142,7 +2403,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 100  # 500/5 = 100 rows with tag='tag_3'
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -2185,7 +2446,8 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify description is preserved
@@ -2194,7 +2456,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
             f"Description should be preserved, got: {desc.get('description')}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2233,7 +2495,8 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify shard count is preserved
@@ -2244,7 +2507,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
             f"Shard count should be {num_shards}, got: {restored_shards}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2282,7 +2545,8 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify consistency level is preserved
@@ -2293,7 +2557,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         assert restored_consistency is not None
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2330,7 +2594,8 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify partition key is preserved in schema
@@ -2348,7 +2613,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 500
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -2398,7 +2663,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify
@@ -2431,7 +2697,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["varchar"] == "updated_125"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2473,7 +2739,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data count (should be 700: 1000 - 300 deleted)
@@ -2488,7 +2755,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 0, "Deleted data should not be present"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2544,11 +2811,13 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         log.info("Created snapshot with IVF_FLAT index")
 
         # Restore snapshot 1 (HNSW)
-        job_id_1, _ = self.restore_snapshot(client, snapshot_name_1, restored_collection_name_1)
+        job_id_1, _ = self.restore_snapshot(client, snapshot_name_1, restored_collection_name_1,
+                                                  source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id_1)
 
         # Restore snapshot 2 (IVF_FLAT)
-        job_id_2, _ = self.restore_snapshot(client, snapshot_name_2, restored_collection_name_2)
+        job_id_2, _ = self.restore_snapshot(client, snapshot_name_2, restored_collection_name_2,
+                                                  source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id_2)
 
         # Verify both collections can search
@@ -2560,8 +2829,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
             assert len(res[0]) == 10, f"Search should return 10 results for {restored_name}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name_1)
-        self.drop_snapshot(client, snapshot_name_2)
+        self.drop_snapshot(client, snapshot_name_1, collection_name)
+        self.drop_snapshot(client, snapshot_name_2, collection_name)
         self.drop_collection(client, restored_collection_name_1)
         self.drop_collection(client, restored_collection_name_2)
 
@@ -2596,7 +2865,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify all data
@@ -2613,7 +2883,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert ids == list(range(total_rows)), "All IDs should be present"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2661,7 +2931,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify final state
@@ -2693,7 +2964,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["varchar"] == "upserted_225"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2742,7 +3013,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify data
@@ -2758,7 +3030,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
             assert res[0]["count(*)"] == 100, f"Category {cat} should have 100 rows"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2799,7 +3071,8 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
@@ -2819,7 +3092,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == 100
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
 
@@ -2854,7 +3127,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
             try:
                 # Directly call client method to bypass ResponseChecker framework
                 # This allows us to capture the real MilvusException with original error message
-                client.create_snapshot(collection_name, snapshot_name)
+                client.create_snapshot(snapshot_name, collection_name)
                 results.append("success")
             except Exception as e:
                 errors.append(str(e))
@@ -2878,7 +3151,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
                 f"Unexpected error: {err}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_captures_consistent_point_in_time(self):
@@ -2935,13 +3208,14 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         inserter.join()
 
         # Get snapshot info
-        info, _ = self.describe_snapshot(client, snapshot_name)
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
         log.info(f"Snapshot created at ts: {info.create_ts}")
         log.info(f"Total inserted: {insert_count[0]}")
 
         # Restore and verify consistency
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                          source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_name)
@@ -2959,7 +3233,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
             f"Should not exceed total inserted: {restored_count} > {insert_count[0]}"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2992,7 +3266,8 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         def restore_thread(idx):
             restored_name = cf.gen_unique_str(prefix + f"_concurrent_{idx}")
             try:
-                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
+                                                      source_collection_name=collection_name)
                 with lock:
                     job_ids.append(job_id)
                     restored_names.append(restored_name)
@@ -3016,6 +3291,6 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
             assert res[0]["count(*)"] == 500, f"{name} should have 500 rows"
 
         # Cleanup
-        self.drop_snapshot(client, snapshot_name)
+        self.drop_snapshot(client, snapshot_name, collection_name)
         for name in restored_names:
             self.drop_collection(client, name)

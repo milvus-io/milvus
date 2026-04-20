@@ -65,13 +65,15 @@ class IndexBase {
     Upload(const Config& config = {}) = 0;
 
     virtual void
-    LoadV3(const Config& config) {
-        ThrowInfo(Unsupported, "LoadV3 is not supported for this index type");
+    LoadUnified(const Config& config) {
+        ThrowInfo(Unsupported,
+                  "LoadUnified is not supported for this index type");
     }
 
     virtual IndexStatsPtr
-    UploadV3(const Config& config) {
-        ThrowInfo(Unsupported, "UploadV3 is not supported for this index type");
+    UploadUnified(const Config& config) {
+        ThrowInfo(Unsupported,
+                  "UploadUnified is not supported for this index type");
     }
 
     virtual const bool

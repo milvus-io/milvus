@@ -101,11 +101,11 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	ctx := suite.ctx
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+	suite.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+	suite.meta.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
 	})
@@ -129,12 +129,12 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 		Address:  "localhost:8080",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 2)
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 3)
-	suite.meta.ResourceManager.HandleNodeUp(ctx, 4)
+	suite.meta.HandleNodeUp(ctx, 1)
+	suite.meta.HandleNodeUp(ctx, 2)
+	suite.meta.HandleNodeUp(ctx, 3)
+	suite.meta.HandleNodeUp(ctx, 4)
 
-	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
+	err := suite.meta.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
@@ -146,7 +146,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	suite.Eventually(func() bool {
 		availableNodes := typeutil.NewUniqueSet()
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
+			replica := suite.meta.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			if replica.RWNodesCount() != 2 {
 				return false
@@ -176,19 +176,19 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	}
 
 	// Do a replica transfer.
-	suite.meta.ReplicaManager.TransferReplica(ctx, suite.collectionID, "rg1", "rg2", 1)
+	suite.meta.TransferReplica(ctx, suite.collectionID, "rg1", "rg2", 1)
 
 	// All replica should in the rg2 but not rg1
 	// And some nodes will become ro nodes before all segment and channel on it is cleaned.
 	suite.Eventually(func() bool {
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
+			replica := suite.meta.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			suite.Equal("rg2", replica.GetResourceGroup())
 			// all replica should have ro nodes.
 			// transferred replica should have 2 ro nodes.
 			// not transferred replica should have 1 ro nodes for balancing.
-			if !(replica.RONodesCount()+replica.RWNodesCount() == 2 && replica.RONodesCount() > 0) {
+			if replica.RONodesCount()+replica.RWNodesCount() != 2 || replica.RONodesCount() <= 0 {
 				return false
 			}
 		}
@@ -203,7 +203,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 
 	suite.Eventually(func() bool {
 		for _, r := range replicas {
-			replica := suite.meta.ReplicaManager.Get(ctx, r.GetID())
+			replica := suite.meta.Get(ctx, r.GetID())
 			suite.NotNil(replica)
 			suite.Equal("rg2", replica.GetResourceGroup())
 			if replica.RONodesCount() > 0 {
@@ -226,16 +226,16 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
-		pchans := []map[int64]*types.StreamingNodeInfo{
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+		pchans := []map[int64]*types.StreamingNodeInfoWithResourceGroup{
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
-				3: {ServerID: 3, Address: "localhost:3"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
+				3: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"}},
 			},
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
 			},
 		}
 		select {
@@ -250,7 +250,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.observer.Start()
 
 	ctx := context.Background()
-	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
+	err := suite.meta.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
@@ -260,14 +260,14 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.Equal(2, len(replicas))
 
 	suite.Eventually(func() bool {
-		replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+		replica := suite.meta.GetByCollection(ctx, suite.collectionID)
 		total := 0
 		for _, r := range replica {
 			total += r.RWSQNodesCount()
 		}
 		return total == 3
 	}, 6*time.Second, 2*time.Second)
-	replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+	replica := suite.meta.GetByCollection(ctx, suite.collectionID)
 	nodes := typeutil.NewUniqueSet()
 	for _, r := range replica {
 		suite.LessOrEqual(r.RWSQNodesCount(), 2)
@@ -279,14 +279,14 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	close(change)
 
 	suite.Eventually(func() bool {
-		replica := suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+		replica := suite.meta.GetByCollection(ctx, suite.collectionID)
 		total := 0
 		for _, r := range replica {
 			total += r.RWSQNodesCount()
 		}
 		return total == 2
 	}, 6*time.Second, 2*time.Second)
-	replica = suite.meta.ReplicaManager.GetByCollection(ctx, suite.collectionID)
+	replica = suite.meta.GetByCollection(ctx, suite.collectionID)
 	nodes = typeutil.NewUniqueSet()
 	for _, r := range replica {
 		suite.Equal(r.RWSQNodesCount(), 1)

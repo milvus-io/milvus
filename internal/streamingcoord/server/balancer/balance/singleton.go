@@ -2,28 +2,44 @@ package balance
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
-var singleton = syncutil.NewFuture[balancer.Balancer]()
+var (
+	singletonMu sync.RWMutex
+	singleton   = syncutil.NewFuture[balancer.Balancer]()
+)
 
 func Register(balancer balancer.Balancer) {
-	singleton.Set(balancer)
+	singletonMu.RLock()
+	s := singleton
+	singletonMu.RUnlock()
+	s.Set(balancer)
 }
 
 func SetFileResourceChecker(checker balancer.FileResourceChecker) {
-	singleton.Get().SetFileResourceChecker(checker)
+	singletonMu.RLock()
+	s := singleton
+	singletonMu.RUnlock()
+	s.Get().SetFileResourceChecker(checker)
 }
 
 func GetWithContext(ctx context.Context) (balancer.Balancer, error) {
-	return singleton.GetWithContext(ctx)
+	singletonMu.RLock()
+	s := singleton
+	singletonMu.RUnlock()
+	return s.GetWithContext(ctx)
 }
 
 func Release() {
-	if !singleton.Ready() {
+	singletonMu.RLock()
+	s := singleton
+	singletonMu.RUnlock()
+	if !s.Ready() {
 		return
 	}
-	singleton.Get().Close()
+	s.Get().Close()
 }

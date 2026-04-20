@@ -112,6 +112,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
 		return nil
 	})
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
+		return nil
+	})
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
@@ -133,7 +136,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 			result := results[mutableMsg.VChannel()]
 			immutableMsg := mutableMsg.WithTimeTick(result.TimeTick).WithLastConfirmed(result.LastConfirmedMessageID).IntoImmutableMessage(result.MessageID)
 			wg.Add(1)
-			go func() {
+			go func() { //nolint:gosec // context.Background is intentional for retries in test
 				defer wg.Done()
 				retry.Do(context.Background(), func() error {
 					return registry.CallMessageAckOnceCallbacks(context.Background(), immutableMsg)

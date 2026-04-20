@@ -103,7 +103,7 @@ ${LCOV_CMD} -r "${FILE_INFO_COMBINE}" -o "${FILE_INFO_OUTPUT}" \
     "*/unittest/*" \
     "*/thirdparty/*" \
     "*/3rdparty_download/*" \
-    "*/.conan/data/*"
+    "*/.conan2/*"
 
 # generate html report
 ${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/

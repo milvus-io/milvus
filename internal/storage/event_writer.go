@@ -73,12 +73,12 @@ func (event *descriptorEvent) GetMemoryUsageInBytes() int32 {
 
 // Write writes descriptor event into buffer
 func (event *descriptorEvent) Write(buffer io.Writer) error {
-	err := event.descriptorEventData.FinishExtra()
+	err := event.FinishExtra()
 	if err != nil {
 		return err
 	}
-	event.descriptorEventHeader.EventLength = event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
-	event.descriptorEventHeader.NextPosition = int32(binary.Size(MagicNumber)) + event.descriptorEventHeader.EventLength
+	event.EventLength = event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
+	event.NextPosition = int32(binary.Size(MagicNumber)) + event.EventLength
 
 	if err := event.descriptorEventHeader.Write(buffer); err != nil {
 		return err
@@ -237,8 +237,8 @@ func newInsertEventWriter(dataType schemapb.DataType, opts ...PayloadWriterOptio
 		},
 		insertEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.insertEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.insertEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -259,8 +259,8 @@ func newDeleteEventWriter(dataType schemapb.DataType, opts ...PayloadWriterOptio
 		},
 		deleteEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.deleteEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.deleteEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -285,8 +285,8 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 		},
 		createCollectionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.createCollectionEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.createCollectionEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -311,8 +311,8 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 		},
 		dropCollectionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.dropCollectionEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.dropCollectionEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -337,8 +337,8 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 		},
 		createPartitionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.createPartitionEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.createPartitionEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -363,8 +363,8 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 		},
 		dropPartitionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.dropPartitionEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 	return writer, nil
 }
 
@@ -385,8 +385,8 @@ func newIndexFileEventWriter(dataType schemapb.DataType) (*indexFileEventWriter,
 		},
 		indexFileEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.indexFileEventData.GetEventDataFixPartSize
-	writer.baseEventWriter.writeEventData = writer.indexFileEventData.WriteEventData
+	writer.getEventDataSize = writer.GetEventDataFixPartSize
+	writer.writeEventData = writer.WriteEventData
 
 	return writer, nil
 }

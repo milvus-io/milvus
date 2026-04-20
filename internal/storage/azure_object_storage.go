@@ -196,7 +196,7 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 }
 
 func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	containerClient := AzureObjectStorage.Client.NewContainerClient(bucketName)
+	containerClient := AzureObjectStorage.NewContainerClient(bucketName)
 	srcBlobClient := containerClient.NewBlockBlobClient(srcObjectName)
 	dstBlobClient := containerClient.NewBlockBlobClient(dstObjectName)
 

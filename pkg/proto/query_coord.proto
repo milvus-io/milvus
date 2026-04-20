@@ -405,6 +405,8 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+    int32 data_version = 25;
+    bool use_take_for_output = 26;
 }
 
 message FieldIndexInfo {
@@ -698,8 +700,11 @@ message SegmentVersionInfo {
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
-    map<int64, JsonStatsInfo> json_stats_info = 11; 
+    map<int64, JsonStatsInfo> json_stats_info = 11;
     string manifest_path = 12;
+    // optional so QueryCoord can distinguish "not reported" (old QueryNode)
+    // from an explicit zero value during a mixed-version rollout.
+    optional int32 data_version = 13;
 }
 
 message ChannelVersionInfo {

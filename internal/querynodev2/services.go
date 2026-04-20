@@ -1232,6 +1232,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			}),
 			JsonStatsInfo: s.GetFieldJSONIndexStats(),
 			ManifestPath:  s.LoadInfo().GetManifestPath(),
+			DataVersion:   proto.Int32(s.LoadInfo().GetDataVersion()),
 		})
 	}
 

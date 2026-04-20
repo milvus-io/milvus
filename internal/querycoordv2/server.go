@@ -270,15 +270,16 @@ func (s *Server) initQueryCoord() error {
 	metaType := Params.MetaStoreCfg.MetaStoreType.GetValue()
 	var idAllocatorKV kv.TxnKV
 	log.Info(fmt.Sprintf("query coordinator connecting to %s.", metaType))
-	if metaType == util.MetaStoreTypeTiKV {
+	switch metaType {
+	case util.MetaStoreTypeTiKV:
 		s.kv = tikv.NewTiKV(s.tikvCli, Params.TiKVCfg.MetaRootPath.GetValue(),
-			tikv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			tikv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOTiKVBase(s.tikvCli, Params.TiKVCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
-	} else if metaType == util.MetaStoreTypeEtcd {
+	case util.MetaStoreTypeEtcd:
 		s.kv = etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
-	} else {
+	default:
 		return fmt.Errorf("not supported meta store: %s", metaType)
 	}
 	log.Info(fmt.Sprintf("query coordinator successfully connected to %s.", metaType))
@@ -750,7 +751,7 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 	// Note: Node manager doesn't persist node list, so after query coord restart, we cannot
 	// update all node statuses in resource manager based on session and node manager's node list.
 	// Therefore, manual status checking of all nodes in resource manager is needed.
-	s.meta.ResourceManager.CheckNodesInResourceGroup(s.ctx)
+	s.meta.CheckNodesInResourceGroup(s.ctx)
 
 	return nil
 }
@@ -769,7 +770,7 @@ func (s *Server) handleNodeUp(node int64) {
 	s.distController.StartDistInstance(s.ctx, node)
 
 	// need assign to new rg and replica
-	s.meta.ResourceManager.HandleNodeUp(s.ctx, node)
+	s.meta.HandleNodeUp(s.ctx, node)
 
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	s.checkerController.Check()
@@ -786,7 +787,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
+	s.meta.HandleNodeDown(context.Background(), node)
 
 	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
@@ -798,7 +799,7 @@ func (s *Server) handleNodeStopping(node int64) {
 	s.nodeMgr.Stopping(node)
 
 	// mark node as stopping in resource manager
-	s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
+	s.meta.HandleNodeStopping(context.Background(), node)
 
 	// trigger checker to check stopping node
 	s.checkerController.Check()
@@ -874,4 +875,10 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+}
+
+// GetInternalReplicasByCollection returns replicas for a collection from internal meta.
+// This method provides access to internal replica information including resource groups.
+func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
+	return s.meta.GetByCollection(ctx, collectionID)
 }

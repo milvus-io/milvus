@@ -66,7 +66,7 @@ func (m *MuxRateLimitObserverRegistryImpl) NotifySourceRateLimitState(source str
 
 	// Compute the merged state
 	targetState := m.computeMergedStateLocked()
-	m.RateLimitObserverRegistryImpl.notifyRateLimitStateChange(targetState)
+	m.notifyRateLimitStateChange(targetState)
 	if targetState.State == streamingpb.WALRateLimitState_WAL_RATE_LIMIT_STATE_REJECT {
 		m.isRejected.Store(true)
 	} else {

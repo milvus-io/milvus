@@ -18,11 +18,11 @@ package importv2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -1087,7 +1087,7 @@ func TestShortenSingleJsonStatsPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shortenSingleJsonStatsPath(tt.inputPath)
+			result := shortenSingleJSONStatsPath(tt.inputPath)
 			assert.Equal(t, tt.expectedPath, result)
 		})
 	}
@@ -1119,7 +1119,7 @@ func TestShortenJsonStatsPath(t *testing.T) {
 		},
 	}
 
-	result := shortenJsonStatsPath(jsonStats)
+	result := shortenJSONStatsPath(jsonStats)
 
 	assert.Equal(t, 2, len(result))
 
@@ -1160,7 +1160,7 @@ func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
 		},
 	}
 
-	result := shortenJsonStatsPath(jsonStats)
+	result := shortenJSONStatsPath(jsonStats)
 
 	assert.Equal(t, 1, len(result))
 	assert.NotNil(t, result[102])
@@ -1171,24 +1171,24 @@ func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
 
 func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
 	t.Run("already_shortened_meta", func(t *testing.T) {
-		result := shortenSingleJsonStatsPath("meta.json")
+		result := shortenSingleJSONStatsPath("meta.json")
 		assert.Equal(t, "meta.json", result)
 	})
 
 	t.Run("already_shortened_shared_key", func(t *testing.T) {
-		result := shortenSingleJsonStatsPath("shared_key_index/inverted_index_0")
+		result := shortenSingleJSONStatsPath("shared_key_index/inverted_index_0")
 		assert.Equal(t, "shared_key_index/inverted_index_0", result)
 	})
 
 	t.Run("full_path_meta_json", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/meta.json"
-		result := shortenSingleJsonStatsPath(fullPath)
+		result := shortenSingleJSONStatsPath(fullPath)
 		assert.Equal(t, "meta.json", result)
 	})
 
 	t.Run("full_path_nested_file", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/subdir/file.dat"
-		result := shortenSingleJsonStatsPath(fullPath)
+		result := shortenSingleJSONStatsPath(fullPath)
 		assert.Equal(t, "subdir/file.dat", result)
 	})
 }
@@ -1456,13 +1456,13 @@ func TestExtractJsonFiles(t *testing.T) {
 				Files:                  []string{"new/b", "new/c"},
 			},
 		}
-		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(jsonInfos)
+		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(jsonInfos)
 		assert.Equal(t, []string{"legacy/a"}, jsonKeyFiles)
 		assert.ElementsMatch(t, []string{"new/b", "new/c"}, jsonStatsFiles)
 	})
 
 	t.Run("empty input", func(t *testing.T) {
-		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(nil)
+		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(nil)
 		assert.Empty(t, jsonKeyFiles)
 		assert.Empty(t, jsonStatsFiles)
 	})
@@ -1488,8 +1488,8 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
 			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
 			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
-			JsonKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
-			JsonStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
+			JSONKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
+			JSONStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
 		}
 
 		mappings, err := generateMappingsFromFiles(files, source, target)

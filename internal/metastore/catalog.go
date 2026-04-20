@@ -329,6 +329,10 @@ type StreamingCoordCataLog interface {
 
 	// GetReplicateConfiguration gets the replicate configuration from metastore.
 	GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error)
+
+	// DropReplicateConfiguration removes the replicate configuration and all replicate pchannel metadata.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
+	DropReplicateConfiguration(ctx context.Context) error
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

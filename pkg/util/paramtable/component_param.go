@@ -3515,6 +3515,9 @@ type queryNodeConfig struct {
 	IDFReadBufferSize ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+
+	// external collection
+	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4702,6 +4705,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
+
+	p.ExternalCollectionUseTakeForOutput = ParamItem{
+		Key:          "queryNode.externalCollection.useTakeForOutput",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          `When true, use take() API to fetch output fields from external storage instead of bulk_subscript`,
+		Export:       false,
+	}
+	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4808,16 +4820,19 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection      ParamItem `refreshable:"false"`
-	GCInterval                   ParamItem `refreshable:"false"`
-	GCMissingTolerance           ParamItem `refreshable:"false"`
-	GCDropTolerance              ParamItem `refreshable:"false"`
-	GCRemoveConcurrent           ParamItem `refreshable:"false"`
-	GCScanIntervalInHour         ParamItem `refreshable:"false"`
-	GCSlowDownCPUUsageThreshold  ParamItem `refreshable:"false"`
-	SnapshotPendingTimeout       ParamItem `refreshable:"true"`
-	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
-	EnableActiveStandby          ParamItem `refreshable:"false"`
+	EnableGarbageCollection                ParamItem `refreshable:"false"`
+	GCInterval                             ParamItem `refreshable:"false"`
+	GCMissingTolerance                     ParamItem `refreshable:"false"`
+	GCDropTolerance                        ParamItem `refreshable:"false"`
+	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
+	GCScanIntervalInHour                   ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout                 ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
+	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
+	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
+	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -4856,6 +4871,7 @@ type dataCoordConfig struct {
 	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
+	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5430,8 +5446,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerDeltalogMaxNum = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.deltalogMaxNum",
 		Version:      "2.4.0",
-		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30",
-		DefaultValue: "30",
+		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000",
+		DefaultValue: "1000",
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
@@ -5683,6 +5699,49 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc:          "The interval for loading snapshot RefIndex from S3",
 	}
 	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
+
+	p.SnapshotRefIndexLoadTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.refIndexLoadTimeout",
+		Version:      "2.6.15",
+		DefaultValue: "30s",
+		Doc: "Per-snapshot timeout for loading RefIndex from S3 inside the loader loop. " +
+			"A single hung S3 read must not block the loader Range, otherwise no other " +
+			"snapshot's RefIndex can be loaded and GC remains in fail-closed coarse block " +
+			"for every collection with a snapshot, leaking storage. On timeout the RefIndex " +
+			"is marked Failed and will be retried on the next loader tick.",
+	}
+	p.SnapshotRefIndexLoadTimeout.Init(base.mgr)
+
+	p.SnapshotMaxCompactionProtectionSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.maxCompactionProtectionSeconds",
+		Version:      "2.6.10",
+		DefaultValue: "604800",
+		Doc:          "Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)",
+		Export:       true,
+	}
+	p.SnapshotMaxCompactionProtectionSeconds.Init(base.mgr)
+
+	p.SnapshotRestorePinTTLSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.restorePinTTLSeconds",
+		Version:      "2.6.11",
+		DefaultValue: "86400",
+		Doc: "TTL (seconds) for pins claimed by snapshot restore jobs on the source snapshot. " +
+			"Acts as a safety-net reaper for orphan pins left behind by crashed datacoord / " +
+			"failed job creation. Default 86400 (24h) is sized well above the worst-case restore " +
+			"wall time — restore copies segments by S3 object reference (no data rewrite), so even " +
+			"multi-TB restores complete in minutes. Minimum enforced value is 300s — values ≤0 " +
+			"(which would create permanent pins with no admin recovery API) and values below 300s " +
+			"are coerced to the default.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 300 {
+				return "86400"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotRestorePinTTLSeconds.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
@@ -6038,11 +6097,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments = ParamItem{
 		Key:          "dataCoord.externalCollectionPreAllocSegments",
 		Version:      "2.6.8",
-		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
-		DefaultValue: "1000",
+		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
+		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
+	p.ExternalCollectionFilesPerTask = ParamItem{
+		Key:          "dataCoord.externalCollectionFilesPerTask",
+		Version:      "3.0.0",
+		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		DefaultValue: "10000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionFilesPerTask.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
@@ -6821,7 +6889,7 @@ if this parameter <= 0, will set it as 10`,
 
 	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
 		Key:          "dataNode.externalCollection.targetRowsPerSegment",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: "1000000",
 		Doc:          "Target number of rows per segment for external collections",
 		Export:       false,
@@ -6830,6 +6898,12 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// primary resource group
+	PrimaryResourceGroup ParamItem `refreshable:"true"`
+
+	// strict resource group isolation mode for streaming query node assignment
+	StrictResourceGroupIsolationEnabled ParamItem `refreshable:"true"`
+
 	// scanner
 	WALScannerPauseConsumption ParamItem `refreshable:"true"`
 
@@ -6915,6 +6989,34 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// primary resource group
+	p.PrimaryResourceGroup = ParamItem{
+		Key:     "streaming.primaryResourceGroup",
+		Version: "2.6.10",
+		Doc: `The resource group name that WAL should be loaded on.
+When this is set, only streaming nodes with the matching resource group label will be used for WAL operations.
+The resource group label is set via environment variable MILVUS_SERVER_LABEL_RESOURCE_GROUP.
+If empty, streaming nodes from all resource groups can be used.`,
+		DefaultValue: "",
+		Export:       false,
+	}
+	p.PrimaryResourceGroup.Init(base.mgr)
+
+	// strict resource group isolation mode for streaming query node assignment
+	p.StrictResourceGroupIsolationEnabled = ParamItem{
+		Key:     "streaming.strictResourceGroupIsolation.enabled",
+		Version: "2.6.10",
+		Doc: `Enable strict resource group isolation mode for streaming query node assignment.
+When enabled, streaming query nodes will only be assigned to replicas within their own resource group.
+If streaming node resource groups do not cover all replica resource groups, replicas without matching
+streaming nodes will not receive any streaming query node assignment.
+When disabled (default), if resource group isolation cannot be satisfied, all streaming nodes will be
+pooled together and assigned fairly across all replicas regardless of resource group boundaries.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.StrictResourceGroupIsolationEnabled.Init(base.mgr)
+
 	// scanner
 	p.WALScannerPauseConsumption = ParamItem{
 		Key:     "streaming.walScanner.pauseConsumption",

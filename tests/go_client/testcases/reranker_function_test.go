@@ -156,6 +156,8 @@ func TestRerankFunctionDecay(t *testing.T) {
 }
 
 func TestRerankFunctionModel(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*3)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -421,6 +423,8 @@ func TestRerankFunctionDecaySingleVector(t *testing.T) {
 }
 
 func TestRerankFunctionModelSingleVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*3)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -655,7 +659,7 @@ func TestRerankFunctionModelNegative(t *testing.T) {
 		queries       []string
 		expectedError string
 	}{
-		{"invalid_endpoint", "tei", "http://invalid:8080", queries[:common.DefaultNq], "Call service failed"},
+		{"invalid_endpoint", "tei", "http://invalid:8080", queries[:common.DefaultNq], "call service failed"},
 		{"empty_endpoint", "tei", "", queries[:common.DefaultNq], "is not a valid http/https link"},
 	}
 

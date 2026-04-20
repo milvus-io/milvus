@@ -110,7 +110,7 @@ func (s *ZillizHighlightProviderSuite) TestNewZillizHighlightProvider_Success() 
 			// but we can verify that the parameters were parsed correctly by checking the error doesn't relate to parameter parsing
 			if err != nil {
 				// Connection errors are expected in unit tests
-				s.Contains(err.Error(), "Connect model serving failed", "Expected connection error, got: %v", err)
+				s.Contains(err.Error(), "connect model serving failed", "Expected connection error, got: %v", err)
 			} else {
 				// If somehow the connection succeeds, verify the provider was created correctly
 				s.NotNil(provider)

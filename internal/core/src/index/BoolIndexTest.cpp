@@ -201,13 +201,13 @@ TEST_F(BoolIndexTest, Codec) {
         index->Build(all_true.data_size(), all_true.data().data());
 
         auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         milvus::Config load_config;
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1.none());
@@ -222,13 +222,13 @@ TEST_F(BoolIndexTest, Codec) {
         index->Build(all_false.data_size(), all_false.data().data());
 
         auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         milvus::Config load_config;
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1.any());
@@ -243,13 +243,13 @@ TEST_F(BoolIndexTest, Codec) {
         index->Build(half.data_size(), half.data().data());
 
         auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         milvus::Config load_config;
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         for (size_t i = 0; i < n; i++) {

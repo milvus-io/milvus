@@ -60,7 +60,7 @@ func TestMain(m *testing.M) {
 	broker := mockKafkaCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
 	// Disable pursuit mode for unit test by default
-	Params.Save(Params.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+	Params.Save(Params.MQCfg.EnablePursuitMode.Key, "false")
 
 	exitCode := m.Run()
 	os.Exit(exitCode)

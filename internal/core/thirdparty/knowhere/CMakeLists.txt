@@ -45,7 +45,7 @@ else ()
     set(WITH_SVS OFF CACHE BOOL "" FORCE )
 endif()
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
+# Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake
 FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}

@@ -221,7 +221,7 @@ func (r *Row) ToString() string {
 	var builder strings.Builder
 	builder.WriteString("agg-row:")
 	for _, fv := range r.fieldValues {
-		builder.WriteString(fmt.Sprintf("%v,", fv.val))
+		fmt.Fprintf(&builder, "%v,", fv.val)
 	}
 	return builder.String()
 }

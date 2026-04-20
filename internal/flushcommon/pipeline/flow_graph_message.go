@@ -71,5 +71,5 @@ func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {
 }
 
 func (fgMsg *FlowGraphMsg) IsClose() bool {
-	return fgMsg.BaseMsg.IsCloseMsg()
+	return fgMsg.IsCloseMsg()
 }

@@ -220,7 +220,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	if msgType == commonpb.MsgType_DropCollection {
+	switch msgType {
+	case commonpb.MsgType_DropCollection:
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
@@ -229,7 +230,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, alias)
 		}
 		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
-	} else if msgType == commonpb.MsgType_DropDatabase {
+	case commonpb.MsgType_DropDatabase:
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
@@ -2100,9 +2101,9 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		rpcEnqueued(method),
 		zap.Uint64("BeginTS", spt.BeginTs()),
 		zap.Uint64("EndTS", spt.EndTs()),
-		zap.String("db", spt.ShowPartitionsRequest.DbName),
-		zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
-		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
+		zap.String("db", spt.DbName),
+		zap.String("collection", spt.CollectionName),
+		zap.Any("partitions", spt.PartitionNames))
 
 	if err := spt.WaitToFinish(); err != nil {
 		log.Warn(
@@ -2110,9 +2111,9 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			zap.Error(err),
 			zap.Uint64("BeginTS", spt.BeginTs()),
 			zap.Uint64("EndTS", spt.EndTs()),
-			zap.String("db", spt.ShowPartitionsRequest.DbName),
-			zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
-			zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
+			zap.String("db", spt.DbName),
+			zap.String("collection", spt.CollectionName),
+			zap.Any("partitions", spt.PartitionNames))
 
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Status(err),
@@ -2123,9 +2124,9 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		rpcDone(method),
 		zap.Uint64("BeginTS", spt.BeginTs()),
 		zap.Uint64("EndTS", spt.EndTs()),
-		zap.String("db", spt.ShowPartitionsRequest.DbName),
-		zap.String("collection", spt.ShowPartitionsRequest.CollectionName),
-		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
+		zap.String("db", spt.DbName),
+		zap.String("collection", spt.CollectionName),
+		zap.Any("partitions", spt.PartitionNames))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return spt.result, nil
@@ -3316,12 +3317,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 		span := tr.ElapseSpan()
 		spanPerNq := span
-		if qt.SearchRequest.GetNq() > 0 {
-			spanPerNq = span / time.Duration(qt.SearchRequest.GetNq())
+		if qt.GetNq() > 0 {
+			spanPerNq = span / time.Duration(qt.GetNq())
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
+				zap.Int64("nq", qt.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3359,7 +3360,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if err := qt.WaitToFinish(); err != nil {
 		log.Warn(
 			rpcFailedToWaitToFinish(method),
-			zap.Int64("nq", qt.SearchRequest.GetNq()),
+			zap.Int64("nq", qt.GetNq()),
 			zap.Error(err),
 		)
 
@@ -3491,7 +3492,7 @@ func (l *hybridSearchRequestExprLogger) String() string {
 	builder := &strings.Builder{}
 
 	for idx, subReq := range l.req.Requests {
-		builder.WriteString(fmt.Sprintf("[No.%d req, expr: %s]", idx, subReq.GetDsl()))
+		fmt.Fprintf(builder, "[No.%d req, expr: %s]", idx, subReq.GetDsl())
 	}
 
 	return builder.String()
@@ -3623,7 +3624,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(len(request.GetRequests()) * int(qt.SearchRequest.GetNq())))
+		Add(float64(len(request.GetRequests()) * int(qt.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3774,7 +3775,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Check if this is a BM25 function-based search
-	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.CollectionSchema.Functions)
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.Functions)
 
 	// For BM25 search, we need to fetch text field; for vector search, we need vector field
 	var fieldToFetch string

@@ -289,11 +289,11 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 
 	req := &rootcoordpb.AlterDatabaseRequest{
-		Base:       t.AlterDatabaseRequest.GetBase(),
-		DbName:     t.AlterDatabaseRequest.GetDbName(),
-		DbId:       t.AlterDatabaseRequest.GetDbId(),
-		Properties: t.AlterDatabaseRequest.GetProperties(),
-		DeleteKeys: t.AlterDatabaseRequest.GetDeleteKeys(),
+		Base:       t.GetBase(),
+		DbName:     t.GetDbName(),
+		DbId:       t.GetDbId(),
+		Properties: t.GetProperties(),
+		DeleteKeys: t.GetDeleteKeys(),
 	}
 
 	ret, err := t.mixCoord.AlterDatabase(ctx, req)
@@ -365,8 +365,8 @@ func (t *describeDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	req := &rootcoordpb.DescribeDatabaseRequest{
-		Base:   t.DescribeDatabaseRequest.GetBase(),
-		DbName: t.DescribeDatabaseRequest.GetDbName(),
+		Base:   t.GetBase(),
+		DbName: t.GetDbName(),
 	}
 
 	ctx = AppendUserInfoForRPC(ctx)

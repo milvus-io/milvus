@@ -1788,6 +1788,10 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(StringArrayField) <= 1`,
 		`array_length(StringArrayField) > 5`,
 		`array_length(StringArrayField) >= 5`,
+		// struct array sub-field
+		`array_length(struct_array[sub_str]) == 3`,
+		`array_length(struct_array[sub_int]) > 1`,
+		`array_length(struct_array[sub_int]) <= 10`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
@@ -2733,6 +2737,194 @@ func TestExpr_ArrayContains(t *testing.T) {
 
 	for _, expr := range validExprs {
 		assertValidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_StructIndexField(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid struct_arr[index][sub_field] expressions
+	validExprs := []string{
+		// comparison
+		`struct_array[0][sub_int] > 50`,
+		`struct_array[0][sub_int] == 100`,
+		`struct_array[1][sub_str] == "apple"`,
+		`struct_array[0][sub_str] != "banana"`,
+		// range via &&
+		`struct_array[0][sub_int] >= 30 && struct_array[0][sub_int] <= 70`,
+		// IN / NOT IN
+		`struct_array[0][sub_int] in [10, 20, 30, 40, 50]`,
+		`struct_array[0][sub_int] not in [0, 1, 2, 3]`,
+		`struct_array[0][sub_str] in ["apple", "banana"]`,
+		`struct_array[0][sub_str] not in ["apple", "banana"]`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Invalid expressions
+	invalidExprs := []string{
+		// non-existent parent or sub-field
+		`non_existent[0][sub_int] > 50`,
+		`struct_array[0][non_existent] > 50`,
+		// unsupported form: sub-field first then index
+		`struct_array[sub_int][0] > 50`,
+		`struct_array[sub_str][0] == "apple"`,
+		`struct_array[sub_int][0] in [10, 20, 30]`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
+	}
+}
+
+func TestExpr_StructIndexField_PlanShape(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	plan, err := CreateSearchPlan(schema, `struct_array[0][sub_int] == 100`, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	require.NoError(t, err)
+
+	predicates := plan.GetVectorAnns().GetPredicates()
+	require.NotNil(t, predicates)
+
+	ure := predicates.GetUnaryRangeExpr()
+	require.NotNil(t, ure)
+	assert.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	assert.Equal(t, int64(100), ure.GetValue().GetInt64Val())
+
+	columnInfo := ure.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+	assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath())
+
+	ret := handleExpr(schema, `struct_array[1][sub_str] in ["apple", "banana"]`)
+	ewt, ok := ret.(*ExprWithType)
+	require.True(t, ok, "handleExpr should return *ExprWithType for term expression")
+
+	te := ewt.expr.GetTermExpr()
+	require.NotNil(t, te)
+	assert.Len(t, te.GetValues(), 2)
+	assert.Equal(t, "apple", te.GetValues()[0].GetStringVal())
+	assert.Equal(t, "banana", te.GetValues()[1].GetStringVal())
+
+	columnInfo = te.GetColumnInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(133), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+	assert.Equal(t, []string{"1"}, columnInfo.GetNestedPath())
+}
+
+func TestExpr_StructFieldArrayLength(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	ret := handleExpr(schema, `array_length(struct_array[sub_int])`)
+	ewt, ok := ret.(*ExprWithType)
+	require.True(t, ok, "handleExpr should return *ExprWithType")
+	assert.Equal(t, schemapb.DataType_Int64, ewt.dataType)
+
+	bae := ewt.expr.GetBinaryArithExpr()
+	require.NotNil(t, bae)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, bae.GetOp())
+	require.Nil(t, bae.GetRight())
+
+	columnInfo := bae.GetLeft().GetColumnExpr().GetInfo()
+	require.NotNil(t, columnInfo)
+	assert.Equal(t, int64(134), columnInfo.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+	assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType())
+	assert.Empty(t, columnInfo.GetNestedPath())
+
+	validExprs := []string{
+		`array_length(struct_array[sub_int]) == 10`,
+		`array_length(struct_array[sub_str]) > 0`,
+	}
+	for _, expr := range validExprs {
+		_, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, expr)
+	}
+}
+
+func TestExpr_StructIndexField_RangeForms(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	testCases := []struct {
+		expr           string
+		lower          int64
+		upper          int64
+		lowerInclusive bool
+		upperInclusive bool
+	}{
+		{
+			expr:           `1 < struct_array[0][sub_int] < 3`,
+			lower:          1,
+			upper:          3,
+			lowerInclusive: false,
+			upperInclusive: false,
+		},
+		{
+			expr:           `0 <= struct_array[0][sub_int] <= 100`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: true,
+			upperInclusive: true,
+		},
+		{
+			expr:           `100 > struct_array[0][sub_int] > 0`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: false,
+			upperInclusive: false,
+		},
+		{
+			expr:           `100 >= struct_array[0][sub_int] >= 0`,
+			lower:          0,
+			upper:          100,
+			lowerInclusive: true,
+			upperInclusive: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		plan, err := CreateSearchPlan(schema, tc.expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.NoError(t, err, tc.expr)
+
+		predicates := plan.GetVectorAnns().GetPredicates()
+		require.NotNil(t, predicates, tc.expr)
+
+		bre := predicates.GetBinaryRangeExpr()
+		require.NotNil(t, bre, tc.expr)
+		assert.Equal(t, tc.lower, bre.GetLowerValue().GetInt64Val(), tc.expr)
+		assert.Equal(t, tc.upper, bre.GetUpperValue().GetInt64Val(), tc.expr)
+		assert.Equal(t, tc.lowerInclusive, bre.GetLowerInclusive(), tc.expr)
+		assert.Equal(t, tc.upperInclusive, bre.GetUpperInclusive(), tc.expr)
+
+		columnInfo := bre.GetColumnInfo()
+		require.NotNil(t, columnInfo, tc.expr)
+		assert.Equal(t, int64(134), columnInfo.GetFieldId(), tc.expr)
+		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), tc.expr)
+		assert.Equal(t, schemapb.DataType_Int32, columnInfo.GetElementType(), tc.expr)
+		assert.Equal(t, []string{"0"}, columnInfo.GetNestedPath(), tc.expr)
 	}
 }
 
