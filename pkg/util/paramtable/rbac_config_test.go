@@ -20,23 +20,45 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
-func TestRbacConfig_DefaultPrivileges(t *testing.T) {
+// TestRbacConfig_BuiltinPrivilegesMatchGoConstants guards against drift between
+// configs/milvus.yaml and the authoritative Go constants in pkg/util/constant.go.
+// When a new privilege is added to util.XxxPrivileges, the matching yaml list
+// must be updated in the same PR or this test fails.
+//
+// Comparing GetAsStrings() against util.XxxPrivileges (not against another
+// ParamItem-derived value) is what makes the drift detectable: the assertion
+// walks the full resolution chain (etcd override -> yaml file -> DefaultValue)
+// and compares the runtime value with the compile-time truth.
+func TestRbacConfig_BuiltinPrivilegesMatchGoConstants(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.RbacConfig
-	assert.Equal(t, len(cfg.GetDefaultPrivilegeGroupNames()), 9)
-	assert.Equal(t, cfg.Enabled.GetAsBool(), false)
-	assert.Equal(t, cfg.ClusterReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterReadOnly"))
-	assert.Equal(t, cfg.ClusterReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterReadWrite"))
-	assert.Equal(t, cfg.ClusterAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("ClusterAdmin"))
-	assert.Equal(t, cfg.DBReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseReadOnly"))
-	assert.Equal(t, cfg.DBReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseReadWrite"))
-	assert.Equal(t, cfg.DBAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("DatabaseAdmin"))
-	assert.Equal(t, cfg.CollectionReadOnlyPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionReadOnly"))
-	assert.Equal(t, cfg.CollectionReadWritePrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionReadWrite"))
-	assert.Equal(t, cfg.CollectionAdminPrivileges.GetAsStrings(), cfg.GetDefaultPrivilegeGroupPrivileges("CollectionAdmin"))
+
+	cases := []struct {
+		name     string
+		got      []string
+		expected []string
+	}{
+		{"ClusterReadOnly", cfg.ClusterReadOnlyPrivileges.GetAsStrings(), util.ClusterReadOnlyPrivileges},
+		{"ClusterReadWrite", cfg.ClusterReadWritePrivileges.GetAsStrings(), util.ClusterReadWritePrivileges},
+		{"ClusterAdmin", cfg.ClusterAdminPrivileges.GetAsStrings(), util.ClusterAdminPrivileges},
+		{"DatabaseReadOnly", cfg.DBReadOnlyPrivileges.GetAsStrings(), util.DatabaseReadOnlyPrivileges},
+		{"DatabaseReadWrite", cfg.DBReadWritePrivileges.GetAsStrings(), util.DatabaseReadWritePrivileges},
+		{"DatabaseAdmin", cfg.DBAdminPrivileges.GetAsStrings(), util.DatabaseAdminPrivileges},
+		{"CollectionReadOnly", cfg.CollectionReadOnlyPrivileges.GetAsStrings(), util.CollectionReadOnlyPrivileges},
+		{"CollectionReadWrite", cfg.CollectionReadWritePrivileges.GetAsStrings(), util.CollectionReadWritePrivileges},
+		{"CollectionAdmin", cfg.CollectionAdminPrivileges.GetAsStrings(), util.CollectionAdminPrivileges},
+	}
+	for _, c := range cases {
+		assert.ElementsMatchf(t, c.expected, c.got,
+			"privilege group %q out of sync: configs/milvus.yaml `common.security.rbac.*.privileges` "+
+				"drifted from util.%sPrivileges in pkg/util/constant.go. "+
+				"Update the yaml list to match the Go constant.", c.name, c.name)
+	}
 }
 
 func TestRbacConfig_OverridePrivileges(t *testing.T) {

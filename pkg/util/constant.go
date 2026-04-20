@@ -312,7 +312,13 @@ var (
 	}
 )
 
-// rbac v2 uses privilege level to group privileges rather than object type
+// rbac v2 uses privilege level to group privileges rather than object type.
+//
+// WARNING: these lists must stay in sync with the `common.security.rbac.*.privileges`
+// entries in configs/milvus.yaml. The yaml values override the DefaultValue set in
+// pkg/util/paramtable/rbac_param.go because ParamItem resolves in the order
+// etcd override -> yaml file -> DefaultValue. TestRbacConfig_BuiltinPrivilegesMatchGoConstants
+// enforces drift detection in CI.
 var (
 	CollectionReadOnlyPrivileges = ConvertPrivileges([]string{
 		commonpb.ObjectPrivilege_PrivilegeQuery.String(),
