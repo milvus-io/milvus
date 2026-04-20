@@ -131,44 +131,43 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_range_filter(self):
         """
-        target: test range search with only range filter
-        method: create connection, collection, insert and search
-        expected: range search successfully as normal search
+        target: test range search with only range_filter (no radius) is rejected
+        method: search with range_filter but no radius for COSINE/IP/L2 metrics
+        expected: search fails with ErrParameterInvalid; range_filter requires radius
+
+        Background: before fix #48915, range_filter without radius was silently ignored
+        by the C++ core and fell back to regular top-K search, returning results that
+        violated the range_filter constraint (e.g. self-match with distance=1.0 despite
+        range_filter=0.5). The proxy now rejects such requests explicitly.
         """
         client = self._client(alias=self.shared_alias)
 
-        # 2. get vectors that inserted into collection
+        # get vectors that inserted into collection
         query_res, _ = self.query(client, self.collection_name, filter=default_search_exp,
                                   output_fields=[ct.default_float_vec_field_name])
         search_vectors = [row[ct.default_float_vec_field_name] for row in query_res[:default_nq]]
 
-        # 3. range search with COSINE (only range_filter, no radius)
-        # With [-1,1] vectors, cosine distances span full range. range_filter=0.5 filters out high-similarity results.
-        range_search_params = {"metric_type": "COSINE",
-                               "params": {"range_filter": 0.5}}
-        search_res, _ = self.search(client, self.collection_name,
-                    data=search_vectors[:default_nq],
-                    anns_field=default_search_field,
-                    search_params=range_search_params,
-                    limit=default_limit,
-                    filter=default_search_exp)
-        # verify range filter is effective: all distances should be <= 0.5
-        for hits in search_res:
-            for hit in hits:
-                assert hit["distance"] <= 0.5
-        # 4. range search with IP (should fail - metric mismatch)
-        range_search_params = {"metric_type": "IP",
-                               "params": {"range_filter": 1}}
+        # range_filter without radius must be rejected (COSINE)
         self.search(client, self.collection_name,
                     data=search_vectors[:default_nq],
                     anns_field=default_search_field,
-                    search_params=range_search_params,
+                    search_params={"metric_type": "COSINE", "params": {"range_filter": 0.5}},
                     limit=default_limit,
                     filter=default_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={ct.err_code: 65535,
-                                 ct.err_msg: "metric type not match: "
-                                             "invalid parameter[expected=COSINE][actual=IP]"})
+                    check_items={ct.err_code: 1100,
+                                 ct.err_msg: "range_filter requires radius to be set"})
+
+        # range_filter without radius must be rejected (IP)
+        self.search(client, self.collection_name,
+                    data=search_vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params={"metric_type": "IP", "params": {"range_filter": 0.5}},
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1100,
+                                 ct.err_msg: "range_filter requires radius to be set"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
