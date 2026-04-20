@@ -10,6 +10,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 // coordinator and StreamingNode/QueryNode followers. State-machine execution
 // remains outside this transport contract.
 service ViewSyncService {
+    rpc SyncDataView(SyncDataViewRequest) returns (SyncDataViewResponse) {}
     rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
     }
 }
@@ -136,6 +137,10 @@ message SyncResponse {
 
 // SyncQueryViewsResponse reports the follower's latest local states.
 message SyncQueryViewsResponse {
+    oneof balance_attributes {
+        StreamingNodeBalanceAttributes streaming_node = 2;
+        QueryNodeBalanceAttributes query_node = 3;
+    }
     repeated QueryViewOfShard query_views = 1;
 }
 
@@ -325,4 +330,25 @@ message RequeryOnViewRequest {
 message RequeryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
+}
+
+message SyncDataViewRequest {
+    repeated DataViewShardTimeTick shards = 1;
+}
+
+message DataViewShardTimeTick {
+    string vchannel = 1;
+    // TransformLog entries with timetick > this value need to be consumed for this shard.
+    uint64 transform_start_after_timetick = 2;
+}
+
+message SyncDataViewResponse {
+}
+
+message StreamingNodeBalanceAttributes {
+}
+
+message QueryNodeBalanceAttributes {
+    int64 memory_usage = 1;  // Current memory usage in bytes.
+    int64 disk_usage = 2;    // Current disk usage in bytes.
 }
