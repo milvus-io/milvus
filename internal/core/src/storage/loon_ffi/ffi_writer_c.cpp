@@ -65,3 +65,45 @@ GetEncParams(CPluginContext* c_plugin_context,
                                       e.what());
     }
 }
+
+/**
+ * @brief C-linkage callback for loon_reader_set_keyretriever.
+ *
+ * Decodes key metadata, retrieves the decryption key from the cipher plugin,
+ * and returns a strdup'd key string (caller/loon FFI manages the memory).
+ */
+static const char*
+key_retriever_callback(const char* metadata) {
+    auto plugin =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (plugin == nullptr) {
+        return nullptr;
+    }
+    auto context = milvus::storage::DecodeKeyMetadata(std::string(metadata));
+    if (context == nullptr) {
+        return nullptr;
+    }
+    auto decryptor = plugin->GetDecryptor(
+        context->ez_id, context->collection_id, std::string(context->key));
+    return strdup(decryptor->GetKey().c_str());
+}
+
+CStatus
+SetupReaderKeyRetriever(LoonReaderHandle reader,
+                        CPluginContext* c_plugin_context) {
+    try {
+        AssertInfo(c_plugin_context != nullptr, "c_plugin_context is nullptr");
+        auto plugin_ptr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(plugin_ptr != nullptr, "cipher plugin is nullptr");
+
+        plugin_ptr->Update(c_plugin_context->ez_id,
+                           c_plugin_context->collection_id,
+                           std::string(c_plugin_context->key));
+        loon_reader_set_keyretriever(reader, key_retriever_callback);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
+                                      e.what());
+    }
+}

@@ -60,7 +60,6 @@
 #include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
-#include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
