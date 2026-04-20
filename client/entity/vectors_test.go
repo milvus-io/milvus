@@ -157,4 +157,34 @@ func TestVectorArrays(t *testing.T) {
 		assert.Equal(t, dim, fa.Dim())
 		assert.Equal(t, rows*dim, len(fa.Serialize()))
 	})
+
+	t.Run("empty arrays report zero dim and nil serialize", func(t *testing.T) {
+		assert.Equal(t, 0, FloatVectorArray(nil).Dim())
+		assert.Equal(t, 0, Float16VectorArray(nil).Dim())
+		assert.Equal(t, 0, BFloat16VectorArray(nil).Dim())
+		assert.Equal(t, 0, BinaryVectorArray(nil).Dim())
+		assert.Equal(t, 0, Int8VectorArray(nil).Dim())
+
+		assert.Nil(t, FloatVectorArray(nil).Serialize())
+		assert.Nil(t, Float16VectorArray(nil).Serialize())
+		assert.Nil(t, BFloat16VectorArray(nil).Serialize())
+		assert.Nil(t, BinaryVectorArray(nil).Serialize())
+		assert.Nil(t, Int8VectorArray(nil).Serialize())
+	})
+}
+
+func TestVectorFieldType(t *testing.T) {
+	// FieldType() for each Vector type is used by vector2Placeholder to pick the placeholder slot.
+	assert.Equal(t, FieldTypeFloatVector, FloatVector{}.FieldType())
+	assert.Equal(t, FieldTypeFloat16Vector, Float16Vector{}.FieldType())
+	assert.Equal(t, FieldTypeBFloat16Vector, BFloat16Vector{}.FieldType())
+	assert.Equal(t, FieldTypeBinaryVector, BinaryVector{}.FieldType())
+	assert.Equal(t, FieldTypeInt8Vector, Int8Vector{}.FieldType())
+}
+
+func TestTextVector(t *testing.T) {
+	txt := Text("hello")
+	assert.Equal(t, 0, txt.Dim())
+	assert.Equal(t, FieldTypeVarChar, txt.FieldType())
+	assert.Equal(t, []byte("hello"), txt.Serialize())
 }

@@ -134,7 +134,65 @@ func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnDeferredError() {
 			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))}
 		_, err := opt.InsertRequest(coll)
 		s.Require().Error(err)
+
+		// UpsertRequest must also surface the deferred error instead of panicking.
+		_, upsertErr := opt.UpsertRequest(coll)
+		s.Require().Error(upsertErr)
 	})
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnNilSchema() {
+	// nil schema must be rejected at build time (deferred).
+	opt := NewColumnBasedInsertOption("c").
+		WithStructArrayColumn("clips", nil, nil)
+	coll := &entity.Collection{Schema: entity.NewSchema().WithName("c")}
+	_, err := opt.InsertRequest(coll)
+	s.Error(err)
+}
+
+func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnAllSupportedTypes() {
+	// All scalar and vector sub-field types supported by newStructSubColumn; each must produce
+	// a non-nil sub-column without error. Vector types also require a valid dim.
+	dim := 8
+	cases := []*entity.Field{
+		entity.NewField().WithName("b").WithDataType(entity.FieldTypeBool),
+		entity.NewField().WithName("i8").WithDataType(entity.FieldTypeInt8),
+		entity.NewField().WithName("i16").WithDataType(entity.FieldTypeInt16),
+		entity.NewField().WithName("i32").WithDataType(entity.FieldTypeInt32),
+		entity.NewField().WithName("i64").WithDataType(entity.FieldTypeInt64),
+		entity.NewField().WithName("f").WithDataType(entity.FieldTypeFloat),
+		entity.NewField().WithName("d").WithDataType(entity.FieldTypeDouble),
+		entity.NewField().WithName("s").WithDataType(entity.FieldTypeVarChar).WithMaxLength(16),
+		entity.NewField().WithName("str").WithDataType(entity.FieldTypeString),
+		entity.NewField().WithName("fv").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)),
+		entity.NewField().WithName("fp16").WithDataType(entity.FieldTypeFloat16Vector).WithDim(int64(dim)),
+		entity.NewField().WithName("bf16").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(int64(dim)),
+		entity.NewField().WithName("bv").WithDataType(entity.FieldTypeBinaryVector).WithDim(int64(dim)),
+		entity.NewField().WithName("i8v").WithDataType(entity.FieldTypeInt8Vector).WithDim(int64(dim)),
+	}
+	for _, f := range cases {
+		c, err := newStructSubColumn(f)
+		s.Require().NoError(err, "type %v", f.DataType)
+		s.NotNil(c)
+	}
+}
+
+func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnErrors() {
+	// Unsupported data type in a struct sub-field must error.
+	_, err := newStructSubColumn(entity.NewField().WithName("bad").WithDataType(entity.FieldTypeJSON))
+	s.Error(err)
+
+	// Vector sub-fields without dim must surface GetDim's error.
+	for _, dt := range []entity.FieldType{
+		entity.FieldTypeFloatVector,
+		entity.FieldTypeFloat16Vector,
+		entity.FieldTypeBFloat16Vector,
+		entity.FieldTypeBinaryVector,
+		entity.FieldTypeInt8Vector,
+	} {
+		_, err := newStructSubColumn(entity.NewField().WithName("no_dim").WithDataType(dt))
+		s.Error(err, "type %v", dt)
+	}
 }
 
 func TestRowBasedDataOption(t *testing.T) {
