@@ -2474,7 +2474,7 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 	for _, fieldID := range fieldIDs {
 		if f, exists := fieldIDFuncMapping[fieldID]; exists {
 			if f.Type == schemapb.FunctionType_BM25 {
-				return nil, fmt.Errorf("Attempt to insert bm25 function output field")
+				return nil, fmt.Errorf("attempt to insert bm25 function output field")
 			}
 			if !allowNonBM25Outputs {
 				return nil, fmt.Errorf("Insert data has function output field, but collection's property `collection.function.allowInsertNonBM25FunctionOutputs` is not enable")
@@ -2522,7 +2522,7 @@ func ExtractStructFieldName(fieldName string) (string, error) {
 }
 
 func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_SparseFloatVector {
 		return false
 	}
 

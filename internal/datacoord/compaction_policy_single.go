@@ -143,9 +143,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	views := make([]CompactionView, 0)
 
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
-		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg)
-		}))
+		SegmentFilterFunc(canTriggerSortCompaction))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")
 		return views, nil

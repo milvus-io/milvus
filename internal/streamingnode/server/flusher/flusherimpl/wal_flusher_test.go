@@ -115,11 +115,12 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 	expect := mixcoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *datapb.GetChannelRecoveryInfoRequest, option ...grpc.CallOption,
 		) (*datapb.GetChannelRecoveryInfoResponse, error) {
-			if request.Vchannel == "vchannel-3" {
+			switch request.Vchannel {
+			case "vchannel-3":
 				return &datapb.GetChannelRecoveryInfoResponse{
 					Status: merr.Status(merr.ErrCollectionNotFound),
 				}, nil
-			} else if request.Vchannel == "vchannel-2" {
+			case "vchannel-2":
 				return &datapb.GetChannelRecoveryInfoResponse{
 					Status: merr.Status(merr.ErrChannelNotAvailable),
 				}, nil

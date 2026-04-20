@@ -2079,9 +2079,10 @@ func Test_TirggerCompaction_WaitResult(t *testing.T) {
 			case signal := <-got.signals:
 				x := j.Load().(int)
 				j.Store(x + 1)
-				if x == 0 {
+				switch x {
+				case 0:
 					assert.EqualValues(t, 3, signal.collectionID)
-				} else if x == 1 {
+				case 1:
 					assert.EqualValues(t, 4, signal.collectionID)
 				}
 				signal.Notify(nil)

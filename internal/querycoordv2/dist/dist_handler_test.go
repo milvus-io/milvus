@@ -256,11 +256,11 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	// Verify that the distributions were updated correctly
 	segments := suite.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(1))
 	suite.Require().Equal(1, len(segments))
-	suite.Require().Equal(int64(1), segments[0].SegmentInfo.ID)
+	suite.Require().Equal(int64(1), segments[0].ID)
 
 	channels := suite.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(1))
 	suite.Require().Equal(1, len(channels))
-	suite.Require().Equal("test-channel-1", channels[0].VchannelInfo.ChannelName)
+	suite.Require().Equal("test-channel-1", channels[0].ChannelName)
 
 	// Verify that the notification was called
 	suite.Require().Greater(notifyCounter.Load(), int32(0))

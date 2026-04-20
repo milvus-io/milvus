@@ -201,7 +201,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 	// validate analyzer params at any streaming node
 	if len(analyzerInfos) > 0 {
-		resp, err := t.Core.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
+		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
 			AnalyzerInfos: analyzerInfos,
 		})
 		if err != nil {

@@ -187,7 +187,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 
 	// growing segments's stats should always be loaded, for generating merged pk bf.
 	loadSegmentStats("growing", unflushed)
-	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
+	if !streamingutil.IsStreamingServiceEnabled() && !paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
 		loadSegmentStats("sealed", flushed)
 	}
 
@@ -243,7 +243,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		dropCallback: dropCallback,
 	}
 
-	ctx, cancel := context.WithCancel(params.Ctx)
+	ctx, cancel := context.WithCancel(params.Ctx) //nolint:gosec // cancel is stored in cancelFn and called in Close()
 	ds := &DataSyncService{
 		ctx:      ctx,
 		cancelFn: cancel,

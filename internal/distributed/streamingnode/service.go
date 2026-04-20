@@ -273,7 +273,8 @@ func (s *Server) initMeta() error {
 	log := log.Ctx(s.ctx)
 	log.Info("data coordinator connecting to metadata store", zap.String("metaType", metaType))
 	metaRootPath := ""
-	if metaType == util.MetaStoreTypeTiKV {
+	switch metaType {
+	case util.MetaStoreTypeTiKV:
 		var err error
 		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
 		if err != nil {
@@ -282,11 +283,11 @@ func (s *Server) initMeta() error {
 		}
 		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
 		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
-			tikvkv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-	} else if metaType == util.MetaStoreTypeEtcd {
+			tikvkv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+	case util.MetaStoreTypeEtcd:
 		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
 		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	}
 	return nil
 }

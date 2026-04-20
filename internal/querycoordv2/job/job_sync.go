@@ -89,7 +89,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		LoadPercentage: 100,
 		CreatedAt:      time.Now(),
 	}
-	err := job.meta.CollectionManager.PutPartition(job.ctx, partition)
+	err := job.meta.PutPartition(job.ctx, partition)
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))

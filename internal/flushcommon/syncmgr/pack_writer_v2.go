@@ -120,7 +120,7 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	if bw.storageConfig != nil {
 		return bw.storageConfig.BucketName
 	}
-	return paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {

@@ -479,9 +479,7 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
 	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return isSegmentHealthy(si)
-	}))
+	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isSegmentHealthy))
 	for _, segment := range segments {
 		ret += segment.GetNumOfRows()
 	}

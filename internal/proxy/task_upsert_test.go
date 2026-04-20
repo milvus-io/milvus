@@ -511,11 +511,11 @@ func TestUpsertTask_Function(t *testing.T) {
 
 	// process failed
 	{
-		oldRows := task.upsertMsg.InsertMsg.InsertRequest.NumRows
-		task.upsertMsg.InsertMsg.InsertRequest.NumRows = 10000
+		oldRows := task.upsertMsg.InsertMsg.NumRows
+		task.upsertMsg.InsertMsg.NumRows = 10000
 		err = task.insertPreExecute(ctx)
 		assert.Error(t, err)
-		task.upsertMsg.InsertMsg.InsertRequest.NumRows = oldRows
+		task.upsertMsg.InsertMsg.NumRows = oldRows
 	}
 }
 

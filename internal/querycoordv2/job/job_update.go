@@ -74,7 +74,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 }
 
 func (job *UpdateLoadConfigJob) Execute() error {
-	if !job.meta.CollectionManager.Exist(job.ctx, job.collectionID) {
+	if !job.meta.Exist(job.ctx, job.collectionID) {
 		msg := "modify replica for unloaded collection is not supported"
 		err := merr.WrapErrCollectionNotLoaded(msg)
 		log.Warn(msg, zap.Error(err))
@@ -115,7 +115,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	if job.needWaitRGReady {
 		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
 	}
-	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
+	newReplicas, spawnErr := job.meta.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
 		log.Warn("failed to spawn replica", zap.Error(spawnErr))
 		err := spawnErr
@@ -125,7 +125,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		if err != nil {
 			// roll back replica from meta
 			replicaIDs := lo.Map(newReplicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
-			err := job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, replicaIDs...)
+			err := job.meta.RemoveReplicas(job.ctx, job.collectionID, replicaIDs...)
 			if err != nil {
 				log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", replicaIDs), zap.Error(err))
 			}
@@ -141,7 +141,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
 			}
 
-			if transferErr := job.meta.ReplicaManager.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
+			if transferErr := job.meta.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
 				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
 				err = transferErr
 				return err
@@ -154,7 +154,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 				for _, replica := range replicas {
 					oldRG := replicaOldRG[replica.GetID()]
 					if replica.GetResourceGroup() != oldRG {
-						if err := job.meta.ReplicaManager.TransferReplica(job.ctx, replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
+						if err := job.meta.TransferReplica(job.ctx, replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
 							log.Warn("failed to roll back replicas", zap.Int64("replica", replica.GetID()), zap.Error(err))
 						}
 					}
@@ -164,7 +164,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}()
 
 	// 5. remove replica from meta
-	err = job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, toRelease...)
+	err = job.meta.RemoveReplicas(job.ctx, job.collectionID, toRelease...)
 	if err != nil {
 		log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
 		return err

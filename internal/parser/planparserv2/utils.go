@@ -771,7 +771,7 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 			},
 		}, schemapb.DataType_Array, nil
 	default:
-		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T\n", value, v)
+		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T", value, v)
 	}
 }
 

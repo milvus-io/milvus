@@ -70,7 +70,7 @@ func TestConfigFromRemote(t *testing.T) {
 		_, _, err = mgr.GetConfig("test.etcd")
 		assert.ErrorIs(t, err, ErrKeyNotFound)
 
-		client.KV.Put(ctx, "test/config/test/etcd", "value")
+		client.Put(ctx, "test/config/test/etcd", "value")
 
 		time.Sleep(100 * time.Millisecond)
 
@@ -81,7 +81,7 @@ func TestConfigFromRemote(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "value", v)
 
-		client.KV.Delete(ctx, "test/config/test/etcd")
+		client.Delete(ctx, "test/config/test/etcd")
 		time.Sleep(100 * time.Millisecond)
 
 		_, _, err = mgr.GetConfig("TEST_ETCD")
@@ -91,21 +91,21 @@ func TestConfigFromRemote(t *testing.T) {
 	t.Run("override origin value", func(t *testing.T) {
 		_, v, _ := mgr.GetConfig("tmp.key")
 		assert.Equal(t, "1", v)
-		client.KV.Put(ctx, "test/config/tmp/key", "2")
+		client.Put(ctx, "test/config/tmp/key", "2")
 
 		time.Sleep(100 * time.Millisecond)
 
 		_, v, _ = mgr.GetConfig("tmp.key")
 		assert.Equal(t, "2", v)
 
-		client.KV.Put(ctx, "test/config/tmp/key", "3")
+		client.Put(ctx, "test/config/tmp/key", "3")
 
 		time.Sleep(100 * time.Millisecond)
 
 		_, v, _ = mgr.GetConfig("tmp.key")
 		assert.Equal(t, "3", v)
 
-		client.KV.Delete(ctx, "test/config/tmp/key")
+		client.Delete(ctx, "test/config/tmp/key")
 		time.Sleep(100 * time.Millisecond)
 
 		_, v, _ = mgr.GetConfig("tmp.key")
@@ -115,14 +115,14 @@ func TestConfigFromRemote(t *testing.T) {
 	t.Run("multi priority", func(t *testing.T) {
 		_, v, _ := mgr.GetConfig("log.level")
 		assert.Equal(t, "info", v)
-		client.KV.Put(ctx, "test/config/log/level", "error")
+		client.Put(ctx, "test/config/log/level", "error")
 
 		time.Sleep(100 * time.Millisecond)
 
 		_, v, _ = mgr.GetConfig("log.level")
 		assert.Equal(t, "error", v)
 
-		client.KV.Delete(ctx, "test/config/log/level")
+		client.Delete(ctx, "test/config/log/level")
 		time.Sleep(100 * time.Millisecond)
 
 		_, v, _ = mgr.GetConfig("log.level")
@@ -132,7 +132,7 @@ func TestConfigFromRemote(t *testing.T) {
 	t.Run("close manager", func(t *testing.T) {
 		mgr.Close()
 
-		client.KV.Put(ctx, "test/config/test/etcd", "value2")
+		client.Put(ctx, "test/config/test/etcd", "value2")
 		assert.Eventually(t, func() bool {
 			_, _, err = mgr.GetConfig("test.etcd")
 			return err != nil && errors.Is(err, ErrKeyNotFound)

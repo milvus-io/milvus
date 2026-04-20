@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -96,7 +95,7 @@ func FieldExists(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
-func isJsonField(schema *schemapb.CollectionSchema, fieldID int64) bool {
+func isJSONField(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	for _, f := range schema.Fields {
 		if f.FieldID == fieldID {
 			return typeutil.IsJSONType(f.DataType)
@@ -160,8 +159,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
-	isJson := isJsonField(schema, req.GetFieldID())
-	if isJson {
+	isJSON := isJSONField(schema, req.GetFieldID())
+	if isJSON {
 		// check json_path and json_cast_type exist
 		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 		if err != nil {
@@ -191,7 +190,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 		defaultIndexName := fieldName
-		if isJson {
+		if isJSON {
 			// ignore error, because it's already checked in getIndexParam before
 			jsonPath, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 			// filter indexes by json path, the length of indexes should not be larger than 1
@@ -210,7 +209,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
+	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJSON)
 	if err != nil {
 		if errors.Is(err, errIndexOperationIgnored) {
 			log.Info("index already exists",
@@ -409,7 +408,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				return merr.Status(err), nil
 			}
 			isVecIndex := typeutil.IsVectorType(fieldSchema.DataType)
-			err = pkgcommon.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
+			err = common.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
 			if err != nil {
 				log.Warn("failed to validate auto index mmap config", zap.Error(err))
 				return merr.Status(err), nil

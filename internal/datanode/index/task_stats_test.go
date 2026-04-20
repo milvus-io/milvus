@@ -193,9 +193,9 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 
 		options := &BuildIndexOptions{
 			TantivyMemory:                0,
-			JsonStatsMaxShreddingColumns: 256,
-			JsonStatsShreddingRatio:      0.3,
-			JsonStatsWriteBatchSize:      81920,
+			JSONStatsMaxShreddingColumns: 256,
+			JSONStatsShreddingRatio:      0.3,
+			JSONStatsWriteBatchSize:      81920,
 		}
 		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options)
 

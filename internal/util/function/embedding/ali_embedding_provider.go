@@ -45,7 +45,7 @@ type AliEmbeddingProvider struct {
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.DashscopeAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.DashscopeAKEnvStr)
 	}
 
 	if url == "" {
@@ -131,11 +131,11 @@ func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 			return nil, err
 		}
 		if end-i != len(resp.Output.Embeddings) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
+			return nil, fmt.Errorf("get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
 		}
 		for _, item := range resp.Output.Embeddings {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

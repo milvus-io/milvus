@@ -45,7 +45,7 @@ type L0CompactionPolicySuite struct {
 	handler            Handler
 	inspector          *MockCompactionInspector
 
-	l0_policy *l0CompactionPolicy
+	l0Policy *l0CompactionPolicy
 }
 
 func (s *L0CompactionPolicySuite) SetupTest() {
@@ -61,7 +61,7 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 		meta.segments.SetSegment(id, segment)
 	}
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	s.l0_policy = newL0CompactionPolicy(meta, s.mockAlloc)
+	s.l0Policy = newL0CompactionPolicy(meta, s.mockAlloc)
 }
 
 const MB = 1024 * 1024
@@ -71,13 +71,13 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key)
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.l0_policy.OnCollectionUpdate(1)
-	s.Require().EqualValues(1, s.l0_policy.activeCollections.GetActiveCollections()[0])
+	s.l0Policy.OnCollectionUpdate(1)
+	s.Require().EqualValues(1, s.l0Policy.activeCollections.GetActiveCollections()[0])
 
 	<-time.After(3 * time.Second)
 
 	for range 3 {
-		gotViews, err := s.l0_policy.Trigger(context.Background())
+		gotViews, err := s.l0Policy.Trigger(context.Background())
 		s.NoError(err)
 		s.NotNil(gotViews)
 		s.NotEmpty(gotViews)
@@ -85,8 +85,8 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 		s.True(ok)
 	}
 
-	s.Empty(s.l0_policy.activeCollections.GetActiveCollections())
-	gotViews, err := s.l0_policy.Trigger(context.Background())
+	s.Empty(s.l0Policy.activeCollections.GetActiveCollections())
+	gotViews, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotNil(gotViews)
 	s.NotEmpty(gotViews)
@@ -95,9 +95,9 @@ func (s *L0CompactionPolicySuite) TestActiveToIdle() {
 }
 
 func (s *L0CompactionPolicySuite) TestTriggerIdle() {
-	s.Require().Empty(s.l0_policy.activeCollections.GetActiveCollections())
+	s.Require().Empty(s.l0Policy.activeCollections.GetActiveCollections())
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	events, err := s.l0_policy.Trigger(context.Background())
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -145,11 +145,11 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	s.l0_policy.meta = meta
+	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
-	s.l0_policy.OnCollectionUpdate(s.testLabel.CollectionID)
-	events, err := s.l0_policy.Trigger(context.Background())
+	s.l0Policy.OnCollectionUpdate(s.testLabel.CollectionID)
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.Equal(1, len(events))
 	gotViews, ok := events[TriggerTypeLevelZeroViewChange]
@@ -163,7 +163,7 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 
 func (s *L0CompactionPolicySuite) TestManualTrigger() {
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.l0_policy.triggerOneCollection(context.Background(), s.testLabel.CollectionID)
+	s.l0Policy.triggerOneCollection(context.Background(), s.testLabel.CollectionID)
 }
 
 func (s *L0CompactionPolicySuite) TestPositionFiltering() {
@@ -206,10 +206,10 @@ func (s *L0CompactionPolicySuite) TestPositionFiltering() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	s.l0_policy.meta = meta
+	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
-	events, err := s.l0_policy.Trigger(context.Background())
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -284,10 +284,10 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringWithNoGrowingSegments() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	s.l0_policy.meta = meta
+	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
-	events, err := s.l0_policy.Trigger(context.Background())
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -341,10 +341,10 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringEdgeCase() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	s.l0_policy.meta = meta
+	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
-	events, err := s.l0_policy.Trigger(context.Background())
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -497,10 +497,10 @@ func (s *L0CompactionPolicySuite) TestMultiChannelPositionFiltering() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	s.l0_policy.meta = meta
+	s.l0Policy.meta = meta
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 
-	events, err := s.l0_policy.Trigger(context.Background())
+	events, err := s.l0Policy.Trigger(context.Background())
 	s.NoError(err)
 	s.NotEmpty(events)
 
@@ -567,8 +567,8 @@ func (s *L0CompactionPolicySuite) TestGroupL0ViewsByPartChan() {
 		meta.segments.SetSegment(segView.ID, info)
 	}
 
-	s.l0_policy.meta = meta
-	views := s.l0_policy.groupL0ViewsByPartChan(1, segments, 999)
+	s.l0Policy.meta = meta
+	views := s.l0Policy.groupL0ViewsByPartChan(1, segments, 999)
 
 	s.Equal(2, len(views))
 
