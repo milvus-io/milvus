@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
@@ -1196,6 +1197,84 @@ func TestHttpAuthenticate(t *testing.T) {
 		ctxName, _ := ctx.Get(httpserver.ContextUsername)
 		assert.Equal(t, "foo", ctxName)
 	}
+}
+
+// TestWebUIRoutesSkipAuthentication verifies that the WebUI management routes
+// (/_cluster/*, /_qc/*, etc.) registered via RegisterRestRouter remain accessible
+// without credentials even when authorizationEnabled = true.  The SDK REST API
+// routes must still require authentication.
+// Regression test for: https://github.com/milvus-io/milvus/issues/48926
+func TestWebUIRoutesSkipAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Use the mock hook so that the authenticate function does not panic
+	// when it cannot find valid credentials; it will abort with 401 instead.
+	hookutil.SetMockAPIHook("", nil)
+	defer hookutil.SetMockAPIHook("", nil)
+
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+	engine := gin.New()
+
+	// SDK REST API group — authenticate middleware applied when auth is enabled.
+	apiv1 := engine.Group(apiPathPrefix)
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		apiv1.Use(authenticate)
+	}
+	apiv1.GET("/sdk-test-route", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	// WebUI management group — no authenticate middleware (mirrors registerHTTPServer fix).
+	webuiGroup := engine.Group(apiPathPrefix)
+	webuiGroup.GET("/_cluster/info", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	webuiGroup.GET("/_cluster/clients", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	webuiGroup.GET("/_cluster/dependencies", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	t.Run("WebUI cluster routes accessible without credentials when auth enabled", func(t *testing.T) {
+		for _, path := range []string{"/_cluster/info", "/_cluster/clients", "/_cluster/dependencies"} {
+			req := httptest.NewRequest(http.MethodGet, apiPathPrefix+path, nil)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code,
+				"WebUI route %s should not require authentication", path)
+			assert.Equal(t, http.StatusOK, w.Code,
+				"WebUI route %s should return 200 without credentials", path)
+		}
+	})
+
+	t.Run("SDK routes require credentials when auth enabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, apiPathPrefix+"/sdk-test-route", nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"SDK routes must still require authentication when auth is enabled")
+	})
+
+	t.Run("WebUI routes accessible without credentials when auth disabled", func(t *testing.T) {
+		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+		engine2 := gin.New()
+		apiv2 := engine2.Group(apiPathPrefix)
+		// No authenticate middleware because auth is disabled.
+		apiv2.GET("/sdk-test-route", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, apiPathPrefix+"/sdk-test-route", nil)
+		w := httptest.NewRecorder()
+		engine2.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code,
+			"All routes should be accessible when auth is disabled")
+	})
 }
 
 func Test_Service_GracefulStop(t *testing.T) {

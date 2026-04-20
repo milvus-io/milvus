@@ -164,18 +164,28 @@ func (s *Server) registerHTTPServer() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	metricsGinHandler := gin.Default()
+
+	// SDK REST API routes: require user authentication when authorization is enabled.
 	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		apiv1.Use(authenticate)
 	}
 	handlers := httpserver.NewHandlers(s.proxy)
 	handlers.RegisterRoutesTo(apiv1)
+
+	// WebUI management routes (_cluster/*, _qc/*, _dc/*, etc.) are served on the
+	// internal management port (9091) which is not publicly exposed in standard
+	// deployments. These observability endpoints must remain accessible to the
+	// built-in WebUI regardless of the authorizationEnabled setting; the WebUI
+	// frontend has no mechanism to supply user credentials.
+	// Telemetry routes (_telemetry/*) carry their own per-handler auth middleware.
 	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
+		webuiGroup := metricsGinHandler.Group(apiPathPrefix)
+		webuiGroup.Use(httpserver.RequestHandlerFunc)
+		p.RegisterRestRouter(webuiGroup)
 	}
+
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
