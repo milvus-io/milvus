@@ -28,13 +28,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// structArrayRow holds per-row struct array data, keyed by sub-field name.
+// structArrayRow holds per-row struct array data, keyed by short sub-field name
+// (i.e. the user-facing name without the `structName[...]` wrapper).
 // Each map entry is the per-row payload for a sub-field:
 //   - For an Array sub-field (scalar elements), the value is a *schemapb.ScalarField
 //     whose ArrayData contains one entry per struct element in this row.
 //   - For an ArrayOfVector sub-field, the value is a *schemapb.VectorField whose
 //     data holds one vector per struct element in this row.
 type structArrayRow map[string]any
+
+// subShortName returns the user-visible sub-field name. Milvus stores struct
+// sub-fields as `structName[subName]` after collection creation, but RESTful
+// users always refer to them by their original short name.
+func subShortName(sub *schemapb.FieldSchema) string {
+	name, err := typeutil.ExtractStructFieldName(sub.GetName())
+	if err != nil || name == "" {
+		return sub.GetName()
+	}
+	return name
+}
 
 // parseStructArrayRow parses the raw JSON value of a struct array field for one row
 // (expected to be `[{sub1: v, sub2: v}, ...]`) and returns a structArrayRow covering
@@ -49,12 +61,13 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 			"struct array field %s expects a JSON array of objects", structSchema.GetName())
 	}
 	elems := parsed.Array()
-	// Collect sub-field values keyed by sub-field name, preserving element order.
+	// Collect sub-field values keyed by short sub-field name, preserving element order.
 	collected := make(map[string][]gjson.Result, len(structSchema.GetFields()))
 	expected := make(map[string]struct{}, len(structSchema.GetFields()))
 	for _, sub := range structSchema.GetFields() {
-		collected[sub.GetName()] = make([]gjson.Result, 0, len(elems))
-		expected[sub.GetName()] = struct{}{}
+		key := subShortName(sub)
+		collected[key] = make([]gjson.Result, 0, len(elems))
+		expected[key] = struct{}{}
 	}
 	for idx, elem := range elems {
 		if elem.Type != gjson.JSON || !elem.IsObject() {
@@ -84,24 +97,25 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 
 	row := structArrayRow{}
 	for _, sub := range structSchema.GetFields() {
-		vals := collected[sub.GetName()]
+		key := subShortName(sub)
+		vals := collected[key]
 		switch sub.GetDataType() {
 		case schemapb.DataType_Array:
 			scalar, err := buildStructSubArrayScalar(sub, vals)
 			if err != nil {
 				return nil, err
 			}
-			row[sub.GetName()] = scalar
+			row[key] = scalar
 		case schemapb.DataType_ArrayOfVector:
 			vec, err := buildStructSubVectorArray(sub, vals)
 			if err != nil {
 				return nil, err
 			}
-			row[sub.GetName()] = vec
+			row[key] = vec
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"sub-field %s of struct %s has unsupported data type %s",
-				sub.GetName(), structSchema.GetName(), sub.GetDataType())
+				key, structSchema.GetName(), sub.GetDataType())
 		}
 	}
 	return row, nil
@@ -368,6 +382,7 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 	subs := structSchema.GetFields()
 	subFieldData := make([]*schemapb.FieldData, 0, len(subs))
 	for _, sub := range subs {
+		short := subShortName(sub)
 		switch sub.GetDataType() {
 		case schemapb.DataType_Array:
 			arrayArray := &schemapb.ArrayArray{
@@ -375,15 +390,15 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 				ElementType: sub.GetElementType(),
 			}
 			for rowIdx, row := range perRow {
-				val, ok := row[sub.GetName()]
+				val, ok := row[short]
 				if !ok {
 					return nil, fmt.Errorf("struct %s row %d missing sub-field %s",
-						structSchema.GetName(), rowIdx, sub.GetName())
+						structSchema.GetName(), rowIdx, short)
 				}
 				scalar, ok := val.(*schemapb.ScalarField)
 				if !ok {
 					return nil, fmt.Errorf("struct %s sub-field %s row %d: unexpected payload type %T",
-						structSchema.GetName(), sub.GetName(), rowIdx, val)
+						structSchema.GetName(), short, rowIdx, val)
 				}
 				arrayArray.Data = append(arrayArray.Data, scalar)
 			}
@@ -408,22 +423,22 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 				Data:        make([]*schemapb.VectorField, 0, len(perRow)),
 			}
 			for rowIdx, row := range perRow {
-				val, ok := row[sub.GetName()]
+				val, ok := row[short]
 				if !ok {
 					return nil, fmt.Errorf("struct %s row %d missing sub-field %s",
-						structSchema.GetName(), rowIdx, sub.GetName())
+						structSchema.GetName(), rowIdx, short)
 				}
 				vf, ok := val.(*schemapb.VectorField)
 				if !ok {
 					return nil, fmt.Errorf("struct %s sub-field %s row %d: unexpected payload type %T",
-						structSchema.GetName(), sub.GetName(), rowIdx, val)
+						structSchema.GetName(), short, rowIdx, val)
 				}
 				// vf.Data is a VectorField_VectorArray wrapping a single per-row VectorField.
 				if va := vf.GetVectorArray(); va != nil && len(va.Data) == 1 {
 					vecArray.Data = append(vecArray.Data, va.Data[0])
 				} else {
 					return nil, fmt.Errorf("struct %s sub-field %s row %d: malformed vector payload",
-						structSchema.GetName(), sub.GetName(), rowIdx)
+						structSchema.GetName(), short, rowIdx)
 				}
 			}
 			subFieldData = append(subFieldData, &schemapb.FieldData{
@@ -473,27 +488,31 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int) ([]map[string]int
 		out[i] = make(map[string]interface{}, len(subs))
 	}
 	for _, sub := range subs {
+		short, err := typeutil.ExtractStructFieldName(sub.GetFieldName())
+		if err != nil || short == "" {
+			short = sub.GetFieldName()
+		}
 		switch sub.GetType() {
 		case schemapb.DataType_Array:
 			rowData := sub.GetScalars().GetArrayData().GetData()
 			if rowIdx >= len(rowData) {
-				return nil, fmt.Errorf("struct sub-field %s missing row %d", sub.GetFieldName(), rowIdx)
+				return nil, fmt.Errorf("struct sub-field %s missing row %d", short, rowIdx)
 			}
 			values := scalarArrayToInterfaces(rowData[rowIdx])
 			if len(values) != elemCount {
 				return nil, fmt.Errorf("struct sub-field %s element count mismatch: expect %d got %d",
-					sub.GetFieldName(), elemCount, len(values))
+					short, elemCount, len(values))
 			}
 			for i, v := range values {
-				out[i][sub.GetFieldName()] = v
+				out[i][short] = v
 			}
 		case schemapb.DataType_ArrayOfVector:
 			va := sub.GetVectors().GetVectorArray()
 			if va == nil {
-				return nil, fmt.Errorf("struct sub-field %s has no vector array", sub.GetFieldName())
+				return nil, fmt.Errorf("struct sub-field %s has no vector array", short)
 			}
 			if rowIdx >= len(va.GetData()) {
-				return nil, fmt.Errorf("struct sub-field %s missing row %d", sub.GetFieldName(), rowIdx)
+				return nil, fmt.Errorf("struct sub-field %s missing row %d", short, rowIdx)
 			}
 			values, err := vectorFieldToInterfaces(va.GetData()[rowIdx], va.GetElementType(), va.GetDim())
 			if err != nil {
@@ -501,10 +520,10 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int) ([]map[string]int
 			}
 			if len(values) != elemCount {
 				return nil, fmt.Errorf("struct sub-field %s vector element count mismatch: expect %d got %d",
-					sub.GetFieldName(), elemCount, len(values))
+					short, elemCount, len(values))
 			}
 			for i, v := range values {
-				out[i][sub.GetFieldName()] = v
+				out[i][short] = v
 			}
 		default:
 			return nil, fmt.Errorf("unsupported struct sub-field type %s", sub.GetType())

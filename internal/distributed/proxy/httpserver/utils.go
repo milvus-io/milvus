@@ -327,7 +327,11 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 	for _, sf := range structFields {
 		subs := make([]gin.H, 0, len(sf.GetFields()))
 		for _, sub := range sf.GetFields() {
-			subs = append(subs, printFieldDetail(sub, false))
+			detail := printFieldDetail(sub, false)
+			if short, err := typeutil.ExtractStructFieldName(sub.GetName()); err == nil && short != "" {
+				detail[HTTPReturnFieldName] = short
+			}
+			subs = append(subs, detail)
 		}
 		entry := gin.H{
 			HTTPReturnFieldName:   sf.GetName(),
