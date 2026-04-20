@@ -659,6 +659,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		HTTPReturnDescription: coll.Schema.Description,
 		HTTPReturnFieldAutoID: autoID,
 		"fields":              printFieldsV2(coll.Schema.Fields),
+		"structFields":        printStructArrayFieldsV2(coll.Schema.StructArrayFields),
 		"functions":           printFunctionDetails(coll.Schema.Functions),
 		"aliases":             aliases,
 		"indexes":             indexDesc,
@@ -1888,6 +1889,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Name:               httpReq.CollectionName,
 			AutoID:             httpReq.Schema.AutoId,
 			Fields:             []*schemapb.FieldSchema{},
+			StructArrayFields:  []*schemapb.StructArrayFieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 			Description:        httpReq.Description,
@@ -1972,6 +1974,30 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
+		}
+		for i := range httpReq.Schema.StructFields {
+			structField := httpReq.Schema.StructFields[i]
+			if _, dup := fieldNames[structField.FieldName]; dup {
+				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
+				log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			structProto, err := structField.GetProto(ctx)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, convert struct array field fail",
+					zap.String("structField", structField.FieldName), zap.Error(err))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			collSchema.StructArrayFields = append(collSchema.StructArrayFields, structProto)
+			fieldNames[structField.FieldName] = true
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}
