@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.25.8
+go 1.26.2
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0

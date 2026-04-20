@@ -25,6 +25,10 @@ source $BASEDIR/setenv.sh
 
 set -e
 
+# Clean Go build cache when toolchain version changes (e.g. Go upgrade PRs)
+# to avoid "compile: version X does not match go tool version Y" errors
+go clean -cache 2>/dev/null || true
+
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 
 TEST_CMD=$@
