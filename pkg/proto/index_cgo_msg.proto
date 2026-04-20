@@ -106,6 +106,9 @@ message BuildIndexInfo {
   string manifest = 30;
   string analyzer_extra_info = 31;
   string stats_base_path = 32;  // remote base path for stats files, computed by Go caller
+  // External collection fields (empty for regular collections)
+  string external_source = 33;
+  string external_spec = 34;
 }
 
 message StoragePluginContext {

@@ -12,8 +12,6 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5@milvus/dev#67b8ae76ad7be5f779082f67416f89bf",
         "onetbb/2021.9.0#f9d7a3aa294ac4a594a93f9b4c7f272d",
         "zstd/1.5.5#70dc5eb8ea16708fc946fbac884c507e",
-        "lz4/1.9.4#7f0b5851453198536c14354ee30ca9ae",
-        "snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3",
         "arrow/17.0.0@milvus/dev-2.6#c743ea7a6f2420ba5811b2be3df59892",
         "libevent/2.1.12#95065aaefcd58d3956d6dfbfc5631d97",
         "googleapis/cci.20221108#4553d68a2429cc0fff7d2bab4e5b3ea9",
@@ -60,6 +58,8 @@ class MilvusConan(ConanFile):
         "arrow/*:compute": True,
         "arrow/*:with_re2": True,
         "arrow/*:with_zstd": True,
+        "arrow/*:with_snappy": True,
+        "arrow/*:with_lz4": True,
         "arrow/*:with_boost": True,
         "arrow/*:with_thrift": True,
         "arrow/*:with_jemalloc": True,
@@ -120,6 +120,10 @@ class MilvusConan(ConanFile):
         self.requires("fmt/11.0.2#eb98daa559c7c59d591f4720dde4cd5c", force=True)
         self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
         self.requires("aws-sdk-cpp/1.11.692@milvus/dev#c309ce91fa572fff68f9f4e36d477a04")
+        # Force snappy/lz4 versions to override Arrow's older transitive deps
+        # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
+        self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
+        self.requires("lz4/1.9.4#7f0b5851453198536c14354ee30ca9ae", force=True)
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
