@@ -1478,10 +1478,19 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 	var phv *commonpb.PlaceholderValue
 	if vectorField.GetDataType() == schemapb.DataType_ArrayOfVector {
-		// Struct sub-vector search: the user supplies one embedding list per
-		// query and we pack each list into a single flat byte buffer whose
-		// PlaceholderType is the EmbList variant of the element type.
-		phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		// Struct sub-vector search. The user may supply either:
+		//   - element-level: one query vector per nq (shape matches a normal
+		//     vector search) → use the regular PlaceholderType of the element
+		//     type.
+		//   - embedding list: one list of vectors per nq, packed into a single
+		//     flat byte buffer → use the EmbList* PlaceholderType variant.
+		// We infer the shape from the `data` JSON: a nested-array / nested-
+		// string first element means EmbList, otherwise element-level.
+		if isEmbeddingListData(body) {
+			phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		} else {
+			phv, err = convertQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		}
 	} else {
 		phv, err = convertQueries2Placeholder(body, dataType, dim)
 	}

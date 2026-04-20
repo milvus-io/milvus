@@ -374,6 +374,45 @@ func wrapStructSubParseError(sub *schemapb.FieldSchema, v gjson.Result, msg stri
 		"sub-field %s parse error: %s (value=%s)", sub.GetName(), msg, v.Raw)
 }
 
+// isEmbeddingListData reports whether the `data` JSON of a search body is shaped
+// as an embedding list (one list of vectors per nq) rather than an element-level
+// query (one vector per nq). The caller has already resolved annsField to a
+// struct ArrayOfVector sub-field, so the choice is strictly between:
+//   - element-level: `data[0]` is a primitive vector (a number array for Float /
+//     Float16 / BFloat16 / Int8, or a base64 string for BinaryVector / byte-backed
+//     vectors) — one vector per nq query.
+//   - embedding list: `data[0]` is itself an array of vectors — one list per nq.
+//
+// Detection walks two levels deep without committing to an element type:
+//
+//	data[0] is a string   → element-level (binary/byte-backed base64 per query)
+//	data[0] is an array   → look at data[0][0]:
+//	    primitive        → element-level
+//	    array or string  → embedding list
+func isEmbeddingListData(body string) bool {
+	raw := gjson.Get(body, HTTPRequestData)
+	if !raw.IsArray() {
+		return false
+	}
+	arr := raw.Array()
+	if len(arr) == 0 {
+		return false
+	}
+	first := arr[0]
+	if first.Type == gjson.String {
+		return false
+	}
+	if !first.IsArray() {
+		return false
+	}
+	inner := first.Array()
+	if len(inner) == 0 {
+		return false
+	}
+	firstInner := inner[0]
+	return firstInner.IsArray() || firstInner.Type == gjson.String
+}
+
 // convertEmbListQueries2Placeholder parses a search body whose "data" is a JSON
 // array of embedding lists. Each top-level element represents one nq query and
 // is itself a JSON array of vectors of the given element type. The resulting
