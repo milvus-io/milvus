@@ -17,6 +17,8 @@ import (
 
 // create -> add field -> index -> load -> insert -> query/search
 func TestAddCollectionField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// Test cases for different defaultValue and filter
@@ -76,6 +78,8 @@ func TestAddCollectionField(t *testing.T) {
 
 // parameterized test for add field invalid cases
 func TestAddCollectionFieldInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -207,6 +211,8 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 
 // test add field when max field number exceeded
 func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -229,6 +235,8 @@ func TestCollectionAddFieldExceedMaxFieldNumber(t *testing.T) {
 
 // create Inverted index for added field and drop index
 func TestIndexAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -300,6 +308,8 @@ func TestIndexAddedField(t *testing.T) {
 }
 
 func TestInsertWithAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, autoID := range [2]bool{false, true} {
@@ -345,6 +355,8 @@ func TestInsertWithAddedField(t *testing.T) {
 }
 
 func TestUpsertDynamicAddField(t *testing.T) {
+	t.Parallel()
+
 	// enable dynamic field/add field and insert dynamic/added column
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -397,6 +409,8 @@ func TestUpsertDynamicAddField(t *testing.T) {
 
 // query with dynamic field same as added field
 func TestQueryWithDynamicAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -447,6 +461,8 @@ func TestQueryWithDynamicAddedField(t *testing.T) {
 
 // search with dynamic field same as added field
 func TestSearchWithDynamicAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -501,6 +517,8 @@ func TestSearchWithDynamicAddedField(t *testing.T) {
 
 // test delete with added field
 func TestDeleteWithAddedField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

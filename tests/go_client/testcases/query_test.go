@@ -19,6 +19,8 @@ import (
 
 // test query from default partition
 func TestQueryDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -52,6 +54,8 @@ func TestQueryDefault(t *testing.T) {
 
 // test query with varchar field filter
 func TestQueryVarcharPkDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -79,6 +83,8 @@ func TestQueryVarcharPkDefault(t *testing.T) {
 
 // test get with invalid ids
 func TestGetInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -112,6 +118,8 @@ func TestGetInvalid(t *testing.T) {
 
 // query from not existed collection name and partition name
 func TestQueryNotExistName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -132,6 +140,8 @@ func TestQueryNotExistName(t *testing.T) {
 
 // test query with invalid partition name
 func TestQueryInvalidPartitionName(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -147,6 +157,8 @@ func TestQueryInvalidPartitionName(t *testing.T) {
 
 // test query with empty partition name
 func TestQueryPartition(t *testing.T) {
+	t.Parallel()
+
 	parName := "p1"
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -197,6 +209,8 @@ func TestQueryPartition(t *testing.T) {
 
 // test query with invalid partition name
 func TestQueryWithoutExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -291,6 +305,8 @@ func TestQueryOutputFields(t *testing.T) {
 
 // test query output all fields and verify data
 func TestQueryOutputAllFieldsColumn(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -346,6 +362,8 @@ func TestQueryOutputAllFieldsColumn(t *testing.T) {
 
 // test query output all fields
 func TestQueryOutputAllFieldsRows(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("https://github.com/milvus-io/milvus/issues/33459")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -377,6 +395,8 @@ func TestQueryOutputAllFieldsRows(t *testing.T) {
 
 // test query output varchar and binaryVector fields
 func TestQueryOutputBinaryAndVarchar(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -448,6 +468,8 @@ func TestQueryOutputSparse(t *testing.T) {
 
 // test query different array rows has different element length
 func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -495,6 +517,8 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 // test query with expr and verify output dynamic field data
 func TestQueryJsonDynamicExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -527,6 +551,8 @@ func TestQueryJsonDynamicExpr(t *testing.T) {
 
 // test query with invalid expr
 func TestQueryInvalidExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -544,6 +570,8 @@ func TestQueryInvalidExpr(t *testing.T) {
 
 // Test query json and dynamic collection with string expr
 func TestQueryCountJsonDynamicExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -621,6 +649,8 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 }
 
 func TestQueryNestedJsonExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -665,6 +695,8 @@ func TestQueryNestedJsonExpr(t *testing.T) {
 }
 
 func TestQueryNumberJsonExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -785,6 +817,8 @@ func TestQueryNumberJsonExpr(t *testing.T) {
 }
 
 func TestQueryObjectJsonExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -923,6 +957,8 @@ func TestQueryObjectJsonExpr(t *testing.T) {
 }
 
 func TestQueryNullJsonExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1003,6 +1039,8 @@ func TestQueryNullJsonExpr(t *testing.T) {
 
 // test query with all kinds of array expr
 func TestQueryArrayFieldExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1046,6 +1084,8 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 
 // test query output invalid count(*) fields
 func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
+	t.Parallel()
+
 	type invalidCountStruct struct {
 		countField string
 		errMsg     string
@@ -1076,6 +1116,8 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 }
 
 func TestQueryWithTemplateParam(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1147,6 +1189,8 @@ func TestQueryWithTemplateParam(t *testing.T) {
 }
 
 func TestQueryWithTemplateParamInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1206,6 +1250,8 @@ func TestQueryWithTemplateParamInvalid(t *testing.T) {
 }
 
 func TestRunAnalyzer(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

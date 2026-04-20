@@ -17,6 +17,8 @@ import (
 )
 
 func TestUpdatePartialFields(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1. prepare create -> insert -> index -> load -> query
 		2. partial update existing entities -> data updated -> query and verify
@@ -65,6 +67,8 @@ func TestUpdatePartialFields(t *testing.T) {
 }
 
 func TestPartialUpdateDynamicField(t *testing.T) {
+	t.Parallel()
+
 	// enable dynamic field and perform partial update operations on dynamic columns
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -126,6 +130,8 @@ func TestPartialUpdateDynamicField(t *testing.T) {
 }
 
 func TestPartialUpdateDynamicSchemaStaticOnly(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test partial upsert with dynamic schema enabled but data contains ONLY static fields:
 		1. Create collection with enable_dynamic_field=true, schema has id + vector + name(nullable)
@@ -230,6 +236,8 @@ func TestPartialUpdateDynamicSchemaStaticOnly(t *testing.T) {
 }
 
 func TestPartialUpdateDynamicSchemaWithDynamicFields(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test partial upsert with dynamic schema enabled AND user-provided dynamic fields:
 		1. Create collection with enable_dynamic_field=true, schema has id + vector + name(nullable)
@@ -355,6 +363,8 @@ func TestPartialUpdateDynamicSchemaWithDynamicFields(t *testing.T) {
 }
 
 func TestUpdateNullableFieldBehavior(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test nullable field behavior for Update operation:
 		1. Insert data with nullable field having a value
@@ -435,6 +445,8 @@ func TestUpdateNullableFieldBehavior(t *testing.T) {
 }
 
 func TestUpdateDefaultValueFieldBehavior(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test default value field behavior for Update operation:
 		1. Insert data with a non-nullable default-value field having explicit values
@@ -511,6 +523,8 @@ func TestUpdateDefaultValueFieldBehavior(t *testing.T) {
 }
 
 func TestPartialUpdateEmptyStringDefaultValue(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test partial update on a non-nullable field with empty string as default value:
 		1. Create collection with non-nullable varchar field, defaultValue=""
@@ -609,6 +623,8 @@ func TestPartialUpdateEmptyStringDefaultValue(t *testing.T) {
 }
 
 func TestUpsertDefaultValueWithCompressedValidData(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test upsert with compressed ValidData for a field with defaultValue.
 		This covers the upsert path (task_upsert.go queryPreExecute) where
