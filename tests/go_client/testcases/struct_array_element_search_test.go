@@ -24,8 +24,6 @@
 package testcases
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -744,7 +742,3 @@ func TestStructArrayElementSearchNoFilter(t *testing.T) {
 		require.EqualValues(t, int64(0), first.(int64), "self-match top-1 should be row 0 even with group_by_pk")
 	})
 }
-
-// _ = strings is retained because some helper messages may use it later
-var _ = strings.Contains
-var _ = fmt.Sprintf

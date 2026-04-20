@@ -16,7 +16,7 @@
 
 // L0 ports of tests/python_client/milvus_client/test_milvus_client_struct_array_element_query.py.
 // Where Python uses class-level fixtures we collapse subtests into a single Go test function via
-// t.Run so the collection setup amortises across cases.
+// t.Run so the collection setup amortizes across cases.
 package testcases
 
 import (
