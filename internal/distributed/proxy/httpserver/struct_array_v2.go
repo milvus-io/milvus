@@ -473,13 +473,42 @@ func buildStructArrayFieldData(structSchema *schemapb.StructArrayFieldSchema, pe
 // Each struct element is a map keyed by sub-field name. Scalar sub-fields map to
 // their native scalar element; vector sub-fields map to the encoded per-element
 // vector (float slice / byte slice / base64 string depending on element type).
-func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int) ([]map[string]interface{}, error) {
+//
+// `schema` is the authoritative source for vector sub-field dimensions: the
+// proto wire format carries `dim` redundantly in both VectorField.Dim and
+// VectorArray.Dim, and we've seen paths (e.g. the query/search reconstruct
+// path) that leave them at zero. Reading dim from schema removes that ambiguity.
+func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int, schema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
 	subs := fd.GetStructArrays().GetFields()
 	if len(subs) == 0 {
 		return []map[string]interface{}{}, nil
 	}
+
+	// Build a lookup of sub-field short-name -> dim (for ArrayOfVector subs).
+	subDims := map[string]int64{}
+	for _, sf := range schema.GetStructArrayFields() {
+		if sf.GetName() != fd.GetFieldName() {
+			continue
+		}
+		for _, sub := range sf.GetFields() {
+			if sub.GetDataType() != schemapb.DataType_ArrayOfVector {
+				continue
+			}
+			dim, err := getDim(sub)
+			if err != nil {
+				return nil, fmt.Errorf("schema sub-field %s has no dim: %w", sub.GetName(), err)
+			}
+			short, _ := typeutil.ExtractStructFieldName(sub.GetName())
+			if short == "" {
+				short = sub.GetName()
+			}
+			subDims[short] = dim
+		}
+		break
+	}
+
 	// Determine element count for this row: all sub-fields share the same count.
-	elemCount, err := structSubElemCount(subs[0], rowIdx)
+	elemCount, err := structSubElemCount(subs[0], rowIdx, subDims)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +543,11 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int) ([]map[string]int
 			if rowIdx >= len(va.GetData()) {
 				return nil, fmt.Errorf("struct sub-field %s missing row %d", short, rowIdx)
 			}
-			values, err := vectorFieldToInterfaces(va.GetData()[rowIdx], va.GetElementType(), va.GetDim())
+			dim, ok := subDims[short]
+			if !ok || dim <= 0 {
+				return nil, fmt.Errorf("schema missing dim for struct sub-field %s", short)
+			}
+			values, err := vectorFieldToInterfaces(va.GetData()[rowIdx], va.GetElementType(), dim)
 			if err != nil {
 				return nil, err
 			}
@@ -532,7 +565,9 @@ func extractStructArrayRow(fd *schemapb.FieldData, rowIdx int) ([]map[string]int
 	return out, nil
 }
 
-func structSubElemCount(sub *schemapb.FieldData, rowIdx int) (int, error) {
+// structSubElemCount returns the number of struct elements in a single row of
+// the first sub-field, used as the canonical row length.
+func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]int64) (int, error) {
 	switch sub.GetType() {
 	case schemapb.DataType_Array:
 		rowData := sub.GetScalars().GetArrayData().GetData()
@@ -545,7 +580,15 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int) (int, error) {
 		if va == nil || rowIdx >= len(va.GetData()) {
 			return 0, fmt.Errorf("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
-		return vectorFieldElemCount(va.GetData()[rowIdx], va.GetElementType(), va.GetDim())
+		short, _ := typeutil.ExtractStructFieldName(sub.GetFieldName())
+		if short == "" {
+			short = sub.GetFieldName()
+		}
+		dim, ok := subDims[short]
+		if !ok || dim <= 0 {
+			return 0, fmt.Errorf("schema missing dim for struct sub-field %s", short)
+		}
+		return vectorFieldElemCount(va.GetData()[rowIdx], va.GetElementType(), dim)
 	default:
 		return 0, fmt.Errorf("unsupported struct sub-field type %s", sub.GetType())
 	}

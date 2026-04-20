@@ -207,14 +207,14 @@ func TestBuildStructArrayFieldData_RoundTrip(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_ArrayOfVector, subs[1].GetType())
 	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
 
-	// Round-trip: read back via extractStructArrayRow.
-	extracted0, err := extractStructArrayRow(fd, 0)
+	// Round-trip: read back via extractStructArrayRow (schema supplies dim).
+	extracted0, err := extractStructArrayRow(fd, 0, buildStructArrayTestSchema())
 	require.NoError(t, err)
 	require.Len(t, extracted0, 2)
 	assert.EqualValues(t, int32(1), extracted0[0]["sub_int"])
 	assert.EqualValues(t, []float32{0.1, 0.2, 0.3, 0.4}, extracted0[0]["sub_vec"])
 
-	extracted1, err := extractStructArrayRow(fd, 1)
+	extracted1, err := extractStructArrayRow(fd, 1, buildStructArrayTestSchema())
 	require.NoError(t, err)
 	require.Len(t, extracted1, 1)
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])

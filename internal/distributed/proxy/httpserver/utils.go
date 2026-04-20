@@ -1860,7 +1860,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
 					}
 				case schemapb.DataType_ArrayOfStruct:
-					structRow, err := extractStructArrayRow(fieldDataList[j], int(dataIdx))
+					structRow, err := extractStructArrayRow(fieldDataList[j], int(dataIdx), collectionSchema)
 					if err != nil {
 						return nil, err
 					}
