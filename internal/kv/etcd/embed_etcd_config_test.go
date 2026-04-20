@@ -34,6 +34,7 @@ func TestEtcdConfigLoad(te *testing.T) {
 	param := new(paramtable.ComponentParam)
 
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 
