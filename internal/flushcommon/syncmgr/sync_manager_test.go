@@ -168,7 +168,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 	syncMgr, ok := manager.(*syncManager)
 	s.Require().True(ok)
 
-	cap := syncMgr.keyLockDispatcher.workerPool.Cap()
+	cap := syncMgr.workerPool.Cap()
 	s.NotZero(cap)
 
 	params := paramtable.Get()
@@ -181,21 +181,21 @@ func (s *SyncManagerSuite) TestResizePool() {
 		HasUpdated: true,
 	})
 
-	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap, syncMgr.workerPool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      "-1",
 		HasUpdated: true,
 	})
-	s.Equal(cap, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap, syncMgr.workerPool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      strconv.FormatInt(int64(oldValue*2), 10),
 		HasUpdated: true,
 	})
-	s.Equal(cap*2, syncMgr.keyLockDispatcher.workerPool.Cap())
+	s.Equal(cap*2, syncMgr.workerPool.Cap())
 }
 
 func (s *SyncManagerSuite) TestUnexpectedError() {

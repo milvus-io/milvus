@@ -44,7 +44,7 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 		return err
 	}
 
-	if !s.meta.CollectionManager.Exist(ctx, req.GetCollectionID()) {
+	if !s.meta.Exist(ctx, req.GetCollectionID()) {
 		return errReleaseCollectionNotLoaded
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().

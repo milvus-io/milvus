@@ -72,7 +72,7 @@ type Node struct {
 func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 	for _, input := range n.inputs {
 		if _, ok := msg[input]; !ok {
-			return nil, fmt.Errorf("Node [%s]'s input %s not found", n.name, input)
+			return nil, fmt.Errorf("node [%s]'s input %s not found", n.name, input)
 		}
 	}
 	inputs := make([]any, len(n.inputs))
@@ -85,7 +85,7 @@ func (n *Node) unpackInputs(msg opMsg) ([]any, error) {
 func (n *Node) packOutputs(outputs []any, srcMsg opMsg) (opMsg, error) {
 	msg := srcMsg
 	if len(outputs) != len(n.outputs) {
-		return nil, fmt.Errorf("Node [%s] output size not match operator output size", n.name)
+		return nil, fmt.Errorf("node [%s] output size not match operator output size", n.name)
 	}
 	for i, output := range n.outputs {
 		msg[output] = outputs[i]
@@ -280,7 +280,7 @@ type rerankOperator struct {
 }
 
 func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		return &rerankOperator{
 			nq:              t.GetNq(),
 			topK:            t.rankParams.limit,
@@ -294,8 +294,8 @@ func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 		}, nil
 	}
 	return &rerankOperator{
-		nq:              t.SearchRequest.GetNq(),
-		topK:            t.SearchRequest.GetTopk(),
+		nq:              t.GetNq(),
+		topK:            t.GetTopk(),
 		offset:          0, // Search performs Offset in the reduce phase
 		roundDecimal:    t.queryInfos[0].RoundDecimal,
 		groupByFieldId:  t.queryInfos[0].GroupByFieldId,
@@ -352,7 +352,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		return nil, err
 	}
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		outputFieldNames.Insert(t.functionScore.GetAllInputFieldNames()...)
 	}
 	// Union order_by field names with output fields for requery
@@ -378,11 +378,11 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 		collectionName:     t.request.GetCollectionName(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
-		consistencyLevel:   t.SearchRequest.GetConsistencyLevel(),
-		guaranteeTimestamp: t.SearchRequest.GetGuaranteeTimestamp(),
+		consistencyLevel:   t.GetConsistencyLevel(),
+		guaranteeTimestamp: t.GetGuaranteeTimestamp(),
 		notReturnAllMeta:   t.request.GetNotReturnAllMeta(),
 		partitionNames:     t.request.GetPartitionNames(),
-		partitionIDs:       t.SearchRequest.GetPartitionIDs(),
+		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 		namespace:          t.request.Namespace,
 	}, nil
@@ -474,7 +474,7 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &organizeOperator{
 		traceCtx:           t.TraceCtx(),
 		primaryFieldSchema: pkField,
-		collectionID:       t.SearchRequest.GetCollectionID(),
+		collectionID:       t.GetCollectionID(),
 	}, nil
 }
 
@@ -1616,7 +1616,7 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 func (p *pipeline) String() string {
 	buf := bytes.NewBufferString(fmt.Sprintf("SearchPipeline: %s", p.name))
 	for _, node := range p.nodes {
-		buf.WriteString(fmt.Sprintf("  %s -> %s", node.name, node.outputs))
+		fmt.Fprintf(buf, "  %s -> %s", node.name, node.outputs)
 	}
 	return buf.String()
 }
@@ -2089,26 +2089,26 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 	hasOrderBy := len(t.orderByFields) > 0
 
 	// Common search with order_by: reduce → requery → order_by
-	if !t.SearchRequest.GetIsAdvanced() && hasOrderBy {
+	if !t.GetIsAdvanced() && hasOrderBy {
 		return newPipeline(searchWithOrderByPipe, t)
 	}
 
-	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
+	if !t.GetIsAdvanced() && !t.needRequery && t.functionScore == nil {
 		return newPipeline(searchPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && t.needRequery && t.functionScore == nil {
+	if !t.GetIsAdvanced() && t.needRequery && t.functionScore == nil {
 		return newPipeline(searchWithRequeryPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && !t.needRequery && t.functionScore != nil {
+	if !t.GetIsAdvanced() && !t.needRequery && t.functionScore != nil {
 		return newPipeline(searchWithRerankPipe, t)
 	}
-	if !t.SearchRequest.GetIsAdvanced() && t.needRequery && t.functionScore != nil {
+	if !t.GetIsAdvanced() && t.needRequery && t.functionScore != nil {
 		return newPipeline(searchWithRerankRequeryPipe, t)
 	}
-	if t.SearchRequest.GetIsAdvanced() && !t.needRequery {
+	if t.GetIsAdvanced() && !t.needRequery {
 		return newPipeline(hybridSearchPipe, t)
 	}
-	if t.SearchRequest.GetIsAdvanced() && t.needRequery {
+	if t.GetIsAdvanced() && t.needRequery {
 		if len(t.functionScore.GetAllInputFieldIDs()) > 0 {
 			// When the function score need field data, we need to requery to fetch the field data before rerank.
 			// The requery will fetch the field data of all search results,
@@ -2120,7 +2120,7 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}
-	return nil, fmt.Errorf("Unsupported pipeline")
+	return nil, merr.WrapErrServiceInternal("unsupported pipeline")
 }
 
 func newSearchPipeline(t *searchTask) (*pipeline, error) {

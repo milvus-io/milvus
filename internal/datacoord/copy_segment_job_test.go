@@ -115,7 +115,7 @@ func (s *CopySegmentJobSuite) TestCopySegmentJob_Clone() {
 
 	// Verify modifying clone doesn't affect original
 	clonedImpl := cloned.(*copySegmentJob)
-	clonedImpl.CopySegmentJob.Reason = "modified reason"
+	clonedImpl.Reason = "modified reason"
 	s.Equal("original reason", original.GetReason())
 	s.Equal("modified reason", cloned.GetReason())
 }

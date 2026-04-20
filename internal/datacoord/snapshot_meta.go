@@ -4,12 +4,12 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -411,7 +411,7 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 //   - first tick: runs immediately, loads RefIndexes from S3, narrows the blocks
 //   - subsequent ticks: periodically retry any RefIndex still in Failed state
 //
-// It runs until loaderCtx is cancelled.
+// It runs until loaderCtx is canceled.
 func (sm *snapshotMeta) refIndexLoaderLoop() {
 	defer sm.loaderWg.Done()
 
@@ -809,8 +809,12 @@ func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectio
 	}
 
 	if len(errs) > 0 {
+		combined := errs[0]
+		for _, e := range errs[1:] {
+			combined = errors.CombineErrors(combined, e)
+		}
 		return dropped, fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
-			len(errs), len(snapshotNames), collectionID, errors.Join(errs...))
+			len(errs), len(snapshotNames), collectionID, combined)
 	}
 
 	return dropped, nil

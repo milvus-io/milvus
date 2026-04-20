@@ -200,19 +200,19 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// skip dynamic fields, see describeCollectionTask.Execute
 	resp.Schema = &schemapb.CollectionSchema{
-		Name:        c.schema.CollectionSchema.Name,
-		Description: c.schema.CollectionSchema.Description,
-		AutoID:      c.schema.CollectionSchema.AutoID,
-		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
+		Name:        c.schema.Name,
+		Description: c.schema.Description,
+		AutoID:      c.schema.AutoID,
+		Fields: lo.Filter(c.schema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic && field.Name != common.NamespaceFieldName
 		}),
-		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),
-		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
-		Properties:         c.schema.CollectionSchema.Properties,
-		Functions:          c.schema.CollectionSchema.Functions,
-		DbName:             c.schema.CollectionSchema.DbName,
-		ExternalSource:     c.schema.CollectionSchema.ExternalSource,
-		ExternalSpec:       c.schema.CollectionSchema.ExternalSpec,
+		StructArrayFields:  cloneStructArrayFields(c.schema.StructArrayFields),
+		EnableDynamicField: c.schema.EnableDynamicField,
+		Properties:         c.schema.Properties,
+		Functions:          c.schema.Functions,
+		DbName:             c.schema.DbName,
+		ExternalSource:     c.schema.ExternalSource,
+		ExternalSpec:       c.schema.ExternalSpec,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format

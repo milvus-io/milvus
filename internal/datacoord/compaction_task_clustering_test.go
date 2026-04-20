@@ -74,7 +74,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockAlloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(x int64) (int64, int64, error) {
 		start := s.mockID.Load()
-		end := s.mockID.Add(int64(x))
+		end := s.mockID.Add(x)
 		return start, end, nil
 	}).Maybe()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).RunAndReturn(func(ctx context.Context) (int64, error) {

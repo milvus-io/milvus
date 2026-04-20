@@ -100,9 +100,9 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
 		},
 	}
 
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", cfg)
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", cfg)
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg3", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg1", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg2", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg3", cfg)
 
 	// Load with 3 replica on 1 rg
 	req := &querypb.LoadCollectionRequest{
@@ -306,9 +306,9 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadPartition() {
 			NodeNum: 1,
 		},
 	}
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", cfg)
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", cfg)
-	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg3", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg1", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg2", cfg)
+	suite.meta.AddResourceGroup(ctx, "rg3", cfg)
 
 	// test load 3 replica in 1 rg, should pass rg check
 	req := &querypb.LoadPartitionsRequest{
@@ -722,7 +722,7 @@ func (suite *ServiceSuite) releaseAll() {
 func (suite *ServiceSuite) assertCollectionReleased(collection int64) {
 	ctx := context.Background()
 	suite.False(suite.meta.Exist(ctx, collection))
-	suite.Equal(0, len(suite.meta.ReplicaManager.GetByCollection(ctx, collection)))
+	suite.Equal(0, len(suite.meta.GetByCollection(ctx, collection)))
 	for _, channel := range suite.channels[collection] {
 		suite.Nil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
 	}
@@ -863,7 +863,7 @@ func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
 	suite.jobScheduler.Add(syncJob)
 	err := syncJob.Wait()
 	suite.NoError(err)
-	partition := suite.meta.CollectionManager.GetPartition(ctx, newPartition)
+	partition := suite.meta.GetPartition(ctx, newPartition)
 	suite.NotNil(partition)
 	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
 
@@ -905,7 +905,7 @@ func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
 func (suite *ServiceSuite) assertCollectionLoaded(collection int64) {
 	ctx := context.Background()
 	suite.True(suite.meta.Exist(ctx, collection))
-	suite.NotEqual(0, len(suite.meta.ReplicaManager.GetByCollection(ctx, collection)))
+	suite.NotEqual(0, len(suite.meta.GetByCollection(ctx, collection)))
 	for _, channel := range suite.channels[collection] {
 		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
 	}

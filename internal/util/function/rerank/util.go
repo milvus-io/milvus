@@ -77,7 +77,7 @@ func organizeFieldIdData(multipSearchResultData []*schemapb.SearchResultData, in
 				}
 			}
 			if len(idField) != len(inputFieldIds) {
-				return nil, fmt.Errorf("Search reaults mismatch rerank inputs")
+				return nil, fmt.Errorf("search results mismatch rerank inputs")
 			}
 		}
 		multipIdField = append(multipIdField, idField)
@@ -426,7 +426,7 @@ func getField(inputField *schemapb.FieldData, start int64, size int64) (any, err
 		}
 		return []string{}, nil
 	default:
-		return nil, fmt.Errorf("Unsupported field type:%s", inputField.Type.String())
+		return nil, fmt.Errorf("unsupported field type:%s", inputField.Type.String())
 	}
 }
 
@@ -460,7 +460,7 @@ func getMergeFunc[T PKType](name string) (scoreMergeFunc[T], error) {
 	case "sum":
 		return sumMerge[T], nil
 	default:
-		return nil, fmt.Errorf("Unsupport score mode: [%s], only supports: [max, avg, sum]", name)
+		return nil, fmt.Errorf("unsupported score mode: [%s], only supports: [max, avg, sum]", name)
 	}
 }
 
@@ -542,7 +542,7 @@ func getPKType(collSchema *schemapb.CollectionSchema) (schemapb.DataType, error)
 	}
 
 	if pkType == schemapb.DataType_None {
-		return pkType, fmt.Errorf("Collection %s can not found pk field", collSchema.Name)
+		return pkType, fmt.Errorf("collection %s can not found pk field", collSchema.Name)
 	}
 	return pkType, nil
 }

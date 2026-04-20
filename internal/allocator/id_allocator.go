@@ -61,10 +61,10 @@ func NewIDAllocator(ctx context.Context, remoteAllocator remoteInterface, peerID
 		PeerID:          peerID,
 	}
 	a.TChan = &EmptyTicker{}
-	a.CachedAllocator.SyncFunc = a.syncID
-	a.CachedAllocator.ProcessFunc = a.processFunc
-	a.CachedAllocator.CheckSyncFunc = a.checkSyncFunc
-	a.CachedAllocator.PickCanDoFunc = a.pickCanDoFunc
+	a.SyncFunc = a.syncID
+	a.ProcessFunc = a.processFunc
+	a.CheckSyncFunc = a.checkSyncFunc
+	a.PickCanDoFunc = a.pickCanDoFunc
 	a.Init()
 	return a, nil
 }

@@ -69,7 +69,7 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 	}
 }
 
-var routeToMethod = map[string]string{
+var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a route-to-method mapping
 	"/v2/vectordb/collections/list":                 "ShowCollections",
 	"/v2/vectordb/collections/has":                  "HasCollection",
 	"/v2/vectordb/collections/describe":             "DescribeCollection",
@@ -701,11 +701,12 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return resp, err
 	}
-	if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotExist {
+	switch resp.(*milvuspb.GetLoadStateResponse).State {
+	case commonpb.LoadState_LoadStateNotExist:
 		err = merr.WrapErrCollectionNotFound(req.CollectionName)
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
-	} else if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotLoad {
+	case commonpb.LoadState_LoadStateNotLoad:
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPReturnLoadState: resp.(*milvuspb.GetLoadStateResponse).State.String(),
 		}})
@@ -1250,7 +1251,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, false)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1325,7 +1326,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

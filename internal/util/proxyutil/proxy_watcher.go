@@ -86,7 +86,7 @@ func (p *ProxyWatcher) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
-	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	childCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	sessions, rev, err := p.getSessionsOnEtcd(childCtx)

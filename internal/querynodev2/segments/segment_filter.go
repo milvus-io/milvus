@@ -296,15 +296,15 @@ func doSparseFilter(seg Segment, plan *planpb.PlanNode) bool {
 			}
 
 			// min/max filter
-			noFilter = !(existMinMax && (minPk.GT(pk) || maxPk.LT(pk)))
+			noFilter = !existMinMax || (!minPk.GT(pk) && !maxPk.LT(pk))
 		case planpb.OpType_GreaterThan:
-			noFilter = !(existMinMax && maxPk.LE(pk))
+			noFilter = !existMinMax || !maxPk.LE(pk)
 		case planpb.OpType_GreaterEqual:
-			noFilter = !(existMinMax && maxPk.LT(pk))
+			noFilter = !existMinMax || !maxPk.LT(pk)
 		case planpb.OpType_LessThan:
-			noFilter = !(existMinMax && minPk.GE(pk))
+			noFilter = !existMinMax || !minPk.GE(pk)
 		case planpb.OpType_LessEqual:
-			noFilter = !(existMinMax && minPk.GT(pk))
+			noFilter = !existMinMax || !minPk.GT(pk)
 		}
 
 		return noFilter

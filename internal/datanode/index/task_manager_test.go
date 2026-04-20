@@ -50,7 +50,8 @@ func (s *statsTaskInfoSuite) SetupSuite() {
 
 func (s *statsTaskInfoSuite) Test_Methods() {
 	s.Run("loadOrStoreStatsTask", func() {
-		_, cancel := context.WithCancel(s.manager.ctx)
+		_, cancel := context.WithCancel(s.manager.ctx) //nolint:gosec // cancel is deferred below
+		defer cancel()
 		info := &StatsTaskInfo{
 			Cancel: cancel,
 			State:  indexpb.JobState_JobStateInProgress,

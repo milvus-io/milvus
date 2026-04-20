@@ -48,7 +48,7 @@ func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *sche
 	}
 
 	if len(base.GetInputFieldNames()) != 0 {
-		return nil, fmt.Errorf("The weighted function does not support input parameters, but got %s", base.GetInputFieldNames())
+		return nil, fmt.Errorf("the weighted function does not support input parameters, but got %s", base.GetInputFieldNames())
 	}
 
 	var weights []float32
@@ -57,7 +57,7 @@ func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *sche
 		switch strings.ToLower(param.Key) {
 		case WeightsParamsKey:
 			if err := json.Unmarshal([]byte(param.Value), &weights); err != nil {
-				return nil, fmt.Errorf("Parse %s param failed, weight should be []float, bug got: %s", WeightsParamsKey, param.Value)
+				return nil, fmt.Errorf("parse %s param failed, weight should be []float, bug got: %s", WeightsParamsKey, param.Value)
 			}
 			for _, weight := range weights {
 				if weight < 0 || weight > 1 {

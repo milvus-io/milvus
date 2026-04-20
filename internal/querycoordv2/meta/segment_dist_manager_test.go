@@ -255,21 +255,22 @@ func TestGetSegmentDistJSON(t *testing.T) {
 	assert.Equal(t, 2, len(segments))
 
 	checkResults := func(s *metricsinfo.Segment) {
-		if s.SegmentID == 1 {
+		switch s.SegmentID {
+		case 1:
 			assert.Equal(t, int64(100), s.CollectionID)
 			assert.Equal(t, int64(10), s.PartitionID)
 			assert.Equal(t, "channel-1", s.Channel)
 			assert.Equal(t, int64(1000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(1), s.NodeID)
-		} else if s.SegmentID == 2 {
+		case 2:
 			assert.Equal(t, int64(200), s.CollectionID)
 			assert.Equal(t, int64(20), s.PartitionID)
 			assert.Equal(t, "channel-2", s.Channel)
 			assert.Equal(t, int64(2000), s.NumOfRows)
 			assert.Equal(t, "Flushed", s.State)
 			assert.Equal(t, int64(2), s.NodeID)
-		} else {
+		default:
 			assert.Failf(t, "unexpected segment id", "unexpected segment id %d", s.SegmentID)
 		}
 	}

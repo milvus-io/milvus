@@ -12,7 +12,7 @@ import (
 )
 
 func ShowYaml(filepath string) {
-	data, err := os.ReadFile(filepath)
+	data, err := os.ReadFile(filepath) //nolint:gosec // filepath is from CLI args, not untrusted input
 	if err != nil {
 		log.Warn("read config failed", zap.Error(err))
 		os.Exit(-3)

@@ -65,15 +65,15 @@ type UpdateJobAction func(job ImportJob)
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.State = state
+		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
 			// releases requested disk resource
-			job.(*importJob).ImportJob.RequestedDiskSize = 0
+			job.(*importJob).RequestedDiskSize = 0
 			// set cleanup ts
 			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 			cleanupTime := time.Now().Add(dur)
 			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
-			job.(*importJob).ImportJob.CleanupTs = cleanupTs
+			job.(*importJob).CleanupTs = cleanupTs
 			log.Info("set import job cleanup ts", zap.Int64("jobID", job.GetJobID()),
 				zap.Time("cleanupTime", cleanupTime), zap.Uint64("cleanupTs", cleanupTs))
 		}
@@ -82,19 +82,19 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 
 func UpdateJobReason(reason string) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.Reason = reason
+		job.(*importJob).Reason = reason
 	}
 }
 
 func UpdateRequestedDiskSize(requestSize int64) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.RequestedDiskSize = requestSize
+		job.(*importJob).RequestedDiskSize = requestSize
 	}
 }
 
 func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	return func(job ImportJob) {
-		job.(*importJob).ImportJob.CompleteTime = completeTime
+		job.(*importJob).CompleteTime = completeTime
 	}
 }
 

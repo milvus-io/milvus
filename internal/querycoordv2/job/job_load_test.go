@@ -326,7 +326,7 @@ func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_Idempotent() {
 	firstReplicaID := replicas1[0].ReplicaId
 
 	// Simulate replay: add the replica to meta so it appears as "current"
-	err = m.ReplicaManager.Put(context.Background(), meta.NewReplica(
+	err = m.Put(context.Background(), meta.NewReplica(
 		&querypb.Replica{
 			ID:            firstReplicaID,
 			CollectionID:  collectionID,
