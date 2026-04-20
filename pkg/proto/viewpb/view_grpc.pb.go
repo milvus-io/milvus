@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	ViewSyncService_SyncDataView_FullMethodName  = "/milvus.proto.view.ViewSyncService/SyncDataView"
 	ViewSyncService_SyncQueryView_FullMethodName = "/milvus.proto.view.ViewSyncService/SyncQueryView"
 )
 
@@ -26,6 +27,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ViewSyncServiceClient interface {
+	SyncDataView(ctx context.Context, in *SyncDataViewRequest, opts ...grpc.CallOption) (*SyncDataViewResponse, error)
 	SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (ViewSyncService_SyncQueryViewClient, error)
 }
 
@@ -35,6 +37,15 @@ type viewSyncServiceClient struct {
 
 func NewViewSyncServiceClient(cc grpc.ClientConnInterface) ViewSyncServiceClient {
 	return &viewSyncServiceClient{cc}
+}
+
+func (c *viewSyncServiceClient) SyncDataView(ctx context.Context, in *SyncDataViewRequest, opts ...grpc.CallOption) (*SyncDataViewResponse, error) {
+	out := new(SyncDataViewResponse)
+	err := c.cc.Invoke(ctx, ViewSyncService_SyncDataView_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *viewSyncServiceClient) SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (ViewSyncService_SyncQueryViewClient, error) {
@@ -72,6 +83,7 @@ func (x *viewSyncServiceSyncQueryViewClient) Recv() (*SyncResponse, error) {
 // All implementations should embed UnimplementedViewSyncServiceServer
 // for forward compatibility
 type ViewSyncServiceServer interface {
+	SyncDataView(context.Context, *SyncDataViewRequest) (*SyncDataViewResponse, error)
 	SyncQueryView(ViewSyncService_SyncQueryViewServer) error
 }
 
@@ -79,6 +91,9 @@ type ViewSyncServiceServer interface {
 type UnimplementedViewSyncServiceServer struct {
 }
 
+func (UnimplementedViewSyncServiceServer) SyncDataView(context.Context, *SyncDataViewRequest) (*SyncDataViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncDataView not implemented")
+}
 func (UnimplementedViewSyncServiceServer) SyncQueryView(ViewSyncService_SyncQueryViewServer) error {
 	return status.Errorf(codes.Unimplemented, "method SyncQueryView not implemented")
 }
@@ -92,6 +107,24 @@ type UnsafeViewSyncServiceServer interface {
 
 func RegisterViewSyncServiceServer(s grpc.ServiceRegistrar, srv ViewSyncServiceServer) {
 	s.RegisterService(&ViewSyncService_ServiceDesc, srv)
+}
+
+func _ViewSyncService_SyncDataView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncDataViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewSyncServiceServer).SyncDataView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewSyncService_SyncDataView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewSyncServiceServer).SyncDataView(ctx, req.(*SyncDataViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ViewSyncService_SyncQueryView_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -126,7 +159,12 @@ func (x *viewSyncServiceSyncQueryViewServer) Recv() (*SyncRequest, error) {
 var ViewSyncService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.view.ViewSyncService",
 	HandlerType: (*ViewSyncServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SyncDataView",
+			Handler:    _ViewSyncService_SyncDataView_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "SyncQueryView",
