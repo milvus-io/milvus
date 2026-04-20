@@ -32,7 +32,7 @@ type SegmentIndex struct {
 	FinishedUTCTime           uint64
 	CurrentScalarIndexVersion int32
 	IndexType                 string
-	IndexStorePathVersion     int32
+	IndexStorePathVersion     indexpb.IndexStorePathVersion
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {

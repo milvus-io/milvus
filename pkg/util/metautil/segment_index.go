@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 // IndexPathBuilder constructs object storage paths for index files.
@@ -13,7 +14,7 @@ import (
 // providing compile-time safety — callers cannot forget to pass the version.
 type IndexPathBuilder struct {
 	rootPath     string
-	pathVersion  int32
+	pathVersion  indexpb.IndexStorePathVersion
 	collID       int64
 	partID       int64
 	segID        int64
@@ -23,7 +24,7 @@ type IndexPathBuilder struct {
 
 // NewIndexPathBuilder creates a builder for constructing index file paths.
 // pathVersion: 0 = legacy, >= 1 = collection-partitioned.
-func NewIndexPathBuilder(rootPath string, pathVersion int32, collID, partID, segID, buildID, indexVersion int64) *IndexPathBuilder {
+func NewIndexPathBuilder(rootPath string, pathVersion indexpb.IndexStorePathVersion, collID, partID, segID, buildID, indexVersion int64) *IndexPathBuilder {
 	return &IndexPathBuilder{
 		rootPath:     rootPath,
 		pathVersion:  pathVersion,
@@ -53,7 +54,7 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
 // v1: {root}/index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
 func (b *IndexPathBuilder) BuildPrefix() string {
-	if b.pathVersion >= 1 {
+	if b.pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)
 		return path.Join(b.rootPath, common.SegmentIndexPath, k)
 	}
@@ -65,7 +66,7 @@ func (b *IndexPathBuilder) BuildPrefix() string {
 // v0: no collection prefix exists, returns index_files root.
 // v1: {root}/index_files/{collID}
 func (b *IndexPathBuilder) BuildCollectionPrefix() string {
-	if b.pathVersion >= 1 {
+	if b.pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
 		return path.Join(b.rootPath, common.SegmentIndexPath, strconv.FormatInt(b.collID, 10))
 	}
 	return path.Join(b.rootPath, common.SegmentIndexPath)
