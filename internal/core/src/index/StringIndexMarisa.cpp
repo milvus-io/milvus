@@ -24,6 +24,7 @@
 #include <cstring>
 #include <exception>
 #include <iosfwd>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -90,8 +91,8 @@ StringIndexMarisa::ComputeByteSize() {
     }
 
     // CSR index + offsets
-    total += csr_index_.capacity() * sizeof(uint64_t);
-    total += csr_offsets_.capacity() * sizeof(uint64_t);
+    total += csr_index_.capacity() * sizeof(uint32_t);
+    total += csr_offsets_.capacity() * sizeof(uint32_t);
 
     cached_byte_size_ = total;
 }
@@ -109,8 +110,8 @@ StringIndexMarisa::CalculateTotalSize() const {
     size += str_ids_.size() * sizeof(int64_t);
 
     // CSR index + offsets
-    size += csr_index_.size() * sizeof(uint64_t);
-    size += csr_offsets_.size() * sizeof(uint64_t);
+    size += csr_index_.size() * sizeof(uint32_t);
+    size += csr_offsets_.size() * sizeof(uint32_t);
 
     return size;
 }
@@ -679,6 +680,13 @@ void
 StringIndexMarisa::fill_offsets() {
     csr_num_keys_ = trie_.num_keys();
 
+    AssertInfo(str_ids_size_ <= std::numeric_limits<uint32_t>::max(),
+               "segment row count {} exceeds uint32_t capacity for CSR",
+               str_ids_size_);
+    AssertInfo(csr_num_keys_ < std::numeric_limits<uint32_t>::max(),
+               "trie key count {} exceeds uint32_t capacity for CSR",
+               csr_num_keys_);
+
     // Pass 1: count occurrences per key_id
     csr_index_.resize(csr_num_keys_ + 1, 0);
     for (size_t offset = 0; offset < str_ids_size_; offset++) {
@@ -696,7 +704,7 @@ StringIndexMarisa::fill_offsets() {
     // Pass 2: fill offsets
     csr_offsets_.resize(csr_index_[csr_num_keys_]);
     // Use a temporary copy of starts for scatter
-    std::vector<uint64_t> write_pos(csr_index_.begin(),
+    std::vector<uint32_t> write_pos(csr_index_.begin(),
                                     csr_index_.begin() + csr_num_keys_);
     for (size_t offset = 0; offset < str_ids_size_; offset++) {
         auto str_id = str_ids_ptr_[offset];
@@ -794,10 +802,10 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     // Persist CSR index + offsets
     writer->WriteEntry(MARISA_CSR_INDEX,
                        csr_index_.data(),
-                       csr_index_.size() * sizeof(uint64_t));
+                       csr_index_.size() * sizeof(uint32_t));
     writer->WriteEntry(MARISA_CSR_OFFSETS,
                        csr_offsets_.data(),
-                       csr_offsets_.size() * sizeof(uint64_t));
+                       csr_offsets_.size() * sizeof(uint32_t));
     writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
@@ -891,6 +899,14 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     if (reader.HasEntry(MARISA_CSR_INDEX)) {
         csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
 
+        // csr_offsets_ is indexed with values up to str_ids_size_; uint32_t
+        // slots require the segment to fit below 2^32 rows. Guard the load
+        // path too so files written by a future build with a larger cap can
+        // be rejected loudly instead of silently truncated.
+        AssertInfo(str_ids_size_ <= std::numeric_limits<uint32_t>::max(),
+                   "segment row count {} exceeds uint32_t capacity for CSR",
+                   str_ids_size_);
+
         if (config.contains(MMAP_FILE_PATH)) {
             // mmap path: stream csr_index + csr_offsets to disk, then mmap
             auto csr_path = file_name + ".csr";
@@ -925,13 +941,13 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             csr_mmap_data_ = static_cast<char*>(mapped);
             csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
 
-            csr_index_ptr_ = reinterpret_cast<const uint64_t*>(csr_mmap_data_);
+            csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
             csr_offsets_ptr_ =
-                reinterpret_cast<const uint64_t*>(csr_mmap_data_ + idx_bytes);
+                reinterpret_cast<const uint32_t*>(csr_mmap_data_ + idx_bytes);
         } else {
             // memory path: stream into vectors
             auto idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
-            csr_index_.resize(idx_bytes / sizeof(uint64_t));
+            csr_index_.resize(idx_bytes / sizeof(uint32_t));
             size_t wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
@@ -942,7 +958,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 });
 
             auto off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
-            csr_offsets_.resize(off_bytes / sizeof(uint64_t));
+            csr_offsets_.resize(off_bytes / sizeof(uint32_t));
             wo = 0;
             reader.ReadEntryStream(
                 MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
