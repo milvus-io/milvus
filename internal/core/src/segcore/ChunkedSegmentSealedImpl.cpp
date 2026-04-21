@@ -4737,6 +4737,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
              field_binlog_to_load.size(),
              id_);
 
+    // When the flag is on, the loader must keep the column resident alongside
+    // the index so bulk_subscript can serve retrieve from field data.
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
+
     std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
         LoadFieldDataInfo load_field_data_info;
@@ -4797,8 +4803,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         }
 
         auto group_id = field_binlog.fieldid();
-        // Skip if this field has an index with raw data
-        if (index_has_raw_data) {
+        // Normally we skip loading field data when the index already carries
+        // raw data, but prefer_field_data_when_index_has_raw_data opts into
+        // keeping both resident so retrieve can read the column directly.
+        if (index_has_raw_data && !prefer_field_data) {
             LOG_INFO(
                 "Skip loading fielddata for segment {} group {} because "
                 "index "
