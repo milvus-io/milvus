@@ -291,7 +291,7 @@ class ConcurrentVectorImpl : public VectorBase {
         ssize_t storage_offset = 0;
         if (use_mapping_storage_) {
             if constexpr (!std::is_same_v<Type, bool>) {
-                storage_offset = offset_mapping_.GetNextPhysicalOffset();
+                storage_offset = offset_mapping_.GetValidCount();
                 // Build valid_data array for offset mapping
                 std::unique_ptr<bool[]> valid_data(new bool[element_count]);
                 for (ssize_t i = 0; i < element_count; ++i) {
@@ -302,10 +302,10 @@ class ConcurrentVectorImpl : public VectorBase {
                         valid_count++;
                     }
                 }
-                offset_mapping_.BuildIncremental(valid_data.get(),
-                                                 element_count,
-                                                 element_offset,
-                                                 storage_offset);
+                offset_mapping_.Append(valid_data.get(),
+                                       element_count,
+                                       element_offset,
+                                       storage_offset);
             }
         } else {
             valid_count = element_count;

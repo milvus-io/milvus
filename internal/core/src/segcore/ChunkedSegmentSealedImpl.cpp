@@ -953,6 +953,15 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
             result.valid_data = std::make_unique<bool[]>(count);
             result.valid_offsets.reserve(count);
 
+            std::unordered_set<int64_t> touched_chunks;
+            for (int64_t i = 0; i < count; ++i) {
+                auto [chunk_id, _] = column->GetChunkIDByOffset(seg_offsets[i]);
+                touched_chunks.insert(static_cast<int64_t>(chunk_id));
+            }
+            for (int64_t c : touched_chunks) {
+                column->EnsureChunkOffsetMapping(c, op_ctx);
+            }
+
             const auto& offset_mapping = column->GetOffsetMapping();
             for (int64_t i = 0; i < count; ++i) {
                 bool is_valid = offset_mapping.IsValid(seg_offsets[i]);
@@ -2644,7 +2653,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (column->IsNullable() && IsVectorDataType(data_type)) {
-        column->BuildValidRowIds(nullptr);
+        column->BuildValidRowIds(op_ctx);
     }
 
     if (!enable_mmap) {
