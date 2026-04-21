@@ -18,10 +18,10 @@ package interceptor
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap/zapcore"
