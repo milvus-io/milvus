@@ -4,6 +4,7 @@ package milvus.proto.cgo;
 option go_package="github.com/milvus-io/milvus/pkg/v2/proto/cgopb";
 
 import "schema.proto";
+import "index_coord.proto";
 
 message LoadIndexInfo {
   int64 collectionID = 1;
@@ -23,6 +24,7 @@ message LoadIndexInfo {
   int64 index_file_size = 16;
   int64 num_rows = 17;
   int32 current_scalar_index_version = 18;
+  index.IndexStorePathVersion index_store_path_version = 19;
 }
 
 message IndexStats {
