@@ -1001,30 +1001,6 @@ common:
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
-    rbac:
-      overrideBuiltInPrivilegeGroups:
-        enabled: false # Whether to override build-in privilege groups
-      cluster:
-        readonly:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups # Cluster level readonly privileges
-        readwrite:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
-        admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup,UpdateReplicateConfiguration # Cluster level admin privileges
-      database:
-        readonly:
-          privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
-        readwrite:
-          privileges: ShowCollections,DescribeDatabase,AlterDatabase # Database level readwrite privileges
-        admin:
-          privileges: ShowCollections,DescribeDatabase,AlterDatabase,CreateCollection,DropCollection # Database level admin privileges
-      collection:
-        readonly:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport # Collection level readonly privileges
-        readwrite:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField # Collection level readwrite privileges
-        admin:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField,CreateAlias,DropAlias # Collection level admin privileges
     internaltlsEnabled: false
     tlsMode: 0
   session:
