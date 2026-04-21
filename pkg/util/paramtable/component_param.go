@@ -719,7 +719,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
 			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
 			`arrow's default (and the cap is ignored).`,
-		Export: true,
+		Export: false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
 
@@ -734,7 +734,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
 			`can service. 0 disables the cap. Has no effect when coefficient ` +
 			`is 0.`,
-		Export: true,
+		Export: false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
