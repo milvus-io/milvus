@@ -19,6 +19,7 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -111,6 +112,10 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
 
+		// Mock CheckAllReplicasServiceable to allow flow to reach later checks
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
 
@@ -162,6 +167,10 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
 
+		// Mock CheckAllReplicasServiceable to allow flow to reach later checks
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
 
@@ -175,37 +184,42 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.Contains(t, resp.Reason, "resource group mismatch")
 	})
 
-	t.Run("collection loading returns NotReady", func(t *testing.T) {
-		// Set cluster config
+	t.Run("delegator not serviceable returns NotReady", func(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
 
-		coord := &mixCoordImpl{
-			queryCoordServer: &querycoordv2.Server{},
-		}
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 
-		// Mock ShowLoadCollections with collection still loading (50%)
-		mocker := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
 			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionIDs:       []int64{100},
-			InMemoryPercentages: []int64{50}, // Only 50% loaded
+			InMemoryPercentages: []int64{100},
 		}, nil).Build()
-		defer mocker.UnPatch()
+		defer mocker1.UnPatch()
+
+		// Replica count matches (1 replica) — needed so the flow reaches the serviceable check
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+		}
+		mockerRep := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mockerRep.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).
+			Return(fmt.Errorf("replica 1 (rg=rg1) channel c1 not serviceable: still catching up")).Build()
+		defer mocker2.UnPatch()
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
-
 		coord.HandleReplicaLoadConfigCompliance(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp LoadConfigComplianceResponse
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		assert.NoError(t, err)
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
-		assert.Contains(t, resp.Reason, "not fully loaded")
-		assert.Contains(t, resp.Reason, "50%")
+		assert.Contains(t, resp.Reason, "not serviceable")
+		assert.Contains(t, resp.Reason, "catching up")
 	})
 
 	t.Run("correct setup returns Ready", func(t *testing.T) {
@@ -244,6 +258,14 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
 		defer mocker2.UnPatch()
 
+		// Mock CheckAllReplicasServiceable to skip the live dist check
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		// Mock GetLeakedResourcesByCollection to report no leaks
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mocker3.UnPatch()
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
 
@@ -255,6 +277,86 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, LoadConfigComplianceStateReady, resp.State)
 		assert.Empty(t, resp.Reason)
+	})
+
+	t.Run("leaked segments returns NotReady", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+		}
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker2.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		// Simulate 5 segments still held by nodes no longer in any replica
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(5, 0).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "not fully released")
+		assert.Contains(t, resp.Reason, "leaked segments=5")
+		assert.Contains(t, resp.Reason, "channels=0")
+	})
+
+	t.Run("leaked channels returns NotReady", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
+		}
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker1 := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker1.UnPatch()
+
+		mocker2 := mockey.Mock((*querycoordv2.Server).GetInternalReplicasByCollection).Return(replicas).Build()
+		defer mocker2.UnPatch()
+
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 2).Build()
+		defer mocker3.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "channels=2")
 	})
 
 	t.Run("internal error returns HTTP 500", func(t *testing.T) {
@@ -327,6 +429,14 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 			return replicasMap[collectionID]
 		}).Build()
 		defer mocker2.UnPatch()
+
+		// All replicas serviceable
+		mockerSvc := mockey.Mock((*querycoordv2.Server).CheckAllReplicasServiceable).Return(nil).Build()
+		defer mockerSvc.UnPatch()
+
+		// No leaked resources for either collection
+		mocker3 := mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollection).Return(0, 0).Build()
+		defer mocker3.UnPatch()
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
 		w := httptest.NewRecorder()
