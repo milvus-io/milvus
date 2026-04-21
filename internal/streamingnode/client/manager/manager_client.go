@@ -109,15 +109,13 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		grpc.WithChainUnaryInterceptor(
 			otelgrpc.UnaryClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionUnaryClientInterceptor(),
-			interceptor.NewMetricsClientUnaryInterceptor(),
-			interceptor.NewLogClientUnaryInterceptor(),
+			interceptor.NewObservabilityClientUnaryInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceUnaryClientInterceptor(),
 		),
 		grpc.WithChainStreamInterceptor(
 			otelgrpc.StreamClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionStreamClientInterceptor(),
-			interceptor.NewMetricsClientStreamInterceptor(),
-			interceptor.NewLogClientStreamInterceptor(),
+			interceptor.NewObservabilityClientStreamInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceStreamClientInterceptor(),
 		),
 		grpc.WithReturnConnectionError(),
