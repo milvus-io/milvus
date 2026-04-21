@@ -1314,3 +1314,36 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, **kwargs).run()
         return res, check_result
+
+    @trace()
+    def pin_snapshot_data(self, client, snapshot_name, collection_name, ttl_seconds=0,
+                          timeout=None, check_task=None, check_items=None, **kwargs):
+        """Pin snapshot data to prevent GC / compaction. Returns pin_id (int).
+
+        SDK signature: ``pin_snapshot_data(snapshot_name, collection_name,
+        db_name="", ttl_seconds=0, ...)``.
+        """
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.pin_snapshot_data, snapshot_name, collection_name],
+                                 ttl_seconds=ttl_seconds, **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       snapshot_name=snapshot_name,
+                                       collection_name=collection_name,
+                                       ttl_seconds=ttl_seconds, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def unpin_snapshot_data(self, client, pin_id, timeout=None,
+                            check_task=None, check_items=None, **kwargs):
+        """Release a pin previously created by ``pin_snapshot_data``."""
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.unpin_snapshot_data, pin_id], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       pin_id=pin_id, **kwargs).run()
+        return res, check_result
