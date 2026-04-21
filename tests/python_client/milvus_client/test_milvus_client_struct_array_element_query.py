@@ -3388,7 +3388,6 @@ class TestMilvusClientStructArrayElementMatchQuery(TestMilvusClientV2Base):
 # ==================== Test Case 9: StructArray Index Access (PR #48987) ====================
 
 
-@pytest.mark.xdist_group("TestMilvusClientStructArrayIndexAccess")
 class TestMilvusClientStructArrayIndexAccess(TestMilvusClientV2Base):
     """Test struct_arr[index][sub_field] index-access syntax (PR #48987).
 
