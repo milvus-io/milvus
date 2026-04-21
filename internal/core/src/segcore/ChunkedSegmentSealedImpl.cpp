@@ -2596,6 +2596,14 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
     std::unique_lock lck(mutex_);
 
+    // Guard against re-entry on a field whose temp text index was already
+    // built: the path `<mmap>/<segment_id>_<field_id>` is shared with the
+    // live holder in text_indexes_, and rebuilding there races with its
+    // destructor's RemoveDir (issue #49076).
+    AssertInfo(text_indexes_.find(field_id) == text_indexes_.end(),
+               "text index for field {} already exists, refusing to rebuild",
+               field_id.get());
+
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
@@ -2681,6 +2689,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
     text_indexes_[field_id] = std::make_shared<index::TextMatchIndexHolder>(
         std::move(index), cfg.GetScalarIndexEnableMmap());
+    // Record under mutex_ together with text_indexes_ write — concurrent
+    // readers of segment_load_info_ see a consistent view.
+    segment_load_info_.SetTextIndexCreated(field_id);
 }
 
 void
@@ -3767,6 +3778,11 @@ ChunkedSegmentSealedImpl::Reopen(
 
     std::unique_lock lck(mutex_);
     SegmentLoadInfo current(segment_load_info_);
+    // Carry runtime-only state forward so subsequent Reopens don't
+    // re-schedule CreateTextIndex on a field whose temp index was built.
+    for (auto fid : current.GetCreatedTextIndexes()) {
+        new_seg_load_info.SetTextIndexCreated(fid);
+    }
     segment_load_info_ = new_seg_load_info;
     use_take_for_output_ = segment_load_info_.GetUseTakeForOutput();
     lck.unlock();
@@ -3903,7 +3919,6 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     if (!diff.text_indexes_to_create.empty()) {
         for (const auto& field_id : diff.text_indexes_to_create) {
             CreateTextIndex(field_id, op_ctx);
-            segment_load_info.SetTextIndexCreated(field_id);
         }
     }
 
