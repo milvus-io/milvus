@@ -23,6 +23,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "Utils.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
@@ -79,6 +80,21 @@ class VectorIndex : public IndexBase {
 
     virtual const bool
     HasRawData() const override = 0;
+
+    virtual bool
+    IsIndexRefineEnabled() const = 0;
+
+    virtual knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                  const BitsetView& bitset,
+                  const int64_t* labels,
+                  size_t labels_len,
+                  bool is_cosine,
+                  milvus::OpContext* op_context = nullptr) const {
+        return knowhere::expected<knowhere::DataSetPtr>::Err(
+            knowhere::Status::not_implemented,
+            "CalcDistByIDs not supported for current index type");
+    }
 
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;

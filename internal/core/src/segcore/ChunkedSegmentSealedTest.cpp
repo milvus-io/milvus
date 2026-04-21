@@ -211,6 +211,91 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 }
 
+TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
+    int dim = 16;
+    int chunk_num = 2;
+    int chunk_size = 64;
+
+    DeferRelease defer;
+
+    int total_row_count = chunk_num * chunk_size;
+    int bitset_size = (total_row_count + 7) / 8;
+
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto field_meta = schema->operator[](fakevec_id);
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> num_rows_per_chunk;
+    for (int i = 0; i < chunk_num; i++) {
+        num_rows_per_chunk.push_back(chunk_size);
+        auto dataset = segcore::DataGen(schema, chunk_size);
+        auto data = dataset.get_col<float>(fakevec_id);
+        auto buf_size = static_cast<int>(sizeof(float) * data.size());
+
+        char* buf = new char[buf_size];
+        defer.AddDefer([buf]() { delete[] buf; });
+        memcpy(buf, data.data(), buf_size);
+
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(chunk_size,
+                                              dim,
+                                              buf,
+                                              buf_size,
+                                              sizeof(float),
+                                              false,
+                                              chunk_mmap_guard));
+    }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        num_rows_per_chunk, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
+
+    SearchInfo search_info;
+    search_info.search_params_ = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+    };
+    search_info.field_id_ = fakevec_id;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.topk_ = 5;
+    search_info.global_refine_enable_ = true;
+    search_info.search_topk_ratio_ = 3.0;
+    search_info.refine_topk_ratio_ = 2.0;
+
+    uint8_t* bitset_data = new uint8_t[bitset_size];
+    defer.AddDefer([bitset_data]() { delete[] bitset_data; });
+    std::fill(bitset_data, bitset_data + bitset_size, 0);
+    BitsetView bv(bitset_data, total_row_count);
+
+    auto query_ds = segcore::DataGen(schema, 1);
+    auto col_query_data = query_ds.get_col<float>(fakevec_id);
+    auto query_data = col_query_data.data();
+    auto index_info = std::map<std::string, std::string>{};
+    SearchResult search_result;
+    milvus::OpContext op_context;
+    query::SearchOnSealedColumn(*schema,
+                                column.get(),
+                                search_info,
+                                index_info,
+                                query_data,
+                                nullptr,
+                                1,
+                                total_row_count,
+                                bv,
+                                &op_context,
+                                search_result);
+
+    ASSERT_EQ(search_result.unity_topK_, search_info.topk_);
+    ASSERT_EQ(search_result.seg_offsets_.size(), search_info.topk_);
+    ASSERT_EQ(search_result.distances_.size(), search_info.topk_);
+}
+
 // Test search on nullable vector field with all null vectors
 // This test verifies that SearchOnSealedColumn returns empty results
 // instead of crashing when all vectors are null

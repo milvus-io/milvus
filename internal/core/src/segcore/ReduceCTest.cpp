@@ -96,6 +96,7 @@ TEST(CApiTest, ReduceSearchResultsAndFillDataCost) {
     auto st = ReduceSearchResultsAndFillData(trace,
                                              &c_search_result_data_blobs,
                                              plan,
+                                             placeholderGroup,
                                              &res,
                                              1,
                                              slice_nqs.data(),

@@ -14,9 +14,12 @@
 #include <google/protobuf/text_format.h>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <memory>
+
+#include "segcore/SegcoreConfig.h"
 #include <optional>
 #include <set>
 #include <string>
@@ -141,6 +144,31 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
                 static_cast<milvus::DataType>(query_info_proto.json_type());
         }
         search_info.strict_cast_ = query_info_proto.strict_cast();
+    }
+
+    // Read global refine config from proto (set by queryHook in Go side)
+    {
+        auto search_topk_ratio = query_info_proto.search_topk_ratio();
+        auto refine_topk_ratio = query_info_proto.refine_topk_ratio();
+        if (search_topk_ratio > 0 && search_topk_ratio < 1.0f) {
+            ThrowInfo(ConfigInvalid,
+                      "search_topk_ratio for global refine must be >= 1.0, but "
+                      "got {}",
+                      search_topk_ratio);
+        }
+        if (refine_topk_ratio > 0 && refine_topk_ratio < 1.0f) {
+            ThrowInfo(ConfigInvalid,
+                      "refine_topk_ratio for global refine must be >= 1.0, but "
+                      "got {}",
+                      refine_topk_ratio);
+        }
+        bool global_refine_enable =
+            search_topk_ratio > 0 && refine_topk_ratio > 0;
+        search_info.global_refine_enable_ = global_refine_enable;
+        if (global_refine_enable) {
+            search_info.search_topk_ratio_ = search_topk_ratio;
+            search_info.refine_topk_ratio_ = refine_topk_ratio;
+        }
     }
 
     if (query_info_proto.has_search_iterator_v2_info()) {

@@ -389,13 +389,27 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	const isSecondStageSearch = false
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch)
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
 
 	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+}
+
+// getVectorFieldDim returns the dimension of the vector field with the given field ID.
+// Returns 0 if the field is not found or dim cannot be determined.
+func (sd *shardDelegator) getVectorFieldDim(fieldID int64) int64 {
+	field := typeutil.GetFieldByID(sd.collection.Schema(), fieldID)
+	if field == nil {
+		return 0
+	}
+	dim, err := typeutil.GetDim(field)
+	if err != nil {
+		return 0
+	}
+	return dim
 }
 
 // Search preforms search operation on shard.
