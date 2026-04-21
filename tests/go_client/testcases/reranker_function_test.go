@@ -156,6 +156,8 @@ func TestRerankFunctionDecay(t *testing.T) {
 }
 
 func TestRerankFunctionModel(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*3)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -421,6 +423,8 @@ func TestRerankFunctionDecaySingleVector(t *testing.T) {
 }
 
 func TestRerankFunctionModelSingleVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*3)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

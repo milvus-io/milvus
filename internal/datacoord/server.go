@@ -331,7 +331,7 @@ func (s *Server) initDataCoord() error {
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
 
-	s.initExternalCollectionInspector()
+	s.initExternalCollectionInspector(storageCli)
 	log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
@@ -657,11 +657,11 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
-func (s *Server) initExternalCollectionInspector() {
+func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.handler.GetCollection)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
 	}
 }
 

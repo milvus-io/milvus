@@ -8,3 +8,14 @@ repos:
     rev: v1.16.10
     hooks:
       - id: typos
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.11
+    hooks:
+      - id: ruff-check
+        name: ruff-check (tests/)
+        args: [--config=tests/pyproject.toml, --fix]
+        files: ^tests/.*\.py$
+      - id: ruff-format
+        name: ruff-format (tests/)
+        args: [--config=tests/pyproject.toml]
+        files: ^tests/.*\.py$

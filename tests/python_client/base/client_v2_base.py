@@ -1143,33 +1143,108 @@ class TestMilvusClientV2Base(Base):
                                        **kwargs).run()
         return res, check_result
 
+    def wait_schema_version_consistent(self, client, collection_name, timeout=30, poll_interval=0.01):
+        """
+        Poll get_collection_stats until the schema version consistency gate would pass.
+
+        Background: After a previous schema-change DDL (AlterCollectionSchema or
+        AddCollectionField), DataCoord's backfill segment-version propagation runs on
+        a periodic tick. Until the tick fires, a back-to-back schema-change call is
+        rejected by the consistency gate at the Proxy / RootCoord with an error like
+        "schema version consistency check failed: N/M segments have caught up".
+        E2E tests that issue successive schema changes need to wait until the gate
+        would pass; this helper polls the same stats keys the gate reads.
+
+        Pass condition (mirrors checkSchemaVersionConsistency):
+          - both keys absent → schema version is 0, no backfill in progress → pass
+          - schema_version_consistent_segments == schema_version_total_segments → pass
+
+        Note: pymilvus MilvusClient.get_collection_stats returns a dict[str, str]
+        (with row_count converted to int), so we read the keys directly from the dict.
+
+        Args:
+            client: pymilvus MilvusClient
+            collection_name: target collection
+            timeout: max seconds to wait before giving up (default 30s)
+            poll_interval: sleep between polls in seconds (default 10ms)
+
+        Raises:
+            AssertionError on timeout, with the last observed counts for debugging.
+        """
+        consistent_key = "schema_version_consistent_segments"
+        total_key = "schema_version_total_segments"
+        deadline = time.time() + timeout
+        last_consistent, last_total = None, None
+        while time.time() < deadline:
+            stats, _ = self.get_collection_stats(client, collection_name)
+            if not stats:
+                time.sleep(poll_interval)
+                continue
+            consistent = stats.get(consistent_key)
+            total = stats.get(total_key)
+            # Both absent → schema v0 path, gate passes trivially.
+            if consistent is None and total is None:
+                return
+            # Both present and equal → backfill caught up.
+            if consistent is not None and total is not None and int(consistent) == int(total):
+                return
+            last_consistent, last_total = consistent, total
+            time.sleep(poll_interval)
+        raise AssertionError(
+            f"wait_schema_version_consistent timed out after {timeout}s for collection "
+            f"{collection_name}: consistent={last_consistent}, total={last_total}"
+        )
+
+    def add_collection_field_wait_schema_version_consistency(self, client, collection_name, field_name, data_type,
+                                                              desc="", timeout=None, check_task=None, check_items=None,
+                                                              wait_timeout=30, poll_interval=0.01, **kwargs):
+        """
+        Wrapper around add_collection_field that first waits for the schema-version
+        consistency gate to pass. Use this in E2E tests that issue successive
+        schema-change DDLs back-to-back, where the previous call's backfill
+        segment-version propagation tick may not have fired yet.
+
+        See wait_schema_version_consistent for the polling logic and pass conditions.
+        All add_collection_field arguments are forwarded unchanged.
+        """
+        self.wait_schema_version_consistent(client, collection_name,
+                                            timeout=wait_timeout, poll_interval=poll_interval)
+        return self.add_collection_field(client, collection_name, field_name, data_type, desc=desc,
+                                         timeout=timeout, check_task=check_task, check_items=check_items,
+                                         **kwargs)
+
     # ====================== Snapshot ======================
     @trace()
     def create_snapshot(self, client, collection_name, snapshot_name, description="",
                         timeout=None, check_task=None, check_items=None, **kwargs):
         """Create a snapshot for a collection.
 
-        Note: Parameter order follows SDK convention - collection_name first, then snapshot_name.
+        Note: wrapper keeps ``collection_name`` before ``snapshot_name`` for test
+        readability, but the SDK signature is ``create_snapshot(snapshot_name,
+        collection_name, ...)`` so we forward positionals in SDK order.
         """
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.create_snapshot, collection_name, snapshot_name, description], **kwargs)
+        res, check = api_request([client.create_snapshot, snapshot_name, collection_name],
+                                 description=description, **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        snapshot_name=snapshot_name, collection_name=collection_name,
                                        **kwargs).run()
         return res, check_result
 
     @trace()
-    def drop_snapshot(self, client, snapshot_name, timeout=None, check_task=None, check_items=None, **kwargs):
+    def drop_snapshot(self, client, snapshot_name, collection_name,
+                      timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.drop_snapshot, snapshot_name], **kwargs)
+        res, check = api_request([client.drop_snapshot, snapshot_name, collection_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       snapshot_name=snapshot_name, **kwargs).run()
+                                       snapshot_name=snapshot_name, collection_name=collection_name,
+                                       **kwargs).run()
         return res, check_result
 
     @trace()
@@ -1184,26 +1259,37 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def describe_snapshot(self, client, snapshot_name, timeout=None, check_task=None, check_items=None, **kwargs):
+    def describe_snapshot(self, client, snapshot_name, collection_name,
+                          timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.describe_snapshot, snapshot_name], **kwargs)
+        res, check = api_request([client.describe_snapshot, snapshot_name, collection_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       snapshot_name=snapshot_name, **kwargs).run()
+                                       snapshot_name=snapshot_name, collection_name=collection_name,
+                                       **kwargs).run()
         return res, check_result
 
     @trace()
-    def restore_snapshot(self, client, snapshot_name, collection_name,
+    def restore_snapshot(self, client, snapshot_name, target_collection_name,
+                         source_collection_name="",
                          timeout=None, check_task=None, check_items=None, **kwargs):
+        """Restore a snapshot into a new collection.
+
+        SDK positional order is ``(snapshot_name, source_collection_name,
+        target_collection_name)`` and ``source_collection_name`` is now required.
+        """
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.restore_snapshot, snapshot_name, collection_name], **kwargs)
+        res, check = api_request([client.restore_snapshot, snapshot_name,
+                                  source_collection_name, target_collection_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       snapshot_name=snapshot_name, collection_name=collection_name,
+                                       snapshot_name=snapshot_name,
+                                       target_collection_name=target_collection_name,
+                                       source_collection_name=source_collection_name,
                                        **kwargs).run()
         return res, check_result
 

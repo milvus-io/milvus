@@ -1151,6 +1151,7 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 						Child: childExpr.expr,
 					},
 				},
+				IsTemplate: childExpr.expr.GetIsTemplate(),
 			},
 			dataType: schemapb.DataType_Bool,
 		}

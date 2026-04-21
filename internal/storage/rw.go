@@ -160,6 +160,15 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 	}
 }
 
+// GetStorageConfig extracts the storage config from the given options.
+func GetStorageConfig(option ...RwOption) *indexpb.StorageConfig {
+	opts := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(opts)
+	}
+	return opts.storageConfig
+}
+
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
@@ -478,7 +487,7 @@ func NewDeltalogReader(
 	switch rwOptions.version {
 	case StorageV1:
 		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
-	case StorageV2:
+	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -503,30 +512,4 @@ func NewDeltalogReader(
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
-}
-
-// NewDeltalogReaderFromManifest creates a deltalog reader from segment manifest path.
-// It extracts delta log file paths from the manifest and reads them as V2 parquet files.
-func NewDeltalogReaderFromManifest(
-	pkType schemapb.DataType,
-	manifestPath string,
-	option ...RwOption,
-) (RecordReader, error) {
-	rwOptions := DefaultReaderOptions()
-	for _, opt := range option {
-		opt(rwOptions)
-	}
-	if err := rwOptions.validate(); err != nil {
-		return nil, err
-	}
-
-	paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, rwOptions.storageConfig)
-	if err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, io.EOF
-	}
-
-	return NewDeltalogReader(pkType, paths, WithVersion(StorageV2), WithStorageConfig(rwOptions.storageConfig))
 }

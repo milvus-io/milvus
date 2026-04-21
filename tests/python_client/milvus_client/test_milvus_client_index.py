@@ -409,8 +409,10 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         if add_field:
             self.add_collection_field(client, collection_name, field_name="field_int", data_type=DataType.INT32,
                                       nullable=True)
-            self.add_collection_field(client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
-                                      nullable=True, max_length=64)
+            # Wait for previous schema bump's backfill segment-version propagation tick.
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
+                nullable=True, max_length=64)
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, "vector")
         res = self.list_indexes(client, collection_name)[0]

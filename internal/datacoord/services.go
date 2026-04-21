@@ -302,7 +302,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -313,6 +312,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 			ChannelName:          req.GetVchannel(),
 			StorageVersion:       req.GetStorageVersion(),
 			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+			SchemaVersion:        req.GetSchemaVersion(),
 		},
 	)
 	if err != nil {
@@ -414,6 +414,66 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+
+	// Calculate schema version consistency proportion
+	// Only report when schema version > 0 (i.e., AlterCollectionSchema has been called)
+	collection := s.meta.GetCollection(req.CollectionID)
+	if collection != nil && collection.Schema != nil && collection.Schema.GetVersion() > 0 {
+		collectionSchemaVersion := collection.Schema.GetVersion()
+		// Growing segments are excluded from the consistency gate as a workaround until
+		// companion PR #48865 lands. Streaming-created growing segments currently carry
+		// SchemaVersion=0 because the propagation chain in segment_alloc_worker.go and
+		// msg_handler_impl.go does not yet pass SchemaVersion through. Including them
+		// would cause the gate to never reach 100% under any write traffic, permanently
+		// blocking subsequent schema-change DDLs.
+		//
+		// This is safe: growing segments will eventually be sealed/flushed, at which
+		// point the backfill policy picks them up and updates their SchemaVersion. The
+		// consistency gate only needs to prove that all data eligible for backfill has
+		// been backfilled — growing segments are not yet eligible.
+		//
+		// L0 segments are also excluded: they only contain delete logs, so there is no
+		// user data to backfill and no schema version consistency to track.
+		//
+		// TODO: remove the Growing exclusion once #48865 lands and streaming-created
+		// segments carry the correct SchemaVersion from creation.
+		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+			return isSegmentHealthy(si) &&
+				!si.GetIsImporting() &&
+				!si.GetIsInvisible() &&
+				si.GetLevel() != datapb.SegmentLevel_L0 &&
+				si.GetState() != commonpb.SegmentState_Growing
+		}))
+
+		// When there are no segments the collection is trivially consistent; emit nothing so the
+		// proxy treats the absent keys as "no backfill in progress" and allows the DDL through.
+		if len(segments) > 0 {
+			consistentCount := 0
+			for _, segment := range segments {
+				if segment.GetSchemaVersion() == collectionSchemaVersion {
+					consistentCount++
+				}
+			}
+			log.Info("calculated schema version consistency",
+				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				zap.Int("totalSegments", len(segments)),
+				zap.Int("consistentSegments", consistentCount))
+			// Emit raw integer counts instead of a floating-point proportion to avoid the rounding
+			// hazard where e.g. 99999/100000 = 99.999% formats as "100.00" with "%.2f" and would
+			// falsely satisfy a 100% gate check.  Proxy compares these as exact integers.
+			resp.Stats = append(resp.Stats,
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionConsistentSegmentsKey,
+					Value: strconv.Itoa(consistentCount),
+				},
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionTotalSegmentsKey,
+					Value: strconv.Itoa(len(segments)),
+				},
+			)
+		}
+	}
+
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }

@@ -514,15 +514,12 @@ func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeySt
 	return DeserializeStats(blobs)
 }
 
-// bm25StatsPerEntryBytes is the estimated memory cost per entry in the rowsWithToken map.
-// Go map overhead per entry: key(4) + value(4) + bucket/pointer overhead (~72B) ≈ 80 bytes.
-const bm25StatsPerEntryBytes = 80
-
 // MemSize estimates the in-memory size of this BM25Stats in bytes.
-// len(map) is O(1) in Go (reads hmap.count directly).
+// len(map) is O(1) in Go (reads hmap.count directly). Per-entry cost is configurable
+// via queryNode.idfOracle.bm25StatsBytesPerEntry.
 func (m *BM25Stats) MemSize() int64 {
 	// Fixed overhead: numRow(8) + numToken(8) + map header (~100B)
-	return 120 + int64(len(m.rowsWithToken))*bm25StatsPerEntryBytes
+	return 120 + int64(len(m.rowsWithToken))*paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
 }
 
 // DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.

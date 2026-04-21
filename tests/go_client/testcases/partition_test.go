@@ -16,6 +16,8 @@ import (
 )
 
 func TestPartitionsDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -61,6 +63,8 @@ func TestPartitionsDefault(t *testing.T) {
 }
 
 func TestCreatePartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -106,7 +110,8 @@ func TestCreatePartitionInvalid(t *testing.T) {
 }
 
 func TestPartitionsNumExceedsMax(t *testing.T) {
-	// 120 seconds may timeout for 1024 partitions
+	// 1023 sequential CreatePartition calls serialize on a per-collection lock in rootcoord;
+	// keep this test serial so it isn't starved by other parallel tests' DDL load.
 	ctx := hp.CreateContext(t, time.Second*300)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -131,6 +136,8 @@ func TestPartitionsNumExceedsMax(t *testing.T) {
 }
 
 func TestDropPartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -151,6 +158,8 @@ func TestDropPartitionInvalid(t *testing.T) {
 }
 
 func TestListHasPartitionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -164,6 +173,8 @@ func TestListHasPartitionInvalid(t *testing.T) {
 }
 
 func TestDropPartitionData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
