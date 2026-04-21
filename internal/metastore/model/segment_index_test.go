@@ -67,9 +67,9 @@ func TestSegmentIndex_MarshalUnmarshal_IndexStorePathVersion(t *testing.T) {
 		IndexType:             "HNSW",
 	}
 	pb := MarshalSegmentIndexModel(original)
-	assert.Equal(t, int32(1), pb.IndexStorePathVersion)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, pb.IndexStorePathVersion)
 	restored := UnmarshalSegmentIndexModel(pb)
-	assert.Equal(t, int32(1), restored.IndexStorePathVersion)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, restored.IndexStorePathVersion)
 }
 
 func TestSegmentIndex_MarshalUnmarshal_LegacyDefaultZero(t *testing.T) {
@@ -78,7 +78,7 @@ func TestSegmentIndex_MarshalUnmarshal_LegacyDefaultZero(t *testing.T) {
 		BuildID:      1000,
 	}
 	restored := UnmarshalSegmentIndexModel(pb)
-	assert.Equal(t, int32(0), restored.IndexStorePathVersion)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, restored.IndexStorePathVersion)
 }
 
 func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
@@ -88,7 +88,7 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 		IndexStorePathVersion: 1,
 	}
 	cloned := CloneSegmentIndex(original)
-	assert.Equal(t, int32(1), cloned.IndexStorePathVersion)
-	cloned.IndexStorePathVersion = 0
-	assert.Equal(t, int32(1), original.IndexStorePathVersion)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
+	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
 }
