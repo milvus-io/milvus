@@ -1,28 +1,32 @@
-import pytest
-import numpy as np
+import json
+import os
 import random
 import time
-import os
-import json
 from pathlib import Path
-from typing import List, Dict, Any
-from deepdiff import DeepDiff
+from typing import Any
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
+from check.param_check import compare_lists_with_epsilon_ignore_dict_order
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from check.param_check import compare_lists_with_epsilon_ignore_dict_order
-from utils.util_pymilvus import *
-from pymilvus import DataType, MilvusClient, AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus.client.embedding_list import EmbeddingList
-from pymilvus.bulk_writer import bulk_import, get_import_progress, LocalBulkWriter, BulkFileType
-import pyarrow as pa
-import pyarrow.parquet as pq
+from deepdiff import DeepDiff
 from minio import Minio
 from minio.error import S3Error
-
+from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, WeightedRanker
+from pymilvus.bulk_writer import (
+    BulkFileType,
+    LocalBulkWriter,
+    bulk_import,
+    get_import_progress,
+)
+from pymilvus.client.embedding_list import EmbeddingList
+from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "struct_array"
 epsilon = 0.001
@@ -64,17 +68,46 @@ EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
 
 # Supported vector types per emb list index type (for MaxSim metrics)
 EMB_LIST_VECTOR_TYPES = {
-    "HNSW": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-             DataType.INT8_VECTOR, DataType.BINARY_VECTOR],
-    "HNSW_SQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                DataType.INT8_VECTOR],
-    "HNSW_PQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                DataType.INT8_VECTOR],
-    "HNSW_PRQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                 DataType.INT8_VECTOR],
-    "IVF_FLAT": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
-    "IVF_FLAT_CC": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
-    "DISKANN": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
+    "HNSW": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.INT8_VECTOR,
+        DataType.BINARY_VECTOR,
+    ],
+    "HNSW_SQ": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.INT8_VECTOR,
+    ],
+    "HNSW_PQ": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.INT8_VECTOR,
+    ],
+    "HNSW_PRQ": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.INT8_VECTOR,
+    ],
+    "IVF_FLAT": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+    ],
+    "IVF_FLAT_CC": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+    ],
+    "DISKANN": [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+    ],
 }
 
 # Dim for emb list index tests (smaller for faster index building)
@@ -91,7 +124,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
     def generate_struct_array_data(
         self, num_rows: int, dim: int = default_dim, capacity: int = default_capacity
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate test data for struct array"""
         data = []
         for i in range(num_rows):
@@ -149,12 +182,10 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 field_name="normal_vector",
                 datatype=DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=mmap_enabled
+                mmap_enabled=mmap_enabled,
             )
         else:
-            schema.add_field(
-                field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-            )
+            schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with optional mmap for sub-fields
         struct_schema = client.create_struct_field_schema()
@@ -165,7 +196,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 "clip_embedding1",
                 DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=subfield1_mmap
+                mmap_enabled=subfield1_mmap,
             )
         else:
             struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=dim)
@@ -175,7 +206,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 "clip_embedding2",
                 DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=subfield2_mmap
+                mmap_enabled=subfield2_mmap,
             )
         else:
             struct_schema.add_field("clip_embedding2", DataType.FLOAT_VECTOR, dim=dim)
@@ -238,9 +269,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with only scalar fields
         struct_schema = client.create_struct_field_schema()
@@ -290,9 +319,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with the specific scalar field type
         struct_schema = client.create_struct_field_schema()
@@ -325,9 +352,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with all supported scalar field types
         struct_schema = client.create_struct_field_schema()
@@ -471,9 +496,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema with mixed field types
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with mixed types
         struct_schema = client.create_struct_field_schema()
@@ -511,9 +534,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create first struct schema
         struct_schema1 = client.create_struct_field_schema()
@@ -561,9 +582,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create first struct schema with common subfield names
         struct_schema1 = client.create_struct_field_schema()
@@ -573,9 +592,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create second struct schema with same subfield names but potentially different semantics
         struct_schema2 = client.create_struct_field_schema()
-        struct_schema2.add_field(
-            "embedding", DataType.FLOAT_VECTOR, dim=128
-        )  # Same name
+        struct_schema2.add_field("embedding", DataType.FLOAT_VECTOR, dim=128)  # Same name
         struct_schema2.add_field("label", DataType.VARCHAR, max_length=128)  # Same name
         struct_schema2.add_field("score", DataType.FLOAT)  # Same name
 
@@ -621,9 +638,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                     {
                         "embedding": [random.random() for _ in range(128)],
                         "label": f"text_label_{i}_{k}",
-                        "score": float(
-                            i * 100 + k + 0.2
-                        ),  # Deterministic score, different from image
+                        "score": float(i * 100 + k + 0.2),  # Deterministic score, different from image
                     }
                 )
 
@@ -703,12 +718,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 expected_score = original_data["image_features"][idx]["score"]
                 expected_label = original_data["image_features"][idx]["label"]
 
-                assert "score" in img_feat, (
-                    f"score missing in image_features for id {result_id}"
-                )
-                assert "label" in img_feat, (
-                    f"label missing in image_features for id {result_id}"
-                )
+                assert "score" in img_feat, f"score missing in image_features for id {result_id}"
+                assert "label" in img_feat, f"label missing in image_features for id {result_id}"
                 assert abs(img_feat["score"] - expected_score) < 0.0001, (
                     f"image_features[{idx}].score mismatch: expected {expected_score}, got {img_feat['score']}"
                 )
@@ -722,12 +733,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 expected_score = original_data["text_features"][idx]["score"]
                 expected_label = original_data["text_features"][idx]["label"]
 
-                assert "score" in txt_feat, (
-                    f"score missing in text_features for id {result_id}"
-                )
-                assert "label" in txt_feat, (
-                    f"label missing in text_features for id {result_id}"
-                )
+                assert "score" in txt_feat, f"score missing in text_features for id {result_id}"
+                assert "label" in txt_feat, f"label missing in text_features for id {result_id}"
                 assert abs(txt_feat["score"] - expected_score) < 0.0001, (
                     f"text_features[{idx}].score mismatch: expected {expected_score}, got {txt_feat['score']}"
                 )
@@ -759,9 +766,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             hit_id = hit_data["id"]
             original_data = data_map[hit_id]
 
-            assert "image_features" in hit_data, (
-                f"image_features missing for id {hit_id}"
-            )
+            assert "image_features" in hit_data, f"image_features missing for id {hit_id}"
 
             # Verify each element in image_features array
             for idx, img_feat in enumerate(hit_data["image_features"]):
@@ -998,13 +1003,18 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         assert check
         res, check = self.load_collection(client, collection_name)
         assert check
-        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id", "clips"], limit=10)
+        results, check = self.query(
+            client,
+            collection_name,
+            filter="id >= 0",
+            output_fields=["id", "clips"],
+            limit=10,
+        )
         assert check
         assert len(results) == 10
         for result in results:
             assert "clips" in result
             assert len(result["clips"]) == 0
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_struct_array_different_lengths(self):
@@ -1152,9 +1162,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with vector field
         struct_schema = client.create_struct_field_schema()
@@ -1280,9 +1288,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         # Create schema with multiple vector fields in struct
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with multiple vector fields
         struct_schema = client.create_struct_field_schema()
@@ -1487,9 +1493,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
@@ -1585,9 +1589,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
@@ -1676,7 +1678,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data and index
-        data = self.create_collection_with_index(client, collection_name)
+        self.create_collection_with_index(client, collection_name)
 
         # Create search vector
         search_vector = [random.random() for _ in range(default_dim)]
@@ -1860,19 +1862,13 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_metric_search_{metric_type.lower()}"
-        )
+        collection_name = cf.gen_unique_str(f"{prefix}_metric_search_{metric_type.lower()}")
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(
             "clips",
             datatype=DataType.ARRAY,
@@ -1887,9 +1883,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Insert data
         data = []
         for i in range(20):
-            struct_array = [
-                {"clip_embedding1": [random.random() for _ in range(default_dim)]}
-            ]
+            struct_array = [{"clip_embedding1": [random.random() for _ in range(default_dim)]}]
             row = {
                 "id": i,
                 "normal_vector": [random.random() for _ in range(default_dim)],
@@ -1983,15 +1977,20 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         self.create_collection_with_index(client, collection_name)
 
         # Search using EmbeddingList
-        error = {ct.err_code: 999,
-                 ct.err_msg: "array of vector is not supported for search by IDs"}
-        self.search(client,
-                    collection_name,
-                    ids=[0, 1],
-                    anns_field="clips[clip_embedding1]",
-                    search_params={"metric_type": "MAX_SIM_COSINE"},
-                    limit=10,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: "array of vector is not supported for search by IDs",
+        }
+        self.search(
+            client,
+            collection_name,
+            ids=[0, 1],
+            anns_field="clips[clip_embedding1]",
+            search_params={"metric_type": "MAX_SIM_COSINE"},
+            limit=10,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("retrieval_ann_ratio", [1.0, 3.0, 5.0, 10.0])
@@ -2021,7 +2020,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             anns_field="clips[clip_embedding1]",
             search_params={
                 "metric_type": "MAX_SIM_COSINE",
-                "params": {"retrieval_ann_ratio": retrieval_ann_ratio}
+                "params": {"retrieval_ann_ratio": retrieval_ann_ratio},
             },
             limit=10,
         )
@@ -2069,15 +2068,15 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         min_patches = 100  # Min patches per document
         max_patches = 300  # Max patches per document
 
-        log.info(f"Creating collection with {nb} docs, {num_query_vectors} query vectors, "
-                 f"{min_patches}-{max_patches} patches per doc")
+        log.info(
+            f"Creating collection with {nb} docs, {num_query_vectors} query vectors, "
+            f"{min_patches}-{max_patches} patches per doc"
+        )
 
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
@@ -2126,7 +2125,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 doc_embeddings[i] = np.array(embeddings_list)
 
             self.insert(client, collection_name, data)
-            log.info(f"Inserted batch {batch_start//batch_size + 1}/{(nb + batch_size - 1)//batch_size}")
+            log.info(f"Inserted batch {batch_start // batch_size + 1}/{(nb + batch_size - 1) // batch_size}")
 
         # Create indexes
         index_params = client.prepare_index_params()
@@ -2184,13 +2183,13 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         log.info(f"Ground truth top-{limit} with scores:")
         for i, (doc_id, score) in enumerate(ground_truth_scores[:limit]):
             num_patches = len(doc_embeddings[doc_id])
-            log.info(f"  GT rank {i+1}: id={doc_id}, score={score:.6f}, num_patches={num_patches}")
+            log.info(f"  GT rank {i + 1}: id={doc_id}, score={score:.6f}, num_patches={num_patches}")
 
         # Search with different retrieval_ann_ratio values
         retrieval_ann_ratios = [0.1, 1.0, 3.0, 5.0]
         recall_results = {}  # Track recall for each ratio
         for retrieval_ann_ratio in retrieval_ann_ratios:
-            log.info(f"\n{'='*50}")
+            log.info(f"\n{'=' * 50}")
             log.info(f"Testing retrieval_ann_ratio={retrieval_ann_ratio}")
 
             results, _ = self.search(
@@ -2200,7 +2199,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 anns_field="clips[clip_embedding1]",
                 search_params={
                     "metric_type": "MAX_SIM_COSINE",
-                    "params": {"retrieval_ann_ratio": retrieval_ann_ratio}
+                    "params": {"retrieval_ann_ratio": retrieval_ann_ratio},
                 },
                 limit=limit,
             )
@@ -2214,19 +2213,28 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             recall = recall_hits / len(ground_truth_ids)
             recall_results[retrieval_ann_ratio] = recall
 
-            log.info(f"retrieval_ann_ratio={retrieval_ann_ratio}, recall={recall:.4f}, "
-                     f"recall_hits={recall_hits}/{limit}")
+            log.info(
+                f"retrieval_ann_ratio={retrieval_ann_ratio}, recall={recall:.4f}, recall_hits={recall_hits}/{limit}"
+            )
             log.info(f"Milvus result IDs: {sorted(milvus_result_ids)}")
 
             # Log detailed comparison for Milvus results
-            log.info(f"Milvus results with ground truth comparison:")
+            log.info("Milvus results with ground truth comparison:")
             gt_ranks_for_milvus = []
             for i, hit in enumerate(results[0][:limit]):
-                gt_score = next((s for doc_id, s in ground_truth_scores if doc_id == hit["id"]), None)
-                gt_rank = next((idx+1 for idx, (doc_id, _) in enumerate(ground_truth_scores) if doc_id == hit["id"]), None)
+                gt_score = next(
+                    (s for doc_id, s in ground_truth_scores if doc_id == hit["id"]),
+                    None,
+                )
+                gt_rank = next(
+                    (idx + 1 for idx, (doc_id, _) in enumerate(ground_truth_scores) if doc_id == hit["id"]),
+                    None,
+                )
                 gt_ranks_for_milvus.append(gt_rank)
-                log.info(f"  Milvus rank {i+1}: id={hit['id']}, distance={hit['distance']:.6f}, "
-                         f"gt_score={gt_score:.6f}, gt_rank={gt_rank}")
+                log.info(
+                    f"  Milvus rank {i + 1}: id={hit['id']}, distance={hit['distance']:.6f}, "
+                    f"gt_score={gt_score:.6f}, gt_rank={gt_rank}"
+                )
 
             # Calculate recall at different K values
             for k in [1, 5, 10]:
@@ -2247,17 +2255,18 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         for i in range(len(retrieval_ann_ratios) - 1):
             ratio_curr = retrieval_ann_ratios[i]
             ratio_next = retrieval_ann_ratios[i + 1]
-            assert recall_results[ratio_next] >= recall_results[ratio_curr], \
-                f"Recall should increase with higher retrieval_ann_ratio: " \
-                f"ratio {ratio_curr} has recall {recall_results[ratio_curr]}, " \
+            assert recall_results[ratio_next] >= recall_results[ratio_curr], (
+                f"Recall should increase with higher retrieval_ann_ratio: "
+                f"ratio {ratio_curr} has recall {recall_results[ratio_curr]}, "
                 f"but ratio {ratio_next} has recall {recall_results[ratio_next]}"
+            )
 
         # Verify that recall >= 0.8 when retrieval_ann_ratio >= 3
         for ratio, recall in recall_results.items():
             if ratio >= 3:
-                assert recall >= 0.8, \
-                    f"Recall should be >= 0.8 when retrieval_ann_ratio >= 3, " \
-                    f"but ratio {ratio} has recall {recall}"
+                assert recall >= 0.8, (
+                    f"Recall should be >= 0.8 when retrieval_ann_ratio >= 3, but ratio {ratio} has recall {recall}"
+                )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
@@ -2267,9 +2276,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         method: insert (flushed + growing) → index → load → search → upsert → delete → search → verify
         expected: all CRUD operations and search work correctly for each index type
         """
-        collection_name = cf.gen_unique_str(
-            f"{prefix}_search_{index_type.lower()}"
-        )
+        collection_name = cf.gen_unique_str(f"{prefix}_search_{index_type.lower()}")
         client = self._client()
 
         config = EMB_LIST_INDEX_CONFIGS[index_type]
@@ -2277,9 +2284,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create collection with full schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
@@ -2430,7 +2435,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
+            client,
+            collection_name,
+            filter="id < 10",
             output_fields=["id", "category", "clips"],
         )
         assert check
@@ -2448,9 +2455,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         res, check = self.flush(client, collection_name)
         assert check
 
-        results, check = self.query(
-            client, collection_name, filter="id >= 0", output_fields=["id"]
-        )
+        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id"])
         assert check
         remaining_ids = {r["id"] for r in results}
         for del_id in delete_ids:
@@ -2478,8 +2483,12 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "vector_type",
-        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR,
-         DataType.BINARY_VECTOR],
+        [
+            DataType.FLOAT16_VECTOR,
+            DataType.BFLOAT16_VECTOR,
+            DataType.INT8_VECTOR,
+            DataType.BINARY_VECTOR,
+        ],
     )
     def test_search_emb_list_with_different_vector_types(self, vector_type):
         """
@@ -2500,9 +2509,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         # Create schema with specified vector type
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_embedding1", vector_type, dim=EMB_LIST_DIM)
@@ -2614,9 +2621,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 [np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in search_vecs]
             )
         else:
-            embedding_list = EmbeddingList(
-                [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
-            )
+            embedding_list = EmbeddingList([np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs])
 
         results, check = self.search(
             client,
@@ -2659,7 +2664,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert check
 
         results, check = self.query(
-            client, collection_name, filter="id < 10",
+            client,
+            collection_name,
+            filter="id < 10",
             output_fields=["id", "category", "clips"],
         )
         assert check
@@ -2672,18 +2679,14 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         delete_flushed_ids = [10, 11, 12, 13, 14]
         delete_growing_ids = list(range(nb_flushed, nb_flushed + 3))
         all_delete_ids = delete_flushed_ids + delete_growing_ids
-        res, check = self.delete(
-            client, collection_name, filter=f"id in {all_delete_ids}"
-        )
+        res, check = self.delete(client, collection_name, filter=f"id in {all_delete_ids}")
         assert check
 
         # Verify deletion
         res, check = self.flush(client, collection_name)
         assert check
 
-        results, check = self.query(
-            client, collection_name, filter="id >= 0", output_fields=["id"]
-        )
+        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id"])
         assert check
         remaining_ids = {r["id"] for r in results}
         for del_id in all_delete_ids:
@@ -2721,20 +2724,14 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Create schema with both normal vector and struct array
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
-        )
+        schema.add_field(field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100)
         schema.add_field(field_name="random", datatype=DataType.DOUBLE)
-        schema.add_field(
-            field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema with vector field
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_str", DataType.VARCHAR, max_length=65535)
-        struct_schema.add_field(
-            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim)
 
         schema.add_field(
             "clips",
@@ -2759,9 +2756,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         # Insert data
@@ -2848,18 +2843,12 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
-        )
+        schema.add_field(field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100)
         schema.add_field(field_name="random", datatype=DataType.DOUBLE)
-        schema.add_field(
-            field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(
             "clips",
             datatype=DataType.ARRAY,
@@ -2883,9 +2872,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         # Insert data
@@ -2952,9 +2939,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
-        log.info(
-            f"Hybrid search with WeightedRanker returned {len(hybrid_res[0])} results"
-        )
+        log.info(f"Hybrid search with WeightedRanker returned {len(hybrid_res[0])} results")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_multiple_struct_array_vectors(self):
@@ -2968,18 +2953,12 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Create schema with both struct array vector and normal vector
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
-        )
+        schema.add_field(field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100)
         schema.add_field(field_name="random", datatype=DataType.DOUBLE)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(
             "clips",
             datatype=DataType.ARRAY,
@@ -3003,9 +2982,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         # Insert data
@@ -3071,14 +3048,10 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
-        log.info(
-            f"Hybrid search with multiple vector sources returned {len(hybrid_res[0])} results"
-        )
+        log.info(f"Hybrid search with multiple vector sources returned {len(hybrid_res[0])} results")
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize(
-        "metric_type", ["MAX_SIM_L2", "MAX_SIM_IP", "MAX_SIM_COSINE"]
-    )
+    @pytest.mark.parametrize("metric_type", ["MAX_SIM_L2", "MAX_SIM_IP", "MAX_SIM_COSINE"])
     def test_hybrid_search_struct_array_different_metrics(self, metric_type):
         """
         target: test hybrid search with different metric types for struct array
@@ -3090,17 +3063,11 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
-        )
-        schema.add_field(
-            field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100)
+        schema.add_field(field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(
             "clips",
             datatype=DataType.ARRAY,
@@ -3124,9 +3091,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         # Insert data
@@ -3179,9 +3144,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         )
 
         # Perform hybrid search
-        hybrid_res = client.hybrid_search(
-            collection_name, req_list, RRFRanker(), default_limit
-        )
+        hybrid_res = client.hybrid_search(collection_name, req_list, RRFRanker(), default_limit)
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
@@ -3190,22 +3153,16 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
     """Test case of struct array query functionality"""
 
-    def create_collection_with_data(
-        self, client: MilvusClient, collection_name: str, nb: int = 50
-    ):
+    def create_collection_with_data(self, client: MilvusClient, collection_name: str, nb: int = 50):
         """Create collection with struct array and insert data"""
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=True)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Create struct schema
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema.add_field("scalar_field", DataType.INT64)
         struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
         struct_schema.add_field("score", DataType.FLOAT)
@@ -3293,7 +3250,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data
-        data = self.create_collection_with_data(client, collection_name)
+        self.create_collection_with_data(client, collection_name)
 
         # Query all data
         results, check = self.query(client, collection_name, filter="id >= 0", limit=10)
@@ -3366,9 +3323,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             for result in results:
                 struct_array = result["clips"]
                 # At least one element in the struct array should satisfy the filter
-                has_matching_element = any(
-                    elem["scalar_field"] < 50 for elem in struct_array
-                )
+                has_matching_element = any(elem["scalar_field"] < 50 for elem in struct_array)
                 assert has_matching_element
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3414,12 +3369,10 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data
-        data = self.create_collection_with_data(client, collection_name, nb=20)
+        self.create_collection_with_data(client, collection_name, nb=20)
 
         # Count all records
-        count_result = client.query(
-            collection_name=collection_name, filter="", output_fields=["count(*)"]
-        )
+        count_result = client.query(collection_name=collection_name, filter="", output_fields=["count(*)"])
         assert len(count_result) == 1
         assert count_result[0]["count(*)"] == 20
 
@@ -3475,13 +3428,14 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
         schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim, nullable=True
+            field_name="normal_vector",
+            datatype=DataType.FLOAT_VECTOR,
+            dim=default_dim,
+            nullable=True,
         )
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema.add_field("scalar_field", DataType.INT64)
         struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
 
@@ -3957,16 +3911,13 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 )
             else:
                 struct_schema.add_field("unsupported_field", unsupported_type)
-            assert False, (
-                f"Expected ParamError when adding {unsupported_type} field to struct schema"
-            )
+            assert False, f"Expected ParamError when adding {unsupported_type} field to struct schema"
         except Exception as e:
             # Verify the error message indicates the type is not supported
             error_msg = str(e)
             # Different error messages for different types
             assert (
-                "Struct field schema does not support Array, ArrayOfVector or Struct"
-                in error_msg
+                "Struct field schema does not support Array, ArrayOfVector or Struct" in error_msg
                 or "is not supported" in error_msg
                 or "not supported for fields in struct" in error_msg
             )
@@ -3985,9 +3936,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("sparse_vector_field", DataType.SPARSE_FLOAT_VECTOR)
@@ -4010,7 +3959,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             check_items=error,
         )
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_with_json_field(self):
         """
@@ -4025,9 +3973,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("json_field", DataType.JSON)
@@ -4064,9 +4010,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("geometry_field", DataType.GEOMETRY)
@@ -4103,9 +4047,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create collection with small capacity
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("scalar_field", DataType.INT64)
@@ -4157,18 +4099,12 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=0
-        )  # Invalid
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=0)  # Invalid
 
-        struct_schema.add_field(
-            "clip_embedding2", DataType.FLOAT_VECTOR, dim=-1
-        )  # Invalid
+        struct_schema.add_field("clip_embedding2", DataType.FLOAT_VECTOR, dim=-1)  # Invalid
         schema.add_field(
             "struct_array",
             datatype=DataType.ARRAY,
@@ -4200,9 +4136,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create collection
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("field1", DataType.INT64)
@@ -4277,9 +4211,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create schema
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         # Try to create struct with unsupported vector type (sparse vector)
         struct_schema = client.create_struct_field_schema()
@@ -4294,7 +4226,10 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
         # Should fail - sparse vectors are not supported in struct array
-        error = {ct.err_code: 65535, ct.err_msg: "only fixed dimension vector types are supported"}
+        error = {
+            ct.err_code: 65535,
+            ct.err_msg: "only fixed dimension vector types are supported",
+        }
         self.create_collection(
             client,
             collection_name,
@@ -4311,15 +4246,16 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim,
-                                nullable=("clip_embedding1" == nullable_field))
-        struct_schema.add_field("scalar_field", DataType.INT64,
-                                nullable=("scalar_field" == nullable_field))
+        struct_schema.add_field(
+            "clip_embedding1",
+            DataType.FLOAT_VECTOR,
+            dim=default_dim,
+            nullable=("clip_embedding1" == nullable_field),
+        )
+        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
         struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
@@ -4329,10 +4265,17 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             struct_schema=struct_schema,
             max_capacity=100,
         )
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"nullable is not supported for fields in struct array now, fieldName = {nullable_field}"}
-        self.create_collection(client, collection_name, schema=schema,
-                               check_task=CheckTasks.err_res, check_items=error)
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"nullable is not supported for fields in struct array now, fieldName = {nullable_field}",
+        }
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):
@@ -4348,13 +4291,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Create collection with data and index using COSINE metric
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field(
-            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
-        )
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(
             "clips",
             datatype=DataType.ARRAY,
@@ -4375,18 +4314,14 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             metric_type="MAX_SIM_COSINE",
             params=INDEX_PARAMS,
         )
-        res, check = self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
         nb = 3000
         data = []
         for i in range(nb):
             struct_array = []
             for j in range(random.randint(1, 10)):
-                struct_array.append(
-                    {"clip_embedding1": [random.random() for _ in range(default_dim)]}
-                )
+                struct_array.append({"clip_embedding1": [random.random() for _ in range(default_dim)]})
             tmp_data = {
                 "id": i,
                 "normal_vector": [random.random() for _ in range(default_dim)],
@@ -4414,11 +4349,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         assert len(initial_results[0]) > 0
 
         # Get distances and sort them
-        distances = [
-            hit.get("distance")
-            for hit in initial_results[0]
-            if hit.get("distance") is not None
-        ]
+        distances = [hit.get("distance") for hit in initial_results[0] if hit.get("distance") is not None]
         distances.sort()
 
         # Select range from sorted distances (e.g., from 20th percentile to 80th percentile)
@@ -4468,10 +4399,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         self.minio_endpoint = f"{minio_host}:9000"
 
     def gen_file_with_local_bulk_writer(
-        self,
-        schema,
-        data: List[Dict[str, Any]],
-        file_type: str = "PARQUET"
+        self, schema, data: list[dict[str, Any]], file_type: str = "PARQUET"
     ) -> tuple[str, dict]:
         """
         Generate import file using LocalBulkWriter from insert-format data
@@ -4492,7 +4420,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             schema=schema,
             local_path=self.LOCAL_FILES_PATH,
             segment_size=512 * 1024 * 1024,  # 512MB
-            file_type=bulk_file_type
+            file_type=bulk_file_type,
         )
 
         log.info(f"Creating {file_type} file using LocalBulkWriter with {len(data)} rows")
@@ -4516,10 +4444,10 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         return batch_files, {
             "id": id_arr,
             "float_vector": float_vector_arr,
-            "struct_array": struct_arr
+            "struct_array": struct_arr,
         }
 
-    def upload_to_minio(self, local_file_path: str) -> List[List[str]]:
+    def upload_to_minio(self, local_file_path: str) -> list[list[str]]:
         """
         Upload parquet file to MinIO
 
@@ -4537,7 +4465,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                 endpoint=self.minio_endpoint,
                 access_key=self.MINIO_ACCESS_KEY,
                 secret_key=self.MINIO_SECRET_KEY,
-                secure=False
+                secure=False,
             )
 
             # Check if bucket exists
@@ -4555,7 +4483,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         except S3Error as e:
             raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
 
-    def call_bulkinsert(self, collection_name: str, batch_files: List[List[str]]):
+    def call_bulkinsert(self, collection_name: str, batch_files: list[list[str]]):
         """
         Call bulk import API and wait for completion
 
@@ -4572,7 +4500,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             files=batch_files,
         )
 
-        job_id = resp.json()['data']['jobId']
+        job_id = resp.json()["data"]["jobId"]
         log.info(f"Bulk import job created, job_id: {job_id}")
 
         # Wait for import to complete
@@ -4582,15 +4510,15 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             time.sleep(5)
 
             resp = get_import_progress(url=url, job_id=job_id)
-            state = resp.json()['data']['state']
-            progress = resp.json()['data']['progress']
+            state = resp.json()["data"]["state"]
+            progress = resp.json()["data"]["progress"]
 
             log.info(f"Import job {job_id} - state: {state}, progress: {progress}%")
 
             if state == "Importing":
                 continue
             elif state == "Failed":
-                reason = resp.json()['data']['reason']
+                reason = resp.json()["data"]["reason"]
                 raise Exception(f"Bulk import job {job_id} failed: {reason}")
             elif state == "Completed" and progress == 100:
                 log.info(f"Bulk import job {job_id} completed successfully")
@@ -4619,7 +4547,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             collection_name=collection_name,
             filter=f"id >= {min(original_data['id'])}",
             output_fields=["*"],
-            limit=num_rows + 100  # Add buffer to ensure all data is retrieved
+            limit=num_rows + 100,  # Add buffer to ensure all data is retrieved
         )
 
         log.info(f"Query returned {len(results)} rows")
@@ -4632,11 +4560,13 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         original_rows = []
         for i in range(num_rows):
             row_id = int(original_data["id"][i])
-            original_rows.append({
-                "id": row_id,
-                "float_vector": [float(x) for x in original_data["float_vector"][i]],
-                "struct_array": original_data["struct_array"][i]
-            })
+            original_rows.append(
+                {
+                    "id": row_id,
+                    "float_vector": [float(x) for x in original_data["float_vector"][i]],
+                    "struct_array": original_data["struct_array"][i],
+                }
+            )
 
         # Convert query results to comparable format
         query_rows_formatted = []
@@ -4644,20 +4574,23 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             formatted_row = {
                 "id": row["id"],
                 "float_vector": [float(x) for x in row["float_vector"]],
-                "struct_array": row["struct_array"]
+                "struct_array": row["struct_array"],
             }
             query_rows_formatted.append(formatted_row)
 
         # Use compare_lists_with_epsilon_ignore_dict_order for comparison
         # This function handles floating-point tolerance and dict order
-        is_equal = compare_lists_with_epsilon_ignore_dict_order(
-            original_rows,
-            query_rows_formatted,
-            epsilon=epsilon
-        )
+        is_equal = compare_lists_with_epsilon_ignore_dict_order(original_rows, query_rows_formatted, epsilon=epsilon)
 
         if not is_equal:
-            deepdiff = DeepDiff(original_rows, query_rows_formatted, ignore_order=True, significant_digits=3),
+            deepdiff = (
+                DeepDiff(
+                    original_rows,
+                    query_rows_formatted,
+                    ignore_order=True,
+                    significant_digits=3,
+                ),
+            )
             log.info(f"DeepDiff: {deepdiff}")
             assert False, "Data verification failed: original data and query results do not match"
 
@@ -4725,7 +4658,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="float_vector",
             index_type="HNSW",
             metric_type="COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Index for vector field inside struct array
@@ -4734,15 +4667,11 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="struct_array[struct_float_vec]",
             index_type="HNSW",
             metric_type="MAX_SIM_COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Create collection
-        client.create_collection(
-            collection_name=c_name,
-            schema=schema,
-            index_params=index_params
-        )
+        client.create_collection(collection_name=c_name, schema=schema, index_params=index_params)
         log.info(f"Collection '{c_name}' created")
 
         # Step 2: Generate parquet file with all supported types
@@ -4760,7 +4689,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         # Step 5: Verify number of entities
         stats = client.get_collection_stats(collection_name=c_name)
-        num_entities = stats['row_count']
+        num_entities = stats["row_count"]
         log.info(f"Collection entities: {num_entities}")
         assert num_entities == entities, f"Expected {entities} entities, got {num_entities}"
 
@@ -4832,7 +4761,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="float_vector",
             index_type="HNSW",
             metric_type="COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Index for vector field inside struct array
@@ -4841,15 +4770,11 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="struct_array[struct_float_vec]",
             index_type="HNSW",
             metric_type="MAX_SIM_COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Create collection
-        client.create_collection(
-            collection_name=c_name,
-            schema=schema,
-            index_params=index_params
-        )
+        client.create_collection(collection_name=c_name, schema=schema, index_params=index_params)
         log.info(f"Collection '{c_name}' created")
 
         # Step 2: Generate JSON file with all supported types
@@ -4867,7 +4792,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         # Step 5: Verify number of entities
         stats = client.get_collection_stats(collection_name=c_name)
-        num_entities = stats['row_count']
+        num_entities = stats["row_count"]
         log.info(f"Collection entities: {num_entities}")
         assert num_entities == entities, f"Expected {entities} entities, got {num_entities}"
 
@@ -4942,7 +4867,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="float_vector",
             index_type="HNSW",
             metric_type="COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Index for vector field inside struct array
@@ -4950,15 +4875,11 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             field_name="struct_array[struct_float_vec]",
             index_type="HNSW",
             metric_type="MAX_SIM_COSINE",
-            params={"M": 16, "efConstruction": 200}
+            params={"M": 16, "efConstruction": 200},
         )
 
         # Create collection
-        client.create_collection(
-            collection_name=c_name,
-            schema=schema,
-            index_params=index_params
-        )
+        client.create_collection(collection_name=c_name, schema=schema, index_params=index_params)
         log.info(f"Collection '{c_name}' created")
 
         # Step 2: Generate insert-format data with all supported types
@@ -4984,14 +4905,14 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                         "struct_float": random.random() * 100,
                         "struct_double": random.random() * 1000,
                         "struct_bool": random.choice([True, False]),
-                        "struct_float_vec": [random.random() for _ in range(dim)]
+                        "struct_float_vec": [random.random() for _ in range(dim)],
                     }
                     struct_list.append(struct_obj)
 
             row = {
                 "id": i,
                 "float_vector": [random.random() for _ in range(dim)],
-                "struct_array": struct_list
+                "struct_array": struct_list,
             }
             insert_data.append(row)
         log.info(f"Generated {empty_array_count} rows with empty struct_array")
@@ -4999,9 +4920,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         # Step 3: Use LocalBulkWriter to convert data to import files
         log.info(f"Using LocalBulkWriter to generate {file_type} files")
         batch_files, original_data = self.gen_file_with_local_bulk_writer(
-            schema=schema,
-            data=insert_data,
-            file_type=file_type
+            schema=schema, data=insert_data, file_type=file_type
         )
 
         # Step 4: Upload generated files to MinIO
@@ -5023,7 +4942,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         # Step 6: Verify number of entities
         stats = client.get_collection_stats(collection_name=c_name)
-        num_entities = stats['row_count']
+        num_entities = stats["row_count"]
         log.info(f"Collection entities: {num_entities}")
         assert num_entities == entities, f"Expected {entities} entities, got {num_entities}"
 
@@ -5073,32 +4992,34 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     "struct_float": np.float32(random.random() * 100),
                     "struct_double": np.float64(random.random() * 1000),
                     "struct_bool": bool(random.choice([True, False])),
-                    "struct_float_vec": [random.random() for _ in range(dim)]
+                    "struct_float_vec": [random.random() for _ in range(dim)],
                 }
                 struct_list.append(struct_obj)
             struct_arr.append(struct_list)
 
         # Define PyArrow schema for struct field with all types
-        struct_type = pa.struct([
-            pa.field("struct_varchar", pa.string()),
-            pa.field("struct_int8", pa.int8()),
-            pa.field("struct_int16", pa.int16()),
-            pa.field("struct_int32", pa.int32()),
-            pa.field("struct_int64", pa.int64()),
-            pa.field("struct_float", pa.float32()),
-            pa.field("struct_double", pa.float64()),
-            pa.field("struct_bool", pa.bool_()),
-            pa.field("struct_float_vec", pa.list_(pa.float32()))
-        ])
+        struct_type = pa.struct(
+            [
+                pa.field("struct_varchar", pa.string()),
+                pa.field("struct_int8", pa.int8()),
+                pa.field("struct_int16", pa.int16()),
+                pa.field("struct_int32", pa.int32()),
+                pa.field("struct_int64", pa.int64()),
+                pa.field("struct_float", pa.float32()),
+                pa.field("struct_double", pa.float64()),
+                pa.field("struct_bool", pa.bool_()),
+                pa.field("struct_float_vec", pa.list_(pa.float32())),
+            ]
+        )
 
         # Build PyArrow arrays with explicit types
         pa_arrays = {
             "id": pa.array(id_arr, type=pa.int64()),
             "float_vector": pa.array(
                 [np.array(v, dtype=np.float32) for v in float_vector_arr],
-                type=pa.list_(pa.float32())
+                type=pa.list_(pa.float32()),
             ),
-            "struct_array": pa.array(struct_arr, type=pa.list_(struct_type))
+            "struct_array": pa.array(struct_arr, type=pa.list_(struct_type)),
         }
 
         # Create PyArrow table and write to Parquet
@@ -5110,7 +5031,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         return {
             "id": id_arr,
             "float_vector": float_vector_arr,
-            "struct_array": struct_arr
+            "struct_array": struct_arr,
         }
 
     def gen_json_file(self, num_rows: int, dim: int, file_path: str) -> dict:
@@ -5151,17 +5072,13 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     "struct_float": random.random() * 100,
                     "struct_double": random.random() * 1000,
                     "struct_bool": random.choice([True, False]),
-                    "struct_float_vec": [random.random() for _ in range(dim)]
+                    "struct_float_vec": [random.random() for _ in range(dim)],
                 }
                 struct_list.append(struct_obj)
             struct_arr.append(struct_list)
 
             # Build row object
-            row = {
-                "id": i,
-                "float_vector": float_vector,
-                "struct_array": struct_list
-            }
+            row = {"id": i, "float_vector": float_vector, "struct_array": struct_list}
             rows.append(row)
 
         # Write to JSON file
@@ -5173,9 +5090,8 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         return {
             "id": id_arr,
             "float_vector": float_vector_arr,
-            "struct_array": struct_arr
+            "struct_array": struct_arr,
         }
-
 
 
 class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
@@ -5183,7 +5099,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
     def generate_struct_array_data(
         self, num_rows: int, dim: int = default_dim, capacity: int = default_capacity
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate test data for struct array"""
         data = []
         for i in range(num_rows):
@@ -5241,12 +5157,10 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
                 field_name="normal_vector",
                 datatype=DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=mmap_enabled
+                mmap_enabled=mmap_enabled,
             )
         else:
-            schema.add_field(
-                field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
-            )
+            schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with optional mmap for sub-fields
         struct_schema = client.create_struct_field_schema()
@@ -5257,7 +5171,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
                 "clip_embedding1",
                 DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=subfield1_mmap
+                mmap_enabled=subfield1_mmap,
             )
         else:
             struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=dim)
@@ -5267,7 +5181,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
                 "clip_embedding2",
                 DataType.FLOAT_VECTOR,
                 dim=dim,
-                mmap_enabled=subfield2_mmap
+                mmap_enabled=subfield2_mmap,
             )
         else:
             struct_schema.add_field("clip_embedding2", DataType.FLOAT_VECTOR, dim=dim)
@@ -5333,9 +5247,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5346,11 +5258,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
 
         # Enable mmap on collection
-        self.alter_collection_properties(
-            client,
-            collection_name,
-            properties={"mmap.enabled": True}
-        )
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
         log.info(f"Enabled mmap on collection {collection_name}")
 
         # Verify mmap is enabled via describe_collection
@@ -5373,7 +5281,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on collection")
+        log.info("Search successful with mmap enabled on collection")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_struct_array_field(self):
@@ -5414,9 +5322,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5431,9 +5337,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips",
-            field_params={"mmap_enabled": True}
+            field_params={"mmap_enabled": True},
         )
-        log.info(f"Enabled mmap on struct array field 'clips'")
+        log.info("Enabled mmap on struct array field 'clips'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5451,7 +5357,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct array field")
+        log.info("Search successful with mmap enabled on struct array field")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_struct_subfield(self):
@@ -5492,9 +5398,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5509,9 +5413,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips[clip_embedding1]",
-            field_params={"mmap_enabled": True}
+            field_params={"mmap_enabled": True},
         )
-        log.info(f"Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5529,7 +5433,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful on field with mmap enabled")
+        log.info("Search successful on field with mmap enabled")
 
         # Verify search also works on clip_embedding2 (without mmap)
         self.search(
@@ -5540,7 +5444,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful on field without mmap")
+        log.info("Search successful on field without mmap")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_enable_on_emb_list_index(self):
@@ -5582,9 +5486,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5599,12 +5501,17 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             index_name="clips[clip_embedding1]",
-            properties={"mmap.enabled": True}
+            properties={"mmap.enabled": True},
         )
-        log.info(f"Enabled mmap on embedding list index 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on embedding list index 'clips[clip_embedding1]'")
 
         # Verify mmap is enabled via describe_index
-        index_info = self.describe_index(client, collection_name, index_name="clips[clip_embedding1]", check_task="check_nothing")
+        index_info = self.describe_index(
+            client,
+            collection_name,
+            index_name="clips[clip_embedding1]",
+            check_task="check_nothing",
+        )
         log.info(f"Index info after enabling mmap: {index_info}")
 
         # Load collection
@@ -5623,7 +5530,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on embedding list index")
+        log.info("Search successful with mmap enabled on embedding list index")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_enable_multiple_levels(self):
@@ -5665,9 +5572,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5678,30 +5583,26 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
 
         # Enable mmap at collection level
-        self.alter_collection_properties(
-            client,
-            collection_name,
-            properties={"mmap.enabled": True}
-        )
-        log.info(f"Enabled mmap at collection level")
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        log.info("Enabled mmap at collection level")
 
         # Enable mmap at field level for struct array field
         self.alter_collection_field(
             client,
             collection_name,
             field_name="clips",
-            field_params={"mmap_enabled": True}
+            field_params={"mmap_enabled": True},
         )
-        log.info(f"Enabled mmap at field level for 'clips'")
+        log.info("Enabled mmap at field level for 'clips'")
 
         # Enable mmap at index level for embedding list index
         self.alter_index_properties(
             client,
             collection_name,
             index_name="clips[clip_embedding1]",
-            properties={"mmap.enabled": True}
+            properties={"mmap.enabled": True},
         )
-        log.info(f"Enabled mmap at index level for 'clips[clip_embedding1]'")
+        log.info("Enabled mmap at index level for 'clips[clip_embedding1]'")
 
         # Load collection
         self.load_collection(client, collection_name)
@@ -5740,7 +5641,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "COSINE"},
             limit=10,
         )
-        log.info(f"All searches successful with mmap enabled at multiple levels")
+        log.info("All searches successful with mmap enabled at multiple levels")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_collection_enable_then_disable(self):
@@ -5780,9 +5681,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5791,12 +5690,8 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
 
         # Release and enable mmap
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(
-            client,
-            collection_name,
-            properties={"mmap.enabled": True}
-        )
-        log.info(f"Enabled mmap on collection")
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        log.info("Enabled mmap on collection")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -5812,16 +5707,12 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled")
+        log.info("Search successful with mmap enabled")
 
         # Now disable mmap
         self.release_collection(client, collection_name)
-        self.alter_collection_properties(
-            client,
-            collection_name,
-            properties={"mmap.enabled": False}
-        )
-        log.info(f"Disabled mmap on collection")
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": False})
+        log.info("Disabled mmap on collection")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -5833,7 +5724,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap")
+        log.info("Search successful after disabling mmap")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_index_disable_then_enable(self):
@@ -5873,9 +5764,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5895,7 +5784,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap")
+        log.info("Search successful without mmap")
 
         # Now enable mmap on index
         self.release_collection(client, collection_name)
@@ -5903,9 +5792,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             index_name="clips[clip_embedding1]",
-            properties={"mmap.enabled": True}
+            properties={"mmap.enabled": True},
         )
-        log.info(f"Enabled mmap on index 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on index 'clips[clip_embedding1]'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -5917,7 +5806,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on index")
+        log.info("Search successful after enabling mmap on index")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_index_enable_then_disable(self):
@@ -5957,9 +5846,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -5979,7 +5866,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on index (from schema)")
+        log.info("Search successful with mmap enabled on index (from schema)")
 
         # Disable mmap on index
         self.release_collection(client, collection_name)
@@ -5987,9 +5874,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             index_name="clips[clip_embedding1]",
-            properties={"mmap.enabled": False}
+            properties={"mmap.enabled": False},
         )
-        log.info(f"Disabled mmap on index")
+        log.info("Disabled mmap on index")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -6001,7 +5888,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on index")
+        log.info("Search successful after disabling mmap on index")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_struct_subfield_enable_then_disable(self):
@@ -6043,9 +5930,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Verify mmap is enabled on subfield via describe_collection
         collection_info = self.describe_collection(client, collection_name, check_task="check_nothing")
@@ -6071,7 +5956,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct sub-field (from schema)")
+        log.info("Search successful with mmap enabled on struct sub-field (from schema)")
 
         # Disable mmap on struct sub-field
         self.release_collection(client, collection_name)
@@ -6079,9 +5964,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips[clip_embedding1]",
-            field_params={"mmap_enabled": False}
+            field_params={"mmap_enabled": False},
         )
-        log.info(f"Disabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Disabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Verify mmap is disabled via describe_collection
         collection_info = self.describe_collection(client, collection_name, check_task="check_nothing")
@@ -6097,7 +5982,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on struct sub-field")
+        log.info("Search successful after disabling mmap on struct sub-field")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_mmap_struct_subfield_disable_then_enable(self):
@@ -6137,9 +6022,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -6159,7 +6042,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap on struct sub-field")
+        log.info("Search successful without mmap on struct sub-field")
 
         # Now enable mmap on struct sub-field
         self.release_collection(client, collection_name)
@@ -6167,9 +6050,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips[clip_embedding1]",
-            field_params={"mmap_enabled": True}
+            field_params={"mmap_enabled": True},
         )
-        log.info(f"Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
+        log.info("Enabled mmap on struct sub-field 'clips[clip_embedding1]'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -6181,7 +6064,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on struct sub-field")
+        log.info("Search successful after enabling mmap on struct sub-field")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_struct_array_field_enable_then_disable(self):
@@ -6221,9 +6104,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -6243,7 +6124,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful with mmap enabled on struct array field (from schema)")
+        log.info("Search successful with mmap enabled on struct array field (from schema)")
 
         # Disable mmap on struct array field
         self.release_collection(client, collection_name)
@@ -6251,9 +6132,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips",
-            field_params={"mmap_enabled": False}
+            field_params={"mmap_enabled": False},
         )
-        log.info(f"Disabled mmap on struct array field 'clips'")
+        log.info("Disabled mmap on struct array field 'clips'")
 
         # Load and verify search still works
         self.load_collection(client, collection_name)
@@ -6265,7 +6146,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after disabling mmap on struct array field")
+        log.info("Search successful after disabling mmap on struct array field")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_mmap_struct_array_field_disable_then_enable(self):
@@ -6305,9 +6186,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
         )
 
         # Create collection
-        self.create_collection(
-            client, collection_name, schema=schema, index_params=index_params
-        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data
         nb = 3000
@@ -6327,7 +6206,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful without mmap on struct array field")
+        log.info("Search successful without mmap on struct array field")
 
         # Now enable mmap on struct array field
         self.release_collection(client, collection_name)
@@ -6335,9 +6214,9 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             client,
             collection_name,
             field_name="clips",
-            field_params={"mmap_enabled": True}
+            field_params={"mmap_enabled": True},
         )
-        log.info(f"Enabled mmap on struct array field 'clips'")
+        log.info("Enabled mmap on struct array field 'clips'")
 
         # Load and verify search works
         self.load_collection(client, collection_name)
@@ -6349,4 +6228,4 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        log.info(f"Search successful after enabling mmap on struct array field")
+        log.info("Search successful after enabling mmap on struct array field")
