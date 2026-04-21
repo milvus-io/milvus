@@ -258,7 +258,6 @@ class TestExternalTableSchemaValidation(TestMilvusClientV2Base):
         (DataType.BINARY_VECTOR, {"dim": 32}),
         (DataType.FLOAT16_VECTOR, {"dim": 4}),
         (DataType.BFLOAT16_VECTOR, {"dim": 4}),
-        (DataType.SPARSE_FLOAT_VECTOR, {}),
     ], ids=lambda x: str(x) if not isinstance(x, dict) else None)
     def test_supported_data_types(self, dtype, extra):
         """Each supported data type should be accepted in external collection schema."""
@@ -272,7 +271,6 @@ class TestExternalTableSchemaValidation(TestMilvusClientV2Base):
         is_vector = dtype in (
             DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
             DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-            DataType.SPARSE_FLOAT_VECTOR,
         )
         if not is_vector:
             schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4, external_field="vec_col")
@@ -281,6 +279,31 @@ class TestExternalTableSchemaValidation(TestMilvusClientV2Base):
         client.create_collection(collection_name=collection_name, schema=schema)
         assert client.has_collection(collection_name)
         client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("dtype,extra,server_type_name", [
+        # SparseFloatVector uses Milvus custom binary encoding that is
+        # incompatible with external files (parquet/lance/vortex), so it is
+        # explicitly blocked by isExternalFieldTypeSupported in
+        # pkg/util/typeutil/schema.go (introduced in Part8-1/4 #49061).
+        (DataType.SPARSE_FLOAT_VECTOR, {}, "SparseFloatVector"),
+    ], ids=lambda x: str(x) if not isinstance(x, (dict, str)) else x)
+    def test_unsupported_external_field_types(self, dtype, extra, server_type_name):
+        """Field types explicitly blocked for external collections should be rejected at create time."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        schema = client.create_schema(
+            external_source="s3://test-bucket/data/",
+            external_spec='{"format":"parquet"}',
+        )
+        schema.add_field("f", dtype, external_field="f_col", **extra)
+
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=collection_name, schema=schema)
+        msg = str(exc_info.value)
+        assert "does not support field type" in msg and server_type_name in msg, \
+            f"Expected type-block error for {server_type_name}, got: {msg}"
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("case_name,schema_fn,expect_err", [

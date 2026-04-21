@@ -3,9 +3,7 @@ package testcases
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -95,17 +93,6 @@ func countManifestsForCollection(ctx context.Context, mc *miniogo.Client, bucket
 		}
 	}
 	return len(paths), paths
-}
-
-// encodeSparseVector encodes a sparse vector as Milvus internal format:
-// sequence of (uint32_LE index, uint32_LE float32bits) pairs, 8 bytes each.
-func encodeSparseVector(indices []uint32, values []float32) []byte {
-	buf := make([]byte, 8*len(indices))
-	for i := range indices {
-		binary.LittleEndian.PutUint32(buf[i*8:], indices[i])
-		binary.LittleEndian.PutUint32(buf[i*8+4:], math.Float32bits(values[i]))
-	}
-	return buf
 }
 
 // helperVectorE2E is a helper to run a single-vector external table E2E test.
@@ -807,392 +794,29 @@ func TestExternalTableVectorTypesE2E(t *testing.T) {
 }
 
 
-// TestExternalTableSparseVectorE2E tests sparse vector external collections with multiple encoding approaches.
-func TestExternalTableSparseVectorE2E(t *testing.T) {
+// TestExternalTableSparseVectorRejected verifies that SparseFloatVector is
+// explicitly rejected as an external field type. SparseFloatVector uses Milvus
+// custom binary encoding that is incompatible with external files (parquet/
+// lance/vortex), so isExternalFieldTypeSupported in pkg/util/typeutil/schema.go
+// blocks it at CreateCollection time (introduced in Part8-1/4 #49061).
+func TestExternalTableSparseVectorRejected(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	minioCfg := getMinIOConfig()
-	minioClient, err := newMinIOClient(minioCfg)
-	if err != nil {
-		t.Skipf("MinIO unavailable: %v", err)
-	}
-	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
-	if err != nil || !exists {
-		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
-	}
+	collName := common.GenRandomString("ext_sparse_rej", 6)
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource("s3://test-bucket/data/").
+		WithExternalSpec(`{"format":"parquet"}`).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector).WithExternalField("sparse"))
 
-	const numRows = 20
-
-	// SparseVector_Binary: Parquet binary column with fake byte content
-	t.Run("SparseVector_Binary", func(t *testing.T) {
-		collName := common.GenRandomString("ext_sparse", 6)
-		extPath := fmt.Sprintf("external-e2e-test/%s", collName)
-		const dim = 4
-
-		arrowSchema := arrow.NewSchema([]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "sparse", Type: arrow.BinaryTypes.Binary},
-			{Name: "embedding", Type: arrow.FixedSizeListOf(dim, arrow.PrimitiveTypes.Float32)},
-		}, nil)
-
-		var buf bytes.Buffer
-		writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
-		require.NoError(t, err)
-
-		pool := memory.NewGoAllocator()
-		builder := array.NewRecordBuilder(pool, arrowSchema)
-		defer builder.Release()
-
-		for i := 0; i < numRows; i++ {
-			builder.Field(0).(*array.Int64Builder).Append(int64(i))
-			// Write fake sparse vector bytes (1 pair: 4 bytes index + 4 bytes value)
-			data := make([]byte, 8)
-			builder.Field(1).(*array.BinaryBuilder).Append(data)
-			embB := builder.Field(2).(*array.FixedSizeListBuilder)
-			embB.Append(true)
-			for d := 0; d < dim; d++ {
-				embB.ValueBuilder().(*array.Float32Builder).Append(float32(i)*0.1 + float32(d))
-			}
-		}
-
-		record := builder.NewRecord()
-		defer record.Release()
-		require.NoError(t, writer.Write(record))
-		require.NoError(t, writer.Close())
-
-		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data.parquet", buf.Bytes())
-
-		t.Cleanup(func() {
-			cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
-			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
-		})
-
-		schema := entity.NewSchema().
-			WithName(collName).
-			WithExternalSource(extPath).
-			WithExternalSpec(`{"format":"parquet"}`).
-			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
-			WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector).WithExternalField("sparse")).
-			WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim).WithExternalField("embedding"))
-
-		err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		require.NoError(t, err)
-		t.Log("[create] ✓ SparseVector_Binary")
-
-		refreshResult, err := mc.RefreshExternalCollection(ctx,
-			client.NewRefreshExternalCollectionOption(collName))
-		if err != nil {
-			t.Logf("[refresh submit] ✗ SparseVector_Binary → %v", err)
-			return
-		}
-
-		jobID := refreshResult.JobID
-		t.Logf("[refresh] started job %d", jobID)
-
-		deadline := time.After(120 * time.Second)
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-deadline:
-				t.Logf("[refresh] ✗ timed out after 120s")
-				return
-			case <-ticker.C:
-				progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
-					client.NewGetRefreshExternalCollectionProgressOption(jobID))
-				if err != nil {
-					t.Logf("[refresh poll] ✗ error: %v", err)
-					return
-				}
-				t.Logf("[refresh] state=%s progress=%d%%", progress.State, progress.Progress)
-
-				switch progress.State {
-				case entity.RefreshStateCompleted:
-					t.Log("[refresh] ✓ completed — SparseVector_Binary refresh succeeded")
-
-					sparseIdx := index.NewAutoIndex(entity.IP)
-					sparseTask, sErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "sparse", sparseIdx))
-					require.NoError(t, sErr)
-					require.NoError(t, sparseTask.Await(ctx))
-
-					embIdx := index.NewAutoIndex(entity.L2)
-					embTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "embedding", embIdx))
-					require.NoError(t, idxErr)
-					require.NoError(t, embTask.Await(ctx))
-
-					loadTask, lErr := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
-					require.NoError(t, lErr)
-					require.NoError(t, loadTask.Await(ctx))
-
-					countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
-						WithConsistencyLevel(entity.ClStrong).
-						WithOutputFields(common.QueryCountFieldName))
-					require.NoError(t, err)
-					count, _ := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
-					t.Logf("[count(*)] = %d", count)
-
-					_, err = mc.Query(ctx, client.NewQueryOption(collName).
-						WithConsistencyLevel(entity.ClStrong).
-						WithFilter("id == 0").
-						WithOutputFields("id", "sparse"))
-					if err != nil {
-						t.Logf("[query output sparse] ✗ %v", err)
-					} else {
-						t.Log("[query output sparse] ✓")
-					}
-					return
-
-				case entity.RefreshStateFailed:
-					t.Logf("[refresh] ✗ FAILED (expected): %s", progress.Reason)
-					return
-				}
-			}
-		}
-	})
-
-	// SparseVector_String_JSON: Parquet string column with JSON-like representation
-	t.Run("SparseVector_String_JSON", func(t *testing.T) {
-		collName := common.GenRandomString("ext_sparse", 6)
-		extPath := fmt.Sprintf("external-e2e-test/%s", collName)
-		const dim = 4
-
-		arrowSchema := arrow.NewSchema([]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "sparse", Type: arrow.BinaryTypes.String},
-			{Name: "embedding", Type: arrow.FixedSizeListOf(dim, arrow.PrimitiveTypes.Float32)},
-		}, nil)
-
-		var buf bytes.Buffer
-		writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
-		require.NoError(t, err)
-
-		pool := memory.NewGoAllocator()
-		builder := array.NewRecordBuilder(pool, arrowSchema)
-		defer builder.Release()
-
-		for i := 0; i < numRows; i++ {
-			builder.Field(0).(*array.Int64Builder).Append(int64(i))
-			builder.Field(1).(*array.StringBuilder).Append(fmt.Sprintf(`{"%d": %f}`, i, float64(i)*0.1))
-			embB := builder.Field(2).(*array.FixedSizeListBuilder)
-			embB.Append(true)
-			for d := 0; d < dim; d++ {
-				embB.ValueBuilder().(*array.Float32Builder).Append(float32(i)*0.1 + float32(d))
-			}
-		}
-
-		record := builder.NewRecord()
-		defer record.Release()
-		require.NoError(t, writer.Write(record))
-		require.NoError(t, writer.Close())
-
-		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data.parquet", buf.Bytes())
-
-		t.Cleanup(func() {
-			cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
-			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
-		})
-
-		schema := entity.NewSchema().
-			WithName(collName).
-			WithExternalSource(extPath).
-			WithExternalSpec(`{"format":"parquet"}`).
-			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
-			WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector).WithExternalField("sparse")).
-			WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim).WithExternalField("embedding"))
-
-		err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		require.NoError(t, err)
-		t.Log("[create] ✓ SparseVector_String_JSON")
-
-		refreshResult, err := mc.RefreshExternalCollection(ctx,
-			client.NewRefreshExternalCollectionOption(collName))
-		if err != nil {
-			t.Logf("[refresh submit] ✗ SparseVector_String_JSON → %v", err)
-			return
-		}
-
-		jobID := refreshResult.JobID
-		deadline := time.After(120 * time.Second)
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-deadline:
-				t.Logf("[refresh] ✗ timed out")
-				return
-			case <-ticker.C:
-				progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
-					client.NewGetRefreshExternalCollectionProgressOption(jobID))
-				if err != nil {
-					t.Logf("[refresh poll] ✗ error: %v", err)
-					return
-				}
-				t.Logf("[refresh] state=%s progress=%d%%", progress.State, progress.Progress)
-
-				switch progress.State {
-				case entity.RefreshStateCompleted:
-					t.Log("[refresh] ✓ completed — SparseVector_String_JSON refresh succeeded")
-
-					sparseIdx := index.NewAutoIndex(entity.IP)
-					sparseTask, sErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "sparse", sparseIdx))
-					require.NoError(t, sErr)
-					require.NoError(t, sparseTask.Await(ctx))
-
-					embIdx := index.NewAutoIndex(entity.L2)
-					embTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "embedding", embIdx))
-					require.NoError(t, idxErr)
-					require.NoError(t, embTask.Await(ctx))
-
-					loadTask, lErr := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
-					require.NoError(t, lErr)
-					require.NoError(t, loadTask.Await(ctx))
-
-					countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
-						WithConsistencyLevel(entity.ClStrong).
-						WithOutputFields(common.QueryCountFieldName))
-					require.NoError(t, err)
-					count, _ := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
-					t.Logf("[count(*)] = %d", count)
-					return
-
-				case entity.RefreshStateFailed:
-					t.Logf("[refresh] ✗ FAILED (expected): %s", progress.Reason)
-					return
-				}
-			}
-		}
-	})
-
-	// SparseVector_RealEncoding: real Milvus-encoded sparse vectors in Parquet binary column
-	t.Run("SparseVector_RealEncoding", func(t *testing.T) {
-		collName := common.GenRandomString("ext_sparse_real", 6)
-		extPath := fmt.Sprintf("external-e2e-test/%s", collName)
-		const numRealRows = 100
-
-		// Generate Parquet with real sparse vectors in Milvus internal encoding
-		// Schema: id (Int64) + sparse (Binary) where binary = Milvus sparse encoding
-		arrowSchema := arrow.NewSchema([]arrow.Field{
-			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "sparse", Type: arrow.BinaryTypes.Binary},
-		}, nil)
-
-		var buf bytes.Buffer
-		writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
-		require.NoError(t, err)
-
-		pool := memory.NewGoAllocator()
-		builder := array.NewRecordBuilder(pool, arrowSchema)
-		defer builder.Release()
-
-		// Each row gets a sparse vector with 3 non-zero elements.
-		// Row i has: {index: i*10, value: 1.0}, {index: i*10+1, value: 0.5}, {index: i*10+2, value: 0.1}
-		for i := 0; i < numRealRows; i++ {
-			builder.Field(0).(*array.Int64Builder).Append(int64(i))
-			sparseBytes := encodeSparseVector(
-				[]uint32{uint32(i*10), uint32(i*10 + 1), uint32(i*10 + 2)},
-				[]float32{1.0, 0.5, 0.1},
-			)
-			builder.Field(1).(*array.BinaryBuilder).Append(sparseBytes)
-		}
-
-		record := builder.NewRecord()
-		defer record.Release()
-		require.NoError(t, writer.Write(record))
-		require.NoError(t, writer.Close())
-
-		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data.parquet", buf.Bytes())
-
-		t.Cleanup(func() {
-			cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
-			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
-		})
-
-		// Create external collection with only SparseFloatVector (single vector field)
-		schema := entity.NewSchema().
-			WithName(collName).
-			WithExternalSource(extPath).
-			WithExternalSpec(`{"format":"parquet"}`).
-			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
-			WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector).WithExternalField("sparse"))
-
-		err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-		require.NoError(t, err)
-		t.Log("[create] ✓")
-
-		// Refresh
-		refreshAndWait(ctx, t, mc, collName)
-		t.Log("[refresh] ✓")
-
-		// Index with IP metric (required for sparse)
-		sparseIdx := index.NewAutoIndex(entity.IP)
-		idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "sparse", sparseIdx))
-		require.NoError(t, err)
-		require.NoError(t, idxTask.Await(ctx))
-		t.Log("[index] ✓ sparse IP")
-
-		// Load
-		loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
-		require.NoError(t, err)
-		require.NoError(t, loadTask.Await(ctx))
-		t.Log("[load] ✓")
-
-		// count(*)
-		countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
-			WithConsistencyLevel(entity.ClStrong).
-			WithOutputFields(common.QueryCountFieldName))
-		require.NoError(t, err)
-		count, _ := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
-		require.Equal(t, int64(numRealRows), count)
-		t.Logf("[count(*)] ✓ %d rows", count)
-
-		// Query with output sparse field for row id=5
-		// Expected: indices {50, 51, 52}, values {1.0, 0.5, 0.1}
-		res, err := mc.Query(ctx, client.NewQueryOption(collName).
-			WithConsistencyLevel(entity.ClStrong).
-			WithFilter("id == 5").
-			WithOutputFields("id", "sparse"))
-		if err != nil {
-			t.Logf("[query output] ✗ %v", err)
-		} else {
-			require.Equal(t, 1, res.GetColumn("id").Len())
-			sparseCol := res.GetColumn("sparse")
-			require.NotNil(t, sparseCol)
-			t.Logf("[query output] ✓ sparse col type=%T len=%d", sparseCol, sparseCol.Len())
-		}
-
-		// Search with a sparse query vector matching row 0:
-		// {index: 0, value: 1.0}, {index: 1, value: 0.5}, {index: 2, value: 0.1}
-		queryVec, err := entity.NewSliceSparseEmbedding(
-			[]uint32{0, 1, 2},
-			[]float32{1.0, 0.5, 0.1},
-		)
-		require.NoError(t, err)
-
-		searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
-			[]entity.Vector{queryVec}).
-			WithConsistencyLevel(entity.ClStrong).
-			WithANNSField("sparse").
-			WithOutputFields("id"))
-		if err != nil {
-			t.Logf("[search] ✗ %v", err)
-		} else {
-			require.Equal(t, 1, len(searchRes))
-			require.Greater(t, searchRes[0].ResultCount, 0)
-			nearestID, _ := searchRes[0].GetColumn("id").GetAsInt64(0)
-			nearestScore := searchRes[0].Scores[0]
-			t.Logf("[search] ✓ top-1: id=%d score=%.4f (expected id=0 with score≈1.26)", nearestID, nearestScore)
-
-			// Row 0 has {0:1.0, 1:0.5, 2:0.1}, query is the same.
-			// IP = 1.0*1.0 + 0.5*0.5 + 0.1*0.1 = 1.26
-			require.Equal(t, int64(0), nearestID, "nearest neighbor should be id=0 (exact match)")
-			require.InDelta(t, 1.26, nearestScore, 0.01, "IP score should be ~1.26")
-		}
-
-		t.Log("[ALL] ✓ SparseFloatVector with real Milvus encoding works end-to-end!")
-	})
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	require.Error(t, err, "CreateCollection with SparseFloatVector as external field should fail")
+	require.Contains(t, err.Error(), "does not support field type",
+		"error should explain the type is blocked, got: %v", err)
+	require.Contains(t, err.Error(), "SparseFloatVector",
+		"error should name SparseFloatVector, got: %v", err)
 }
 
 
