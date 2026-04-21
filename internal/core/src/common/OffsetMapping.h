@@ -36,17 +36,29 @@ class OffsetMapping {
     // Build mapping from valid_data (bool array format)
     // If use_vec is not specified, auto-select based on valid ratio (< 10% uses map)
     void
-    Build(const bool* valid_data,
-          int64_t total_count,
-          int64_t start_logical = 0,
-          int64_t start_physical = 0);
+    Build(const bool* valid_data, int64_t total_count);
 
     // Build mapping incrementally (always uses vec mode for incremental builds)
     void
-    BuildIncremental(const bool* valid_data,
-                     int64_t count,
-                     int64_t start_logical,
-                     int64_t start_physical);
+    Append(const bool* valid_data,
+           int64_t count,
+           int64_t start_logical,
+           int64_t start_physical);
+
+    // Allocate shape and lock storage mode without filling per-row entries.
+    void
+    Reserve(int64_t total_count, int64_t valid_count, size_t num_chunks);
+
+    // Idempotent and safe for concurrent calls on distinct chunks.
+    void
+    SetChunk(int64_t chunk_id,
+             int64_t start_logical,
+             int64_t start_physical,
+             const bool* valid_data,
+             int64_t count);
+
+    bool
+    IsChunkSet(int64_t chunk_id) const;
 
     // Get physical offset from logical offset. Returns -1 if null.
     int64_t
@@ -68,10 +80,6 @@ class OffsetMapping {
     bool
     IsEnabled() const;
 
-    // Get next physical offset (for incremental builds)
-    int64_t
-    GetNextPhysicalOffset() const;
-
     // Get total logical count (including nulls)
     int64_t
     GetTotalCount() const;
@@ -87,6 +95,8 @@ class OffsetMapping {
     // Map mode storage (for sparse valid data)
     std::unordered_map<int32_t, int32_t> l2p_map_;  // logical -> physical
     std::unordered_map<int32_t, int32_t> p2l_map_;  // physical -> logical
+
+    std::vector<uint8_t> chunk_built_;
 
     int64_t valid_count_{0};
     int64_t total_count_{0};  // total logical count (including nulls)
