@@ -97,6 +97,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should have called Enqueue for Init task
@@ -120,6 +123,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should have called Enqueue for Retry task
@@ -143,6 +149,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should NOT call Enqueue for InProgress task in inspect()
@@ -166,6 +175,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should NOT call Enqueue for Finished task
@@ -189,6 +201,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should NOT call Enqueue for Failed task
@@ -215,6 +230,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.inspect()
 
 		// Should be called twice: once for Init and once for Retry
@@ -242,6 +260,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should have called Enqueue for Init task
@@ -265,6 +286,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should have called Enqueue for Retry task
@@ -288,6 +312,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should have called Enqueue for InProgress task (for recovery)
@@ -311,6 +338,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should NOT call Enqueue for Finished task
@@ -334,6 +364,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should NOT call Enqueue for Failed task
@@ -361,6 +394,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
+			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
+		}
 		inspector.reloadFromMeta()
 
 		// Should be called 3 times: Init, Retry, InProgress
