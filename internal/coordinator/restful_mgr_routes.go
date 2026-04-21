@@ -1386,7 +1386,9 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	// Alter configuration(s) in etcd atomically (updates + deletes in one transaction)
+	// Alter configuration(s) in etcd atomically (updates + deletes in one transaction).
+	// AlterConfigsInEtcd also proactively refreshes the local EtcdSource so that the write
+	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
 		logger.Info("HandleAlterConfig failed to atomically alter configs in etcd",
 			zap.Any("updates", configsToUpdate),

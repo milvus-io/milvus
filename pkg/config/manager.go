@@ -621,6 +621,12 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 		return fmt.Errorf("failed to atomically alter configs in etcd: %w", err)
 	}
 
+	// Proactively refresh local EtcdSource so the write is immediately visible in this process,
+	// rather than waiting for the async etcd-watch refresher.
+	if err := etcdSource.refreshConfigurations(); err != nil {
+		return err
+	}
+
 	log.Info("configs atomically altered in etcd",
 		zap.Int("updates", len(updates)),
 		zap.Int("deletes", len(deletes)),

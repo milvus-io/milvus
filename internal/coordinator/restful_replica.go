@@ -74,25 +74,12 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	}
 
 	// Check each collection
-	percentages := showResp.GetInMemoryPercentages()
-	for idx, collectionID := range showResp.GetCollectionIDs() {
-		// Check if collection is fully loaded (LoadPercentage == 100)
-		if idx >= len(percentages) {
-			writeJSONError(w, fmt.Sprintf("inconsistent response: collection %d has no load percentage", collectionID), http.StatusInternalServerError)
-			return
-		}
-		loadPercentage := percentages[idx]
-		if loadPercentage < 100 {
-			reason := fmt.Sprintf("collection %d: not fully loaded (%d%%)", collectionID, loadPercentage)
-			logger.Info("collection not 100% loaded", zap.String("reason", reason))
-			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
-			return
-		}
-
+	for _, collectionID := range showResp.GetCollectionIDs() {
 		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field
 		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
 
-		// Check replica count matches exactly
+		// Check replica count matches exactly — the replica meta must already reflect
+		// the configured count before we inspect serviceability/leaks.
 		if clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
 			reason := fmt.Sprintf("collection %d: replica count mismatch (expected %d, actual %d)",
 				collectionID, clusterReplicaNum, len(internalReplicas))
@@ -113,6 +100,31 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 				return
 			}
+		}
+
+		// Now that replica count and RG distribution match, verify every replica actually
+		// has a serviceable shard leader for every channel. This live dist check avoids
+		// the stale CollectionObserver-persisted LoadPercentage that can falsely report
+		// 100% during scale-up/scale-down transitions.
+		if err := s.queryCoordServer.CheckAllReplicasServiceable(ctx, collectionID); err != nil {
+			reason := fmt.Sprintf("collection %d: %s", collectionID, err.Error())
+			logger.Info("collection not serviceable", zap.String("reason", reason))
+			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+			return
+		}
+
+		// Check that physical resources have been released from querynodes no longer
+		// part of any replica. During scale-down a decommissioned replica's querynode may
+		// still hold segments/channels while release is in flight; compliance must wait for
+		// that to finish before signaling Ready, otherwise callers may terminate nodes while
+		// they are still serving or holding state.
+		leakedSegments, leakedChannels := s.queryCoordServer.GetLeakedResourcesByCollection(ctx, collectionID)
+		if leakedSegments > 0 || leakedChannels > 0 {
+			reason := fmt.Sprintf("collection %d: resources not fully released (leaked segments=%d, channels=%d)",
+				collectionID, leakedSegments, leakedChannels)
+			logger.Info("collection has leaked resources on non-replica nodes", zap.String("reason", reason))
+			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+			return
 		}
 	}
 
