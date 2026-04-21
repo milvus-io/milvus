@@ -152,11 +152,10 @@ class VectorIndex : public IndexBase {
 
     void
     UpdateValidData(const bool* valid_data, int64_t count) {
-        offset_mapping_.BuildIncremental(
-            valid_data,
-            count,
-            offset_mapping_.GetTotalCount(),
-            offset_mapping_.GetNextPhysicalOffset());
+        offset_mapping_.Append(valid_data,
+                               count,
+                               offset_mapping_.GetTotalCount(),
+                               offset_mapping_.GetValidCount());
     }
 
     void
