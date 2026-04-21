@@ -815,6 +815,8 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 		}
 	}
 
+	preferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+
 	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
 
@@ -828,6 +830,9 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 					IndexInfo:   index,
 				}
 				indexedFieldInfos[index.IndexID] = fieldInfo
+			}
+			if preferFieldData {
+				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 			}
 		} else {
 			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
@@ -883,6 +888,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
+	preferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.GetAsBool()
+
 	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
 
@@ -924,6 +931,9 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 						}
 						indexedFieldInfos[indexInfo.IndexID] = fieldInfo
 					}
+					if preferFieldData {
+						fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+					}
 				} else {
 					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 				}
@@ -945,6 +955,9 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 						IndexInfo:   indexInfo,
 					}
 					indexedFieldInfos[indexInfo.IndexID] = fieldInfo
+				}
+				if preferFieldData {
+					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 				}
 			} else {
 				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
