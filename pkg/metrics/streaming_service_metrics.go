@@ -495,6 +495,30 @@ var (
 		Help: "Total of empty time tick filtered",
 	}, WALChannelLabelName)
 
+	// Flusher sync dispatcher metrics.
+
+	WALFlusherSyncDispatcherPendingTasks = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "flusher_sync_dispatcher_pending_tasks",
+		Help: "Number of pending sync tasks (queued + in-flight) in the dispatcher",
+	})
+
+	WALFlusherSyncDispatcherTaskTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "flusher_sync_dispatcher_task_total",
+		Help: "Total number of sync tasks submitted to the dispatcher",
+	})
+
+	WALFlusherSyncDispatcherQueueDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_queue_duration_seconds",
+		Help:    "Time a sync task spends waiting in the per-key queue before execution starts",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherExecuteDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_execute_duration_seconds",
+		Help:    "Time a sync task spends executing (including S3 upload and callbacks)",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
 	WALRateLimitControllerState = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "rate_limit_controller_state",
 		Help: "Current state of adaptive rate limit controller",
@@ -660,6 +684,11 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
+	registry.MustRegister(WALFlusherSyncDispatcherPendingTasks)
+	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
+	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)
+
 	registry.MustRegister(WALRateLimitControllerState)
 	registry.MustRegister(WALRateLimitState)
 	registry.MustRegister(WALRateLimitConfigRecoveryHWM)
