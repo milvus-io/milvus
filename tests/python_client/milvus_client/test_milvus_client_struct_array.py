@@ -4432,8 +4432,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         # Step 2: Perform range search with selected radius and range_filter
         # For COSINE: radius < distance <= range_filter
         error = {
-            ct.err_code: 65535,
-            ct.err_msg: "range search is not supported for vector array",
+            ct.err_code: 1100,
+            ct.err_msg: "range search is not supported for multi-search-multi on embedding list fields",
         }
         self.search(
             client,
