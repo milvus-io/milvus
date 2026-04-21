@@ -771,12 +771,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
-	case taskcommon.ExternalCollection:
-		req := &datapb.UpdateExternalCollectionRequest{}
+	case taskcommon.RefreshExternalCollection:
+		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createExternalCollectionTask(ctx, req)
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createRefreshExternalCollectionTask(ctx, clusterID, req)
 	case taskcommon.CopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -893,11 +897,11 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.ExternalCollection:
+	case taskcommon.RefreshExternalCollection:
 		// Query task state from external collection manager
 		info := node.externalCollectionManager.Get(clusterID, taskID)
 		if info == nil {
-			resp := &datapb.UpdateExternalCollectionResponse{
+			resp := &datapb.RefreshExternalCollectionTaskResponse{
 				Status:     merr.Success(),
 				State:      indexpb.JobState_JobStateFailed,
 				FailReason: "task result not found",
@@ -907,7 +911,7 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason("task result not found")
 			return wrapQueryTaskResult(resp, resProperties)
 		}
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			Status:          merr.Success(),
 			State:           info.State,
 			FailReason:      info.FailReason,
@@ -975,7 +979,7 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			TaskIDs:   []int64{taskID},
 			JobType:   jobType,
 		})
-	case taskcommon.ExternalCollection:
+	case taskcommon.RefreshExternalCollection:
 		// Drop external collection task from external collection manager
 		clusterID, err := properties.GetClusterID()
 		if err != nil {
@@ -1013,15 +1017,18 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 	return merr.Success(), nil
 }
 
-// createExternalCollectionTask handles updating external collection segments
-// This submits the task to the external collection manager for async execution
-func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *datapb.UpdateExternalCollectionRequest) (*commonpb.Status, error) {
+// createRefreshExternalCollectionTask handles a refresh-external-collection task dispatched from DataCoord.
+// This submits the task to the external collection manager for async execution.
+// clusterID is the caller's cluster identifier (from CreateTask properties),
+// used as the task key so that QueryTask from the same caller can locate the result.
+func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, clusterID string, req *datapb.RefreshExternalCollectionTaskRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("clusterID", clusterID),
 	)
 
-	log.Info("createExternalCollectionTask received",
+	log.Info("createRefreshExternalCollectionTask received",
 		zap.Int("currentSegments", len(req.GetCurrentSegments())),
 		zap.String("externalSource", req.GetExternalSource()))
 
@@ -1029,16 +1036,10 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 		return merr.Status(err), nil
 	}
 
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-
 	// Submit task to external collection manager
 	// The task will execute asynchronously in the manager's goroutine pool
-	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-		// Execute the task
-		// cancel is managed by SubmitTask's pool closure (defer cancel()),
-		// but we still pass a context-derived cancel for consistency.
-		_, taskCancel := context.WithCancel(taskCtx)
-		task := external.NewUpdateExternalTask(taskCtx, taskCancel, req)
+	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		task := external.NewRefreshExternalCollectionTask(taskCtx, req)
 
 		if err := task.PreExecute(taskCtx); err != nil {
 			log.Warn("external collection task PreExecute failed", zap.Error(err))
@@ -1058,7 +1059,7 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 		log.Info("external collection task completed successfully",
 			zap.Int("updatedSegments", len(task.GetUpdatedSegments())))
 
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			Status:          merr.Success(),
 			State:           indexpb.JobState_JobStateFinished,
 			KeptSegments:    task.GetKeptSegmentIDs(),
@@ -1074,18 +1075,4 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 
 	log.Info("external collection task submitted to manager")
 	return merr.Success(), nil
-}
-
-func extractSegmentIDs(segments []*datapb.SegmentInfo) []int64 {
-	if len(segments) == 0 {
-		return nil
-	}
-	result := make([]int64, 0, len(segments))
-	for _, seg := range segments {
-		if seg == nil {
-			continue
-		}
-		result = append(result, seg.GetID())
-	}
-	return result
 }

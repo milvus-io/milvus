@@ -106,6 +106,22 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				udpates.ConsistencyLevel = lv
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
+		case common.CollectionExternalSource:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSource = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
+		case common.CollectionExternalSpec:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSpec = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
 		}
@@ -157,6 +173,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			EnableDynamicField: coll.EnableDynamicField,
 			Properties:         newPropsKeyValuePairs,
 			Version:            coll.SchemaVersion,
+		}
+		// Preserve ExternalSource/ExternalSpec if they were set earlier in this request.
+		if udpates.Schema != nil {
+			schema.ExternalSource = udpates.Schema.ExternalSource
+			schema.ExternalSpec = udpates.Schema.ExternalSpec
 		}
 		udpates.Schema = schema
 	}

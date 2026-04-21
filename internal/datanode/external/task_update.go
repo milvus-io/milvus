@@ -16,7 +16,7 @@
 
 package external
 
-// UpdateExternalTask handles updating external collection segments by fetching fragments from external sources
+// RefreshExternalCollectionTask handles updating external collection segments by fetching fragments from external sources
 // and organizing them into segments with balanced row counts.
 //
 // SEGMENT ID ALLOCATION WORKFLOW:
@@ -43,6 +43,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -51,6 +52,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -136,19 +139,18 @@ type SegmentResult struct {
 	IsNew      bool // true if this is a newly created segment requiring ID allocation
 }
 
-// UpdateExternalTask handles updating external collection segments
-type UpdateExternalTask struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+// RefreshExternalCollectionTask handles updating external collection segments
+type RefreshExternalCollectionTask struct {
+	ctx context.Context
 
-	req *datapb.UpdateExternalCollectionRequest
+	req *datapb.RefreshExternalCollectionTaskRequest
 	tr  *timerecord.TimeRecorder
 
 	state      indexpb.JobState
 	failReason string
 
 	// Cached parsed spec (populated in PreExecute, reused in Execute)
-	parsedSpec *ExternalSpec
+	parsedSpec *externalspec.ExternalSpec
 	columns    []string
 
 	// Result after execution — tracked separately for correct response building
@@ -162,54 +164,51 @@ type UpdateExternalTask struct {
 	nextAllocID         int64           // next available segment ID from pre-allocated range
 }
 
-// NewUpdateExternalTask creates a new update external task
-func NewUpdateExternalTask(
+// NewRefreshExternalCollectionTask creates a new update external task
+func NewRefreshExternalCollectionTask(
 	ctx context.Context,
-	cancel context.CancelFunc,
-	req *datapb.UpdateExternalCollectionRequest,
-) *UpdateExternalTask {
-	return &UpdateExternalTask{
+	req *datapb.RefreshExternalCollectionTaskRequest,
+) *RefreshExternalCollectionTask {
+	return &RefreshExternalCollectionTask{
 		ctx:             ctx,
-		cancel:          cancel,
 		req:             req,
-		tr:              timerecord.NewTimeRecorder(fmt.Sprintf("UpdateExternalTask: %d", req.GetTaskID())),
+		tr:              timerecord.NewTimeRecorder(fmt.Sprintf("RefreshExternalCollectionTask: %d", req.GetTaskID())),
 		state:           indexpb.JobState_JobStateInit,
 		segmentMappings: make(map[int64]*SegmentRowMapping),
 	}
 }
 
-func (t *UpdateExternalTask) Ctx() context.Context {
+func (t *RefreshExternalCollectionTask) Ctx() context.Context {
 	return t.ctx
 }
 
-func (t *UpdateExternalTask) Name() string {
-	return fmt.Sprintf("UpdateExternalTask-%d", t.req.GetTaskID())
+func (t *RefreshExternalCollectionTask) Name() string {
+	return fmt.Sprintf("RefreshExternalCollectionTask-%d", t.req.GetTaskID())
 }
 
-func (t *UpdateExternalTask) OnEnqueue(ctx context.Context) error {
+func (t *RefreshExternalCollectionTask) OnEnqueue(ctx context.Context) error {
 	t.tr.RecordSpan()
-	log.Ctx(ctx).Info("UpdateExternalTask enqueued",
+	log.Ctx(ctx).Info("RefreshExternalCollectionTask enqueued",
 		zap.Int64("taskID", t.req.GetTaskID()),
 		zap.Int64("collectionID", t.req.GetCollectionID()))
 	return nil
 }
 
-func (t *UpdateExternalTask) SetState(state indexpb.JobState, failReason string) {
+func (t *RefreshExternalCollectionTask) SetState(state indexpb.JobState, failReason string) {
 	t.state = state
 	t.failReason = failReason
 }
 
-func (t *UpdateExternalTask) GetState() indexpb.JobState {
+func (t *RefreshExternalCollectionTask) GetState() indexpb.JobState {
 	return t.state
 }
 
-func (t *UpdateExternalTask) GetSlot() int64 {
+func (t *RefreshExternalCollectionTask) GetSlot() int64 {
 	return 1
 }
 
-func (t *UpdateExternalTask) Reset() {
+func (t *RefreshExternalCollectionTask) Reset() {
 	t.ctx = nil
-	t.cancel = nil
 	t.req = nil
 	t.tr = nil
 	t.keptSegmentIDs = nil
@@ -218,11 +217,11 @@ func (t *UpdateExternalTask) Reset() {
 	t.segmentMappings = nil
 }
 
-func (t *UpdateExternalTask) PreExecute(ctx context.Context) error {
+func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("UpdateExternalTask PreExecute",
+	log.Ctx(ctx).Info("RefreshExternalCollectionTask PreExecute",
 		zap.Int64("taskID", t.req.GetTaskID()),
 		zap.Int64("collectionID", t.req.GetCollectionID()))
 
@@ -240,7 +239,7 @@ func (t *UpdateExternalTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Parse and cache external spec for reuse during Execute
-	spec, err := ParseExternalSpec(t.req.GetExternalSpec())
+	spec, err := externalspec.ParseExternalSpec(t.req.GetExternalSpec())
 	if err != nil {
 		return fmt.Errorf("failed to parse external spec: %w", err)
 	}
@@ -250,12 +249,12 @@ func (t *UpdateExternalTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *UpdateExternalTask) Execute(ctx context.Context) error {
+func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
 	log := log.Ctx(ctx)
-	log.Info("UpdateExternalTask Execute",
+	log.Info("RefreshExternalCollectionTask Execute",
 		zap.Int64("taskID", t.req.GetTaskID()),
 		zap.Int64("collectionID", t.req.GetCollectionID()))
 
@@ -294,22 +293,46 @@ func (t *UpdateExternalTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-// fetchFragmentsFromExternalSource scans the external source and returns fragments
-func (t *UpdateExternalTask) fetchFragmentsFromExternalSource(ctx context.Context) ([]packed.Fragment, error) {
-	return packed.FetchFragmentsFromExternalSource(
+// fetchFragmentsFromExternalSource reads file info from the explore manifest
+// written by DataCoord and returns fragments for the assigned file range.
+func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx context.Context) ([]packed.Fragment, error) {
+	manifestPath := t.req.GetExploreManifestPath()
+	if manifestPath == "" {
+		return nil, fmt.Errorf("explore manifest path is required but not provided")
+	}
+
+	log.Ctx(ctx).Info("reading file list from explore manifest",
+		zap.String("manifestPath", manifestPath),
+		zap.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
+		zap.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
+
+	extfsPrefix := packed.ExtfsPrefixForCollection(t.req.GetCollectionID())
+	specExtfs := t.parsedSpec.BuildExtfsOverrides(extfsPrefix)
+
+	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+
+	return packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
 		t.parsedSpec.Format,
 		t.columns,
 		t.req.GetExternalSource(),
 		t.req.GetStorageConfig(),
+		t.req.GetFileIndexBegin(),
+		t.req.GetFileIndexEnd(),
+		manifestPath,
+		packed.ExternalFetchOptions{
+			CollectionID: t.req.GetCollectionID(),
+			SpecExtfs:    specExtfs,
+			RowLimit:     targetRowsPerSegment,
+		},
 	)
 }
 
-func (t *UpdateExternalTask) PostExecute(ctx context.Context) error {
+func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
-	log.Ctx(ctx).Info("UpdateExternalTask PostExecute",
+	log.Ctx(ctx).Info("RefreshExternalCollectionTask PostExecute",
 		zap.Int64("taskID", t.req.GetTaskID()),
 		zap.Int64("collectionID", t.req.GetCollectionID()),
 		zap.Int("updatedSegments", len(t.updatedSegments)))
@@ -317,27 +340,27 @@ func (t *UpdateExternalTask) PostExecute(ctx context.Context) error {
 }
 
 // GetUpdatedSegments returns all result segments (kept + new) after execution
-func (t *UpdateExternalTask) GetUpdatedSegments() []*datapb.SegmentInfo {
+func (t *RefreshExternalCollectionTask) GetUpdatedSegments() []*datapb.SegmentInfo {
 	return t.updatedSegments
 }
 
 // GetKeptSegmentIDs returns IDs of current segments that were kept unchanged
-func (t *UpdateExternalTask) GetKeptSegmentIDs() []int64 {
+func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 	return t.keptSegmentIDs
 }
 
 // GetNewSegments returns only newly created segments (from orphan fragment rebalancing)
-func (t *UpdateExternalTask) GetNewSegments() []*datapb.SegmentInfo {
+func (t *RefreshExternalCollectionTask) GetNewSegments() []*datapb.SegmentInfo {
 	return t.newSegments
 }
 
 // GetSegmentMappings returns the row mappings for all segments (segmentID -> mapping)
-func (t *UpdateExternalTask) GetSegmentMappings() map[int64]*SegmentRowMapping {
+func (t *RefreshExternalCollectionTask) GetSegmentMappings() map[int64]*SegmentRowMapping {
 	return t.segmentMappings
 }
 
 // GetSegmentResults returns segment results with metadata for DataCoord processing
-func (t *UpdateExternalTask) GetSegmentResults() []*SegmentResult {
+func (t *RefreshExternalCollectionTask) GetSegmentResults() []*SegmentResult {
 	var results []*SegmentResult
 
 	// Build a map of current segment IDs for fast lookup
@@ -365,12 +388,12 @@ func fragmentKey(f packed.Fragment) string {
 }
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments
-func (t *UpdateExternalTask) buildCurrentSegmentFragments() (packed.SegmentFragments, error) {
+func (t *RefreshExternalCollectionTask) buildCurrentSegmentFragments() (packed.SegmentFragments, error) {
 	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig())
 }
 
 // organizeSegments compares fragments and organizes them into segments
-func (t *UpdateExternalTask) organizeSegments(
+func (t *RefreshExternalCollectionTask) organizeSegments(
 	ctx context.Context,
 	currentSegmentFragments packed.SegmentFragments,
 	newFragments []packed.Fragment,
@@ -472,7 +495,7 @@ func (t *UpdateExternalTask) organizeSegments(
 }
 
 // balanceFragmentsToSegments organizes fragments into segments with balanced row counts
-func (t *UpdateExternalTask) balanceFragmentsToSegments(ctx context.Context, fragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.Context, fragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
 	if len(fragments) == 0 {
 		return nil, nil
 	}
@@ -540,17 +563,17 @@ func (t *UpdateExternalTask) balanceFragmentsToSegments(ctx context.Context, fra
 		bins[minIdx].rowCount += f.RowCount
 	}
 
-	// Convert bins to SegmentInfo
-	var result []*datapb.SegmentInfo
+	// Phase 1: Allocate segment IDs (sequential, lightweight)
+	type segmentWork struct {
+		segmentID int64
+		rowCount  int64
+		fragments []packed.Fragment
+	}
+	var works []segmentWork
 	for _, bin := range bins {
-		if err := ensureContext(ctx); err != nil {
-			return nil, err
-		}
 		if len(bin.fragments) == 0 {
 			continue
 		}
-
-		// Allocate segment ID from pre-allocated range
 		if t.nextAllocID >= t.preallocatedIDRange.End {
 			return nil, fmt.Errorf("insufficient pre-allocated segment IDs: need more but only have %d IDs in range [%d, %d)",
 				t.preallocatedIDRange.End-t.preallocatedIDRange.Begin,
@@ -559,43 +582,80 @@ func (t *UpdateExternalTask) balanceFragmentsToSegments(ctx context.Context, fra
 		}
 		segmentID := t.nextAllocID
 		t.nextAllocID++
+		works = append(works, segmentWork{
+			segmentID: segmentID,
+			rowCount:  bin.rowCount,
+			fragments: bin.fragments,
+		})
+	}
 
-		log.Info("Assigned pre-allocated segment ID",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("nextID", t.nextAllocID),
-			zap.Int64("rowCount", bin.rowCount),
-			zap.Int("numFragments", len(bin.fragments)))
+	log.Info("Allocated segment IDs, starting manifest creation",
+		zap.Int("numSegments", len(works)))
 
-		// Create manifest for this segment
-		manifestPath, err := t.createManifestForSegment(ctx, segmentID, bin.fragments)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create manifest for segment %d: %w", segmentID, err)
-		}
+	// Phase 2: Create manifests concurrently with a fixed-size worker pool.
+	// Same concurrency model as fetchRowCountsConcurrently in storagev2/packed:
+	// conc.Pool + AwaitAll gives built-in first-error propagation and goroutine
+	// lifetime management, so we don't reinvent it with channels + WaitGroup.
+	const createManifestWorkers = 16
+	manifestStart := time.Now()
 
+	workers := createManifestWorkers
+	if workers > len(works) {
+		workers = len(works)
+	}
+	pool := conc.NewPool[struct{}](workers)
+	defer pool.Release()
+
+	manifestPaths := make([]string, len(works))
+	futures := make([]*conc.Future[struct{}], len(works))
+	for i, work := range works {
+		i, work := i, work
+		futures[i] = pool.Submit(func() (struct{}, error) {
+			manifestPath, err := t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			if err != nil {
+				return struct{}{}, fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
+			}
+			manifestPaths[i] = manifestPath
+			return struct{}{}, nil
+		})
+	}
+	if err := conc.AwaitAll(futures...); err != nil {
+		return nil, err
+	}
+	// Guard against ctx canceled during the pool run: conc.AwaitAll waits
+	// for every submitted future to settle, so a canceled ctx whose workers
+	// happened to return nil (e.g. a mock that ignores ctx) would otherwise
+	// slip past the error check above and we'd build result from half-done
+	// work. Mirrors the pre-conc.Pool behavior.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	manifestDuration := time.Since(manifestStart)
+	log.Info("CreateManifest phase completed",
+		zap.Int("numSegments", len(works)),
+		zap.Int("workers", workers),
+		zap.Duration("duration", manifestDuration))
+
+	// Phase 3: Build result and mappings (sequential, lightweight)
+	result := make([]*datapb.SegmentInfo, 0, len(works))
+	for i, work := range works {
 		seg := &datapb.SegmentInfo{
-			ID:             segmentID,
+			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
-			NumOfRows:      bin.rowCount,
-			ManifestPath:   manifestPath,
+			NumOfRows:      work.rowCount,
+			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
 		}
 		result = append(result, seg)
-
-		// Compute and store row mapping for new segment
-		t.segmentMappings[segmentID] = NewSegmentRowMapping(segmentID, bin.fragments)
-
-		log.Debug("Created new segment from fragments",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("rowCount", bin.rowCount),
-			zap.Int("numFragments", len(bin.fragments)),
-			zap.String("manifestPath", manifestPath))
+		t.segmentMappings[work.segmentID] = NewSegmentRowMapping(work.segmentID, work.fragments)
 	}
 
 	return result, nil
 }
 
 // createManifestForSegment creates a manifest file for the segment
-func (t *UpdateExternalTask) createManifestForSegment(
+func (t *RefreshExternalCollectionTask) createManifestForSegment(
 	ctx context.Context,
 	segmentID int64,
 	fragments []packed.Fragment,
