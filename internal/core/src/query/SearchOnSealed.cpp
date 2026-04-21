@@ -160,6 +160,9 @@ SearchOnSealedColumn(const Schema& schema,
     TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     if (offset_mapping.IsEnabled()) {
+        for (int64_t c = 0; c < column->num_chunks(); ++c) {
+            column->EnsureChunkOffsetMapping(c, op_context);
+        }
         transformed_bitset = TransformBitset(bitview, offset_mapping);
         search_bitview = BitsetView(transformed_bitset);
         if (offset_mapping.GetValidCount() == 0) {
