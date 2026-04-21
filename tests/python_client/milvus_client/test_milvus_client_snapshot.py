@@ -4733,3 +4733,160 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
+
+
+class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
+    """Test pin_snapshot_data / unpin_snapshot_data.
+
+    These APIs exist in both the SDK (``pymilvus/milvus_client/milvus_client.py``)
+    and the server (``internal/proxy/task_snapshot.go:839-1029``) but are not
+    exercised by existing tests. They are the admin-facing hooks for holding
+    snapshot segments against compaction/GC during out-of-band copy-out.
+    """
+
+    def _prepare(self, client, nb=500):
+        """Helper: create collection + snapshot, return (collection, snapshot)."""
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+        return collection_name, snapshot_name
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_pin_snapshot_data_basic(self):
+        """
+        target: test basic pin → unpin flow
+        method: pin with ttl=60; assert pin_id > 0; unpin; drop snapshot still works
+        expected: pin returns a positive int pin_id; unpin is side-effect free
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare(client)
+
+        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name,
+                                           ttl_seconds=60)
+        assert isinstance(pin_id, int) and pin_id > 0, \
+            f"pin_snapshot_data should return a positive pin_id, got {pin_id!r}"
+
+        self.unpin_snapshot_data(client, pin_id)
+
+        # Snapshot must still be intact after pin/unpin cycle
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
+        assert info.name == snapshot_name
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_pin_snapshot_blocks_drop(self):
+        """
+        target: test that a pin blocks drop_snapshot until unpinned
+        method: pin with ttl=300s; attempt drop → expect failure; unpin → drop succeeds
+        expected: drop fails while pin is active; error mentions pin; drop works after unpin
+        note: mirrors the pin-based protection exercised indirectly by
+              ``test_snapshot_drop_and_restore_race`` in TestMilvusClientSnapshotLifecycle.
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare(client)
+
+        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name,
+                                           ttl_seconds=300)
+
+        # drop should be rejected while pinned
+        with pytest.raises(Exception) as exc_info:
+            client.drop_snapshot(snapshot_name, collection_name, timeout=30)
+        err_msg = str(exc_info.value).lower()
+        assert "pin" in err_msg, \
+            f"Expected drop error to mention pin, got: {exc_info.value}"
+
+        # Unpin releases the hold
+        self.unpin_snapshot_data(client, pin_id)
+
+        # drop should now succeed
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+        snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
+        assert snapshot_name not in snapshots
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_pin_snapshot_invalid_ttl_negative(self):
+        """
+        target: test pin rejects negative ttl_seconds
+        method: call pin with ttl_seconds=-1
+        expected: server returns ParameterInvalid with "non-negative"
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare(client)
+
+        with pytest.raises(Exception) as exc_info:
+            client.pin_snapshot_data(snapshot_name, collection_name, ttl_seconds=-1)
+        msg = str(exc_info.value).lower()
+        assert "non-negative" in msg or "ttl_seconds" in msg, \
+            f"Expected ttl_seconds error, got: {exc_info.value}"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_pin_snapshot_invalid_ttl_exceeds_max(self):
+        """
+        target: test pin rejects ttl_seconds beyond the 30-day cap
+        method: call pin with ttl_seconds > 2592000 (30 days)
+        expected: server returns ParameterInvalid with "exceeds maximum"
+        note: cap defined in internal/proxy/task_snapshot.go:891 (maxPinTTLSeconds)
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare(client)
+
+        with pytest.raises(Exception) as exc_info:
+            client.pin_snapshot_data(snapshot_name, collection_name,
+                                     ttl_seconds=2_592_001)
+        msg = str(exc_info.value).lower()
+        assert "exceed" in msg or "ttl_seconds" in msg, \
+            f"Expected exceeds-max error, got: {exc_info.value}"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_pin_nonexistent_snapshot(self):
+        """
+        target: test pin on a non-existent snapshot fails cleanly
+        method: pin a snapshot_name that was never created
+        expected: server returns a clear error (typically not found / snapshot metadata missing)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+
+        with pytest.raises(Exception) as exc_info:
+            client.pin_snapshot_data(cf.gen_unique_str("ghost"), collection_name,
+                                     ttl_seconds=60)
+        # Accept any error — the server may return "not found", "snapshot", or ParameterInvalid
+        log.info(f"pin non-existent snapshot error: {exc_info.value}")
+        assert str(exc_info.value), "pin_snapshot_data on non-existent snapshot must raise"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_unpin_invalid_pin_id(self):
+        """
+        target: test unpin with an unknown / never-issued pin_id
+        method: call unpin with a random int not produced by pin_snapshot_data
+        expected: server either ignores idempotently or returns a clear error;
+                  no hang, no system inconsistency
+        """
+        client = self._client()
+
+        # Either the call raises a clear error, or it silently no-ops.
+        # Both are acceptable — the key is it must not hang or corrupt state.
+        try:
+            client.unpin_snapshot_data(pin_id=987_654_321, timeout=30)
+            log.info("unpin with unknown pin_id was idempotent (no error)")
+        except Exception as e:
+            log.info(f"unpin with unknown pin_id rejected: {e}")
+            assert str(e), "unpin error, if any, must carry a message"
