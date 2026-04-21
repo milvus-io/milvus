@@ -259,16 +259,24 @@ class BitmapIndex : public ScalarIndex<T> {
     SerializeIndexData(uint8_t* index_data_ptr);
 
     std::pair<std::shared_ptr<uint8_t[]>, size_t>
+    SerializeValidBitsetData() const;
+
+    std::pair<std::shared_ptr<uint8_t[]>, size_t>
     SerializeIndexMeta();
 
     std::pair<size_t, size_t>
     DeserializeIndexMeta(const uint8_t* data_ptr, size_t data_size);
 
+    void
+    DeserializeValidBitsetData(const uint8_t* data_ptr, size_t data_size);
+
     T
     ParseKey(const uint8_t** ptr);
 
     void
-    DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
+    DeserializeIndexData(const uint8_t* data_ptr,
+                         size_t index_length,
+                         bool rebuild_validity_from_postings);
 
     void
     BuildOffsetCache();
@@ -317,7 +325,8 @@ class BitmapIndex : public ScalarIndex<T> {
                   const uint8_t* data,
                   size_t data_size,
                   size_t index_length,
-                  milvus::proto::common::LoadPriority priority);
+                  milvus::proto::common::LoadPriority priority,
+                  bool rebuild_validity_from_postings);
 
     void
     UnmapIndexData();

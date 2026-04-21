@@ -233,6 +233,21 @@ BitmapIndex<T>::SerializeIndexData(uint8_t* data_ptr) {
 
 template <typename T>
 std::pair<std::shared_ptr<uint8_t[]>, size_t>
+BitmapIndex<T>::SerializeValidBitsetData() const {
+    size_t valid_bitset_size = (total_num_rows_ + 7) / 8;
+    std::shared_ptr<uint8_t[]> valid_bitset_data(
+        new uint8_t[valid_bitset_size]);
+    memset(valid_bitset_data.get(), 0, valid_bitset_size);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        if (valid_bitset_[i]) {
+            valid_bitset_data[i / 8] |= (1 << (i % 8));
+        }
+    }
+    return std::make_pair(valid_bitset_data, valid_bitset_size);
+}
+
+template <typename T>
+std::pair<std::shared_ptr<uint8_t[]>, size_t>
 BitmapIndex<T>::SerializeIndexMeta() {
     YAML::Node node;
     node[BITMAP_INDEX_LENGTH] = data_.size();
@@ -264,6 +279,24 @@ BitmapIndex<std::string>::SerializeIndexData(uint8_t* data_ptr) {
 }
 
 template <typename T>
+void
+BitmapIndex<T>::DeserializeValidBitsetData(const uint8_t* data_ptr,
+                                           size_t data_size) {
+    auto expected_size = (total_num_rows_ + 7) / 8;
+    AssertInfo(data_size == expected_size,
+               "bitmap valid_bitset size mismatch, expect {}, got {}",
+               expected_size,
+               data_size);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        uint8_t byte = data_ptr[i / 8];
+        if (byte & (1 << (i % 8))) {
+            valid_bitset_.set(i);
+        }
+    }
+}
+
+template <typename T>
 BinarySet
 BitmapIndex<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built yet");
@@ -279,6 +312,11 @@ BitmapIndex<T>::Serialize(const Config& config) {
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
+    if (schema_.nullable()) {
+        auto valid_bitset = SerializeValidBitsetData();
+        ret_set.Append(
+            BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
+    }
 
     LOG_INFO("build bitmap index with cardinality = {}, num_rows = {}",
              data_.size(),
@@ -346,7 +384,8 @@ BitmapIndex<T>::ChooseIndexLoadMode(int64_t index_length) {
 template <typename T>
 void
 BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
-                                     size_t index_length) {
+                                     size_t index_length,
+                                     bool rebuild_validity_from_postings) {
     ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         T key;
@@ -362,8 +401,10 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
         } else {
             data_[key] = value;
         }
-        for (const auto& v : value) {
-            valid_bitset_.set(v);
+        if (rebuild_validity_from_postings) {
+            for (const auto& v : value) {
+                valid_bitset_.set(v);
+            }
         }
     }
 }
@@ -405,8 +446,10 @@ BitmapIndex<T>::BuildOffsetCache() {
 
 template <>
 void
-BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
-                                               size_t index_length) {
+BitmapIndex<std::string>::DeserializeIndexData(
+    const uint8_t* data_ptr,
+    size_t index_length,
+    bool rebuild_validity_from_postings) {
     ChooseIndexLoadMode(index_length);
     for (size_t i = 0; i < index_length; ++i) {
         size_t key_size;
@@ -425,8 +468,10 @@ BitmapIndex<std::string>::DeserializeIndexData(const uint8_t* data_ptr,
         } else {
             data_[key] = value;
         }
-        for (const auto& v : value) {
-            valid_bitset_.set(v);
+        if (rebuild_validity_from_postings) {
+            for (const auto& v : value) {
+                valid_bitset_.set(v);
+            }
         }
     }
 }
@@ -460,7 +505,8 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
                               const uint8_t* data_ptr,
                               size_t data_size,
                               size_t index_length,
-                              milvus::proto::common::LoadPriority priority) {
+                              milvus::proto::common::LoadPriority priority,
+                              bool rebuild_validity_from_postings) {
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
 
@@ -475,8 +521,10 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
             roaring::Roaring value;
             value =
                 roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-            for (const auto& v : value) {
-                valid_bitset_.set(v);
+            if (rebuild_validity_from_postings) {
+                for (const auto& v : value) {
+                    valid_bitset_.set(v);
+                }
             }
 
             // convert roaring vaule to frozen mode
@@ -529,7 +577,15 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                            index_meta_buffer->size);
     auto index_length = index_meta.first;
     total_num_rows_ = index_meta.second;
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    valid_bitset_ = TargetBitmap(total_num_rows_, !schema_.nullable());
+    bool rebuild_validity_from_postings = schema_.nullable();
+
+    auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
+    if (valid_bitset_buffer != nullptr) {
+        DeserializeValidBitsetData(valid_bitset_buffer->data.get(),
+                                   valid_bitset_buffer->size);
+        rebuild_validity_from_postings = false;
+    }
 
     auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
 
@@ -550,9 +606,12 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                       index_data_buffer->data.get(),
                       index_data_buffer->size,
                       index_length,
-                      priority);
+                      priority,
+                      rebuild_validity_from_postings);
     } else {
-        DeserializeIndexData(index_data_buffer->data.get(), index_length);
+        DeserializeIndexData(index_data_buffer->data.get(),
+                             index_length,
+                             rebuild_validity_from_postings);
     }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
