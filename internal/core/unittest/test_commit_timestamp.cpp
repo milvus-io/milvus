@@ -214,7 +214,7 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
     schema->set_primary_field_id(pk);
 
     constexpr int64_t N = 10;
-    constexpr Timestamp T_old = 1000;  // row ts range: [1000, 1009]
+    constexpr Timestamp T_old = 1000;     // row ts range: [1000, 1009]
     constexpr Timestamp T_commit = 1009;  // == max(row_ts)
 
     auto dataset = DataGen(schema, N, /*seed=*/42, /*ts_offset=*/T_old);
