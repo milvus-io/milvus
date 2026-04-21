@@ -25,6 +25,7 @@
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <cstddef>
+#include <optional>
 #include <shared_mutex>
 #include <type_traits>
 #include <vector>
@@ -235,26 +236,31 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         return;
     }
     std::vector<std::string> null_offset_files;
+    std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
         if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
 
-        // add slice meta file for null offset file compact
         if (file_name == INDEX_FILE_SLICE_META) {
-            null_offset_files.push_back(file);
+            slice_meta_file = file;
         }
     }
 
     if (null_offset_files.size() > 0) {
+        AssertInfo(slice_meta_file.has_value(),
+                   "null offset slices found but _meta_slice is missing");
+        null_offset_files.push_back(slice_meta_file.value());
         // null offset file is sliced
         auto index_datas = mem_file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
-        auto null_offsets_data = CompactIndexDatas(index_datas);
-        auto null_offsets_data_codecs =
-            std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto null_offsets_data_codecs = CompactIndexDatasByKey(
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
+        AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
+                   "null offset file is empty");
         for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());
