@@ -57,13 +57,13 @@ type BedrockEmbeddingProvider struct {
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.BedrockAccessKeyId)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockAccessKeyId)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.BedrockSAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.BedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, errors.New("Missing AWS Service region. Please pass `region` param.")
+		return nil, errors.New("missing AWS Service region. Please pass `region` param")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),
@@ -140,7 +140,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			case "true":
 				normalize = true
 			default:
-				return nil, fmt.Errorf("Illegal [%s:%s] param, ", models.NormalizeParamKey, param.Value)
+				return nil, fmt.Errorf("illegal [%s:%s] param", models.NormalizeParamKey, param.Value)
 			}
 		default:
 		}
@@ -214,7 +214,7 @@ func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, tex
 			return nil, err
 		}
 		if len(resp.Embedding) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding))
 		}
 		data = append(data, resp.Embedding)

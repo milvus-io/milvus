@@ -73,7 +73,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 	collectionID := job.result.Message.Header().GetCollectionId()
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", collectionID))
 
-	if !job.meta.CollectionManager.Exist(job.ctx, collectionID) {
+	if !job.meta.Exist(job.ctx, collectionID) {
 		log.Info("release collection end, the collection has not been loaded into QueryNode")
 		return nil
 	}

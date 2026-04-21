@@ -52,11 +52,11 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.eventReader != nil {
 		reader.eventReader.Close()
 	}
-	nullable, err := reader.descriptorEvent.GetNullable()
+	nullable, err := reader.GetNullable()
 	if err != nil {
 		return nil, err
 	}
-	reader.eventReader, err = newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer, nullable)
+	reader.eventReader, err = newEventReader(reader.PayloadDataType, reader.buffer, nullable)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ type BinlogReaderOption func(base *BinlogReader) error
 
 func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {
-		edek, ok := base.descriptorEvent.GetEdek()
+		edek, ok := base.GetEdek()
 		if !ok {
 			return nil
 		}
@@ -129,7 +129,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 
 		log.Debug("Binlog reader starts to decypt cipher text",
 			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
+			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),
 		)
 		decrypted, err := decryptor.Decrypt(cipherText)
@@ -139,7 +139,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 		}
 		log.Debug("Binlog reader decrypted cipher text",
 			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
+			zap.Int64("fieldID", base.FieldID),
 			zap.Int("cipher size", len(cipherText)),
 			zap.Int("plain size", len(decrypted)),
 		)

@@ -290,7 +290,7 @@ func Test_CheckRowsEqual(t *testing.T) {
 		DataType: schemapb.DataType_Bool,
 	}
 	schema.Fields = append(schema.Fields, newField)
-	insertData.Data[newField.GetFieldID()], err = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldData(newField.GetDataType(), newField, 1)
 	err = CheckRowsEqual(schema, insertData)
 	assert.Error(t, err)
 
@@ -506,10 +506,11 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				Nullable:     tt.nullable,
 				DefaultValue: tt.defaultVal,
 			}
-			if tt.dataType == schemapb.DataType_Array {
+			switch tt.dataType {
+			case schemapb.DataType_Array:
 				fieldSchema.ElementType = schemapb.DataType_Int64
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
-			} else if tt.dataType == schemapb.DataType_VarChar {
+			case schemapb.DataType_VarChar:
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
 			}
 
@@ -670,7 +671,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 
-	// the dynamic field is allready filled, do nothing
+	// the dynamic field is already filled, do nothing
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())

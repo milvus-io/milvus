@@ -42,7 +42,7 @@ type bytesFileReader struct {
 }
 
 func (r *bytesFileReader) Close() error         { return nil }
-func (r *bytesFileReader) Size() (int64, error) { return int64(r.Reader.Len()), nil }
+func (r *bytesFileReader) Size() (int64, error) { return int64(r.Len()), nil }
 
 type IDFOracleSuite struct {
 	suite.Suite

@@ -370,8 +370,8 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de := NewBaseDescriptorEvent(bsw.collectionID, bsw.partitionID, bsw.segmentID)
 	de.PayloadDataType = bsw.fieldSchema.DataType
 	de.FieldID = bsw.fieldSchema.FieldID
-	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
-	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
+	de.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
+	de.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
 	// Additional head options
 	if bsw.headerOpt != nil {
 		bsw.headerOpt(de)

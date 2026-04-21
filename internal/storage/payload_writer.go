@@ -773,10 +773,10 @@ func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVec
 	if !ok {
 		return errors.New("failed to cast SparseFloatVectorBuilder")
 	}
-	length := len(data.SparseFloatArray.Contents)
+	length := len(data.Contents)
 	builder.Reserve(length)
 	for i := 0; i < length; i++ {
-		builder.Append(data.SparseFloatArray.Contents[i])
+		builder.Append(data.Contents[i])
 	}
 
 	return nil

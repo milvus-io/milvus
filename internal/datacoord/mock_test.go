@@ -60,7 +60,7 @@ func NewMetaMemoryKV() *metaMemoryKV {
 }
 
 func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
-	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
+	keys, values, err := mm.LoadWithPrefix(context.TODO(), prefix)
 	if err != nil {
 		return err
 	}

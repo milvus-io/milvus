@@ -314,7 +314,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
-func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) bool {
 	// Skip error handling since json path existence is guaranteed in CreateIndex
 	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
 	jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
@@ -416,10 +416,10 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 }
 
 // CanCreateIndex currently is used in Unittest
-func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
+func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool) (UniqueID, error) {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
-	indexID, err := m.canCreateIndex(req, isJson)
+	indexID, err := m.canCreateIndex(req, isJSON)
 	if err != nil {
 		return 0, err
 	}
@@ -427,7 +427,7 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 	return indexID, nil
 }
 
-func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
+func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool) (UniqueID, error) {
 	indexes, ok := m.indexes[req.CollectionID]
 	if !ok {
 		return 0, nil
@@ -438,7 +438,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&
-				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
+				/*only check json params when it is json index*/ (!isJSON || checkIdenticalJSON(index, req)) {
 				return index.IndexID, errIndexOperationIgnored
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -450,7 +450,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			return 0, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
-			if isJson {
+			if isJSON {
 				// Skip error handling since json path existence is guaranteed in CreateIndex
 				jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
 				jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)

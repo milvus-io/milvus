@@ -63,7 +63,7 @@ func (t *txnImpl) Commit(ctx context.Context) (*types.AppendResult, error) {
 		panic("in flight count not zero when commit")
 	}
 	t.mu.Unlock()
-	defer t.walAccesserImpl.lifetime.Done()
+	defer t.lifetime.Done()
 
 	commit, err := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(t.opts.VChannel).
@@ -88,7 +88,7 @@ func (t *txnImpl) Rollback(ctx context.Context) error {
 		panic("in flight count not zero when rollback")
 	}
 	t.mu.Unlock()
-	defer t.walAccesserImpl.lifetime.Done()
+	defer t.lifetime.Done()
 
 	rollback, err := message.NewRollbackTxnMessageBuilderV2().
 		WithVChannel(t.opts.VChannel).

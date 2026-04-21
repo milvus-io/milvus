@@ -983,8 +983,8 @@ func TestProxy(t *testing.T) {
 	base.Init(bt)
 	var p paramtable.GrpcServerConfig
 	p.Init(typeutil.ProxyRole, bt)
-	testServer.Proxy.SetAddress(p.GetAddress())
-	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
+	testServer.SetAddress(p.GetAddress())
+	assert.Equal(t, p.GetAddress(), testServer.GetAddress())
 
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())

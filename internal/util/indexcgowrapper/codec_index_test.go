@@ -111,11 +111,12 @@ func NewFloat16(f float32) Float16 {
 	exp := (i >> 23) & 0xff
 	exp16 := int16(exp) - 127 + 15
 	frac := uint16(i>>13) & 0x3ff
-	if exp == 0 {
+	switch exp {
+	case 0:
 		exp16 = 0
-	} else if exp == 0xff {
+	case 0xff:
 		exp16 = 0x1f
-	} else {
+	default:
 		if exp16 > 0x1e {
 			exp16 = 0x1f
 			frac = 0
@@ -136,11 +137,12 @@ func NewBFloat16(f float32) BFloat16 {
 	exp := (i >> 23) & 0xff
 	exp16 := int16(exp) - 127 + 15
 	frac := uint16(i>>13) & 0x3ff
-	if exp == 0 {
+	switch exp {
+	case 0:
 		exp16 = 0
-	} else if exp == 0xff {
+	case 0xff:
 		exp16 = 0x1f
-	} else {
+	default:
 		if exp16 > 0x1e {
 			exp16 = 0x1f
 			frac = 0

@@ -108,36 +108,37 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 	indexParams := make(map[string]string)
 	indexParams[common.IndexTypeKey] = indexType
 	indexParams[common.MetricTypeKey] = metricType
-	if indexType == IndexFaissIDMap { // float vector
+	switch indexType {
+	case IndexFaissIDMap: // float vector
 		indexParams[common.DimKey] = strconv.Itoa(dim)
-	} else if indexType == IndexFaissIVFFlat {
+	case IndexFaissIVFFlat:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
-	} else if indexType == IndexFaissIVFPQ {
+	case IndexFaissIVFPQ:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexFaissIVFSQ8 {
+	case IndexFaissIVFSQ8:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexScaNN {
+	case IndexScaNN:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
-	} else if indexType == IndexHNSW {
+	case IndexHNSW:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexFaissBinIVFFlat { // binary vector
+	case IndexFaissBinIVFFlat: // binary vector
 		indexParams[common.DimKey] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexFaissBinIDMap {
+	case IndexFaissBinIDMap:
 		indexParams[common.DimKey] = strconv.Itoa(dim)
-	} else {
+	default:
 		panic("")
 	}
 

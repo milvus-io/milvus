@@ -178,20 +178,22 @@ func (mgr *vecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType sche
 		dataType = elementType
 	}
 
-	if dataType == schemapb.DataType_BinaryVector {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
 		return mgr.IsBinaryVectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_FloatVector {
+	case schemapb.DataType_FloatVector:
 		return mgr.IsFloat32VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_BFloat16Vector {
+	case schemapb.DataType_BFloat16Vector:
 		return mgr.IsBFloat16VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_Float16Vector {
+	case schemapb.DataType_Float16Vector:
 		return mgr.IsFloat16VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_SparseFloatVector {
+	case schemapb.DataType_SparseFloatVector:
 		return mgr.IsSparseFloat32VectorSupport(indexType, isEmbeddingList)
-	} else if dataType == schemapb.DataType_Int8Vector {
+	case schemapb.DataType_Int8Vector:
 		return mgr.IsInt8VectorSupport(indexType, isEmbeddingList)
+	default:
+		return false
 	}
-	return false
 }
 
 func (mgr *vecIndexMgrImpl) IsFlatVecIndex(indexType IndexType) bool {

@@ -56,7 +56,7 @@ func NewScheduler() *Scheduler {
 }
 
 func (scheduler *Scheduler) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called in Stop()
 	scheduler.cancel = cancel
 
 	scheduler.wg.Add(1)

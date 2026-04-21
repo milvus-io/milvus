@@ -53,7 +53,7 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 		if err != nil {
 			panic(fmt.Errorf("failed to create etcd client: %w", err))
 		}
-		path := paramtable.Get().ServiceParam.EtcdCfg.MetaRootPath.GetValue()
+		path := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
 		clientCreator.rootpath = &path
 	}
 	return clientCreator.client, *clientCreator.rootpath

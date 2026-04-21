@@ -245,7 +245,7 @@ var _ Loader = (*segmentLoader)(nil)
 
 func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
 	if segmentInfo.GetStorageVersion() == 2 && paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
-		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+		bucketName := paramtable.Get().MinioCfg.BucketName.GetValue()
 		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
 				binlog.LogPath = path.Join(bucketName, binlog.LogPath)

@@ -43,7 +43,7 @@ func getProvider(functionSchema *schemapb.FunctionSchema) (string, error) {
 		default:
 		}
 	}
-	return "", fmt.Errorf("The text embedding service provider parameter:[%s] was not found", Provider)
+	return "", fmt.Errorf("the text embedding service provider parameter:[%s] was not found", Provider)
 }
 
 func NewFunctionBase(coll *schemapb.CollectionSchema, fSchema *schemapb.FunctionSchema) (*FunctionBase, error) {
@@ -59,7 +59,7 @@ func NewFunctionBase(coll *schemapb.CollectionSchema, fSchema *schemapb.Function
 	}
 
 	if len(base.outputFields) != len(fSchema.GetOutputFieldNames()) {
-		return &base, fmt.Errorf("The collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
+		return &base, fmt.Errorf("the collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
 			coll.Name, fSchema.Name)
 	}
 

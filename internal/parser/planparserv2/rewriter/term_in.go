@@ -436,13 +436,13 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 		comparable := true
 		for _, tv := range termVals {
 			if g.lower != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.lower)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.lower))) {
 					comparable = false
 					break
 				}
 			}
 			if comparable && g.upper != nil {
-				if !(areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) || (isNumericCase(valueCaseWithNil(tv)) && isNumericCase(valueCaseWithNil(g.upper)))) {
+				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.upper))) {
 					comparable = false
 					break
 				}

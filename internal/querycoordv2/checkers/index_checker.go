@@ -82,7 +82,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
-	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
+	collectionIDs := c.meta.GetAll(ctx)
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
@@ -92,8 +92,8 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 			continue
 		}
 
-		collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
-		schema := c.meta.CollectionManager.GetCollectionSchema(ctx, collectionID)
+		collection := c.meta.GetCollection(ctx, collectionID)
+		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		if collection == nil {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
 			continue
@@ -105,7 +105,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 				c.meta.PutCollectionSchema(ctx, collectionID, collectionSchema.GetSchema())
 			}
 		}
-		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)
 		}

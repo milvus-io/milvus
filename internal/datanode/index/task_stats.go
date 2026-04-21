@@ -77,9 +77,9 @@ type statsTask struct {
 
 type BuildIndexOptions struct {
 	TantivyMemory                int64
-	JsonStatsMaxShreddingColumns int64
-	JsonStatsShreddingRatio      float64
-	JsonStatsWriteBatchSize      int64
+	JSONStatsMaxShreddingColumns int64
+	JSONStatsShreddingRatio      float64
+	JSONStatsWriteBatchSize      int64
 }
 
 func NewStatsTask(ctx context.Context,
@@ -632,9 +632,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
 			options := &BuildIndexOptions{
-				JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
-				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
-				JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
+				JSONStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
+				JSONStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
+				JSONStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
 
@@ -714,9 +714,9 @@ func buildIndexParams(
 		StorageConfig:                    storageConfig,
 		CurrentScalarIndexVersion:        req.GetCurrentScalarIndexVersion(),
 		StorageVersion:                   req.GetStorageVersion(),
-		JsonStatsMaxShreddingColumns:     options.JsonStatsMaxShreddingColumns,
-		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,
-		JsonStatsWriteBatchSize:          options.JsonStatsWriteBatchSize,
+		JsonStatsMaxShreddingColumns:     options.JSONStatsMaxShreddingColumns,
+		JsonStatsShreddingRatioThreshold: options.JSONStatsShreddingRatio,
+		JsonStatsWriteBatchSize:          options.JSONStatsWriteBatchSize,
 		Manifest:                         req.GetManifestPath(),
 	}
 

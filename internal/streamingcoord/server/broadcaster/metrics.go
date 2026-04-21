@@ -61,7 +61,7 @@ func (m *broadcasterMetrics) NewBroadcastTask(msgType message.MessageType, state
 		broadcasterMetrics: m,
 		messageType:        msgType,
 	}
-	g.broadcasterMetrics.fromStateToState(msgType, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
+	g.fromStateToState(msgType, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
 	return g
 }
 
@@ -76,7 +76,7 @@ type taskMetricsGuard struct {
 
 // ObserveStateChanged updates the state of the broadcast task.
 func (g *taskMetricsGuard) ObserveStateChanged(state streamingpb.BroadcastTaskState) {
-	g.broadcasterMetrics.fromStateToState(g.messageType, g.state, state)
+	g.fromStateToState(g.messageType, g.state, state)
 	if state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		g.executionDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.start).Seconds())
 	}

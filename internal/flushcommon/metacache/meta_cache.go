@@ -88,7 +88,7 @@ func NewMetaCache(
 	schemaManager ...SchemaManager,
 ) MetaCache {
 	vchannel := info.GetVchan()
-	var m SchemaManager = newVersionlessSchemaManager(info.GetSchema())
+	m := newVersionlessSchemaManager(info.GetSchema())
 	if len(schemaManager) > 0 && schemaManager[0] != nil {
 		m = schemaManager[0]
 	}

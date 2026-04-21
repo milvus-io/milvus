@@ -71,7 +71,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 
 	{
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Rerank function output field names should be empty")
+		s.ErrorContains(err, "rerank function output field names should be empty")
 	}
 	{
 		functionSchema := &schemapb.FunctionSchema{
@@ -96,38 +96,38 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 		functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normsScorekey, Value: "true"}
 		functionSchema.Params[6] = &commonpb.KeyValuePair{Key: scoreMode, Value: "unknow"}
 		_, err = newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Unsupport score mode")
+		s.ErrorContains(err, "unsupported score mode")
 	}
 
 	{
 		functionSchema.OutputFieldNames = []string{}
 		functionSchema.InputFieldNames = []string{""}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Rerank input field name cannot be empty string")
+		s.ErrorContains(err, "rerank input field name cannot be empty string")
 	}
 
 	{
 		functionSchema.InputFieldNames = []string{"ts", "ts"}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Each function input field should be used exactly once in the same function")
+		s.ErrorContains(err, "each function input field should be used exactly once in the same function")
 	}
 
 	{
 		functionSchema.InputFieldNames = []string{"ts", "pk"}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function only supports single input, but gets")
+		s.ErrorContains(err, "decay function only supports single input, but gets")
 	}
 
 	{
 		functionSchema.InputFieldNames = []string{"notExists"}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Function input field not found:")
+		s.ErrorContains(err, "function input field not found:")
 	}
 
 	{
 		functionSchema.InputFieldNames = []string{"vector"}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay rerank: unsupported input field type")
+		s.ErrorContains(err, "decay rerank: unsupported input field type")
 	}
 
 	{
@@ -154,7 +154,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 		}
 		functionSchema.Params[4].Value = "NotExist"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Invaild decay function:")
+		s.ErrorContains(err, "invalid decay function:")
 		functionSchema.Params[4].Value = "exp"
 	}
 
@@ -201,7 +201,7 @@ func (s *DecayFunctionSuite) TestAllTypesInput() {
 		if i < len(inputTypes)-1 {
 			s.NoError(err)
 		} else {
-			s.ErrorContains(err, "Decay rerank: unsupported input field type")
+			s.ErrorContains(err, "decay rerank: unsupported input field type")
 		}
 	}
 
@@ -212,7 +212,7 @@ func (s *DecayFunctionSuite) TestAllTypesInput() {
 		if i < len(inputTypes)-1 {
 			s.NoError(err)
 		} else {
-			s.ErrorContains(err, "Decay rerank: unsupported input field type")
+			s.ErrorContains(err, "decay rerank: unsupported input field type")
 		}
 	}
 
@@ -221,34 +221,34 @@ func (s *DecayFunctionSuite) TestAllTypesInput() {
 	{
 		functionSchema.Params[1].Key = "N"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function lost param: origin")
+		s.ErrorContains(err, "decay function lost param: origin")
 		functionSchema.Params[1].Key = originKey
 	}
 	{
 		functionSchema.Params[2].Key = "N"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function lost param: scale")
+		s.ErrorContains(err, "decay function lost param: scale")
 		functionSchema.Params[2].Key = scaleKey
 	}
 
 	{
 		functionSchema.Params[2].Value = "-1"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: scale must > 0,")
+		s.ErrorContains(err, "decay function param: scale must > 0,")
 		functionSchema.Params[2].Value = "0.5"
 	}
 
 	{
 		functionSchema.Params[3].Value = "-1"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: offset must >= 0")
+		s.ErrorContains(err, "decay function param: offset must >= 0")
 		functionSchema.Params[3].Value = "0.5"
 	}
 
 	{
 		functionSchema.Params[4].Value = "10"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: decay must 0 < decay < 1")
+		s.ErrorContains(err, "decay function param: decay must 0 < decay < 1")
 		functionSchema.Params[2].Value = "0.5"
 	}
 }
@@ -300,7 +300,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 
 		_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
-		s.ErrorContains(err, "Search reaults mismatch rerank inputs")
+		s.ErrorContains(err, "search results mismatch rerank inputs")
 	}
 
 	// singleSearchResultData
