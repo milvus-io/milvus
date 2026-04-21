@@ -1750,6 +1750,10 @@ type logConfig struct {
 	Format                      ParamItem `refreshable:"false"`
 	Stdout                      ParamItem `refreshable:"false"`
 	GrpcLogLevel                ParamItem `refreshable:"false"`
+	GrpcServerLogLevel          ParamItem `refreshable:"true"`
+	GrpcClientLogLevel          ParamItem `refreshable:"true"`
+	GrpcServerLogMethods        ParamItem `refreshable:"true"`
+	GrpcClientLogMethods        ParamItem `refreshable:"true"`
 	AsyncWriteEnable            ParamItem `refreshable:"false"`
 	AsyncWriteFlushInterval     ParamItem `refreshable:"false"`
 	AsyncWriteDroppedTimeout    ParamItem `refreshable:"false"`
@@ -1834,6 +1838,42 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       true,
 	}
 	l.GrpcLogLevel.Init(base.mgr)
+
+	l.GrpcServerLogLevel = ParamItem{
+		Key:          "grpc.serverLog.level",
+		DefaultValue: "info",
+		Version:      "2.6.0",
+		Doc:          "Log level for the gRPC server logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogLevel.Init(base.mgr)
+
+	l.GrpcClientLogLevel = ParamItem{
+		Key:          "grpc.clientLog.level",
+		DefaultValue: "info",
+		Version:      "2.6.0",
+		Doc:          "Log level for the gRPC client logging interceptor. Options: debug, info, warn, error. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogLevel.Init(base.mgr)
+
+	l.GrpcServerLogMethods = ParamItem{
+		Key:          "grpc.serverLog.methods",
+		DefaultValue: "",
+		Version:      "2.6.0",
+		Doc:          "Comma-separated full-method allowlist logged on server side (e.g. /proxy.Proxy/Search). Empty disables logging. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcServerLogMethods.Init(base.mgr)
+
+	l.GrpcClientLogMethods = ParamItem{
+		Key:          "grpc.clientLog.methods",
+		DefaultValue: "",
+		Version:      "2.6.0",
+		Doc:          "Comma-separated full-method allowlist logged on client side. Empty disables logging. Hot-reloadable.",
+		Export:       false,
+	}
+	l.GrpcClientLogMethods.Init(base.mgr)
 
 	l.AsyncWriteEnable = ParamItem{
 		Key:          "log.asyncWrite.enable",
