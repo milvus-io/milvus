@@ -3144,8 +3144,25 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (vec_index == nullptr) {
         return false;
     }
+    // Callers pass logical offsets (already translated from physical by
+    // SearchOnIndex). When the index carries an offset_mapping (nullable
+    // vector), the underlying knowhere index operates on physical offsets,
+    // so translate logical -> physical before the call.
+    const auto& offset_mapping = vec_index->GetOffsetMapping();
+    std::vector<int64_t> physical_offsets;
+    const int64_t* labels = seg_offsets;
+    if (offset_mapping.IsEnabled()) {
+        physical_offsets.resize(count);
+        for (size_t i = 0; i < count; ++i) {
+            physical_offsets[i] =
+                seg_offsets[i] < 0
+                    ? seg_offsets[i]
+                    : offset_mapping.GetPhysicalOffset(seg_offsets[i]);
+        }
+        labels = physical_offsets.data();
+    }
     auto res = vec_index->CalcDistByIDs(
-        query_dataset, BitsetView(), seg_offsets, count, is_cosine, nullptr);
+        query_dataset, BitsetView(), labels, count, is_cosine, nullptr);
     if (!res.has_value()) {
         return false;
     }
