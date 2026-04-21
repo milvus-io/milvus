@@ -1708,6 +1708,7 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
     // Build a VectorFieldProto for each embedding list
     for (int64_t i = 0; i < count; i++) {
         auto* entry = obj->mutable_data()->Add();
+        entry->set_dim(dim);
         size_t vec_start = offsets[i];
         size_t vec_count = offsets[i + 1] - offsets[i];
         if (vec_count == 0) {
