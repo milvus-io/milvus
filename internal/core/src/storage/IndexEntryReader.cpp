@@ -23,13 +23,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <future>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "common/Channel.h"
 #include "common/EasyAssert.h"
 #include "nlohmann/json.hpp"
+#include "storage/ChunkStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
 
@@ -547,6 +551,233 @@ IndexEntryReader::ReadEntriesToFiles(
         close_all_fds();
         throw;
     }
+}
+
+size_t
+IndexEntryReader::GetEntrySize(const std::string& name) const {
+    auto it = entry_index_.find(name);
+    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (it->second.encrypted) {
+        return it->second.enc.original_size;
+    }
+    return it->second.plain.size;
+}
+
+void
+IndexEntryReader::ReadEntryStream(
+    const std::string& name,
+    std::function<void(const uint8_t* data, size_t len)> callback,
+    size_t chunk_size) {
+    auto it = entry_index_.find(name);
+    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    const auto& meta = it->second;
+
+    if (meta.encrypted) {
+        ReadEncryptedEntryStream(meta.enc, callback);
+    } else {
+        ReadPlainEntryStream(meta.plain, callback, chunk_size);
+    }
+}
+
+void
+IndexEntryReader::ReadPlainEntryStream(
+    const PlainEntryMeta& pm,
+    const std::function<void(const uint8_t* data, size_t len)>& callback,
+    size_t chunk_size) {
+    size_t num_chunks = (pm.size + chunk_size - 1) / chunk_size;
+    if (num_chunks == 0) {
+        return;
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto& budget = ChunkInflightBudget::GetInstance();
+    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
+        budget.MaxInflight());
+
+    size_t next_submit = 0;
+    size_t next_consume = 0;
+    size_t local_inflight = 0;
+
+    auto submitOne = [&]() {
+        size_t seq = next_submit;
+        size_t off = seq * chunk_size;
+        size_t len = std::min<size_t>(chunk_size, pm.size - off);
+        size_t src = pm.offset + off;
+
+        pool.Submit([this, channel, seq, src, len]() {
+            auto r = std::make_shared<ChunkResult>();
+            r->seq = seq;
+            r->data.resize(len);
+            size_t n =
+                input_->ReadAt(r->data.data(), MILVUS_V3_MAGIC_SIZE + src, len);
+            AssertInfo(n == len, "Failed to read entry chunk");
+            channel->push(std::move(r));
+        });
+
+        next_submit++;
+        local_inflight++;
+    };
+
+    // 1. Fill window: block for first slot, then try-acquire remaining.
+    if (next_submit < num_chunks) {
+        budget.Acquire();
+        submitOne();
+    }
+    while (next_submit < num_chunks && budget.TryAcquire()) {
+        submitOne();
+    }
+
+    // 2. Slide: consume one, submit next
+    uint32_t running_crc = 0;
+    bool first = true;
+    std::map<size_t, std::shared_ptr<ChunkResult>> reorder_buf;
+
+    auto deliverChunk = [&](const std::shared_ptr<ChunkResult>& c) {
+        uint32_t chunk_crc = Crc32cValue(c->data.data(), c->data.size());
+        running_crc =
+            first ? chunk_crc
+                  : Crc32cCombine(running_crc, chunk_crc, c->data.size());
+        first = false;
+        callback(c->data.data(), c->data.size());
+        budget.Release();
+        next_consume++;
+        local_inflight--;
+    };
+
+    while (next_consume < num_chunks) {
+        std::shared_ptr<ChunkResult> chunk;
+        bool ok = channel->pop(chunk);
+        AssertInfo(ok, "Channel closed unexpectedly");
+
+        if (chunk->seq == next_consume) {
+            deliverChunk(chunk);
+        } else {
+            reorder_buf[chunk->seq] = std::move(chunk);
+        }
+
+        // Deliver any consecutive buffered chunks
+        while (reorder_buf.count(next_consume)) {
+            auto node = reorder_buf.extract(next_consume);
+            deliverChunk(node.mapped());
+        }
+
+        // Replenish: try non-blocking first
+        while (next_submit < num_chunks && budget.TryAcquire()) {
+            submitOne();
+        }
+
+        // If nothing inflight but still work to do, must block-acquire
+        // to guarantee progress. Safe because channel is empty here.
+        if (local_inflight == 0 && next_submit < num_chunks) {
+            budget.Acquire();
+            submitOne();
+        }
+    }
+
+    AssertInfo(running_crc == pm.crc32,
+               "CRC-32C mismatch in stream read: expected {}, got {}",
+               Crc32cToHex(pm.crc32),
+               Crc32cToHex(running_crc));
+}
+
+void
+IndexEntryReader::ReadEncryptedEntryStream(
+    const EncryptedEntryMeta& em,
+    const std::function<void(const uint8_t* data, size_t len)>& callback) {
+    size_t num_slices = em.slices.size();
+    if (num_slices == 0) {
+        return;
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto& budget = ChunkInflightBudget::GetInstance();
+    auto channel = std::make_shared<Channel<std::shared_ptr<ChunkResult>>>(
+        budget.MaxInflight());
+
+    size_t next_submit = 0;
+    size_t next_consume = 0;
+    size_t local_inflight = 0;
+
+    auto submitOne = [&]() {
+        size_t seq = next_submit;
+        const auto& slice = em.slices[seq];
+
+        pool.Submit([this, channel, seq, slice]() {
+            std::vector<uint8_t> cipher(slice.size);
+            size_t n = input_->ReadAt(
+                cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
+            AssertInfo(n == slice.size, "Failed to read encrypted slice");
+
+            auto dec =
+                cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+            auto plain = dec->Decrypt(cipher.data(), cipher.size());
+
+            auto r = std::make_shared<ChunkResult>();
+            r->seq = seq;
+            r->data.assign(
+                reinterpret_cast<const uint8_t*>(plain.data()),
+                reinterpret_cast<const uint8_t*>(plain.data()) + plain.size());
+            channel->push(std::move(r));
+        });
+
+        next_submit++;
+        local_inflight++;
+    };
+
+    // Fill window: block for first slot, then try-acquire remaining
+    if (next_submit < num_slices) {
+        budget.Acquire();
+        submitOne();
+    }
+    while (next_submit < num_slices && budget.TryAcquire()) {
+        submitOne();
+    }
+
+    // Slide: consume + replenish
+    uint32_t running_crc = 0;
+    bool first = true;
+    std::map<size_t, std::shared_ptr<ChunkResult>> reorder_buf;
+
+    auto deliverChunk = [&](const std::shared_ptr<ChunkResult>& c) {
+        uint32_t chunk_crc = Crc32cValue(c->data.data(), c->data.size());
+        running_crc =
+            first ? chunk_crc
+                  : Crc32cCombine(running_crc, chunk_crc, c->data.size());
+        first = false;
+        callback(c->data.data(), c->data.size());
+        budget.Release();
+        next_consume++;
+        local_inflight--;
+    };
+
+    while (next_consume < num_slices) {
+        std::shared_ptr<ChunkResult> chunk;
+        bool ok = channel->pop(chunk);
+        AssertInfo(ok, "Channel closed unexpectedly");
+
+        if (chunk->seq == next_consume) {
+            deliverChunk(chunk);
+        } else {
+            reorder_buf[chunk->seq] = std::move(chunk);
+        }
+
+        while (reorder_buf.count(next_consume)) {
+            auto node = reorder_buf.extract(next_consume);
+            deliverChunk(node.mapped());
+        }
+
+        while (next_submit < num_slices && budget.TryAcquire()) {
+            submitOne();
+        }
+
+        if (local_inflight == 0 && next_submit < num_slices) {
+            budget.Acquire();
+            submitOne();
+        }
+    }
+
+    AssertInfo(running_crc == em.crc32,
+               "CRC-32C mismatch in encrypted stream read");
 }
 
 }  // namespace milvus::storage

@@ -357,23 +357,34 @@ IndexFactory::ScalarIndexLoadResource(
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = 0;
+        if (mmap_enable) {
+            // V3 streaming: chunks streamed to disk + mmap, no resident memory
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // V3 streaming: pre-allocate target, stream into it
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
+            // V3 streaming: trie streamed to disk + mmap, str_ids in memory
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
             request.max_disk_cost = index_size_in_bytes;
         } else {
+            // V3 streaming: trie via temp file + read, str_ids pre-allocated
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;  // trie temp file
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||
@@ -387,11 +398,14 @@ IndexFactory::ScalarIndexLoadResource(
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
+            // V3 streaming: stream to temp file (mmap'd, no heap), then
+            // MMapIndexData writes frozen format to final file
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
+            request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
+            // V3 streaming: pre-allocate buffer + deserialize
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost = 2 * index_size_in_bytes;
