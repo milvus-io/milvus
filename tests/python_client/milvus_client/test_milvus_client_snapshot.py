@@ -4735,6 +4735,156 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name, collection_name)
 
 
+class TestMilvusClientSnapshotCreateParams(TestMilvusClientV2Base):
+    """Test create_snapshot parameter handling beyond basic lifecycle.
+
+    Focus on the ``compaction_protection_seconds`` option introduced with
+    the snapshot feature (see ``internal/proxy/task_snapshot.go:118-126``).
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_snapshot_with_compaction_protection_seconds(self):
+        """
+        target: test create_snapshot accepts a positive compaction_protection_seconds
+        method: create snapshot with compaction_protection_seconds=3600
+        expected: snapshot is created and subsequent describe/list succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Call the SDK directly — wrapper forces description as kwarg ordering
+        client.create_snapshot(snapshot_name, collection_name,
+                               compaction_protection_seconds=3600)
+
+        info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
+        assert info.name == snapshot_name
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_snapshot_compaction_protection_negative(self):
+        """
+        target: test create_snapshot rejects negative compaction_protection_seconds
+        method: pass compaction_protection_seconds=-1
+        expected: server raises ParameterInvalid with "non-negative" in message
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        self.create_collection(client, collection_name, default_dim)
+
+        with pytest.raises(Exception) as exc_info:
+            client.create_snapshot(snapshot_name, collection_name,
+                                   compaction_protection_seconds=-1)
+        msg = str(exc_info.value).lower()
+        assert "non-negative" in msg or "compaction_protection_seconds" in msg, \
+            f"Expected compaction_protection error, got: {exc_info.value}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_snapshot_compaction_protection_exceeds_max(self):
+        """
+        target: test create_snapshot rejects compaction_protection_seconds > server max
+        method: pass compaction_protection_seconds well above the default 604800s cap
+        expected: server raises ParameterInvalid with "must not exceed" in message
+        note: default max is 604800s (7 days) per dataCoord.snapshot.maxCompactionProtectionSeconds
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        self.create_collection(client, collection_name, default_dim)
+
+        with pytest.raises(Exception) as exc_info:
+            client.create_snapshot(snapshot_name, collection_name,
+                                   compaction_protection_seconds=999_999_999)
+        msg = str(exc_info.value).lower()
+        assert "not exceed" in msg or "exceeds" in msg or "compaction_protection_seconds" in msg, \
+            f"Expected exceeds-max error, got: {exc_info.value}"
+
+
+class TestMilvusClientSnapshotRestoreParams(TestMilvusClientV2Base):
+    """Test restore_snapshot parameter handling (cross-db source, etc.)."""
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_restore_snapshot_source_db_name_explicit(self):
+        """
+        target: test restore_snapshot honors explicit source_db_name
+        method: create snapshot in DB X; from default-db context call restore
+                with source_db_name=X and target_db_name="default"
+        expected: restore completes; target collection is created in default db
+                  with identical row count; source remains in DB X untouched
+        note: complements the existing cross-db test which only exercises
+              target_db_name. This test exercises source_db_name explicitly.
+        """
+        client = self._client()
+        source_db = cf.gen_unique_str("test_src_db")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create source db and populate collection + snapshot inside it
+        self.create_database(client, source_db)
+        try:
+            client.using_database(source_db)
+            self.create_collection(client, collection_name, default_dim)
+            rng = np.random.default_rng(seed=19530)
+            rows = [{
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            } for i in range(default_nb)]
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            self.create_snapshot(client, collection_name, snapshot_name)
+
+            # 2. Switch to default db and restore via explicit source_db_name
+            client.using_database("default")
+            job_id = client.restore_snapshot(snapshot_name, collection_name,
+                                             restored_name,
+                                             source_db_name=source_db,
+                                             target_db_name="default")
+            wait_for_restore_complete(client, job_id, timeout=120)
+
+            # 3. Target collection lives in default db
+            default_collections = client.list_collections()
+            assert restored_name in default_collections, \
+                f"Restored collection should be in default db, got {default_collections}"
+
+            client.load_collection(restored_name)
+            res = client.query(restored_name, filter="id >= 0", output_fields=["count(*)"])
+            assert res[0]["count(*)"] == default_nb, \
+                f"Restored collection should have {default_nb} rows"
+
+            # 4. Source still exists in source_db
+            client.using_database(source_db)
+            source_collections = client.list_collections()
+            assert collection_name in source_collections, \
+                f"Source collection missing in {source_db}: {source_collections}"
+
+            # Cleanup
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, collection_name)
+            client.using_database("default")
+            self.drop_collection(client, restored_name)
+        finally:
+            client.using_database("default")
+            try:
+                client.drop_database(source_db)
+            except Exception as e:
+                log.warning(f"Failed to drop source db '{source_db}': {e}")
+
+
 class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
     """Test pin_snapshot_data / unpin_snapshot_data.
 
