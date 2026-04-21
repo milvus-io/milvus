@@ -123,6 +123,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.DataNodeRole),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -133,6 +134,7 @@ func (s *Server) startGrpcLoop() {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			interceptor.NewObservabilityServerStreamInterceptor(),
 			mlog.StreamServerInterceptor(typeutil.DataNodeRole),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {

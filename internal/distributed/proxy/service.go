@@ -296,6 +296,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
@@ -415,6 +416,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
@@ -425,6 +427,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			interceptor.NewObservabilityServerStreamInterceptor(),
 			mlog.StreamServerInterceptor(typeutil.ProxyRole),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
