@@ -229,6 +229,45 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_create_same_name_different_collections(self):
+        """
+        target: test that snapshot name uniqueness is per-collection, not global
+        method: create the same snapshot_name under two different collections
+        expected: both succeed; describe returns the owning collection for each
+        note: server enforces uniqueness keyed by (collection_id, snapshot_name),
+              see internal/datacoord/services.go:2093-2099
+        """
+        client = self._client()
+        col_a = cf.gen_collection_name_by_testcase_name() + "_a"
+        col_b = cf.gen_collection_name_by_testcase_name() + "_b"
+        shared_snapshot = cf.gen_unique_str(prefix + "_shared")
+
+        self.create_collection(client, col_a, default_dim)
+        self.create_collection(client, col_b, default_dim)
+
+        # Both snapshot creations should succeed under different collections
+        self.create_snapshot(client, col_a, shared_snapshot)
+        self.create_snapshot(client, col_b, shared_snapshot)
+
+        # Each collection's list returns its own snapshot
+        snaps_a, _ = self.list_snapshots(client, collection_name=col_a)
+        snaps_b, _ = self.list_snapshots(client, collection_name=col_b)
+        assert shared_snapshot in snaps_a
+        assert shared_snapshot in snaps_b
+
+        # describe returns the owning collection id/name, not the other one
+        info_a, _ = self.describe_snapshot(client, shared_snapshot, col_a)
+        info_b, _ = self.describe_snapshot(client, shared_snapshot, col_b)
+        assert info_a.collection_name == col_a
+        assert info_b.collection_name == col_b
+
+        # Cleanup
+        self.drop_snapshot(client, shared_snapshot, col_a)
+        self.drop_snapshot(client, shared_snapshot, col_b)
+        self.drop_collection(client, col_a)
+        self.drop_collection(client, col_b)
+
 
 class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
     """Test drop_snapshot with invalid parameters - L1"""
@@ -449,6 +488,108 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_list_by_db_name_from_other_context(self):
+        """
+        target: test list_snapshots honors the db_name kwarg from a different active-db context
+        method: create collection + snapshot in a non-default db, then switch client to
+                default db and call list_snapshots(collection_name=<col>, db_name=<target_db>)
+        expected: snapshot is returned; same call with db_name="default" returns empty/missing
+        note: server requires collection_name for ListSnapshots
+              (internal/proxy/task_snapshot.go:448-450)
+        """
+        client = self._client()
+        target_db = cf.gen_unique_str("test_db_list")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        self.create_database(client, target_db)
+        try:
+            client.using_database(target_db)
+            self.create_collection(client, collection_name, default_dim)
+            self.create_snapshot(client, collection_name, snapshot_name)
+
+            # switch active db back to default but query via db_name kwarg
+            client.using_database("default")
+            snapshots, _ = self.list_snapshots(client, collection_name=collection_name,
+                                               db_name=target_db)
+            assert snapshot_name in snapshots, \
+                f"{snapshot_name} missing when listing via db_name={target_db}, got {snapshots}"
+
+            # cleanup while still in target db context
+            client.using_database(target_db)
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, collection_name)
+        finally:
+            client.using_database("default")
+            try:
+                client.drop_database(target_db)
+            except Exception as e:
+                log.warning(f"Failed to drop test database '{target_db}': {e}")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_list_restore_jobs_by_db_name(self):
+        """
+        target: test list_restore_snapshot_jobs(db_name=X) filters by database
+        method: create snapshot + trigger restore entirely in a non-default db
+                (explicit source_db_name / target_db_name) -> list jobs via db_name
+        expected: returned jobs include the one created in target db; default db sees none
+        """
+        client = self._client()
+        target_db = cf.gen_unique_str("test_db_jobs")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+
+        self.create_database(client, target_db)
+        try:
+            client.using_database(target_db)
+            self.create_collection(client, collection_name, default_dim)
+            rng = np.random.default_rng(seed=19530)
+            rows = [{
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            } for i in range(500)]
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            self.create_snapshot(client, collection_name, snapshot_name)
+
+            # Explicitly pin both source and target to target_db so the job is
+            # recorded under target_db's DbId (default empty target_db_name
+            # resolves to "default" on the server side)
+            job_id = client.restore_snapshot(snapshot_name, collection_name,
+                                             restored_name,
+                                             source_db_name=target_db,
+                                             target_db_name=target_db)
+            wait_for_restore_complete(client, job_id)
+
+            # list jobs via explicit db_name kwarg from default db context
+            client.using_database("default")
+            jobs_target, _ = self.list_restore_snapshot_jobs(client, collection_name="",
+                                                             db_name=target_db)
+            job_ids = [j.job_id for j in jobs_target]
+            assert job_id in job_ids, \
+                f"Job {job_id} should appear when listing via db_name={target_db}, got {job_ids}"
+
+            # jobs in default db must not include this job
+            jobs_default, _ = self.list_restore_snapshot_jobs(client, collection_name="",
+                                                              db_name="default")
+            default_job_ids = [j.job_id for j in jobs_default]
+            assert job_id not in default_job_ids, \
+                f"Job {job_id} leaked into default db listing: {default_job_ids}"
+
+            # Cleanup: both collections are in target_db
+            client.using_database(target_db)
+            self.drop_snapshot(client, snapshot_name, collection_name)
+            self.drop_collection(client, collection_name)
+            self.drop_collection(client, restored_name)
+        finally:
+            client.using_database("default")
+            try:
+                client.drop_database(target_db)
+            except Exception as e:
+                log.warning(f"Failed to drop test database '{target_db}': {e}")
 
 
 class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
@@ -4163,6 +4304,51 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.drop_alias(client, alias_name)
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_restore_target_name_equals_existing_alias_fails(self):
+        """
+        target: test restoring a snapshot with target_collection_name equal to
+                an existing alias should fail (alias and collection share a namespace)
+        method: create col_src + snapshot -> create alias A pointing to col_src
+                -> restore snapshot to target_collection_name=A
+        expected: restore is synchronously rejected with an alias-conflict error;
+                  source collection, snapshot, and alias all remain intact
+        note: the rejection happens in datacoord's broker.CreateCollection path
+              during RestoreCollection (snapshot_manager.go:833)
+        """
+        client = self._client()
+        col_src = cf.gen_collection_name_by_testcase_name()
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create source collection + snapshot + alias
+        self._create_collection_with_data(client, col_src)
+        self.create_snapshot(client, col_src, snapshot_name)
+        self.create_alias(client, col_src, alias_name)
+
+        # 2. Restore with target_collection_name = existing alias name must fail
+        error = {ct.err_code: 65535, ct.err_msg: "conflicts with an existing alias"}
+        self.restore_snapshot(client, snapshot_name, alias_name,
+                              source_collection_name=col_src,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+        # 3. Verify source, snapshot, and alias are all untouched
+        snapshots, _ = self.list_snapshots(client, collection_name=col_src)
+        assert snapshot_name in snapshots
+
+        # A restore succeeds with a fresh, non-conflicting target name — proves
+        # the alias-conflict was a clean rejection, not a corrupted state.
+        clean_target = cf.gen_unique_str(prefix + "_clean")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_target,
+                                          source_collection_name=col_src)
+        wait_for_restore_complete(client, job_id)
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name, col_src)
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, col_src)
+        self.drop_collection(client, clean_target)
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
