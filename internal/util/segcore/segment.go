@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -553,14 +554,37 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			continue
 		}
 
+		files := v.GetFiles()
+		basePath := basePaths[k]
+		// V2 legacy segments may carry full paths in Files (reconstructed by
+		// metautil.BuildTextLogPaths on etcd load). The C++ loader expects
+		// relative filenames and prepends BasePath itself, so strip any
+		// basePath prefix here to honor the contract.
+		if basePath != "" {
+			prefix := basePath + "/"
+			stripped := make([]string, len(files))
+			for i, f := range files {
+				stripped[i] = strings.TrimPrefix(f, prefix)
+			}
+			files = stripped
+		}
+		log.Info("convertTextIndexStats",
+			zap.Int64("fieldID", v.GetFieldID()),
+			zap.Int64("buildID", v.GetBuildID()),
+			zap.Int64("version", v.GetVersion()),
+			zap.String("basePath", basePath),
+			zap.Int("fileCount", len(files)),
+			zap.Strings("files", files),
+		)
+
 		result[k] = &segcorepb.TextIndexStats{
 			FieldID:    v.GetFieldID(),
 			Version:    v.GetVersion(),
-			Files:      v.GetFiles(),
+			Files:      files,
 			LogSize:    v.GetLogSize(),
 			MemorySize: v.GetMemorySize(),
 			BuildID:    v.GetBuildID(),
-			BasePath:   basePaths[k],
+			BasePath:   basePath,
 		}
 	}
 	return result
@@ -578,15 +602,37 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 			continue
 		}
 
+		files := v.GetFiles()
+		basePath := basePaths[k]
+		// V2 legacy segments may carry full paths in Files; strip basePath
+		// prefix so the C++ loader (which prepends BasePath) sees relative
+		// filenames. See convertTextIndexStats for details.
+		if basePath != "" {
+			prefix := basePath + "/"
+			stripped := make([]string, len(files))
+			for i, f := range files {
+				stripped[i] = strings.TrimPrefix(f, prefix)
+			}
+			files = stripped
+		}
+		log.Info("convertJSONKeyStats",
+			zap.Int64("fieldID", v.GetFieldID()),
+			zap.Int64("buildID", v.GetBuildID()),
+			zap.Int64("version", v.GetVersion()),
+			zap.String("basePath", basePath),
+			zap.Int("fileCount", len(files)),
+			zap.Strings("files", files),
+		)
+
 		result[k] = &segcorepb.JsonKeyStats{
 			FieldID:                v.GetFieldID(),
 			Version:                v.GetVersion(),
-			Files:                  v.GetFiles(),
+			Files:                  files,
 			LogSize:                v.GetLogSize(),
 			MemorySize:             v.GetMemorySize(),
 			BuildID:                v.GetBuildID(),
 			JsonKeyStatsDataFormat: v.GetJsonKeyStatsDataFormat(),
-			BasePath:               basePaths[k],
+			BasePath:               basePath,
 		}
 	}
 	return result
