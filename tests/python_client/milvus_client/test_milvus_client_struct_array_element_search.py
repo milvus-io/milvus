@@ -6081,7 +6081,6 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
 # ==================== Test Case 10: StructArray Index-Access in search() (PR #48987) ====================
 
 
-@pytest.mark.xdist_group("TestMilvusClientStructArrayIndexAccessSearch")
 class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
     """search() filter coverage for the same predicates verified by query in
     TestMilvusClientStructArrayIndexAccess (PR #48987 + companion array ops).
