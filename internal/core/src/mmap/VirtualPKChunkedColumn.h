@@ -200,12 +200,6 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         return num_rows_until_chunk_;
     }
 
-    const std::vector<int64_t>&
-    GetNumValidRowsUntilChunk() const override {
-        // Virtual PK is never nullable, so valid rows == total rows
-        return num_rows_until_chunk_;
-    }
-
     void
     BulkValueAt(milvus::OpContext* op_ctx,
                 std::function<void(const char*, size_t)> fn,

@@ -986,10 +986,21 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
+
+        std::vector<FieldId> fields_for_stats;
+        if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
+            fields_for_stats = milvus_field_ids;
+        } else {
+            for (auto field_id : milvus_field_ids) {
+                const auto& fm = field_metas.at(field_id);
+                if (fm.is_nullable() && IsVectorDataType(fm.get_data_type())) {
+                    fields_for_stats.push_back(field_id);
+                }
+            }
+        }
         auto metadata = LoadGroupChunkMetadata(
             insert_files,
-            ENABLE_PARQUET_STATS_SKIP_INDEX ? milvus_field_ids
-                                            : std::vector<FieldId>{},
+            fields_for_stats,
             fmt::format(
                 "seg_{}_cg_{}", get_segment_id(), column_group_id.get()));
         auto parquet_stats_by_field =
@@ -1018,24 +1029,20 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
             std::optional<ParquetStatistics> statistics_opt;
-            if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
-                auto it = parquet_stats_by_field.find(field_id.get());
-                AssertInfo(it != parquet_stats_by_field.end(),
-                           "parquet statistics for field {} not found",
-                           field_id.get());
+            auto it = parquet_stats_by_field.find(field_id.get());
+            if (it != parquet_stats_by_field.end()) {
                 statistics_opt = std::move(it->second);
             }
 
-            load_field_data_common(
-                field_id,
-                column,
-                num_rows,
-                data_type,
-                info.enable_mmap,
-                true,
-                ENABLE_PARQUET_STATS_SKIP_INDEX ? statistics_opt : std::nullopt,
-                op_ctx,
-                is_replace);
+            load_field_data_common(field_id,
+                                   column,
+                                   num_rows,
+                                   data_type,
+                                   info.enable_mmap,
+                                   true,
+                                   statistics_opt,
+                                   op_ctx,
+                                   is_replace);
             if (field_id == TimestampFieldID) {
                 init_storage_v2_timestamp_index(
                     column, num_rows, info.warmup_policy);
@@ -1580,6 +1587,15 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
         if (column != nullptr && column->IsNullable()) {
             result.valid_data = std::make_unique<bool[]>(count);
             result.valid_offsets.reserve(count);
+
+            std::unordered_set<int64_t> touched_chunks;
+            for (int64_t i = 0; i < count; ++i) {
+                auto [chunk_id, _] = column->GetChunkIDByOffset(seg_offsets[i]);
+                touched_chunks.insert(static_cast<int64_t>(chunk_id));
+            }
+            for (int64_t c : touched_chunks) {
+                column->EnsureChunkOffsetMapping(c, op_ctx);
+            }
 
             const auto& offset_mapping = column->GetOffsetMapping();
             for (int64_t i = 0; i < count; ++i) {
@@ -3626,7 +3642,28 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (column->IsNullable() && IsVectorDataType(data_type)) {
-        column->BuildValidRowIds(op_ctx);
+        bool lazy_inited = false;
+        if (statistics.has_value() && !statistics.value().empty()) {
+            const auto& stats = statistics.value();
+            bool any_null = false;
+            for (const auto& s : stats) {
+                if (s == nullptr) {
+                    any_null = true;
+                    break;
+                }
+            }
+            if (!any_null) {
+                lazy_inited = column->TryInitValidRowIdsFromRowGroups(
+                    stats.size(),
+                    [&](size_t i) {
+                        return stats[i]->num_values() + stats[i]->null_count();
+                    },
+                    [&](size_t i) { return stats[i]->null_count(); });
+            }
+        }
+        if (!lazy_inited) {
+            column->BuildValidRowIds(op_ctx);
+        }
     }
 
     if (!enable_mmap) {
