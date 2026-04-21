@@ -484,8 +484,8 @@ var (
 
 	// Flusher sync dispatcher metrics.
 
-	WALFlusherSyncDispatcherPending = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "flusher_sync_dispatcher_pending_total",
+	WALFlusherSyncDispatcherPendingTasks = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "flusher_sync_dispatcher_pending_tasks",
 		Help: "Number of pending sync tasks (queued + in-flight) in the dispatcher",
 	})
 
@@ -610,7 +610,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
-	registry.MustRegister(WALFlusherSyncDispatcherPending)
+	registry.MustRegister(WALFlusherSyncDispatcherPendingTasks)
 	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
 	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
 	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)

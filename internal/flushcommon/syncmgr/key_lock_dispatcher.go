@@ -80,7 +80,7 @@ func (d *keyLockDispatcher[K]) Submit(ctx context.Context, key K, t Task, callba
 	}
 
 	metrics.WALFlusherSyncDispatcherTaskTotal.WithLabelValues(nodeID).Inc()
-	metrics.WALFlusherSyncDispatcherPending.WithLabelValues(nodeID).Inc()
+	metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID).Inc()
 
 	pt := &pendingTask{
 		ctx:       ctx,
@@ -152,7 +152,7 @@ func (d *keyLockDispatcher[K]) dispatchLocked(key K, pt *pendingTask) {
 			close(pt.resultCh)
 
 			d.semaphore.Release()
-			metrics.WALFlusherSyncDispatcherPending.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+			metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 
 			d.mu.Lock()
 			d.inFlight[key] = false
@@ -213,7 +213,7 @@ func (d *keyLockDispatcher[K]) Close() {
 			pt.resultCh <- err
 			close(pt.resultCh)
 			d.semaphore.Release()
-			metrics.WALFlusherSyncDispatcherPending.WithLabelValues(nodeID).Dec()
+			metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID).Dec()
 		}
 		delete(d.queues, key)
 	}
