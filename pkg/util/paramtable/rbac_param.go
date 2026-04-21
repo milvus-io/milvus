@@ -11,7 +11,6 @@ import (
 )
 
 type rbacConfig struct {
-	Enabled                    ParamItem `refreshable:"false"`
 	ClusterReadOnlyPrivileges  ParamItem `refreshable:"false"`
 	ClusterReadWritePrivileges ParamItem `refreshable:"false"`
 	ClusterAdminPrivileges     ParamItem `refreshable:"false"`
@@ -26,21 +25,12 @@ type rbacConfig struct {
 }
 
 func (p *rbacConfig) init(base *BaseTable) {
-	p.Enabled = ParamItem{
-		Key:          "common.security.rbac.overrideBuiltInPrivilegeGroups.enabled",
-		DefaultValue: "false",
-		Version:      "2.4.16",
-		Doc:          "Whether to override build-in privilege groups",
-		Export:       true,
-	}
-	p.Enabled.Init(base.mgr)
-
 	p.ClusterReadOnlyPrivileges = ParamItem{
 		Key:          "common.security.rbac.cluster.readonly.privileges",
 		DefaultValue: strings.Join(util.ClusterReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level readonly privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.ClusterReadOnlyPrivileges.Init(base.mgr)
 
@@ -49,7 +39,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.ClusterReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level readwrite privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.ClusterReadWritePrivileges.Init(base.mgr)
 
@@ -58,7 +48,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.ClusterAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Cluster level admin privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.ClusterAdminPrivileges.Init(base.mgr)
 
@@ -67,7 +57,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.DatabaseReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level readonly privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.DBReadOnlyPrivileges.Init(base.mgr)
 
@@ -76,7 +66,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.DatabaseReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level readwrite privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.DBReadWritePrivileges.Init(base.mgr)
 
@@ -85,7 +75,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.DatabaseAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Database level admin privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.DBAdminPrivileges.Init(base.mgr)
 
@@ -94,7 +84,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.CollectionReadOnlyPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level readonly privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.CollectionReadOnlyPrivileges.Init(base.mgr)
 
@@ -103,7 +93,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.CollectionReadWritePrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level readwrite privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.CollectionReadWritePrivileges.Init(base.mgr)
 
@@ -112,7 +102,7 @@ func (p *rbacConfig) init(base *BaseTable) {
 		DefaultValue: strings.Join(util.CollectionAdminPrivileges, ","),
 		Version:      "2.4.16",
 		Doc:          "Collection level admin privileges",
-		Export:       true,
+		Export:       false,
 	}
 	p.CollectionAdminPrivileges.Init(base.mgr)
 }
