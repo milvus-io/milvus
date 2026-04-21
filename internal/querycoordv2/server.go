@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -881,4 +882,57 @@ func (s *Server) watchLoadConfigChanges() {
 // This method provides access to internal replica information including resource groups.
 func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
 	return s.meta.GetByCollection(ctx, collectionID)
+}
+
+// CheckAllReplicasServiceable returns an error if any replica has a non-serviceable
+// shard leader for any channel in the collection's current target. Unlike
+// CalculateLoadPercentage (which reads the CollectionObserver's periodically-persisted
+// snapshot), this performs a live check against the distribution manager and so
+// reflects the real-time serviceability after scale-up / scale-down.
+func (s *Server) CheckAllReplicasServiceable(ctx context.Context, collectionID int64) error {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	if len(replicas) == 0 {
+		return errors.New("no replica found")
+	}
+	channels := s.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		return errors.New("no channels in current target")
+	}
+	for _, replica := range replicas {
+		for channelName := range channels {
+			leader := s.dist.ChannelDistManager.GetShardLeader(channelName, replica)
+			if leader == nil {
+				return fmt.Errorf("replica %d (rg=%s): no leader for channel %s",
+					replica.GetID(), replica.GetResourceGroup(), channelName)
+			}
+			if err := utils.CheckDelegatorDataReady(s.nodeMgr, s.targetMgr, leader.View, meta.CurrentTarget); err != nil {
+				return fmt.Errorf("replica %d (rg=%s) channel %s not serviceable: %w",
+					replica.GetID(), replica.GetResourceGroup(), channelName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// GetLeakedResourcesByCollection returns the number of segments and channels still held by
+// querynodes that are NOT part of any current replica of the collection. A non-zero result
+// means physical resources have not been fully released yet (e.g., during scale-down a
+// decommissioned replica's querynode may still hold segments while release RPCs are in flight).
+func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionID int64) (leakedSegments, leakedChannels int) {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	validNodes := typeutil.NewUniqueSet()
+	for _, r := range replicas {
+		validNodes.Insert(r.GetNodes()...)
+	}
+	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
+		if !validNodes.Contain(seg.Node) {
+			leakedSegments++
+		}
+	}
+	for _, ch := range s.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID) {
+		if !validNodes.Contain(ch.Node) {
+			leakedChannels++
+		}
+	}
+	return leakedSegments, leakedChannels
 }
