@@ -160,7 +160,6 @@ class ChunkMergeIterator : public VectorIterator {
     // returns element IDs, which will be processed by IArrayOffsets.
     ChunkMergeIterator(int chunk_count,
                        const milvus::OffsetMapping* offset_mapping,
-                       const std::vector<int64_t>& total_rows_until_chunk = {},
                        bool larger_is_closer = false)
         : offset_mapping_(offset_mapping),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
@@ -216,22 +215,6 @@ class ChunkMergeIterator : public VectorIterator {
     }
 
  private:
-    int64_t
-    convert_to_segment_offset(int64_t chunk_offset, int chunk_idx) {
-        if (total_rows_until_chunk_.size() == 0) {
-            AssertInfo(
-                iterators_.size() == 1,
-                "Wrong state for vectorIterators, which having incorrect "
-                "kw_iterator count:{} "
-                "without setting value for chunk_rows, "
-                "cannot convert chunk_offset to segment_offset correctly",
-                iterators_.size());
-            return chunk_offset;
-        }
-        return total_rows_until_chunk_[chunk_idx] + chunk_offset;
-    }
-
- private:
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     std::priority_queue<std::shared_ptr<OffsetDisPair>,
                         std::vector<std::shared_ptr<OffsetDisPair>>,
@@ -239,7 +222,6 @@ class ChunkMergeIterator : public VectorIterator {
         heap_;
     bool sealed = false;
     const milvus::OffsetMapping* offset_mapping_ = nullptr;
-    std::vector<int64_t> total_rows_until_chunk_;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -263,7 +245,6 @@ struct SearchResult {
     AssembleChunkVectorIterators(
         int64_t nq,
         int chunk_count,
-        const std::vector<int64_t>& total_rows_until_chunk,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
         const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
@@ -277,11 +258,8 @@ struct SearchResult {
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
-                auto chunk_merge_iter =
-                    std::make_shared<ChunkMergeIterator>(chunk_count,
-                                                         offset_mapping,
-                                                         total_rows_until_chunk,
-                                                         larger_is_closer);
+                auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
+                    chunk_count, offset_mapping, larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];

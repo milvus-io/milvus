@@ -80,7 +80,6 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 search_result.AssembleChunkVectorIterators(
                     nq,
                     1,
-                    {0},
                     iterators_val.value(),
                     iter_offset_mapping,
                     larger_is_closer);

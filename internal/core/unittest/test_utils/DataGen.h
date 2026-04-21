@@ -61,7 +61,7 @@ namespace milvus::segcore {
 struct GeneratedData {
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
-    InsertRecordProto* raw_;
+    InsertRecordProto* raw_ = nullptr;
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
 

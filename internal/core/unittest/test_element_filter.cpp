@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <tuple>
@@ -2877,6 +2878,7 @@ namespace {
 constexpr int kElemDim = 4;
 constexpr int kElemArrayLen = 3;
 constexpr size_t kElemN = 200;
+constexpr uint64_t kFixtureVecSeed = 0x5EEDBEEFULL;
 constexpr int kElemTopK = 10;
 // Ground-truth target: the query vector equals row kElemTargetDoc's element
 // kElemTargetElem, so an exact (BF) search must return it first with
@@ -2904,6 +2906,41 @@ MakeElementSearchFixture() {
     f.schema->set_primary_field_id(f.int64_fid);
 
     f.raw_data = DataGen(f.schema, kElemN, 42, 0, 1, kElemArrayLen);
+
+    // DataGen's VECTOR_ARRAY branch uses the same seed for every row, so all
+    // rows share identical element vectors. Overwrite the whole vector-array
+    // field with per-(row, elem) unique values so that brute-force search has
+    // no ties and iterator_v2 batch boundaries see strictly increasing
+    // distances.
+    {
+        std::mt19937_64 rng(kFixtureVecSeed);
+        std::normal_distribution<float> distr(0.0f, 1.0f);
+        for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+            auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+            if (fd->field_id() != f.vec_fid.get()) {
+                continue;
+            }
+            auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+            for (int row = 0; row < vec_array->data_size(); ++row) {
+                auto* row_data = vec_array->mutable_data(row)
+                                     ->mutable_float_vector()
+                                     ->mutable_data();
+                for (int k = 0; k < kElemArrayLen * kElemDim; ++k) {
+                    row_data->Set(k, distr(rng));
+                }
+            }
+            // Pin the target element to a unique sentinel so exact search
+            // deterministically returns (kElemTargetDoc, kElemTargetElem).
+            auto* target_row = vec_array->mutable_data(kElemTargetDoc)
+                                   ->mutable_float_vector()
+                                   ->mutable_data();
+            for (int k = 0; k < kElemDim; ++k) {
+                target_row->Set(kElemTargetElem * kElemDim + k, 7.0f);
+            }
+            break;
+        }
+    }
+
     auto array_vec_values = f.raw_data.get_col<VectorFieldProto>(f.vec_fid);
     f.flat_data.resize(array_vec_values.size() * kElemArrayLen * kElemDim);
     for (size_t i = 0; i < array_vec_values.size(); ++i) {

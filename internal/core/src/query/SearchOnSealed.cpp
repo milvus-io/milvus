@@ -299,7 +299,6 @@ SearchOnSealedColumn(const Schema& schema,
             search_info.array_offsets_ != nullptr ? nullptr : &offset_mapping;
         result.AssembleChunkVectorIterators(num_queries,
                                             num_chunk,
-                                            column->GetNumRowsUntilChunk(),
                                             final_qr.chunk_iterators(),
                                             iter_offset_mapping,
                                             larger_is_closer);
@@ -312,7 +311,6 @@ SearchOnSealedColumn(const Schema& schema,
                     search_info.array_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
-            result.element_level_ = true;
         } else {
             if (offset_mapping.IsEnabled()) {
                 TransformOffset(final_qr.mutable_offsets(), offset_mapping);

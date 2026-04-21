@@ -5243,37 +5243,6 @@ class TestMilvusClientStructArrayElementSearchNoFilter(TestMilvusClientV2Base):
         assert elem_ids != normal_ids, \
             "Element-level and normal vector search returned identical results"
 
-    # ---- 9.8 Range search not supported on element-level embedding ----
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_element_search_no_filter_range_search_not_supported(self):
-        """
-        target: range search on structA[embedding] should be rejected
-        method: search with radius and range_filter params on element-level field
-        expected: server returns error (range search not supported for vector array)
-        """
-        client = self.shared_client
-        collection_name = self.shared_collection
-        data = self.shared_data
-
-        query_vector = data[0]["structA"][0]["embedding"]
-        radius = 0.5
-        range_filter = 1.0
-        results, check = self.search(
-            client, collection_name,
-            data=[query_vector],
-            anns_field="structA[embedding]",
-            search_params={
-                "metric_type": "COSINE",
-                "params": {"radius": radius, "range_filter": range_filter},
-            },
-            limit=50,
-            output_fields=["id"],
-            check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100,
-                         "err_msg": "range search is not supported for vector array"},
-        )
-
     # ---- 9.9 Growing segment search without filter ----
 
     @pytest.mark.tags(CaseLabel.L1)

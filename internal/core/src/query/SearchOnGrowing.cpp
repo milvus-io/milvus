@@ -334,10 +334,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             }
         }
         if (milvus::exec::UseVectorIterator(info)) {
-            std::vector<int64_t> chunk_rows(max_chunk, 0);
-            for (int i = 1; i < max_chunk; ++i) {
-                chunk_rows[i] = i * vec_size_per_chunk;
-            }
             bool larger_is_closer = PositivelyRelated(info.metric_type_);
             // Element-level search skips row-level mapping (element IDs are
             // not row-aligned); see ChunkMergeIterator ctor.
@@ -346,7 +342,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.AssembleChunkVectorIterators(
                 num_queries,
                 max_chunk,
-                chunk_rows,
                 final_qr.chunk_iterators(),
                 iter_offset_mapping,
                 larger_is_closer);
@@ -359,7 +354,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         info.array_offsets_.get());
                 search_result.seg_offsets_ = std::move(seg_offsets);
                 search_result.element_indices_ = std::move(elem_indicies);
-                search_result.element_level_ = true;
             } else {
                 if (offset_mapping.IsEnabled()) {
                     TransformOffset(final_qr.mutable_offsets(), offset_mapping);
