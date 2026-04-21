@@ -4920,6 +4920,105 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
 
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_pin_denied_without_privilege(self, host, port):
+        """
+        target: verify PinSnapshotData is denied without the privilege
+        method: create snapshot as root; attempt pin as unprivileged user
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, _ = self._setup_user_with_role(client, host, port)
+
+        self.pin_snapshot_data(user_client, snapshot_name, collection_name,
+                               check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_pin_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify PinSnapshotData succeeds after granting the privilege via v2 API
+        method: grant PinSnapshotData to role; attempt pin; immediately unpin as root
+        expected: pin succeeds with a non-zero pin_id
+        note: PinSnapshotData is a Global-level privilege
+              (pkg/util/constant.go:122-124)
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        self.grant_privilege_v2(client, role_name, "PinSnapshotData", "*", "*")
+        time.sleep(10)
+
+        pin_id, _ = self.pin_snapshot_data(user_client, snapshot_name, collection_name,
+                                           ttl_seconds=60)
+        assert isinstance(pin_id, int) and pin_id > 0, \
+            f"pin_snapshot_data should return a positive int pin_id, got {pin_id!r}"
+
+        # Clean up with root (unpin doesn't need user privilege here)
+        try:
+            client.unpin_snapshot_data(pin_id)
+        except Exception as e:
+            log.warning(f"cleanup unpin failed, relying on TTL: {e}")
+
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_unpin_denied_without_privilege(self, host, port):
+        """
+        target: verify UnpinSnapshotData is denied without the privilege
+        method: unprivileged user attempts unpin with an arbitrary pin_id
+        expected: permission denied (privilege check happens before pin lookup)
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, _ = self._setup_user_with_role(client, host, port)
+
+        # Use an arbitrary pin_id — server must reject on privilege, not on lookup
+        self.unpin_snapshot_data(user_client, pin_id=123456789,
+                                 check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_restore_revoke_privilege_v2_then_denied(self, host, port):
+        """
+        target: verify restore is denied after revoking RestoreSnapshot via v2 API
+        method: grant -> verify restore succeeds -> revoke -> verify restore denied
+        expected: permission denied after revocation
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant and verify allowed
+        self.grant_privilege_v2(client, role_name, "RestoreSnapshot", "*", "*")
+        time.sleep(10)
+        restored_ok = cf.gen_unique_str(prefix + "_ok")
+        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_ok,
+                                          source_collection_name=collection_name)
+        wait_for_restore_complete(client, job_id)
+
+        # revoke and verify denied
+        self.revoke_privilege_v2(client, role_name, "RestoreSnapshot", "*", "*")
+        time.sleep(10)
+        restored_denied = cf.gen_unique_str(prefix + "_denied")
+        self.restore_snapshot(user_client, snapshot_name, restored_denied,
+                              source_collection_name=collection_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name, collection_name)
+        self.drop_collection(client, restored_ok)
+
 
 class TestMilvusClientSnapshotCreateParams(TestMilvusClientV2Base):
     """Test create_snapshot parameter handling beyond basic lifecycle.
