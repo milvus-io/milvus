@@ -108,3 +108,38 @@ $ uv run ruff format --check .  # format check only (CI-friendly)
 
 Rules enabled: `E`, `F`, `W`, `I`, `UP`. Target Python version: `3.10`.
 
+#### Lint only PR-changed files (Python Lint CI parity)
+
+The GitHub Actions workflow `.github/workflows/python-lint.yaml` (job
+**"Python Lint (tests/) / Ruff (changed files only)"**) runs `ruff check`
+and `ruff format --check` against the *changed* `tests/**/*.py` set on
+every PR. Running `uv run ruff check .` over the whole tree is too coarse
+because the historical contents of many files predate the lint config and
+will fail unrelated rules.
+
+To reproduce the CI step locally, use the `Makefile` shipped in this directory:
+
+```shell
+$ cd tests/
+$ make ci             # ruff check + format --check on PR-changed *.py (CI equivalent)
+$ make lint-fix       # ruff check --fix on PR-changed *.py
+$ make format         # ruff format on PR-changed *.py
+$ make help           # show all targets and the detected BASE_REF
+```
+
+`BASE_REF` is auto-detected from the current branch's open PR via `gh pr view`:
+the PR URL is parsed to discover the base `<owner>/<repo>` and matched against
+your local git remotes, producing e.g. `upstream/master`, `upstream/2.x`, or
+`origin/main` for direct clones.
+
+If no open PR exists for the branch, you **must** set `BASE_REF` explicitly
+(no guessing — a wrong base diffs against unrelated commits):
+
+```shell
+$ make ci BASE_REF=upstream/master
+```
+
+Requires `uv` (provides `uvx`) and `gh` authenticated against GitHub
+(`gh auth status`). The ruff version is pinned in the `Makefile` via
+`RUFF_VERSION` to match the workflow.
+

@@ -108,3 +108,37 @@ $ uv run ruff format --check .  # 只检查不修改 (CI 友好)
 
 启用的规则：`E`、`F`、`W`、`I`、`UP`；目标 Python 版本：`3.10`。
 
+#### 仅检查 PR 修改的文件 (与 Python Lint CI 一致)
+
+GitHub Actions workflow `.github/workflows/python-lint.yaml`
+（job **"Python Lint (tests/) / Ruff (changed files only)"**）
+只对 PR 修改的 `tests/**/*.py` 文件跑 `ruff check` 和 `ruff format --check`。
+直接对整个 `tests/` 目录执行 `uv run ruff check .` 太粗——很多历史文件早于
+当前 lint 配置，会因为无关规则失败。
+
+要在本地复现 CI 这一步，使用本目录下的 `Makefile`：
+
+```shell
+$ cd tests/
+$ make ci             # 对 PR 修改文件跑 ruff check + format --check（与 CI 等价）
+$ make lint-fix       # 对 PR 修改文件跑 ruff check --fix
+$ make format         # 对 PR 修改文件跑 ruff format
+$ make help           # 显示所有 target 以及当前自动检测到的 BASE_REF
+```
+
+`BASE_REF` 通过 `gh pr view` 从当前分支的开放 PR 中自动检测：
+解析 PR URL 得到 base `<owner>/<repo>`，再匹配本地 git remotes，
+得到形如 `upstream/master`、`upstream/2.x` 或（直接 clone 主仓库时的）
+`origin/main`。
+
+如果当前分支没有开放 PR，**必须**显式设置 `BASE_REF`
+（不再做猜测——base 选错会 diff 出无关 commit）：
+
+```shell
+$ make ci BASE_REF=upstream/master
+```
+
+需要本地已安装 `uv`（提供 `uvx`）和已认证的 `gh`
+（`gh auth status`）。Makefile 通过 `RUFF_VERSION` 锁定与
+workflow 一致的 ruff 版本。
+
