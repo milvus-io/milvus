@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -54,6 +55,19 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 
 	ctx := req.Context()
 	logger := log.Ctx(ctx).With(zap.String("handler", "ReplicaLoadConfigCompliance"))
+
+	// Cluster-level check: WAL is fully migrated onto the configured primary resource group.
+	// Short-circuit before reading config / loading collections — a WAL-layout issue affects
+	// every collection and is independent of per-collection replica/RG config.
+	if b, err := balance.GetWithContext(ctx); err != nil {
+		writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err.Error()), http.StatusInternalServerError)
+		return
+	} else if err := b.ConfirmPrimaryResourceGroupReady(ctx); err != nil {
+		reason := fmt.Sprintf("WAL placement: %s", err.Error())
+		logger.Info("WAL not fully placed on primary resource group", zap.String("reason", reason))
+		s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+		return
+	}
 
 	// Get cluster-level configuration
 	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
