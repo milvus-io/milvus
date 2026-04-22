@@ -265,6 +265,24 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
+	arrowIOThreadHandler := func(key string) func(evt *config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newThreads := initcore.ResolveArrowIOThreadPoolCapacity()
+			initcore.UpdateArrowIOThreadPoolCapacity(newThreads)
+			log.Info("arrow io thread pool capacity updated",
+				zap.String("trigger", key),
+				zap.Int("threads", newThreads))
+		}
+	}
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
