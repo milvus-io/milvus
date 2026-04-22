@@ -40,15 +40,11 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                             db_name=db_name,
                         )
                         if db_client.has_collection(c_name):
-                            logger.info(
-                                f"[CLEANUP] Dropping collection {c_name} in db {db_name}"
-                            )
+                            logger.info(f"[CLEANUP] Dropping collection {c_name} in db {db_name}")
                             db_client.drop_collection(c_name)
                         db_client.close()
                     except Exception as e:
-                        logger.warning(
-                            f"[CLEANUP] Failed to drop collection {c_name} in db {db_name}: {e}"
-                        )
+                        logger.warning(f"[CLEANUP] Failed to drop collection {c_name} in db {db_name}: {e}")
 
             for resource_type, resource_data in self.resources_to_cleanup:
                 if resource_type == "database":
@@ -91,26 +87,18 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         upstream_client.create_database(db_name_2)
 
         # Create DB-scoped clients
-        up_db1_client = MilvusClient(
-            uri=upstream_uri, token=upstream_token, db_name=db_name_1
-        )
-        up_db2_client = MilvusClient(
-            uri=upstream_uri, token=upstream_token, db_name=db_name_2
-        )
+        up_db1_client = MilvusClient(uri=upstream_uri, token=upstream_token, db_name=db_name_1)
+        up_db2_client = MilvusClient(uri=upstream_uri, token=upstream_token, db_name=db_name_2)
 
         # Create collection in db1 with 100 rows
         schema1 = self.create_default_schema(up_db1_client)
-        up_db1_client.create_collection(
-            collection_name=c_name_1, schema=schema1, consistency_level="Strong"
-        )
+        up_db1_client.create_collection(collection_name=c_name_1, schema=schema1, consistency_level="Strong")
         up_db1_client.insert(c_name_1, self.generate_test_data(100))
         up_db1_client.flush(c_name_1)
 
         # Create collection in db2 with 200 rows
         schema2 = self.create_default_schema(up_db2_client)
-        up_db2_client.create_collection(
-            collection_name=c_name_2, schema=schema2, consistency_level="Strong"
-        )
+        up_db2_client.create_collection(collection_name=c_name_2, schema=schema2, consistency_level="Strong")
         up_db2_client.insert(c_name_2, self.generate_test_data(200))
         up_db2_client.flush(c_name_2)
 
@@ -122,9 +110,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
             try:
                 if db_name_1 not in downstream_client.list_databases():
                     return False
-                dn_db1 = MilvusClient(
-                    uri=downstream_uri, token=downstream_token, db_name=db_name_1
-                )
+                dn_db1 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_1)
                 exists = dn_db1.has_collection(c_name_1)
                 if exists:
                     stats = dn_db1.get_collection_stats(c_name_1)
@@ -135,17 +121,13 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                 logger.warning(f"Check db1 collection failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_db1_collection, sync_timeout, f"collection {c_name_1} in {db_name_1}"
-        )
+        assert self.wait_for_sync(check_db1_collection, sync_timeout, f"collection {c_name_1} in {db_name_1}")
 
         def check_db2_collection():
             try:
                 if db_name_2 not in downstream_client.list_databases():
                     return False
-                dn_db2 = MilvusClient(
-                    uri=downstream_uri, token=downstream_token, db_name=db_name_2
-                )
+                dn_db2 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_2)
                 exists = dn_db2.has_collection(c_name_2)
                 if exists:
                     stats = dn_db2.get_collection_stats(c_name_2)
@@ -156,9 +138,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                 logger.warning(f"Check db2 collection failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_db2_collection, sync_timeout, f"collection {c_name_2} in {db_name_2}"
-        )
+        assert self.wait_for_sync(check_db2_collection, sync_timeout, f"collection {c_name_2} in {db_name_2}")
 
         # Verify row counts
         dn_db1 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_1)
@@ -205,9 +185,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         upstream_client.create_database(db_name)
         up_db_client = MilvusClient(uri=upstream_uri, token=upstream_token, db_name=db_name)
         schema = self.create_default_schema(up_db_client)
-        up_db_client.create_collection(
-            collection_name=c_name, schema=schema, consistency_level="Strong"
-        )
+        up_db_client.create_collection(collection_name=c_name, schema=schema, consistency_level="Strong")
         up_db_client.insert(c_name, self.generate_test_data(50))
         up_db_client.flush(c_name)
         up_db_client.close()
@@ -241,9 +219,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         def check_db_dropped():
             return db_name not in downstream_client.list_databases()
 
-        assert self.wait_for_sync(
-            check_db_dropped, sync_timeout, f"drop database {db_name}"
-        )
+        assert self.wait_for_sync(check_db_dropped, sync_timeout, f"drop database {db_name}")
 
     def test_cross_db_operations(
         self,
@@ -276,9 +252,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         # Step 2: Create DB-scoped client and 1st collection with insert
         up_db_client = MilvusClient(uri=upstream_uri, token=upstream_token, db_name=db_name)
         schema1 = self.create_default_schema(up_db_client)
-        up_db_client.create_collection(
-            collection_name=c_name_1, schema=schema1, consistency_level="Strong"
-        )
+        up_db_client.create_collection(collection_name=c_name_1, schema=schema1, consistency_level="Strong")
         up_db_client.insert(c_name_1, self.generate_test_data(100))
         up_db_client.flush(c_name_1)
 
@@ -290,9 +264,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
 
         # Step 4: Create 2nd collection in the same DB
         schema2 = self.create_default_schema(up_db_client)
-        up_db_client.create_collection(
-            collection_name=c_name_2, schema=schema2, consistency_level="Strong"
-        )
+        up_db_client.create_collection(collection_name=c_name_2, schema=schema2, consistency_level="Strong")
         up_db_client.close()
 
         # Wait for all operations to sync to downstream
@@ -341,6 +313,4 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                 logger.warning(f"Check DB properties sync failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_db_props, sync_timeout, f"DB properties sync for {db_name}"
-        )
+        assert self.wait_for_sync(check_db_props, sync_timeout, f"DB properties sync for {db_name}")

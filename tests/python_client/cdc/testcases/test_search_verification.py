@@ -130,9 +130,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"data sync 500 records {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"data sync 500 records {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             # Build 5 random query vectors
             dtype = getattr(DataType, vector_type)
@@ -205,9 +205,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"data sync 500 records {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"data sync 500 records {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             output_fields = ["id", "int_field", "varchar_field", "float_field"]
             match_count, mismatch_count, mismatch_details = self.verify_data_sampling(
@@ -219,12 +219,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
             )
 
             logger.info(
-                f"[RESULT] Sampling — match={match_count}, mismatch={mismatch_count}, "
-                f"details={mismatch_details[:3]}"
+                f"[RESULT] Sampling — match={match_count}, mismatch={mismatch_count}, details={mismatch_details[:3]}"
             )
-            assert mismatch_count == 0, (
-                f"Found {mismatch_count} mismatched records: {mismatch_details[:5]}"
-            )
+            assert mismatch_count == 0, f"Found {mismatch_count} mismatched records: {mismatch_details[:5]}"
 
         finally:
             self.log_test_end(
@@ -307,9 +304,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"hybrid data sync {c_name}"
-            ), f"Downstream did not receive 300 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"hybrid data sync {c_name}"), (
+                f"Downstream did not receive 300 records within {sync_timeout}s"
+            )
 
             # Build hybrid search requests
             q_dense = self._gen_vectors(1, 128, DataType.FLOAT_VECTOR)[0]
@@ -348,13 +345,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
             union_size = len(up_pks | down_pks)
             overlap = len(up_pks & down_pks) / union_size if union_size > 0 else 1.0
 
-            logger.info(
-                f"[RESULT] Hybrid search PK overlap={overlap:.4f} "
-                f"(up={len(up_pks)}, down={len(down_pks)})"
-            )
+            logger.info(f"[RESULT] Hybrid search PK overlap={overlap:.4f} (up={len(up_pks)}, down={len(down_pks)})")
             assert overlap >= self.SEARCH_OVERLAP_THRESHOLD, (
-                f"Hybrid search overlap {overlap:.4f} below threshold "
-                f"{self.SEARCH_OVERLAP_THRESHOLD}"
+                f"Hybrid search overlap {overlap:.4f} below threshold {self.SEARCH_OVERLAP_THRESHOLD}"
             )
 
         finally:
@@ -374,17 +367,13 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_srch_iter", max_length=50)
 
-        self.log_test_start(
-            "test_search_iterator_consistency", "SEARCH_ITERATOR", c_name
-        )
+        self.log_test_start("test_search_iterator_consistency", "SEARCH_ITERATOR", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
         try:
             self.cleanup_collection(upstream_client, c_name)
-            self._setup_collection(
-                upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128
-            )
+            self._setup_collection(upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128)
 
             def check_sync():
                 try:
@@ -400,9 +389,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"data sync 500 records {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"data sync 500 records {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             query_vec = self._gen_vectors(1, 128, DataType.FLOAT_VECTOR)[0]
             search_params = {"metric_type": "COSINE", "params": {"ef": 64}}
@@ -432,13 +421,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
             union_size = len(up_pks | down_pks)
             overlap = len(up_pks & down_pks) / union_size if union_size > 0 else 1.0
 
-            logger.info(
-                f"[RESULT] Search iterator overlap={overlap:.4f} "
-                f"(up={len(up_pks)}, down={len(down_pks)})"
-            )
+            logger.info(f"[RESULT] Search iterator overlap={overlap:.4f} (up={len(up_pks)}, down={len(down_pks)})")
             assert overlap >= self.SEARCH_OVERLAP_THRESHOLD, (
-                f"Search iterator PK overlap {overlap:.4f} below threshold "
-                f"{self.SEARCH_OVERLAP_THRESHOLD}"
+                f"Search iterator PK overlap {overlap:.4f} below threshold {self.SEARCH_OVERLAP_THRESHOLD}"
             )
 
         finally:
@@ -458,17 +443,13 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_qry_iter", max_length=50)
 
-        self.log_test_start(
-            "test_query_iterator_consistency", "QUERY_ITERATOR", c_name
-        )
+        self.log_test_start("test_query_iterator_consistency", "QUERY_ITERATOR", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
         try:
             self.cleanup_collection(upstream_client, c_name)
-            self._setup_collection(
-                upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128
-            )
+            self._setup_collection(upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128)
 
             def check_sync():
                 try:
@@ -484,9 +465,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"data sync 500 records {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"data sync 500 records {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             up_count, down_count, match = self.verify_iterator_consistency(
                 upstream_client,
@@ -495,12 +476,8 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                 batch_size=100,
             )
 
-            logger.info(
-                f"[RESULT] Query iterator — upstream={up_count}, downstream={down_count}, match={match}"
-            )
-            assert match, (
-                f"Query iterator PK sets differ: upstream={up_count}, downstream={down_count}"
-            )
+            logger.info(f"[RESULT] Query iterator — upstream={up_count}, downstream={down_count}, match={match}")
+            assert match, f"Query iterator PK sets differ: upstream={up_count}, downstream={down_count}"
 
         finally:
             self.log_test_end(
@@ -519,17 +496,13 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_srch_filter", max_length=50)
 
-        self.log_test_start(
-            "test_search_with_filter_consistency", "SEARCH_WITH_FILTER", c_name
-        )
+        self.log_test_start("test_search_with_filter_consistency", "SEARCH_WITH_FILTER", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
         try:
             self.cleanup_collection(upstream_client, c_name)
-            self._setup_collection(
-                upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128
-            )
+            self._setup_collection(upstream_client, c_name, "FLOAT_VECTOR", "HNSW", "COSINE", 128)
 
             def check_sync():
                 try:
@@ -545,9 +518,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_sync, sync_timeout, f"data sync 500 records {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_sync, sync_timeout, f"data sync 500 records {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             filter_expr = "int_field > 500"
             query_vec = self._gen_vectors(1, 128, DataType.FLOAT_VECTOR)[0]
@@ -573,14 +546,10 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
             )
 
             # Verify filter is honoured on both sides
-            for hit in (up_results[0] if up_results else []):
-                assert hit["int_field"] > 500, (
-                    f"Filter violated on upstream: int_field={hit['int_field']}"
-                )
-            for hit in (down_results[0] if down_results else []):
-                assert hit["int_field"] > 500, (
-                    f"Filter violated on downstream: int_field={hit['int_field']}"
-                )
+            for hit in up_results[0] if up_results else []:
+                assert hit["int_field"] > 500, f"Filter violated on upstream: int_field={hit['int_field']}"
+            for hit in down_results[0] if down_results else []:
+                assert hit["int_field"] > 500, f"Filter violated on downstream: int_field={hit['int_field']}"
 
             # Verify PK overlap
             up_pks = set(hit["id"] for hit in up_results[0]) if up_results else set()
@@ -588,13 +557,9 @@ class TestCDCSyncSearchVerification(TestCDCSyncBase):
             union_size = len(up_pks | down_pks)
             overlap = len(up_pks & down_pks) / union_size if union_size > 0 else 1.0
 
-            logger.info(
-                f"[RESULT] Filtered search overlap={overlap:.4f} "
-                f"(up={len(up_pks)}, down={len(down_pks)})"
-            )
+            logger.info(f"[RESULT] Filtered search overlap={overlap:.4f} (up={len(up_pks)}, down={len(down_pks)})")
             assert overlap >= self.SEARCH_OVERLAP_THRESHOLD, (
-                f"Filtered search overlap {overlap:.4f} below threshold "
-                f"{self.SEARCH_OVERLAP_THRESHOLD}"
+                f"Filtered search overlap {overlap:.4f} below threshold {self.SEARCH_OVERLAP_THRESHOLD}"
             )
 
         finally:

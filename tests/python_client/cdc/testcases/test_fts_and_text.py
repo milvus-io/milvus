@@ -64,9 +64,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
             self.cleanup_collection(upstream_client, collection_name)
 
             # Create FTS schema and collection
-            logger.info(
-                f"[CREATE] Creating FTS collection '{collection_name}' with analyzer_type='{analyzer_type}'"
-            )
+            logger.info(f"[CREATE] Creating FTS collection '{collection_name}' with analyzer_type='{analyzer_type}'")
             schema = self.create_fts_schema(upstream_client, analyzer_type)
             upstream_client.create_collection(collection_name, schema=schema)
 
@@ -145,9 +143,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                         return False
                     if len(upstream_ids) == 0:
                         return len(downstream_ids) > 0
-                    overlap = len(upstream_ids & downstream_ids) / max(
-                        len(upstream_ids), 1
-                    )
+                    overlap = len(upstream_ids & downstream_ids) / max(len(upstream_ids), 1)
                     logger.info(
                         f"[OVERLAP] FTS search overlap: {overlap:.2f} "
                         f"(upstream={len(upstream_ids)}, downstream={len(downstream_ids)})"
@@ -161,10 +157,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 check_fts_overlap,
                 sync_timeout,
                 f"FTS search overlap sync (analyzer={analyzer_type})",
-            ), (
-                f"FTS search results did not reach overlap threshold "
-                f"{self.SEARCH_OVERLAP_THRESHOLD} on downstream"
-            )
+            ), f"FTS search results did not reach overlap threshold {self.SEARCH_OVERLAP_THRESHOLD} on downstream"
 
             duration = time.time() - start_time
             self.log_test_end("test_fts_insert_and_search", True, duration)
@@ -220,9 +213,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 analyzer_params={"type": analyzer_type},
             )
 
-            logger.info(
-                f"[CREATE] Creating text-match collection '{collection_name}'"
-            )
+            logger.info(f"[CREATE] Creating text-match collection '{collection_name}'")
             upstream_client.create_collection(collection_name, schema=schema)
 
             # Insert 100 rows from FTS_SENTENCES
@@ -282,10 +273,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                         limit=100,
                     )
                     ds_count = len(ds_results)
-                    logger.info(
-                        f"[VERIFY] TEXT_MATCH downstream count={ds_count}, "
-                        f"upstream count={upstream_count}"
-                    )
+                    logger.info(f"[VERIFY] TEXT_MATCH downstream count={ds_count}, upstream count={upstream_count}")
                     return ds_count == upstream_count
                 except Exception as e:
                     logger.warning(f"TEXT_MATCH count check failed: {e}")
@@ -295,10 +283,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 check_count_match,
                 sync_timeout,
                 f"TEXT_MATCH query count sync (analyzer={analyzer_type})",
-            ), (
-                f"TEXT_MATCH query count mismatch between upstream ({upstream_count}) "
-                f"and downstream after timeout"
-            )
+            ), f"TEXT_MATCH query count mismatch between upstream ({upstream_count}) and downstream after timeout"
 
             duration = time.time() - start_time
             self.log_test_end("test_text_match_sync", True, duration)
@@ -353,9 +338,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 analyzer_params={"type": analyzer_type},
             )
 
-            logger.info(
-                f"[CREATE] Creating phrase-match collection '{collection_name}'"
-            )
+            logger.info(f"[CREATE] Creating phrase-match collection '{collection_name}'")
             upstream_client.create_collection(collection_name, schema=schema)
 
             # Insert 100 rows from FTS_SENTENCES
@@ -393,9 +376,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 limit=100,
             )
             upstream_count = len(upstream_results)
-            logger.info(
-                f"[QUERY] Upstream PHRASE_MATCH returned {upstream_count} rows"
-            )
+            logger.info(f"[QUERY] Upstream PHRASE_MATCH returned {upstream_count} rows")
 
             # Wait for collection to appear downstream
             def check_collection_exists():
@@ -417,10 +398,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                         limit=100,
                     )
                     ds_count = len(ds_results)
-                    logger.info(
-                        f"[VERIFY] PHRASE_MATCH downstream count={ds_count}, "
-                        f"upstream count={upstream_count}"
-                    )
+                    logger.info(f"[VERIFY] PHRASE_MATCH downstream count={ds_count}, upstream count={upstream_count}")
                     return ds_count == upstream_count
                 except Exception as e:
                     logger.warning(f"PHRASE_MATCH count check failed: {e}")
@@ -430,10 +408,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 check_count_match,
                 sync_timeout,
                 f"PHRASE_MATCH query count sync (analyzer={analyzer_type})",
-            ), (
-                f"PHRASE_MATCH query count mismatch between upstream ({upstream_count}) "
-                f"and downstream after timeout"
-            )
+            ), f"PHRASE_MATCH query count mismatch between upstream ({upstream_count}) and downstream after timeout"
 
             duration = time.time() - start_time
             self.log_test_end("test_phrase_match_sync", True, duration)
@@ -531,9 +506,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 for hit in upstream_results[0]:
                     upstream_ids.add(hit.get("id") or hit.id)
 
-            logger.info(
-                f"[SEARCH] Upstream hybrid search returned {len(upstream_ids)} results"
-            )
+            logger.info(f"[SEARCH] Upstream hybrid search returned {len(upstream_ids)} results")
 
             # Wait for collection to appear downstream
             def check_collection_exists():
@@ -576,9 +549,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                         return False
                     if len(upstream_ids) == 0:
                         return len(downstream_ids) > 0
-                    overlap = len(upstream_ids & downstream_ids) / max(
-                        len(upstream_ids), 1
-                    )
+                    overlap = len(upstream_ids & downstream_ids) / max(len(upstream_ids), 1)
                     logger.info(
                         f"[OVERLAP] Hybrid search overlap: {overlap:.2f} "
                         f"(upstream={len(upstream_ids)}, downstream={len(downstream_ids)})"
@@ -592,10 +563,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                 check_hybrid_overlap,
                 sync_timeout,
                 "hybrid search (FTS + dense) overlap sync",
-            ), (
-                f"Hybrid search results did not reach overlap threshold "
-                f"{self.SEARCH_OVERLAP_THRESHOLD} on downstream"
-            )
+            ), f"Hybrid search results did not reach overlap threshold {self.SEARCH_OVERLAP_THRESHOLD} on downstream"
 
             duration = time.time() - start_time
             self.log_test_end("test_hybrid_search_fts_dense", True, duration)
@@ -642,9 +610,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
             self.cleanup_collection(upstream_client, collection_name)
 
             # Phase 1: Create FTS collection and index on original upstream
-            logger.info(
-                f"[PHASE1] Creating FTS collection '{collection_name}' on upstream"
-            )
+            logger.info(f"[PHASE1] Creating FTS collection '{collection_name}' on upstream")
             schema = self.create_fts_schema(upstream_client, "standard")
             upstream_client.create_collection(collection_name, schema=schema)
 
@@ -695,16 +661,12 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
             logger.info("[PHASE1] Initial FTS sync verified")
 
             # Phase 2: Switchover — downstream becomes new source
-            logger.info(
-                f"[PHASE2] Switching CDC direction: {target_cluster_id} -> {source_cluster_id}"
-            )
+            logger.info(f"[PHASE2] Switching CDC direction: {target_cluster_id} -> {source_cluster_id}")
             switchover_helper(target_cluster_id, source_cluster_id)
 
             # Insert 50 more docs to the new source (original downstream)
             extra_data = self.generate_fts_data(50)
-            logger.info(
-                f"[PHASE2] Inserting {len(extra_data)} additional docs to new source (downstream_client)"
-            )
+            logger.info(f"[PHASE2] Inserting {len(extra_data)} additional docs to new source (downstream_client)")
             downstream_client.insert(collection_name, extra_data)
             downstream_client.flush(collection_name)
 
@@ -735,10 +697,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
             logger.info("[PHASE3] FTS search verified on new downstream after switchover")
 
             # Phase 4: Switch back to original topology
-            logger.info(
-                f"[PHASE4] Switching back to original topology: "
-                f"{source_cluster_id} -> {target_cluster_id}"
-            )
+            logger.info(f"[PHASE4] Switching back to original topology: {source_cluster_id} -> {target_cluster_id}")
             switchover_helper(source_cluster_id, target_cluster_id)
 
             duration = time.time() - start_time
@@ -747,9 +706,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
         except Exception as exc:
             # Best-effort restore original topology on failure
             try:
-                logger.warning(
-                    "[RECOVER] Attempting to restore original CDC topology after failure"
-                )
+                logger.warning("[RECOVER] Attempting to restore original CDC topology after failure")
                 switchover_helper(source_cluster_id, target_cluster_id)
             except Exception as restore_exc:
                 logger.error(f"[RECOVER] Failed to restore topology: {restore_exc}")

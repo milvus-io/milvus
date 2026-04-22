@@ -49,9 +49,7 @@ class TestCDCSyncBase:
     ]
 
     @staticmethod
-    def gen_unique_name(
-        prefix: str = "", length: int = 8, max_length: int = None
-    ) -> str:
+    def gen_unique_name(prefix: str = "", length: int = 8, max_length: int = None) -> str:
         """Generate a unique string with prefix and timestamp."""
         chars = string.ascii_letters + string.digits
         random_str = "".join(random.choice(chars) for _ in range(length))
@@ -68,11 +66,7 @@ class TestCDCSyncBase:
             if available_len > 0:
                 # Use shorter timestamp format for space
                 short_timestamp = datetime.now().strftime("%m%d_%H%M%S")  # 11 chars
-                truncated_prefix = (
-                    prefix[: available_len - len(short_timestamp) - 1]
-                    if len(prefix) > 0
-                    else ""
-                )
+                truncated_prefix = prefix[: available_len - len(short_timestamp) - 1] if len(prefix) > 0 else ""
                 name = (
                     f"{truncated_prefix}_{short_timestamp}_{random_str}"
                     if truncated_prefix
@@ -111,34 +105,23 @@ class TestCDCSyncBase:
             try:
                 if check_func():
                     elapsed = time.time() - start_time
-                    logger.info(
-                        f"[SUCCESS] {operation_name} synced successfully in {elapsed:.2f}s"
-                    )
+                    logger.info(f"[SUCCESS] {operation_name} synced successfully in {elapsed:.2f}s")
                     return True
             except Exception as e:
                 elapsed = time.time() - start_time
-                logger.warning(
-                    f"Sync check failed for {operation_name} at {elapsed:.1f}s: {e}"
-                )
+                logger.warning(f"Sync check failed for {operation_name} at {elapsed:.1f}s: {e}")
 
             elapsed = time.time() - start_time
             # Log every 10 seconds or on first check
-            if (
-                elapsed - (last_log_time - start_time) >= 10
-                or elapsed <= check_interval
-            ):
+            if elapsed - (last_log_time - start_time) >= 10 or elapsed <= check_interval:
                 progress = (elapsed / timeout) * 100
-                logger.info(
-                    f"[WAITING] {operation_name} sync... {elapsed:.1f}s elapsed ({progress:.1f}% of timeout)"
-                )
+                logger.info(f"[WAITING] {operation_name} sync... {elapsed:.1f}s elapsed ({progress:.1f}% of timeout)")
                 last_log_time = time.time()
 
             time.sleep(check_interval)
 
         elapsed = time.time() - start_time
-        logger.error(
-            f"[FAILED] {operation_name} sync failed after {elapsed:.2f}s timeout"
-        )
+        logger.error(f"[FAILED] {operation_name} sync failed after {elapsed:.2f}s timeout")
         return False
 
     @staticmethod
@@ -178,18 +161,10 @@ class TestCDCSyncBase:
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=1000)
 
         # Array fields
-        schema.add_field(
-            "bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100
-        )
-        schema.add_field(
-            "int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100
-        )
-        schema.add_field(
-            "int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100
-        )
-        schema.add_field(
-            "float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100
-        )
+        schema.add_field("bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100)
+        schema.add_field("int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100)
+        schema.add_field("int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100)
+        schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100)
         schema.add_field(
             "double_array",
             DataType.ARRAY,
@@ -235,18 +210,10 @@ class TestCDCSyncBase:
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=1000)
 
         # Array fields
-        schema.add_field(
-            "bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100
-        )
-        schema.add_field(
-            "int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100
-        )
-        schema.add_field(
-            "int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100
-        )
-        schema.add_field(
-            "float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100
-        )
+        schema.add_field("bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100)
+        schema.add_field("int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100)
+        schema.add_field("int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100)
+        schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100)
         schema.add_field(
             "double_array",
             DataType.ARRAY,
@@ -292,18 +259,10 @@ class TestCDCSyncBase:
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=1000)
 
         # Array fields
-        schema.add_field(
-            "bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100
-        )
-        schema.add_field(
-            "int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100
-        )
-        schema.add_field(
-            "int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100
-        )
-        schema.add_field(
-            "float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100
-        )
+        schema.add_field("bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100)
+        schema.add_field("int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100)
+        schema.add_field("int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100)
+        schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100)
         schema.add_field(
             "double_array",
             DataType.ARRAY,
@@ -349,18 +308,10 @@ class TestCDCSyncBase:
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=1000)
 
         # Array fields
-        schema.add_field(
-            "bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100
-        )
-        schema.add_field(
-            "int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100
-        )
-        schema.add_field(
-            "int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100
-        )
-        schema.add_field(
-            "float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100
-        )
+        schema.add_field("bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=100)
+        schema.add_field("int32_array", DataType.ARRAY, element_type=DataType.INT32, max_capacity=100)
+        schema.add_field("int64_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=100)
+        schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=100)
         schema.add_field(
             "double_array",
             DataType.ARRAY,
@@ -406,9 +357,7 @@ class TestCDCSyncBase:
         ]
 
     @staticmethod
-    def generate_test_data_with_id(
-        count: int = 100, start_id: int = 0
-    ) -> list[dict[str, Any]]:
+    def generate_test_data_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate test data with manual IDs for upsert operations."""
         return [
             {
@@ -427,15 +376,9 @@ class TestCDCSyncBase:
 
         # Generate vectors using standard method
         float_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.FLOAT_VECTOR)
-        float16_vectors = TestCDCSyncBase._gen_vectors(
-            count, 64, DataType.FLOAT16_VECTOR
-        )
-        binary_vectors = TestCDCSyncBase._gen_vectors(
-            count, 128, DataType.BINARY_VECTOR
-        )
-        sparse_vectors = TestCDCSyncBase._gen_vectors(
-            count, 1000, DataType.SPARSE_FLOAT_VECTOR
-        )
+        float16_vectors = TestCDCSyncBase._gen_vectors(count, 64, DataType.FLOAT16_VECTOR)
+        binary_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.BINARY_VECTOR)
+        sparse_vectors = TestCDCSyncBase._gen_vectors(count, 1000, DataType.SPARSE_FLOAT_VECTOR)
 
         data = []
         for i in range(count):
@@ -450,31 +393,17 @@ class TestCDCSyncBase:
                 "int8_field": random.randint(-128, 127),
                 "int16_field": random.randint(-32768, 32767),
                 "int32_field": random.randint(-2147483648, 2147483647),
-                "int64_field": random.randint(
-                    -9223372036854775808, 9223372036854775807
-                ),
+                "int64_field": random.randint(-9223372036854775808, 9223372036854775807),
                 "float_field": random.uniform(-1000.0, 1000.0),
                 "double_field": random.uniform(-1000.0, 1000.0),
                 "varchar_field": f"test_varchar_{i}_{random.randint(1000, 9999)}",
                 # Array fields
-                "bool_array": [
-                    random.choice([True, False]) for _ in range(random.randint(1, 10))
-                ],
-                "int32_array": [
-                    random.randint(-100, 100) for _ in range(random.randint(1, 10))
-                ],
-                "int64_array": [
-                    random.randint(-1000, 1000) for _ in range(random.randint(1, 10))
-                ],
-                "float_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "double_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "varchar_array": [
-                    f"array_str_{j}" for j in range(random.randint(1, 5))
-                ],
+                "bool_array": [random.choice([True, False]) for _ in range(random.randint(1, 10))],
+                "int32_array": [random.randint(-100, 100) for _ in range(random.randint(1, 10))],
+                "int64_array": [random.randint(-1000, 1000) for _ in range(random.randint(1, 10))],
+                "float_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "double_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "varchar_array": [f"array_str_{j}" for j in range(random.randint(1, 5))],
                 # JSON field
                 "json_field": {
                     "name": f"item_{i}",
@@ -496,13 +425,9 @@ class TestCDCSyncBase:
 
         # Generate vectors using standard method - alternative set
         float_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.FLOAT_VECTOR)
-        bfloat16_vectors = TestCDCSyncBase._gen_vectors(
-            count, 64, DataType.BFLOAT16_VECTOR
-        )
+        bfloat16_vectors = TestCDCSyncBase._gen_vectors(count, 64, DataType.BFLOAT16_VECTOR)
         int8_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.INT8_VECTOR)
-        sparse_vectors = TestCDCSyncBase._gen_vectors(
-            count, 1000, DataType.SPARSE_FLOAT_VECTOR
-        )
+        sparse_vectors = TestCDCSyncBase._gen_vectors(count, 1000, DataType.SPARSE_FLOAT_VECTOR)
 
         data = []
         for i in range(count):
@@ -517,31 +442,17 @@ class TestCDCSyncBase:
                 "int8_field": random.randint(-128, 127),
                 "int16_field": random.randint(-32768, 32767),
                 "int32_field": random.randint(-2147483648, 2147483647),
-                "int64_field": random.randint(
-                    -9223372036854775808, 9223372036854775807
-                ),
+                "int64_field": random.randint(-9223372036854775808, 9223372036854775807),
                 "float_field": random.uniform(-1000.0, 1000.0),
                 "double_field": random.uniform(-1000.0, 1000.0),
                 "varchar_field": f"test_varchar_{i}_{random.randint(1000, 9999)}",
                 # Array fields
-                "bool_array": [
-                    random.choice([True, False]) for _ in range(random.randint(1, 10))
-                ],
-                "int32_array": [
-                    random.randint(-100, 100) for _ in range(random.randint(1, 10))
-                ],
-                "int64_array": [
-                    random.randint(-1000, 1000) for _ in range(random.randint(1, 10))
-                ],
-                "float_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "double_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "varchar_array": [
-                    f"array_str_{j}" for j in range(random.randint(1, 5))
-                ],
+                "bool_array": [random.choice([True, False]) for _ in range(random.randint(1, 10))],
+                "int32_array": [random.randint(-100, 100) for _ in range(random.randint(1, 10))],
+                "int64_array": [random.randint(-1000, 1000) for _ in range(random.randint(1, 10))],
+                "float_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "double_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "varchar_array": [f"array_str_{j}" for j in range(random.randint(1, 5))],
                 # JSON field
                 "json_field": {
                     "name": f"item_{i}",
@@ -558,20 +469,14 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_comprehensive_test_data_alt_with_id(
-        count: int = 100, start_id: int = 0
-    ) -> list[dict[str, Any]]:
+    def generate_comprehensive_test_data_alt_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs and alternative vector types (BFLOAT16 + INT8)."""
 
         # Generate vectors using standard method - alternative set
         float_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.FLOAT_VECTOR)
-        bfloat16_vectors = TestCDCSyncBase._gen_vectors(
-            count, 64, DataType.BFLOAT16_VECTOR
-        )
+        bfloat16_vectors = TestCDCSyncBase._gen_vectors(count, 64, DataType.BFLOAT16_VECTOR)
         int8_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.INT8_VECTOR)
-        sparse_vectors = TestCDCSyncBase._gen_vectors(
-            count, 1000, DataType.SPARSE_FLOAT_VECTOR
-        )
+        sparse_vectors = TestCDCSyncBase._gen_vectors(count, 1000, DataType.SPARSE_FLOAT_VECTOR)
 
         data = []
         for i in range(count):
@@ -587,31 +492,17 @@ class TestCDCSyncBase:
                 "int8_field": random.randint(-128, 127),
                 "int16_field": random.randint(-32768, 32767),
                 "int32_field": random.randint(-2147483648, 2147483647),
-                "int64_field": random.randint(
-                    -9223372036854775808, 9223372036854775807
-                ),
+                "int64_field": random.randint(-9223372036854775808, 9223372036854775807),
                 "float_field": random.uniform(-1000.0, 1000.0),
                 "double_field": random.uniform(-1000.0, 1000.0),
                 "varchar_field": f"test_varchar_{i}_{random.randint(1000, 9999)}",
                 # Array fields
-                "bool_array": [
-                    random.choice([True, False]) for _ in range(random.randint(1, 10))
-                ],
-                "int32_array": [
-                    random.randint(-100, 100) for _ in range(random.randint(1, 10))
-                ],
-                "int64_array": [
-                    random.randint(-1000, 1000) for _ in range(random.randint(1, 10))
-                ],
-                "float_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "double_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "varchar_array": [
-                    f"array_str_{j}" for j in range(random.randint(1, 5))
-                ],
+                "bool_array": [random.choice([True, False]) for _ in range(random.randint(1, 10))],
+                "int32_array": [random.randint(-100, 100) for _ in range(random.randint(1, 10))],
+                "int64_array": [random.randint(-1000, 1000) for _ in range(random.randint(1, 10))],
+                "float_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "double_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "varchar_array": [f"array_str_{j}" for j in range(random.randint(1, 5))],
                 # JSON field
                 "json_field": {
                     "name": f"item_{i}",
@@ -659,41 +550,27 @@ class TestCDCSyncBase:
             # Generate binary vectors (dim bits = dim/8 bytes)
             bytes_per_vector = dim // 8
             for _ in range(nb):
-                binary_vec = np.random.randint(
-                    0, 256, size=bytes_per_vector, dtype=np.uint8
-                ).tobytes()
+                binary_vec = np.random.randint(0, 256, size=bytes_per_vector, dtype=np.uint8).tobytes()
                 vectors.append(binary_vec)
         elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
             # Generate sparse vectors
             for _ in range(nb):
-                sparse_indices = random.sample(
-                    range(dim), random.randint(5, min(20, dim))
-                )
+                sparse_indices = random.sample(range(dim), random.randint(5, min(20, dim)))
                 sparse_values = [random.random() for _ in sparse_indices]
-                sparse_vector = {
-                    idx: val for idx, val in zip(sparse_indices, sparse_values)
-                }
+                sparse_vector = {idx: val for idx, val in zip(sparse_indices, sparse_values)}
                 vectors.append(sparse_vector)
 
         return vectors
 
     @staticmethod
-    def generate_comprehensive_test_data_with_id(
-        count: int = 100, start_id: int = 0
-    ) -> list[dict[str, Any]]:
+    def generate_comprehensive_test_data_with_id(count: int = 100, start_id: int = 0) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs for upsert operations using standard vector generation."""
 
         # Generate vectors using standard method
         float_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.FLOAT_VECTOR)
-        float16_vectors = TestCDCSyncBase._gen_vectors(
-            count, 64, DataType.FLOAT16_VECTOR
-        )
-        binary_vectors = TestCDCSyncBase._gen_vectors(
-            count, 128, DataType.BINARY_VECTOR
-        )
-        sparse_vectors = TestCDCSyncBase._gen_vectors(
-            count, 1000, DataType.SPARSE_FLOAT_VECTOR
-        )
+        float16_vectors = TestCDCSyncBase._gen_vectors(count, 64, DataType.FLOAT16_VECTOR)
+        binary_vectors = TestCDCSyncBase._gen_vectors(count, 128, DataType.BINARY_VECTOR)
+        sparse_vectors = TestCDCSyncBase._gen_vectors(count, 1000, DataType.SPARSE_FLOAT_VECTOR)
 
         data = []
         for i in range(count):
@@ -709,31 +586,17 @@ class TestCDCSyncBase:
                 "int8_field": random.randint(-128, 127),
                 "int16_field": random.randint(-32768, 32767),
                 "int32_field": random.randint(-2147483648, 2147483647),
-                "int64_field": random.randint(
-                    -9223372036854775808, 9223372036854775807
-                ),
+                "int64_field": random.randint(-9223372036854775808, 9223372036854775807),
                 "float_field": random.uniform(-1000.0, 1000.0),
                 "double_field": random.uniform(-1000.0, 1000.0),
                 "varchar_field": f"test_varchar_{i}_{random.randint(1000, 9999)}",
                 # Array fields
-                "bool_array": [
-                    random.choice([True, False]) for _ in range(random.randint(1, 10))
-                ],
-                "int32_array": [
-                    random.randint(-100, 100) for _ in range(random.randint(1, 10))
-                ],
-                "int64_array": [
-                    random.randint(-1000, 1000) for _ in range(random.randint(1, 10))
-                ],
-                "float_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "double_array": [
-                    random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))
-                ],
-                "varchar_array": [
-                    f"array_str_{j}" for j in range(random.randint(1, 5))
-                ],
+                "bool_array": [random.choice([True, False]) for _ in range(random.randint(1, 10))],
+                "int32_array": [random.randint(-100, 100) for _ in range(random.randint(1, 10))],
+                "int64_array": [random.randint(-1000, 1000) for _ in range(random.randint(1, 10))],
+                "float_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "double_array": [random.uniform(-100.0, 100.0) for _ in range(random.randint(1, 10))],
+                "varchar_array": [f"array_str_{j}" for j in range(random.randint(1, 5))],
                 # JSON field
                 "json_field": {
                     "name": f"item_{i}",
@@ -754,9 +617,7 @@ class TestCDCSyncBase:
         """Generate test data with BFLOAT16_VECTOR for index testing using standard method."""
 
         # Generate bfloat16 vectors using standard method
-        bfloat16_vectors = TestCDCSyncBase._gen_vectors(
-            count, 64, DataType.BFLOAT16_VECTOR
-        )
+        bfloat16_vectors = TestCDCSyncBase._gen_vectors(count, 64, DataType.BFLOAT16_VECTOR)
 
         data = []
         for i in range(count):
@@ -801,17 +662,11 @@ class TestCDCSyncBase:
             if client.has_collection(collection_name):
                 logger.info(f"[CLEANUP] Cleaning up collection: {collection_name}")
                 client.drop_collection(collection_name)
-                logger.info(
-                    f"[SUCCESS] Collection {collection_name} cleaned up successfully"
-                )
+                logger.info(f"[SUCCESS] Collection {collection_name} cleaned up successfully")
             else:
-                logger.debug(
-                    f"Collection {collection_name} does not exist, skipping cleanup"
-                )
+                logger.debug(f"Collection {collection_name} does not exist, skipping cleanup")
         except Exception as e:
-            logger.warning(
-                f"[FAILED] Failed to cleanup collection {collection_name}: {e}"
-            )
+            logger.warning(f"[FAILED] Failed to cleanup collection {collection_name}: {e}")
 
     def cleanup_user(self, client: MilvusClient, username: str):
         """Clean up user if exists."""
@@ -836,10 +691,7 @@ class TestCDCSyncBase:
                 # First, revoke all privileges from the role
                 try:
                     role_privileges = client.describe_role(role_name)
-                    if (
-                        isinstance(role_privileges, dict)
-                        and "privileges" in role_privileges
-                    ):
+                    if isinstance(role_privileges, dict) and "privileges" in role_privileges:
                         privileges_list = role_privileges["privileges"]
                     elif isinstance(role_privileges, list):
                         privileges_list = role_privileges
@@ -850,9 +702,7 @@ class TestCDCSyncBase:
                         try:
                             client.revoke_privilege(
                                 role_name=role_name,
-                                object_type=privilege_info.get(
-                                    "object_type", "Collection"
-                                ),
+                                object_type=privilege_info.get("object_type", "Collection"),
                                 privilege=privilege_info.get("privilege"),
                                 object_name=privilege_info.get("object_name", "*"),
                             )
@@ -864,9 +714,7 @@ class TestCDCSyncBase:
                                 f"[CLEANUP] Failed to revoke privilege {privilege_info.get('privilege')}: {revoke_e}"
                             )
                 except Exception as describe_e:
-                    logger.debug(
-                        f"[CLEANUP] Failed to describe role privileges: {describe_e}"
-                    )
+                    logger.debug(f"[CLEANUP] Failed to describe role privileges: {describe_e}")
 
                 # Then drop the role
                 client.drop_role(role_name)
@@ -876,9 +724,7 @@ class TestCDCSyncBase:
         except Exception as e:
             logger.warning(f"[FAILED] Failed to cleanup role {role_name}: {e}")
 
-    def log_test_start(
-        self, test_name: str, operation_type: str, resource_name: str = ""
-    ):
+    def log_test_start(self, test_name: str, operation_type: str, resource_name: str = ""):
         """Log test case start with detailed information."""
         separator = "=" * 80
         logger.info(f"\n{separator}")
@@ -886,9 +732,7 @@ class TestCDCSyncBase:
         logger.info(f"[OPERATION] Operation type: {operation_type}")
         if resource_name:
             logger.info(f"[RESOURCE] Resource: {resource_name}")
-        logger.info(
-            f"[TIME] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+        logger.info(f"[TIME] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"{separator}")
 
     def log_test_end(self, test_name: str, success: bool, duration: float = 0):
@@ -911,26 +755,16 @@ class TestCDCSyncBase:
         client_type: str = "upstream",
     ):
         """Log CDC operation execution."""
-        logger.info(
-            f"[EXECUTE] Executing {operation} on {client_type}: {resource_type} '{resource_name}'"
-        )
+        logger.info(f"[EXECUTE] Executing {operation} on {client_type}: {resource_type} '{resource_name}'")
 
-    def log_sync_verification(
-        self, operation: str, resource_name: str, expected_state: str
-    ):
+    def log_sync_verification(self, operation: str, resource_name: str, expected_state: str):
         """Log sync verification attempt."""
-        logger.info(
-            f"[VERIFY] Verifying sync for {operation}: {resource_name} should be {expected_state}"
-        )
+        logger.info(f"[VERIFY] Verifying sync for {operation}: {resource_name} should be {expected_state}")
 
-    def log_data_operation(
-        self, operation: str, collection_name: str, count: int = 0, details: str = ""
-    ):
+    def log_data_operation(self, operation: str, collection_name: str, count: int = 0, details: str = ""):
         """Log data manipulation operations."""
         if count > 0:
-            logger.info(
-                f"[DATA] {operation} operation: {collection_name} - {count} records {details}"
-            )
+            logger.info(f"[DATA] {operation} operation: {collection_name} - {count} records {details}")
         else:
             logger.info(f"[DATA] {operation} operation: {collection_name} {details}")
 
@@ -943,16 +777,8 @@ class TestCDCSyncBase:
         details: str = "",
     ):
         """Log current resource state."""
-        state_prefix = (
-            "[EXISTS]"
-            if state == "exists"
-            else "[MISSING]"
-            if state == "missing"
-            else "[UNKNOWN]"
-        )
-        logger.info(
-            f"{state_prefix} {client_type.capitalize()} {resource_type} '{resource_name}': {state} {details}"
-        )
+        state_prefix = "[EXISTS]" if state == "exists" else "[MISSING]" if state == "missing" else "[UNKNOWN]"
+        logger.info(f"{state_prefix} {client_type.capitalize()} {resource_type} '{resource_name}': {state} {details}")
 
     # -------------------------------------------------------------------------
     # Part 1: Additional Schema Factories
@@ -1103,15 +929,15 @@ class TestCDCSyncBase:
                 "nullable_varchar": None if random.random() < null_ratio else f"varchar_{random.randint(1000, 9999)}",
                 "nullable_float": None if random.random() < null_ratio else random.uniform(-100.0, 100.0),
                 "nullable_json": None if random.random() < null_ratio else {"key": random.randint(1, 100)},
-                "nullable_array": None if random.random() < null_ratio else [random.randint(0, 100) for _ in range(random.randint(1, 10))],
+                "nullable_array": None
+                if random.random() < null_ratio
+                else [random.randint(0, 100) for _ in range(random.randint(1, 10))],
             }
             data.append(record)
         return data
 
     @staticmethod
-    def generate_dynamic_data(
-        count=100, extra_fields=None
-    ) -> list[dict[str, Any]]:
+    def generate_dynamic_data(count=100, extra_fields=None) -> list[dict[str, Any]]:
         """Generate data for collections with dynamic fields enabled."""
         if extra_fields is None:
             extra_fields = {"extra_int": int, "extra_str": str, "extra_float": float}
@@ -1135,9 +961,7 @@ class TestCDCSyncBase:
         return data
 
     @classmethod
-    def generate_single_vector_data(
-        cls, count=100, vector_type="FLOAT_VECTOR", dim=128
-    ) -> list[dict[str, Any]]:
+    def generate_single_vector_data(cls, count=100, vector_type="FLOAT_VECTOR", dim=128) -> list[dict[str, Any]]:
         """Generate data for a single-vector collection."""
         dtype = getattr(DataType, vector_type)
         vectors = cls._gen_vectors(count, dim, dtype)
@@ -1185,9 +1009,7 @@ class TestCDCSyncBase:
 
         sample_size = max(1, int(len(all_pks) * sample_ratio))
         sampled_pks = random.sample(all_pks, min(sample_size, len(all_pks)))
-        logger.info(
-            f"[VERIFY] Sampling {len(sampled_pks)} / {len(all_pks)} records from '{collection_name}'"
-        )
+        logger.info(f"[VERIFY] Sampling {len(sampled_pks)} / {len(all_pks)} records from '{collection_name}'")
 
         match_count = 0
         mismatch_count = 0
@@ -1237,9 +1059,7 @@ class TestCDCSyncBase:
                 mismatch_count += 1
                 mismatch_details.append({"pk": pk, "field_diffs": field_diffs})
 
-        logger.info(
-            f"[VERIFY] Sampling result — match: {match_count}, mismatch: {mismatch_count}"
-        )
+        logger.info(f"[VERIFY] Sampling result — match: {match_count}, mismatch: {mismatch_count}")
         return match_count, mismatch_count, mismatch_details
 
     @classmethod
@@ -1354,6 +1174,7 @@ class TestCDCSyncBase:
         Returns:
             (up_count, down_count, match_bool)
         """
+
         def _collect_pks(client):
             pks = set()
             iterator = client.query_iterator(

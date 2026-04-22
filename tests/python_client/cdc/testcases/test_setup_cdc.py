@@ -45,10 +45,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -56,10 +53,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -91,9 +85,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_sync():
             return downstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_sync, 30, f"collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_sync, 30, f"collection {test_collection_name} sync")
 
         # Cleanup
         self.cleanup_collection(upstream_client, test_collection_name)
@@ -117,10 +109,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -128,10 +117,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -143,7 +129,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config)
-        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config)
+        downstream_client.update_replicate_configuration(
+            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config
+        )
         time.sleep(3)
 
         # Now switch the direction (target -> source)
@@ -152,10 +140,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -163,10 +148,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -179,7 +161,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
 
         # Apply switched configuration
         upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config)
-        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config)
+        downstream_client.update_replicate_configuration(
+            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config
+        )
         time.sleep(3)
 
         # Test the switched topology by creating collection on downstream (now source)
@@ -195,9 +179,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_switched_sync():
             return upstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_switched_sync, 30, f"switched collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_switched_sync, 30, f"switched collection {test_collection_name} sync")
 
         # Cleanup
         self.cleanup_collection(downstream_client, test_collection_name)
@@ -233,7 +215,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_1)
+            upstream_client.update_replicate_configuration(
+                timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_1
+            )
 
         # Test case 4.2: Circular dependency (A -> B, B -> A)
         invalid_config_2 = {
@@ -266,7 +250,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
 
         # This may or may not fail depending on implementation, but test it
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_2)
+            upstream_client.update_replicate_configuration(
+                timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_2
+            )
 
         # Test case 4.3: Invalid connection parameters
         invalid_config_3 = {
@@ -296,7 +282,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_3)
+            upstream_client.update_replicate_configuration(
+                timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_3
+            )
 
         # Test case 4.4: Empty cluster list but non-empty topology
         invalid_config_4 = {
@@ -309,7 +297,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_4)
+            upstream_client.update_replicate_configuration(
+                timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_4
+            )
 
         # Test case 4.5: Invalid pchannel format
         invalid_config_5 = {
@@ -323,7 +313,9 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             "cross_cluster_topology": [],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_5)
+            upstream_client.update_replicate_configuration(
+                timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_5
+            )
 
     @pytest.mark.order(-1)
     def test_clear_configuration_disconnect(
@@ -345,10 +337,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
                 {
                     "cluster_id": target_cluster_id,
@@ -356,10 +345,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 },
             ],
             "cross_cluster_topology": [
@@ -384,9 +370,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         def check_initial_sync():
             return downstream_client.has_collection(test_collection_name)
 
-        assert self.wait_for_sync(
-            check_initial_sync, 30, f"initial collection {test_collection_name} sync"
-        )
+        assert self.wait_for_sync(check_initial_sync, 30, f"initial collection {test_collection_name} sync")
 
         # Now clear the configuration (empty topology)
         empty_upstream_config = {
@@ -394,10 +378,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                 {
                     "cluster_id": source_cluster_id,
                     "connection_param": {"uri": upstream_uri, "token": upstream_token},
-                    "pchannels": [
-                        f"{source_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{source_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 }
             ],
             "cross_cluster_topology": [],
@@ -410,17 +391,18 @@ class TestCDCTopologySetup(TestCDCSyncBase):
                         "uri": downstream_uri,
                         "token": downstream_token,
                     },
-                    "pchannels": [
-                        f"{target_cluster_id}-rootcoord-dml_{i}"
-                        for i in range(pchannel_num)
-                    ],
+                    "pchannels": [f"{target_cluster_id}-rootcoord-dml_{i}" for i in range(pchannel_num)],
                 }
             ],
             "cross_cluster_topology": [],
         }
         # Apply empty configuration to disconnect CDC
-        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_upstream_config)
-        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_downstream_config)
+        upstream_client.update_replicate_configuration(
+            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_upstream_config
+        )
+        downstream_client.update_replicate_configuration(
+            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_downstream_config
+        )
         time.sleep(3)
 
         # Test that CDC is disconnected - create new collection and verify it doesn't sync

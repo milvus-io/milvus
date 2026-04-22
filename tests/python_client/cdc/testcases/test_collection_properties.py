@@ -163,9 +163,7 @@ class TestCDCSyncCollectionProperties(TestCDCSyncBase):
                 logger.warning(f"Check autocompaction sync failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_autocomp, sync_timeout, f"autocompaction property sync for {c_name}"
-        )
+        assert self.wait_for_sync(check_autocomp, sync_timeout, f"autocompaction property sync for {c_name}")
 
     def test_alter_multiple_properties(self, upstream_client, downstream_client, sync_timeout):
         """Test ALTER_COLLECTION_PROPERTIES with multiple properties at once sync."""
@@ -211,9 +209,7 @@ class TestCDCSyncCollectionProperties(TestCDCSyncBase):
                 logger.warning(f"Check all properties sync failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_all_props, sync_timeout, f"all properties sync for {c_name}"
-        )
+        assert self.wait_for_sync(check_all_props, sync_timeout, f"all properties sync for {c_name}")
 
     def test_drop_properties_sync(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_COLLECTION_PROPERTIES — set TTL + mmap, drop TTL, verify TTL gone and mmap remains."""
@@ -277,6 +273,4 @@ class TestCDCSyncCollectionProperties(TestCDCSyncBase):
                 logger.warning(f"Check drop TTL sync failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_drop_ttl, sync_timeout, f"drop TTL property sync for {c_name}"
-        )
+        assert self.wait_for_sync(check_drop_ttl, sync_timeout, f"drop TTL property sync for {c_name}")

@@ -63,9 +63,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 200 rows with extra dynamic fields
             extra_fields = {"extra_int": int, "extra_str": str, "extra_float": float}
@@ -99,12 +97,8 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                     logger.warning(f"Dynamic schema sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_data, sync_timeout, f"dynamic schema data sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Dynamic schema data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_data, sync_timeout, f"dynamic schema data sync {collection_name}")
+            assert sync_success, f"Dynamic schema data failed to sync to downstream for {collection_name}"
 
             # Verify data sampling for extra fields
             match, mismatch, details = self.verify_data_sampling(
@@ -115,9 +109,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                 output_fields=["id", "varchar_field", "extra_int", "extra_str", "extra_float"],
             )
             logger.info(f"[VERIFY] Dynamic schema sampling: match={match}, mismatch={mismatch}")
-            assert mismatch == 0, (
-                f"Dynamic field data mismatch detected: {details}"
-            )
+            assert mismatch == 0, f"Dynamic field data mismatch detected: {details}"
 
             duration = time.time() - start_time
             self.log_test_end("test_dynamic_schema_sync", True, duration)
@@ -162,9 +154,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 200 rows with null_ratio=0.3
             test_data = self.generate_nullable_data(200, null_ratio=0.3)
@@ -185,9 +175,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             )
             upstream_null_count = null_result[0]["count(*)"] if null_result else 0
             upstream_not_null_count = not_null_result[0]["count(*)"] if not_null_result else 0
-            logger.info(
-                f"[UPSTREAM] nullable_int64 null={upstream_null_count}, not_null={upstream_not_null_count}"
-            )
+            logger.info(f"[UPSTREAM] nullable_int64 null={upstream_null_count}, not_null={upstream_not_null_count}")
 
             self.log_sync_verification("NULLABLE_FIELDS", collection_name, "null counts match downstream")
 
@@ -210,10 +198,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                         f"[SYNC_PROGRESS] downstream nullable_int64 null={d_null_count}/{upstream_null_count}, "
                         f"not_null={d_not_null_count}/{upstream_not_null_count}"
                     )
-                    return (
-                        d_null_count == upstream_null_count
-                        and d_not_null_count == upstream_not_null_count
-                    )
+                    return d_null_count == upstream_null_count and d_not_null_count == upstream_not_null_count
                 except Exception as e:
                     logger.warning(f"Nullable sync check failed: {e}")
                     return False
@@ -221,9 +206,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             sync_success = self.wait_for_sync(
                 check_null_counts, sync_timeout, f"nullable fields sync {collection_name}"
             )
-            assert sync_success, (
-                f"Nullable field counts failed to sync to downstream for {collection_name}"
-            )
+            assert sync_success, f"Nullable field counts failed to sync to downstream for {collection_name}"
 
             duration = time.time() - start_time
             self.log_test_end("test_nullable_fields_sync", True, duration)
@@ -268,15 +251,10 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 100 rows providing ONLY float_vector — default fields are omitted
-            test_data = [
-                {"float_vector": [random.random() for _ in range(128)]}
-                for _ in range(100)
-            ]
+            test_data = [{"float_vector": [random.random() for _ in range(128)]} for _ in range(100)]
             self.log_data_operation("INSERT", collection_name, len(test_data), "- only float_vector provided")
             upstream_client.insert(collection_name, test_data)
             upstream_client.flush(collection_name)
@@ -289,11 +267,11 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             )
             upstream_count = upstream_result[0]["count(*)"] if upstream_result else 0
             logger.info(f'[UPSTREAM] default_varchar == "default" count: {upstream_count}')
-            assert upstream_count == 100, (
-                f"Expected 100 rows with default varchar on upstream, got {upstream_count}"
-            )
+            assert upstream_count == 100, f"Expected 100 rows with default varchar on upstream, got {upstream_count}"
 
-            self.log_sync_verification("DEFAULT_VALUES", collection_name, 'default_varchar == "default" count=100 on downstream')
+            self.log_sync_verification(
+                "DEFAULT_VALUES", collection_name, 'default_varchar == "default" count=100 on downstream'
+            )
 
             # Wait for sync and verify same count on downstream
             def check_defaults():
@@ -304,18 +282,14 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                         output_fields=["count(*)"],
                     )
                     down_count = down_result[0]["count(*)"] if down_result else 0
-                    logger.info(f'[SYNC_PROGRESS] downstream default_varchar count: {down_count}/100')
+                    logger.info(f"[SYNC_PROGRESS] downstream default_varchar count: {down_count}/100")
                     return down_count == 100
                 except Exception as e:
                     logger.warning(f"Default values sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_defaults, sync_timeout, f"default values sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Default value data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_defaults, sync_timeout, f"default values sync {collection_name}")
+            assert sync_success, f"Default value data failed to sync to downstream for {collection_name}"
 
             duration = time.time() - start_time
             self.log_test_end("test_default_values_sync", True, duration)
@@ -360,9 +334,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 500 rows with random categories as partition key values
             categories = ["cat_A", "cat_B", "cat_C", "cat_D", "cat_E"]
@@ -378,7 +350,9 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             upstream_client.insert(collection_name, test_data)
             upstream_client.flush(collection_name)
 
-            self.log_sync_verification("PARTITION_KEY", collection_name, "count=500 and partition_key field on downstream")
+            self.log_sync_verification(
+                "PARTITION_KEY", collection_name, "count=500 and partition_key field on downstream"
+            )
 
             # Wait for sync and verify count=500 on downstream
             def check_data():
@@ -395,18 +369,12 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                     logger.warning(f"Partition key sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_data, sync_timeout, f"partition key data sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Partition key data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_data, sync_timeout, f"partition key data sync {collection_name}")
+            assert sync_success, f"Partition key data failed to sync to downstream for {collection_name}"
 
             # Verify partition_key_field is present in downstream describe_collection
             downstream_info = downstream_client.describe_collection(collection_name)
-            downstream_fields = [
-                f["name"] for f in downstream_info.get("fields", [])
-            ]
+            downstream_fields = [f["name"] for f in downstream_info.get("fields", [])]
             logger.info(f"[VERIFY] Downstream fields: {downstream_fields}")
             assert "partition_key_field" in downstream_fields, (
                 f"partition_key_field not found in downstream collection schema: {downstream_fields}"
@@ -455,9 +423,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 300 rows
             test_data = [
@@ -472,7 +438,9 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             upstream_client.insert(collection_name, test_data)
             upstream_client.flush(collection_name)
 
-            self.log_sync_verification("CLUSTERING_KEY", collection_name, "count=300 and clustering_key field on downstream")
+            self.log_sync_verification(
+                "CLUSTERING_KEY", collection_name, "count=300 and clustering_key field on downstream"
+            )
 
             # Wait for sync and verify count=300 on downstream
             def check_data():
@@ -489,18 +457,12 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                     logger.warning(f"Clustering key sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_data, sync_timeout, f"clustering key data sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Clustering key data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_data, sync_timeout, f"clustering key data sync {collection_name}")
+            assert sync_success, f"Clustering key data failed to sync to downstream for {collection_name}"
 
             # Verify clustering_key_field is present in downstream describe_collection
             downstream_info = downstream_client.describe_collection(collection_name)
-            downstream_fields = [
-                f["name"] for f in downstream_info.get("fields", [])
-            ]
+            downstream_fields = [f["name"] for f in downstream_info.get("fields", [])]
             logger.info(f"[VERIFY] Downstream fields: {downstream_fields}")
             assert "clustering_key_field" in downstream_fields, (
                 f"clustering_key_field not found in downstream collection schema: {downstream_fields}"
@@ -572,9 +534,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 100 rows across 3 patterns
             test_data = []
@@ -612,12 +572,8 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                     logger.warning(f"Nullable+defaults sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_data, sync_timeout, f"nullable+defaults sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Nullable-with-defaults data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_data, sync_timeout, f"nullable+defaults sync {collection_name}")
+            assert sync_success, f"Nullable-with-defaults data failed to sync to downstream for {collection_name}"
 
             duration = time.time() - start_time
             self.log_test_end("test_nullable_with_defaults", True, duration)
@@ -672,9 +628,7 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(collection_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {collection_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {collection_name}")
 
             # Insert 300 rows with dynamic fields + partition key values
             partitions = ["region_A", "region_B", "region_C", "region_D"]
@@ -717,20 +671,14 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                         output_fields=["count(*)"],
                     )
                     down_count = down_result[0]["count(*)"] if down_result else 0
-                    logger.info(
-                        f"[SYNC_PROGRESS] downstream dynamic_num > 0 count: {down_count}/{upstream_count}"
-                    )
+                    logger.info(f"[SYNC_PROGRESS] downstream dynamic_num > 0 count: {down_count}/{upstream_count}")
                     return down_count == upstream_count
                 except Exception as e:
                     logger.warning(f"Dynamic+partition_key sync check failed: {e}")
                     return False
 
-            sync_success = self.wait_for_sync(
-                check_data, sync_timeout, f"dynamic+partition_key sync {collection_name}"
-            )
-            assert sync_success, (
-                f"Dynamic+partition_key data failed to sync to downstream for {collection_name}"
-            )
+            sync_success = self.wait_for_sync(check_data, sync_timeout, f"dynamic+partition_key sync {collection_name}")
+            assert sync_success, f"Dynamic+partition_key data failed to sync to downstream for {collection_name}"
 
             duration = time.time() - start_time
             self.log_test_end("test_dynamic_with_partition_key", True, duration)

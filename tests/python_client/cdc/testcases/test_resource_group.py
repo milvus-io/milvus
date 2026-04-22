@@ -53,17 +53,13 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
 
         # Create resource group in upstream
         upstream_client.create_resource_group(rg_name)
-        assert rg_name in upstream_client.list_resource_groups(), (
-            f"Resource group {rg_name} not created in upstream"
-        )
+        assert rg_name in upstream_client.list_resource_groups(), f"Resource group {rg_name} not created in upstream"
 
         # Wait for sync to downstream
         def check_sync():
             return rg_name in downstream_client.list_resource_groups()
 
-        assert self.wait_for_sync(
-            check_sync, sync_timeout, f"create resource group {rg_name}"
-        )
+        assert self.wait_for_sync(check_sync, sync_timeout, f"create resource group {rg_name}")
 
     def test_drop_resource_group_sync(self, upstream_client, downstream_client, sync_timeout):
         """Test DROP_RESOURCE_GROUP operation sync."""
@@ -83,9 +79,7 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
         def check_create():
             return rg_name in downstream_client.list_resource_groups()
 
-        assert self.wait_for_sync(
-            check_create, sync_timeout, f"create resource group {rg_name}"
-        )
+        assert self.wait_for_sync(check_create, sync_timeout, f"create resource group {rg_name}")
 
         # Drop resource group in upstream
         upstream_client.drop_resource_group(rg_name)
@@ -97,9 +91,7 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
         def check_drop():
             return rg_name not in downstream_client.list_resource_groups()
 
-        assert self.wait_for_sync(
-            check_drop, sync_timeout, f"drop resource group {rg_name}"
-        )
+        assert self.wait_for_sync(check_drop, sync_timeout, f"drop resource group {rg_name}")
 
     def test_update_resource_group_sync(self, upstream_client, downstream_client, sync_timeout):
         """Test UPDATE_RESOURCE_GROUP (with config) operation sync."""
@@ -118,9 +110,7 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
             "limits": {"node_num": 2},
         }
         upstream_client.create_resource_group(rg_name, config=config)
-        assert rg_name in upstream_client.list_resource_groups(), (
-            f"Resource group {rg_name} not created in upstream"
-        )
+        assert rg_name in upstream_client.list_resource_groups(), f"Resource group {rg_name} not created in upstream"
 
         # Wait for resource group to sync downstream
         def check_sync():
@@ -136,9 +126,7 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
                 logger.warning(f"Check update resource group sync failed: {e}")
                 return False
 
-        assert self.wait_for_sync(
-            check_sync, sync_timeout, f"update resource group {rg_name}"
-        )
+        assert self.wait_for_sync(check_sync, sync_timeout, f"update resource group {rg_name}")
 
     def test_transfer_replica_sync(self, upstream_client, downstream_client, sync_timeout):
         """Test that two resource groups both sync to downstream."""

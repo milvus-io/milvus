@@ -62,9 +62,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             # Insert 200 records on upstream (original source)
             batch1 = self.generate_test_data_with_id(200, start_id=0)
@@ -85,9 +83,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_200, sync_timeout, f"initial 200-record sync {c_name}"
-            )
+            assert self.wait_for_sync(check_200, sync_timeout, f"initial 200-record sync {c_name}")
 
             # Switchover: target becomes new source
             logger.info("[SWITCHOVER] Initiating basic switchover...")
@@ -126,24 +122,18 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_400_upstream, sync_timeout, f"400-record sync upstream {c_name}"
-            )
-            assert self.wait_for_sync(
-                check_400_downstream, sync_timeout, f"400-record sync downstream {c_name}"
-            )
+            assert self.wait_for_sync(check_400_upstream, sync_timeout, f"400-record sync upstream {c_name}")
+            assert self.wait_for_sync(check_400_downstream, sync_timeout, f"400-record sync downstream {c_name}")
 
             # Sample verify
             match_count, mismatch_count, details = self.verify_data_sampling(
                 downstream_client,  # new source
-                upstream_client,    # new target
+                upstream_client,  # new target
                 c_name,
                 sample_ratio=0.2,
                 output_fields=["id", "vector"],
             )
-            assert mismatch_count == 0, (
-                f"Data mismatch after basic switchover: {details[:5]}"
-            )
+            assert mismatch_count == 0, f"Data mismatch after basic switchover: {details[:5]}"
 
         finally:
             # Restore original topology
@@ -168,9 +158,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_sw_writes", max_length=50)
 
-        self.log_test_start(
-            "test_switchover_during_writes", "SWITCHOVER_DURING_WRITES", c_name
-        )
+        self.log_test_start("test_switchover_during_writes", "SWITCHOVER_DURING_WRITES", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
@@ -183,9 +171,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             total_inserted = 0
             lock = threading.Lock()
@@ -200,10 +186,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                         upstream_client.insert(c_name, data)
                         with lock:
                             total_inserted += 100
-                        logger.info(
-                            f"[BACKGROUND] Inserted batch {batch_idx + 1}/10 "
-                            f"(total: {total_inserted})"
-                        )
+                        logger.info(f"[BACKGROUND] Inserted batch {batch_idx + 1}/10 (total: {total_inserted})")
                     except Exception as e:
                         logger.error(f"[BACKGROUND] Insert failed on batch {batch_idx}: {e}")
                         write_error.append(e)
@@ -240,6 +223,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     except Exception as e:
                         logger.warning(f"Sync check failed ({label}): {e}")
                         return False
+
                 return _check
 
             assert self.wait_for_sync(
@@ -253,25 +237,18 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                 f"downstream count>={expected} after switchover-during-writes",
             )
 
-            up_res = upstream_client.query(
-                collection_name=c_name, filter="", output_fields=["count(*)"]
-            )
-            down_res = downstream_client.query(
-                collection_name=c_name, filter="", output_fields=["count(*)"]
-            )
+            up_res = upstream_client.query(collection_name=c_name, filter="", output_fields=["count(*)"])
+            down_res = downstream_client.query(collection_name=c_name, filter="", output_fields=["count(*)"])
             up_cnt = up_res[0]["count(*)"] if up_res else 0
             down_cnt = down_res[0]["count(*)"] if down_res else 0
             assert up_cnt == down_cnt, (
-                f"Count mismatch after switchover-during-writes: "
-                f"upstream={up_cnt}, downstream={down_cnt}"
+                f"Count mismatch after switchover-during-writes: upstream={up_cnt}, downstream={down_cnt}"
             )
 
         finally:
             logger.info("[SWITCHOVER] Restoring original topology after test_switchover_during_writes...")
             switchover_helper(source_cluster_id, target_cluster_id)
-            self.log_test_end(
-                "test_switchover_during_writes", True, time.time() - start_time
-            )
+            self.log_test_end("test_switchover_during_writes", True, time.time() - start_time)
 
     def test_switchover_with_all_data_types(
         self,
@@ -306,9 +283,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             data = self.generate_comprehensive_test_data(100)
             upstream_client.insert(c_name, data)
@@ -328,9 +303,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_100, sync_timeout, f"100-record sync {c_name}"
-            )
+            assert self.wait_for_sync(check_100, sync_timeout, f"100-record sync {c_name}")
 
             # Switchover
             logger.info("[SWITCHOVER] Initiating switchover with all data types...")
@@ -338,23 +311,24 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
 
             # After switchover, verify scalar field sampling (new source is downstream)
             scalar_fields = [
-                "bool_field", "int8_field", "int16_field", "int32_field",
-                "int64_field", "float_field", "double_field", "varchar_field",
+                "bool_field",
+                "int8_field",
+                "int16_field",
+                "int32_field",
+                "int64_field",
+                "float_field",
+                "double_field",
+                "varchar_field",
             ]
             match_count, mismatch_count, details = self.verify_data_sampling(
                 downstream_client,  # new source
-                upstream_client,    # new target
+                upstream_client,  # new target
                 c_name,
                 sample_ratio=0.3,
                 output_fields=scalar_fields,
             )
-            logger.info(
-                f"[RESULT] All-dtypes sampling — match={match_count}, "
-                f"mismatch={mismatch_count}"
-            )
-            assert mismatch_count == 0, (
-                f"Data mismatch after switchover with all types: {details[:5]}"
-            )
+            logger.info(f"[RESULT] All-dtypes sampling — match={match_count}, mismatch={mismatch_count}")
+            assert mismatch_count == 0, f"Data mismatch after switchover with all types: {details[:5]}"
 
         finally:
             logger.info("[SWITCHOVER] Restoring original topology after test_switchover_with_all_data_types...")
@@ -408,9 +382,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             data = self.generate_test_data(200)
             upstream_client.insert(c_name, data)
@@ -430,9 +402,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_200, sync_timeout, f"200-record sync {c_name}"
-            )
+            assert self.wait_for_sync(check_200, sync_timeout, f"200-record sync {c_name}")
 
             # Verify search works on downstream before switchover
             q_vec = [random.random() for _ in range(128)]
@@ -462,13 +432,8 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     limit=5,
                     output_fields=["id"],
                 )
-                assert results and len(results[0]) > 0, (
-                    f"Search returned no results on {label} after switchover"
-                )
-                logger.info(
-                    f"[VERIFY] Search on {label} after switchover returned "
-                    f"{len(results[0])} results — OK"
-                )
+                assert results and len(results[0]) > 0, f"Search returned no results on {label} after switchover"
+                logger.info(f"[VERIFY] Search on {label} after switchover returned {len(results[0])} results — OK")
 
         finally:
             logger.info("[SWITCHOVER] Restoring original topology after test_switchover_with_loaded_collection...")
@@ -495,9 +460,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_sw_index", max_length=50)
 
-        self.log_test_start(
-            "test_switchover_with_index", "SWITCHOVER_INDEX", c_name
-        )
+        self.log_test_start("test_switchover_with_index", "SWITCHOVER_INDEX", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
@@ -527,17 +490,15 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                 try:
                     indexes = downstream_client.list_indexes(c_name)
                     result = len(indexes) > 0
-                    logger.info(
-                        f"[SYNC_PROGRESS] downstream indexes: {indexes} (has_index={result})"
-                    )
+                    logger.info(f"[SYNC_PROGRESS] downstream indexes: {indexes} (has_index={result})")
                     return result
                 except Exception as e:
                     logger.warning(f"Index sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_index_sync, sync_timeout, f"index sync {c_name}"
-            ), f"Index did not sync to downstream within {sync_timeout}s"
+            assert self.wait_for_sync(check_index_sync, sync_timeout, f"index sync {c_name}"), (
+                f"Index did not sync to downstream within {sync_timeout}s"
+            )
 
             # Switchover
             logger.info("[SWITCHOVER] Initiating switchover with index...")
@@ -547,10 +508,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             up_indexes = upstream_client.list_indexes(c_name)
             down_indexes = downstream_client.list_indexes(c_name)
 
-            logger.info(
-                f"[VERIFY] After switchover — upstream indexes={up_indexes}, "
-                f"downstream indexes={down_indexes}"
-            )
+            logger.info(f"[VERIFY] After switchover — upstream indexes={up_indexes}, downstream indexes={down_indexes}")
             assert len(up_indexes) > 0, "No indexes on upstream after switchover"
             assert len(down_indexes) > 0, "No indexes on downstream after switchover"
             assert set(up_indexes) == set(down_indexes), (
@@ -560,9 +518,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
         finally:
             logger.info("[SWITCHOVER] Restoring original topology after test_switchover_with_index...")
             switchover_helper(source_cluster_id, target_cluster_id)
-            self.log_test_end(
-                "test_switchover_with_index", True, time.time() - start_time
-            )
+            self.log_test_end("test_switchover_with_index", True, time.time() - start_time)
 
     def test_rapid_switchover_stress(
         self,
@@ -580,9 +536,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
         start_time = time.time()
         c_name = self.gen_unique_name("test_sw_stress", max_length=50)
 
-        self.log_test_start(
-            "test_rapid_switchover_stress", "RAPID_SWITCHOVER_STRESS", c_name
-        )
+        self.log_test_start("test_rapid_switchover_stress", "RAPID_SWITCHOVER_STRESS", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
 
@@ -605,9 +559,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             # Track topology state
             current_source_id = source_cluster_id
@@ -633,51 +585,29 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
 
                 # Swap topology
                 current_source_id, current_target_id = current_target_id, current_source_id
-                current_source_client = (
-                    downstream_client
-                    if current_source_id == target_cluster_id
-                    else upstream_client
-                )
+                current_source_client = downstream_client if current_source_id == target_cluster_id else upstream_client
 
             logger.info(
-                f"[STRESS] All 5 switchovers done. Waiting 30s for final sync "
-                f"(total_inserted={total_inserted})..."
+                f"[STRESS] All 5 switchovers done. Waiting 30s for final sync (total_inserted={total_inserted})..."
             )
             time.sleep(30)
 
             # Verify counts match on both sides
-            up_res = upstream_client.query(
-                collection_name=c_name, filter="", output_fields=["count(*)"]
-            )
-            down_res = downstream_client.query(
-                collection_name=c_name, filter="", output_fields=["count(*)"]
-            )
+            up_res = upstream_client.query(collection_name=c_name, filter="", output_fields=["count(*)"])
+            down_res = downstream_client.query(collection_name=c_name, filter="", output_fields=["count(*)"])
             up_cnt = up_res[0]["count(*)"] if up_res else 0
             down_cnt = down_res[0]["count(*)"] if down_res else 0
 
-            logger.info(
-                f"[VERIFY] After stress — upstream={up_cnt}, downstream={down_cnt}, "
-                f"expected>={total_inserted}"
-            )
-            assert up_cnt >= total_inserted, (
-                f"Upstream count {up_cnt} < expected {total_inserted} after stress"
-            )
-            assert down_cnt >= total_inserted, (
-                f"Downstream count {down_cnt} < expected {total_inserted} after stress"
-            )
-            assert up_cnt == down_cnt, (
-                f"Count mismatch after stress: upstream={up_cnt}, downstream={down_cnt}"
-            )
+            logger.info(f"[VERIFY] After stress — upstream={up_cnt}, downstream={down_cnt}, expected>={total_inserted}")
+            assert up_cnt >= total_inserted, f"Upstream count {up_cnt} < expected {total_inserted} after stress"
+            assert down_cnt >= total_inserted, f"Downstream count {down_cnt} < expected {total_inserted} after stress"
+            assert up_cnt == down_cnt, f"Count mismatch after stress: upstream={up_cnt}, downstream={down_cnt}"
 
         finally:
             # Restore to original topology
-            logger.info(
-                "[SWITCHOVER] Restoring original topology after test_rapid_switchover_stress..."
-            )
+            logger.info("[SWITCHOVER] Restoring original topology after test_rapid_switchover_stress...")
             switchover_helper(source_cluster_id, target_cluster_id)
-            self.log_test_end(
-                "test_rapid_switchover_stress", True, time.time() - start_time
-            )
+            self.log_test_end("test_rapid_switchover_stress", True, time.time() - start_time)
 
     def test_failover_source_down(
         self,
@@ -709,9 +639,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             def check_create():
                 return downstream_client.has_collection(c_name)
 
-            assert self.wait_for_sync(
-                check_create, sync_timeout, f"create collection {c_name}"
-            )
+            assert self.wait_for_sync(check_create, sync_timeout, f"create collection {c_name}")
 
             # Insert 500 records
             data = self.generate_test_data_with_id(500, start_id=0)
@@ -732,15 +660,12 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Sync check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_500_downstream, sync_timeout, f"500-record sync {c_name}"
-            ), f"Downstream did not receive 500 records within {sync_timeout}s"
+            assert self.wait_for_sync(check_500_downstream, sync_timeout, f"500-record sync {c_name}"), (
+                f"Downstream did not receive 500 records within {sync_timeout}s"
+            )
 
             # Kill source pods forcefully
-            logger.info(
-                f"[FAILOVER] Killing source pods "
-                f"(instance={source_cluster_id}, ns={milvus_ns})..."
-            )
+            logger.info(f"[FAILOVER] Killing source pods (instance={source_cluster_id}, ns={milvus_ns})...")
             kill_cmd = [
                 "kubectl",
                 "delete",
@@ -754,8 +679,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             ]
             result = subprocess.run(kill_cmd, capture_output=True, text=True)
             logger.info(
-                f"[FAILOVER] kubectl output: stdout={result.stdout!r}, "
-                f"stderr={result.stderr!r}, rc={result.returncode}"
+                f"[FAILOVER] kubectl output: stdout={result.stdout!r}, stderr={result.stderr!r}, rc={result.returncode}"
             )
 
             # Wait 60 s and verify target still has data
@@ -776,9 +700,9 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Target check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_target_intact, 30, f"target intact after source kill {c_name}"
-            ), "Target lost data after source pod kill"
+            assert self.wait_for_sync(check_target_intact, 30, f"target intact after source kill {c_name}"), (
+                "Target lost data after source pod kill"
+            )
 
             # Wait 120 s more for source to recover, then verify
             logger.info("[FAILOVER] Waiting 120s for source recovery...")
@@ -798,11 +722,9 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     logger.warning(f"Source recovery check failed: {e}")
                     return False
 
-            assert self.wait_for_sync(
-                check_source_recovered, 60, f"source recovery {c_name}"
-            ), "Source did not recover with expected data count within timeout"
+            assert self.wait_for_sync(check_source_recovered, 60, f"source recovery {c_name}"), (
+                "Source did not recover with expected data count within timeout"
+            )
 
         finally:
-            self.log_test_end(
-                "test_failover_source_down", True, time.time() - start_time
-            )
+            self.log_test_end("test_failover_source_down", True, time.time() - start_time)
