@@ -1291,7 +1291,7 @@ TEST(CApiTest, GlobalRefineRejectsGroupBy) {
     query::Plan plan(schema);
     plan.plan_node_ = std::make_unique<query::VectorPlanNode>();
     plan.plan_node_->search_info_.global_refine_enable_ = true;
-    plan.plan_node_->search_info_.group_by_field_id_ = FieldId(101);
+    plan.plan_node_->search_info_.group_by_field_ids_.push_back(FieldId(101));
 
     SearchResult seg0;
     seg0.total_nq_ = 1;

@@ -27,6 +27,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
@@ -134,7 +135,8 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                            int group_size = 1) {
     auto nq = ((SearchResult*)results[0])->total_nq_;
     std::unordered_set<PkType> pk_set;
-    std::unordered_map<GroupByValueType, int> group_by_map;
+    std::unordered_map<CompositeGroupKey, int, CompositeGroupKeyHash>
+        group_by_map;
     for (int qi = 0; qi < nq; qi++) {
         pk_set.clear();
         group_by_map.clear();
@@ -148,14 +150,101 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                 auto ret = pk_set.insert(search_result->primary_keys_[ki]);
                 ASSERT_TRUE(ret.second);
 
-                if (search_result->group_by_values_.has_value() &&
-                    search_result->group_by_values_.value().size() > ki) {
-                    auto group_by_val =
-                        search_result->group_by_values_.value()[ki];
+                if (search_result->composite_group_by_values_.has_value() &&
+                    search_result->composite_group_by_values_.value().size() >
+                        ki) {
+                    const auto& group_by_val =
+                        search_result->composite_group_by_values_.value()[ki];
                     group_by_map[group_by_val] += 1;
                     ASSERT_TRUE(group_by_map[group_by_val] <= group_size);
                 }
             }
+        }
+    }
+}
+
+// Extract a scalar field value at a given flat index as a string key.
+// Used by proto-based post-reduce checks. Supports all group_by-capable types.
+[[maybe_unused]] static std::string
+ExtractScalarAsKeyString(const milvus::proto::schema::FieldData& fd,
+                         int64_t idx) {
+    const auto& scalars = fd.scalars();
+    switch (fd.type()) {
+        case milvus::proto::schema::DataType::Int8:
+        case milvus::proto::schema::DataType::Int16:
+        case milvus::proto::schema::DataType::Int32:
+            return "i32:" + std::to_string(scalars.int_data().data(idx));
+        case milvus::proto::schema::DataType::Int64:
+        case milvus::proto::schema::DataType::Timestamptz:
+            return "i64:" + std::to_string(scalars.long_data().data(idx));
+        case milvus::proto::schema::DataType::Bool:
+            return scalars.bool_data().data(idx) ? "b:1" : "b:0";
+        case milvus::proto::schema::DataType::VarChar:
+        case milvus::proto::schema::DataType::String:
+            return "s:" + scalars.string_data().data(idx);
+        default:
+            return "unk";
+    }
+}
+
+// Post-reduce check reading from proto blobs rather than per-segment
+// SearchResult state (which is moved-from after FillOtherData for perf).
+// Validates pk uniqueness per-nq and per-composite-key count <= group_size.
+[[maybe_unused]] void
+CheckGroupByReducedSearchResult(CSearchResultDataBlobs c_blobs,
+                                int group_size) {
+    auto blobs =
+        reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(c_blobs);
+    for (const auto& slice_bytes : blobs->blobs) {
+        milvus::proto::schema::SearchResultData data;
+        ASSERT_TRUE(data.ParseFromArray(slice_bytes.data(),
+                                        static_cast<int>(slice_bytes.size())));
+
+        int64_t slice_nq = data.num_queries();
+        int64_t offset = 0;
+        for (int64_t qi = 0; qi < slice_nq; qi++) {
+            int64_t topk_qi = data.topks(qi);
+            std::unordered_set<std::string> pk_set;
+            std::unordered_map<std::string, int> group_count;
+
+            for (int64_t k = 0; k < topk_qi; k++) {
+                int64_t idx = offset + k;
+
+                // pk uniqueness
+                std::string pk_str;
+                if (data.ids().has_int_id()) {
+                    pk_str =
+                        "i:" + std::to_string(data.ids().int_id().data(idx));
+                } else if (data.ids().has_str_id()) {
+                    pk_str = "s:" + data.ids().str_id().data(idx);
+                } else {
+                    FAIL() << "unknown pk type";
+                }
+                ASSERT_TRUE(pk_set.insert(pk_str).second)
+                    << "duplicate pk at slice_qi=" << qi << " k=" << k;
+
+                // composite key count (read from group_by_field_values, or
+                // singular group_by_field_value for legacy single-field path)
+                std::string group_key;
+                if (data.group_by_field_values_size() > 0) {
+                    for (int fi = 0; fi < data.group_by_field_values_size();
+                         fi++) {
+                        group_key += ExtractScalarAsKeyString(
+                                         data.group_by_field_values(fi), idx) +
+                                     ";";
+                    }
+                } else if (data.has_group_by_field_value()) {
+                    group_key = ExtractScalarAsKeyString(
+                        data.group_by_field_value(), idx);
+                } else {
+                    continue;  // no group_by in this result
+                }
+                group_count[group_key]++;
+                ASSERT_LE(group_count[group_key], group_size)
+                    << "group_size exceeded at slice_qi=" << qi
+                    << " key=" << group_key;
+            }
+            offset += topk_qi;
         }
     }
 }

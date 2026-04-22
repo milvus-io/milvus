@@ -86,10 +86,9 @@ void
 ReduceHelper::Reduce() {
     auto global_refine_enable =
         plan_->plan_node_->search_info_.global_refine_enable_;
-    AssertInfo(
-        !(global_refine_enable &&
-          plan_->plan_node_->search_info_.group_by_field_id_.has_value()),
-        "global refine is not enabled for group_by");
+    AssertInfo(!(global_refine_enable &&
+                 plan_->plan_node_->search_info_.has_group_by()),
+               "global refine is not enabled for group_by");
     if (global_refine_enable && CanUseGlobalRefine()) {
         // Global reduce with refine: filter → truncate → refine → fill PK
         FilterInvalidSearchResults();
@@ -639,12 +638,14 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                     search_result->element_level_
                         ? search_result->element_indices_[start + i]
                         : -1;
-                // Also save group_by_value if present (for group by search)
-                GroupByValueType temp_group_by_val;
-                bool has_group_by = search_result->group_by_values_.has_value();
-                if (has_group_by) {
-                    temp_group_by_val =
-                        search_result->group_by_values_.value()[start + i];
+                // Also save composite_group_by_value if present (for group by search)
+                CompositeGroupKey temp_composite_group_by_val;
+                bool has_composite_group_by = search_result->HasGroupBy();
+                if (has_composite_group_by) {
+                    // move: cycle-start slot is only written to after this.
+                    temp_composite_group_by_val =
+                        std::move(search_result->composite_group_by_values_
+                                      .value()[start + i]);
                 }
 
                 size_t curr = i;
@@ -658,10 +659,12 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         search_result->element_indices_[start + curr] =
                             search_result->element_indices_[start + next];
                     }
-                    if (has_group_by) {
-                        search_result->group_by_values_.value()[start + curr] =
-                            search_result->group_by_values_
-                                .value()[start + next];
+                    if (has_composite_group_by) {
+                        // move: src[next] will be overwritten as next target.
+                        search_result->composite_group_by_values_
+                            .value()[start + curr] =
+                            std::move(search_result->composite_group_by_values_
+                                          .value()[start + next]);
                     }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
@@ -673,9 +676,12 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                     search_result->element_indices_[start + curr] =
                         temp_elem_idx;
                 }
-                if (has_group_by) {
-                    search_result->group_by_values_.value()[start + curr] =
-                        temp_group_by_val;
+                if (has_composite_group_by) {
+                    // Safe to move: temp_composite_group_by_val is a per-cycle
+                    // local and this is its last use before going out of scope.
+                    search_result->composite_group_by_values_
+                        .value()[start + curr] =
+                        std::move(temp_composite_group_by_val);
                 }
                 indices[curr] = curr;
             }

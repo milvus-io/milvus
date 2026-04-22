@@ -128,9 +128,44 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
             query_info_proto.bm25_avgdl();
     }
 
-    if (query_info_proto.group_by_field_id() > 0) {
-        auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());
-        search_info.group_by_field_id_ = group_by_field_id;
+    // Parse group by field IDs (support both new multi-field and old single-field API)
+    if (query_info_proto.group_by_field_ids_size() > 0) {
+        // Defense-in-depth: all of the checks below (field-count upper bound,
+        // positive id, duplicate id) should be enforced by the Go proxy in the
+        // request pre-check phase — this kind of input validation is a proxy
+        // responsibility, not something to push down to segcore. These checks
+        // are kept here only as a safety net and should never trigger in
+        // practice; companion Go PR owns the primary gate.
+        constexpr int MAX_GROUPBY_FIELDS = 10;
+        if (query_info_proto.group_by_field_ids_size() > MAX_GROUPBY_FIELDS) {
+            ThrowInfo(ConfigInvalid,
+                      "too many group_by fields: {} (max allowed: {})",
+                      query_info_proto.group_by_field_ids_size(),
+                      MAX_GROUPBY_FIELDS);
+        }
+        std::set<int64_t> seen_ids;
+        for (int i = 0; i < query_info_proto.group_by_field_ids_size(); i++) {
+            auto id = query_info_proto.group_by_field_ids(i);
+            if (id <= 0) {
+                ThrowInfo(ConfigInvalid,
+                          "invalid group_by field id {} (must be > 0)",
+                          id);
+            }
+            if (!seen_ids.insert(id).second) {
+                ThrowInfo(ConfigInvalid,
+                          "duplicate group_by field id {} in "
+                          "group_by_field_ids",
+                          id);
+            }
+            search_info.group_by_field_ids_.push_back(FieldId(id));
+        }
+    } else if (query_info_proto.group_by_field_id() > 0) {
+        // Backward compatibility: single-field API converts to group_by_field_ids_
+        search_info.group_by_field_ids_.push_back(
+            FieldId(query_info_proto.group_by_field_id()));
+    }
+
+    if (!search_info.group_by_field_ids_.empty()) {
         search_info.group_size_ = query_info_proto.group_size() > 0
                                       ? query_info_proto.group_size()
                                       : 1;
@@ -524,7 +559,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
         bool is_iterative =
             plan_node->search_info_.iterative_filter_execution &&
-            plan_node->search_info_.group_by_field_id_ == std::nullopt;
+            !plan_node->search_info_.has_group_by();
         if (is_iterative) {
             plannode = std::make_shared<milvus::plan::MvccNode>(
                 milvus::plan::GetNextPlanNodeId());
@@ -621,7 +656,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
-    if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
+    if (plan_node->search_info_.has_group_by()) {
         plannode = std::make_shared<milvus::plan::SearchGroupByNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};

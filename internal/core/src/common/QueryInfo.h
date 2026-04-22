@@ -39,7 +39,8 @@ struct SearchInfo {
     FieldId field_id_;
     MetricType metric_type_;
     knowhere::Json search_params_;
-    std::optional<FieldId> group_by_field_id_;
+    std::vector<FieldId>
+        group_by_field_ids_;  // Group by field IDs (single or multi-field)
     tracer::TraceContext trace_ctx_;
     bool materialized_view_involved = false;
     bool iterative_filter_execution = false;
@@ -56,6 +57,11 @@ struct SearchInfo {
     bool
     element_level() const {
         return array_offsets_ != nullptr;
+    }
+
+    bool
+    has_group_by() const {
+        return !group_by_field_ids_.empty();
     }
 };
 

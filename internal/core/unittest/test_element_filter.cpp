@@ -2229,14 +2229,14 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     ASSERT_NE(search_result, nullptr);
-    ASSERT_TRUE(search_result->group_by_values_.has_value())
+    ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
 
     // Group by returns row-level results even for element-level search
     ASSERT_FALSE(search_result->element_level_)
         << "Group by should return row-level results";
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto& group_by_values = search_result->composite_group_by_values_.value();
 
     ASSERT_LE(search_result->seg_offsets_.size(),
               static_cast<size_t>(topK * group_size))
@@ -2246,10 +2246,11 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
         int64_t doc_id = search_result->seg_offsets_[i];
 
-        if (i < group_by_values.size() && group_by_values[i].has_value()) {
-            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+        if (i < group_by_values.size() && group_by_values[i][0].has_value()) {
+            if (std::holds_alternative<int64_t>(
+                    group_by_values[i][0].value())) {
                 int64_t group_val =
-                    std::get<int64_t>(group_by_values[i].value());
+                    std::get<int64_t>(group_by_values[i][0].value());
 
                 ASSERT_EQ(group_val, doc_id)
                     << "Group by primary key: group value should equal doc_id";
@@ -2351,14 +2352,14 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
     auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     ASSERT_NE(search_result, nullptr);
-    ASSERT_TRUE(search_result->group_by_values_.has_value())
+    ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
 
     // Verify element_level_ is false (group by returns row-level results)
     ASSERT_FALSE(search_result->element_level_)
         << "Group by should return row-level results";
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto& group_by_values = search_result->composite_group_by_values_.value();
 
     ASSERT_FALSE(search_result->seg_offsets_.empty())
         << "Should have search results";
@@ -2382,10 +2383,11 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
         ASSERT_LE(doc_id, 133)
             << "doc_id " << doc_id << " should be <= 133 (element filter)";
 
-        if (i < group_by_values.size() && group_by_values[i].has_value()) {
-            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+        if (i < group_by_values.size() && group_by_values[i][0].has_value()) {
+            if (std::holds_alternative<int64_t>(
+                    group_by_values[i][0].value())) {
                 int64_t group_val =
-                    std::get<int64_t>(group_by_values[i].value());
+                    std::get<int64_t>(group_by_values[i][0].value());
                 ASSERT_EQ(group_val, doc_id)
                     << "Group by primary key: group value should equal doc_id";
             }
@@ -2449,14 +2451,14 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     ASSERT_NE(search_result, nullptr);
-    ASSERT_TRUE(search_result->group_by_values_.has_value())
+    ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
 
     // Verify element_level_ is false
     ASSERT_FALSE(search_result->element_level_)
         << "Normal search should not be element-level";
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto& group_by_values = search_result->composite_group_by_values_.value();
 
     ASSERT_FALSE(search_result->seg_offsets_.empty())
         << "Should have search results";
@@ -2471,10 +2473,11 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
         ASSERT_EQ(doc_id % 2, 0)
             << "Result doc_id " << doc_id << " should satisfy (id % 2 == 0)";
 
-        if (i < group_by_values.size() && group_by_values[i].has_value()) {
-            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+        if (i < group_by_values.size() && group_by_values[i][0].has_value()) {
+            if (std::holds_alternative<int32_t>(
+                    group_by_values[i][0].value())) {
                 int32_t group_val =
-                    std::get<int32_t>(group_by_values[i].value());
+                    std::get<int32_t>(group_by_values[i][0].value());
                 group_counts[group_val]++;
                 ASSERT_LE(group_counts[group_val], group_size)
                     << "Each group should have at most group_size results";
@@ -2597,12 +2600,12 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
     auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     ASSERT_NE(search_result, nullptr);
-    ASSERT_TRUE(search_result->group_by_values_.has_value())
+    ASSERT_TRUE(search_result->composite_group_by_values_.has_value())
         << "Group by values should be present";
     ASSERT_FALSE(search_result->element_level_)
         << "Group by should return row-level results";
 
-    auto& group_by_values = search_result->group_by_values_.value();
+    auto& group_by_values = search_result->composite_group_by_values_.value();
 
     ASSERT_FALSE(search_result->seg_offsets_.empty())
         << "Should have search results";
@@ -2623,10 +2626,11 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
             << "Duplicate doc_id " << doc_id
             << " in results: same document should not appear more than once";
 
-        if (i < group_by_values.size() && group_by_values[i].has_value()) {
-            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+        if (i < group_by_values.size() && group_by_values[i][0].has_value()) {
+            if (std::holds_alternative<int32_t>(
+                    group_by_values[i][0].value())) {
                 int32_t group_val =
-                    std::get<int32_t>(group_by_values[i].value());
+                    std::get<int32_t>(group_by_values[i][0].value());
 
                 ASSERT_EQ(group_val, doc_id % 10)
                     << "Group value should equal category (doc_id % 10)";
