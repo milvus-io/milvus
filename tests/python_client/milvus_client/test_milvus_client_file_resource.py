@@ -1,14 +1,13 @@
 import io
-import time
 import threading
+import time
 
 import pytest
-from pymilvus import DataType, Function, FunctionType
-
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import DataType, Function, FunctionType
 
 prefix = "file_resource"
 
@@ -26,6 +25,7 @@ class FileResourceTestBase(TestMilvusClientV2Base):
     def init_minio_client(self, minio_host):
         """Initialise a MinIO client reusing the existing --minio_host option."""
         from minio import Minio
+
         self._minio_client = Minio(
             f"{minio_host}:9000",
             access_key="minioadmin",
@@ -103,9 +103,7 @@ class FileResourceTestBase(TestMilvusClientV2Base):
         )
         self.create_collection(client, col_name, schema=schema, **kwargs)
 
-    def create_bm25_collection_with_stop_filter(
-        self, client, col_name, res_name, **kwargs
-    ):
+    def create_bm25_collection_with_stop_filter(self, client, col_name, res_name, **kwargs):
         """Shortcut: BM25 collection with a remote stop-words filter."""
         self.create_bm25_collection(
             client,
@@ -316,9 +314,7 @@ class TestMilvusClientFileResourceRemove(FileResourceTestBase):
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         # 3. remove should fail
         error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
-        self.remove_file_resource(
-            client, res_name, check_task=CheckTasks.err_res, check_items=error
-        )
+        self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_then_readd_same_name(self, file_resource_env):
@@ -451,9 +447,7 @@ class TestMilvusClientFileResourceJieba(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         # 2. create collection with jieba analyzer
-        self.create_bm25_collection(
-            client, col_name, self._jieba_analyzer_params(res_name)
-        )
+        self.create_bm25_collection(client, col_name, self._jieba_analyzer_params(res_name))
         # 3. insert and build index
         docs = [
             "向量数据库是新一代的数据管理系统",
@@ -471,13 +465,9 @@ class TestMilvusClientFileResourceJieba(FileResourceTestBase):
             limit=10,
             output_fields=["text"],
         )
-        assert len(results) > 0 and len(results[0]) > 0, (
-            "Search should return at least one result"
-        )
+        assert len(results) > 0 and len(results[0]) > 0, "Search should return at least one result"
         top_text = results[0][0]["entity"]["text"]
-        assert "向量数据库" in top_text, (
-            f"Top hit should contain '向量数据库', got '{top_text}'"
-        )
+        assert "向量数据库" in top_text, f"Top hit should contain '向量数据库', got '{top_text}'"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_jieba_remote_dict_all_custom_words(self, file_resource_env):
@@ -492,9 +482,7 @@ class TestMilvusClientFileResourceJieba(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         # 2. create collection with jieba analyzer
-        self.create_bm25_collection(
-            client, col_name, self._jieba_analyzer_params(res_name)
-        )
+        self.create_bm25_collection(client, col_name, self._jieba_analyzer_params(res_name))
         self.build_and_load_bm25(client, col_name)
         # 3. verify each custom word is recognized as a single token
         test_cases = [
@@ -503,13 +491,9 @@ class TestMilvusClientFileResourceJieba(FileResourceTestBase):
             ("全文检索是传统的文本搜索方式", "全文检索"),
         ]
         for text, expected_token in test_cases:
-            res, _ = self.run_analyzer(
-                client, text, None, collection_name=col_name, field_name="text"
-            )
+            res, _ = self.run_analyzer(client, text, None, collection_name=col_name, field_name="text")
             tokens = list(res.tokens)
-            assert expected_token in tokens, (
-                f"Custom dict word '{expected_token}' should be a token, got {tokens}"
-            )
+            assert expected_token in tokens, f"Custom dict word '{expected_token}' should be a token, got {tokens}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_jieba_default_vs_custom_comparison(self, file_resource_env):
@@ -565,9 +549,7 @@ class TestMilvusClientFileResourceSynonym(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, SYNONYMS_PATH)
         # 2. create collection with synonym analyzer
-        self.create_bm25_collection(
-            client, col_name, self._synonym_analyzer_params(res_name, expand=True)
-        )
+        self.create_bm25_collection(client, col_name, self._synonym_analyzer_params(res_name, expand=True))
         # 3. insert and build index
         docs = [
             "搜索引擎可以帮助用户查找信息",
@@ -584,9 +566,7 @@ class TestMilvusClientFileResourceSynonym(FileResourceTestBase):
             limit=10,
             output_fields=["text"],
         )
-        assert len(results) > 0 and len(results[0]) > 0, (
-            "Synonym search should return results"
-        )
+        assert len(results) > 0 and len(results[0]) > 0, "Synonym search should return results"
         hit_texts = [r["entity"]["text"] for r in results[0]]
         assert any("搜索" in t for t in hit_texts), (
             f"Doc with '搜索' should match synonym query '检索', got {hit_texts}"
@@ -605,23 +585,17 @@ class TestMilvusClientFileResourceSynonym(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, SYNONYMS_PATH)
         # 2. create collection with synonym analyzer (expand=true)
-        self.create_bm25_collection(
-            client, col_name, self._synonym_analyzer_params(res_name, expand=True)
-        )
+        self.create_bm25_collection(client, col_name, self._synonym_analyzer_params(res_name, expand=True))
         self.build_and_load_bm25(client, col_name)
         # 3. verify "搜索" expands to all synonyms
-        res, _ = self.run_analyzer(
-            client, "搜索", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "搜索", None, collection_name=col_name, field_name="text")
         tokens = set(res.tokens)
         expected_synonyms = {"搜索", "检索", "查询"}
         assert expected_synonyms.issubset(tokens), (
             f"expand=true on '搜索' should produce {expected_synonyms}, got {tokens}"
         )
         # 4. verify "向量" expands to all synonyms
-        res, _ = self.run_analyzer(
-            client, "向量", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "向量", None, collection_name=col_name, field_name="text")
         tokens = set(res.tokens)
         expected_synonyms = {"向量", "矢量", "vector"}
         assert expected_synonyms.issubset(tokens), (
@@ -641,42 +615,24 @@ class TestMilvusClientFileResourceSynonym(FileResourceTestBase):
         # 1. add file resource
         self.add_file_resource(client, res_name, SYNONYMS_PATH)
         # 2. create collection with synonym analyzer (expand=false)
-        self.create_bm25_collection(
-            client, col_name, self._synonym_analyzer_params(res_name, expand=False)
-        )
+        self.create_bm25_collection(client, col_name, self._synonym_analyzer_params(res_name, expand=False))
         self.build_and_load_bm25(client, col_name)
         # 3. verify "检索" maps to canonical "搜索"
-        res, _ = self.run_analyzer(
-            client, "检索", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "检索", None, collection_name=col_name, field_name="text")
         tokens = list(res.tokens)
-        assert tokens == ["搜索"], (
-            f"expand=false: '检索' should map to ['搜索'], got {tokens}"
-        )
+        assert tokens == ["搜索"], f"expand=false: '检索' should map to ['搜索'], got {tokens}"
         # 4. verify "查询" maps to canonical "搜索"
-        res, _ = self.run_analyzer(
-            client, "查询", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "查询", None, collection_name=col_name, field_name="text")
         tokens = list(res.tokens)
-        assert tokens == ["搜索"], (
-            f"expand=false: '查询' should map to ['搜索'], got {tokens}"
-        )
+        assert tokens == ["搜索"], f"expand=false: '查询' should map to ['搜索'], got {tokens}"
         # 5. verify "矢量" maps to canonical "向量"
-        res, _ = self.run_analyzer(
-            client, "矢量", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "矢量", None, collection_name=col_name, field_name="text")
         tokens = list(res.tokens)
-        assert tokens == ["向量"], (
-            f"expand=false: '矢量' should map to ['向量'], got {tokens}"
-        )
+        assert tokens == ["向量"], f"expand=false: '矢量' should map to ['向量'], got {tokens}"
         # 6. verify canonical "搜索" remains unchanged
-        res, _ = self.run_analyzer(
-            client, "搜索", None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, "搜索", None, collection_name=col_name, field_name="text")
         tokens = list(res.tokens)
-        assert tokens == ["搜索"], (
-            f"expand=false: canonical '搜索' should stay ['搜索'], got {tokens}"
-        )
+        assert tokens == ["搜索"], f"expand=false: canonical '搜索' should stay ['搜索'], got {tokens}"
 
 
 class TestMilvusClientFileResourceStopWords(FileResourceTestBase):
@@ -716,26 +672,18 @@ class TestMilvusClientFileResourceStopWords(FileResourceTestBase):
         )
         self.build_and_load_bm25(client, col_name)
         # 3. verify stop words are filtered
-        res, _ = self.run_analyzer(
-            client, text, None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, text, None, collection_name=col_name, field_name="text")
         tokens_filtered = set(res.tokens)
         found = stop_words & tokens_filtered
-        assert len(found) == 0, (
-            f"Stop words should be filtered, but found {found} in {tokens_filtered}"
-        )
+        assert len(found) == 0, f"Stop words should be filtered, but found {found} in {tokens_filtered}"
         # 4. verify baseline (no filter) contains stop words
         res_baseline, _ = self.run_analyzer(client, text, {"tokenizer": "jieba"})
         tokens_baseline = set(res_baseline.tokens)
         baseline_stop = stop_words & tokens_baseline
-        assert len(baseline_stop) > 0, (
-            f"Baseline (no filter) should contain stop words, but got {tokens_baseline}"
-        )
+        assert len(baseline_stop) > 0, f"Baseline (no filter) should contain stop words, but got {tokens_baseline}"
         # 5. verify content tokens still present after filtering
         content_tokens = tokens_filtered - stop_words
-        assert len(content_tokens) > 0, (
-            f"Filtered output should still have content tokens, got {tokens_filtered}"
-        )
+        assert len(content_tokens) > 0, f"Filtered output should still have content tokens, got {tokens_filtered}"
 
 
 class TestMilvusClientFileResourceDecompounder(FileResourceTestBase):
@@ -782,16 +730,10 @@ class TestMilvusClientFileResourceDecompounder(FileResourceTestBase):
         )
         tokens = list(res.tokens)
         for expected in ["bank", "note", "fire", "work"]:
-            assert expected in tokens, (
-                f"Decompounder should produce '{expected}', got {tokens}"
-            )
+            assert expected in tokens, f"Decompounder should produce '{expected}', got {tokens}"
         # 4. verify compound words are replaced
-        assert "banknote" not in tokens, (
-            f"Compound 'banknote' should be decomposed, got {tokens}"
-        )
-        assert "firework" not in tokens, (
-            f"Compound 'firework' should be decomposed, got {tokens}"
-        )
+        assert "banknote" not in tokens, f"Compound 'banknote' should be decomposed, got {tokens}"
+        assert "firework" not in tokens, f"Compound 'firework' should be decomposed, got {tokens}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_decompounder_baseline_without_filter(self, file_resource_env):
@@ -802,16 +744,10 @@ class TestMilvusClientFileResourceDecompounder(FileResourceTestBase):
         """
         client = self._client()
         # 1. verify compound words remain intact without decompounder
-        res, _ = self.run_analyzer(
-            client, "banknote firework", {"tokenizer": "standard"}
-        )
+        res, _ = self.run_analyzer(client, "banknote firework", {"tokenizer": "standard"})
         tokens = list(res.tokens)
-        assert "banknote" in tokens, (
-            f"Without decompounder, 'banknote' should be a single token, got {tokens}"
-        )
-        assert "firework" in tokens, (
-            f"Without decompounder, 'firework' should be a single token, got {tokens}"
-        )
+        assert "banknote" in tokens, f"Without decompounder, 'banknote' should be a single token, got {tokens}"
+        assert "firework" in tokens, f"Without decompounder, 'firework' should be a single token, got {tokens}"
         assert "bank" not in tokens and "note" not in tokens, (
             f"Without decompounder, sub-tokens should not appear, got {tokens}"
         )
@@ -965,9 +901,7 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         # 3. remove should fail
         error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
-        self.remove_file_resource(
-            client, res_name, check_task=CheckTasks.err_res, check_items=error
-        )
+        self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_multi_ref_partial_drop(self, file_resource_env):
@@ -990,9 +924,7 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         time.sleep(1)
         # 4. remove should still fail (col2 still references)
         error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
-        self.remove_file_resource(
-            client, res_name, check_task=CheckTasks.err_res, check_items=error
-        )
+        self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_all_refs_dropped_can_delete(self, file_resource_env):
@@ -1215,9 +1147,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         """Upload content to MinIO and register for teardown cleanup."""
         self._minio_objects_to_cleanup.append((bucket, remote_path))
         content_bytes = content.encode("utf-8")
-        self._minio_client.put_object(
-            bucket, remote_path, io.BytesIO(content_bytes), len(content_bytes)
-        )
+        self._minio_client.put_object(bucket, remote_path, io.BytesIO(content_bytes), len(content_bytes))
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_large_jieba_dict_5mb(self, file_resource_env):
@@ -1263,9 +1193,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
             limit=10,
             output_fields=["text"],
         )
-        assert len(results) > 0 and len(results[0]) > 0, (
-            "Search with 5MB dict should return results"
-        )
+        assert len(results) > 0 and len(results[0]) > 0, "Search with 5MB dict should return results"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_large_jieba_dict_50mb(self, file_resource_env):
@@ -1310,9 +1238,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
             limit=10,
             output_fields=["text"],
         )
-        assert len(results) > 0 and len(results[0]) > 0, (
-            "Search with 50MB dict should return results"
-        )
+        assert len(results) > 0 and len(results[0]) > 0, "Search with 50MB dict should return results"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_large_stopwords_5mb(self, file_resource_env):
@@ -1354,15 +1280,11 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         self.build_and_load_bm25(client, col_name)
         # 4. verify stop words are filtered
         text = "这是一个在测试的文本和数据在这里了"
-        res, _ = self.run_analyzer(
-            client, text, None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, text, None, collection_name=col_name, field_name="text")
         tokens = set(res.tokens)
         stop_words = {"的", "是", "在", "了", "和"}
         found = stop_words & tokens
-        assert len(found) == 0, (
-            f"Stop words should be filtered with 5MB file, but found {found}"
-        )
+        assert len(found) == 0, f"Stop words should be filtered with 5MB file, but found {found}"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_large_stopwords_50mb(self, file_resource_env):
@@ -1404,15 +1326,11 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         self.build_and_load_bm25(client, col_name)
         # 4. verify stop words are filtered
         text = "这是一个在测试的文本和数据在这里了"
-        res, _ = self.run_analyzer(
-            client, text, None, collection_name=col_name, field_name="text"
-        )
+        res, _ = self.run_analyzer(client, text, None, collection_name=col_name, field_name="text")
         tokens = set(res.tokens)
         stop_words = {"的", "是", "在", "了", "和"}
         found = stop_words & tokens
-        assert len(found) == 0, (
-            f"Stop words should be filtered with 50MB file, but found {found}"
-        )
+        assert len(found) == 0, f"Stop words should be filtered with 50MB file, but found {found}"
 
 
 class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
@@ -1449,14 +1367,10 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         self._minio_objects_to_cleanup.append((bucket, remote_path))
         content1 = "的\n是\n"
         content1_bytes = content1.encode("utf-8")
-        self._minio_client.put_object(
-            bucket, remote_path, io.BytesIO(content1_bytes), len(content1_bytes)
-        )
+        self._minio_client.put_object(bucket, remote_path, io.BytesIO(content1_bytes), len(content1_bytes))
         self.add_file_resource(client, res_name, remote_path)
         # 2. overwrite with v2 and re-add (idempotent)
         content2 = "的\n是\n在\n了\n和\n"
         content2_bytes = content2.encode("utf-8")
-        self._minio_client.put_object(
-            bucket, remote_path, io.BytesIO(content2_bytes), len(content2_bytes)
-        )
+        self._minio_client.put_object(bucket, remote_path, io.BytesIO(content2_bytes), len(content2_bytes))
         self.add_file_resource(client, res_name, remote_path)
