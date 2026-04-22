@@ -331,6 +331,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
+		ExternalSource:            schema.GetExternalSource(),
+		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

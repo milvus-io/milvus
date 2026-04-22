@@ -399,13 +399,10 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToLoonArrowSchema() const;
 
-    // Build an Arrow schema suitable for reading data from storage.
-    // Normal collections: same as ConvertToArrowSchema().
-    // External collections: filtered to external fields only, using
-    // parquet column names with ARROW_FIELD_ID_KEY metadata for
-    // downstream field ID resolution.
-    const ArrowSchemaPtr
-    BuildReaderArrowSchema() const;
+    // Get the list of external column names (parquet column names) for
+    // external collections. Used as needed_columns for schemaless Reader.
+    std::shared_ptr<std::vector<std::string>>
+    GetExternalColumnNames() const;
 
     // Resolve a column group column name to a FieldId.
     // Normal collections: column name is the numeric field ID string.
