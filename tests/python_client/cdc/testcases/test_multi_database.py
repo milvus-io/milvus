@@ -3,7 +3,9 @@ CDC sync tests for multi-database operations.
 """
 
 import time
+
 from pymilvus import MilvusClient
+
 from .base import TestCDCSyncBase, logger
 
 

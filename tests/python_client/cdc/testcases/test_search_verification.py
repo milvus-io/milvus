@@ -2,12 +2,13 @@
 CDC sync tests for search and query result verification across vector types.
 """
 
-import time
 import random
-import pytest
-from pymilvus import DataType, AnnSearchRequest, RRFRanker
-from .base import TestCDCSyncBase, logger
+import time
 
+import pytest
+from pymilvus import AnnSearchRequest, DataType, RRFRanker
+
+from .base import TestCDCSyncBase, logger
 
 # fmt: off
 VECTOR_PARAMS = [

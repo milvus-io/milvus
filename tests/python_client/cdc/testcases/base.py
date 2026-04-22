@@ -2,13 +2,15 @@
 Base class for CDC sync tests with common utilities.
 """
 
-import time
+import logging
 import random
 import string
-import logging
+import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Dict, List, Callable
-from pymilvus import MilvusClient, DataType
+from typing import Any
+
+from pymilvus import DataType, MilvusClient
 
 # Configure logging
 logging.basicConfig(
@@ -390,7 +392,7 @@ class TestCDCSyncBase:
         return schema
 
     @staticmethod
-    def generate_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data for insert operations."""
         return [
             {
@@ -406,7 +408,7 @@ class TestCDCSyncBase:
     @staticmethod
     def generate_test_data_with_id(
         count: int = 100, start_id: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate test data with manual IDs for upsert operations."""
         return [
             {
@@ -420,7 +422,7 @@ class TestCDCSyncBase:
         ]
 
     @staticmethod
-    def generate_comprehensive_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate comprehensive test data with all data types using standard vector generation."""
 
         # Generate vectors using standard method
@@ -489,7 +491,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_comprehensive_test_data_alt(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_comprehensive_test_data_alt(count: int = 100) -> list[dict[str, Any]]:
         """Generate comprehensive test data with alternative vector types (BFLOAT16 + INT8)."""
 
         # Generate vectors using standard method - alternative set
@@ -558,7 +560,7 @@ class TestCDCSyncBase:
     @staticmethod
     def generate_comprehensive_test_data_alt_with_id(
         count: int = 100, start_id: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs and alternative vector types (BFLOAT16 + INT8)."""
 
         # Generate vectors using standard method - alternative set
@@ -678,7 +680,7 @@ class TestCDCSyncBase:
     @staticmethod
     def generate_comprehensive_test_data_with_id(
         count: int = 100, start_id: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate comprehensive test data with manual IDs for upsert operations using standard vector generation."""
 
         # Generate vectors using standard method
@@ -748,7 +750,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_bfloat16_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_bfloat16_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data with BFLOAT16_VECTOR for index testing using standard method."""
 
         # Generate bfloat16 vectors using standard method
@@ -766,7 +768,7 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_int8_test_data(count: int = 100) -> List[Dict[str, Any]]:
+    def generate_int8_test_data(count: int = 100) -> list[dict[str, Any]]:
         """Generate test data with INT8_VECTOR for index testing using standard method."""
 
         # Generate int8 vectors using standard method
@@ -1076,7 +1078,7 @@ class TestCDCSyncBase:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def generate_fts_data(cls, count=100) -> List[Dict[str, Any]]:
+    def generate_fts_data(cls, count=100) -> list[dict[str, Any]]:
         """Generate data for full-text search (FTS) collections."""
         categories = ["catA", "catB", "catC", "catD"]
         data = []
@@ -1091,11 +1093,11 @@ class TestCDCSyncBase:
         return data
 
     @staticmethod
-    def generate_nullable_data(count=100, null_ratio=0.3) -> List[Dict[str, Any]]:
+    def generate_nullable_data(count=100, null_ratio=0.3) -> list[dict[str, Any]]:
         """Generate data with randomly null-ified nullable fields."""
         data = []
         for _ in range(count):
-            record: Dict[str, Any] = {
+            record: dict[str, Any] = {
                 "float_vector": [random.random() for _ in range(128)],
                 "nullable_int64": None if random.random() < null_ratio else random.randint(-1000, 1000),
                 "nullable_varchar": None if random.random() < null_ratio else f"varchar_{random.randint(1000, 9999)}",
@@ -1109,14 +1111,14 @@ class TestCDCSyncBase:
     @staticmethod
     def generate_dynamic_data(
         count=100, extra_fields=None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate data for collections with dynamic fields enabled."""
         if extra_fields is None:
             extra_fields = {"extra_int": int, "extra_str": str, "extra_float": float}
 
         data = []
         for i in range(count):
-            record: Dict[str, Any] = {
+            record: dict[str, Any] = {
                 "float_vector": [random.random() for _ in range(128)],
                 "varchar_field": f"dynamic_varchar_{i}_{random.randint(1000, 9999)}",
             }
@@ -1135,7 +1137,7 @@ class TestCDCSyncBase:
     @classmethod
     def generate_single_vector_data(
         cls, count=100, vector_type="FLOAT_VECTOR", dim=128
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Generate data for a single-vector collection."""
         dtype = getattr(DataType, vector_type)
         vectors = cls._gen_vectors(count, dim, dtype)
@@ -1161,7 +1163,7 @@ class TestCDCSyncBase:
         downstream_client,
         collection_name: str,
         sample_ratio: float = 0.2,
-        output_fields: List[str] = None,
+        output_fields: list[str] = None,
     ):
         """
         Sample a fraction of records and compare them field-by-field between upstream
@@ -1189,7 +1191,7 @@ class TestCDCSyncBase:
 
         match_count = 0
         mismatch_count = 0
-        mismatch_details: List[Dict[str, Any]] = []
+        mismatch_details: list[dict[str, Any]] = []
 
         for pk in sampled_pks:
             up_rows = upstream_client.query(
@@ -1211,7 +1213,7 @@ class TestCDCSyncBase:
             up_row = up_rows[0]
             down_row = down_rows[0]
             fields_match = True
-            field_diffs: Dict[str, Any] = {}
+            field_diffs: dict[str, Any] = {}
 
             for field, up_val in up_row.items():
                 down_val = down_row.get(field)
@@ -1246,7 +1248,7 @@ class TestCDCSyncBase:
         upstream_client,
         downstream_client,
         collection_name: str,
-        vectors: List[Any],
+        vectors: list[Any],
         anns_field: str,
         limit: int = 10,
         metric_type: str = "COSINE",
@@ -1257,9 +1259,9 @@ class TestCDCSyncBase:
         Returns:
             (avg_overlap_ratio, all_upstream_pks, all_downstream_pks)
         """
-        all_upstream_pks: List[List[Any]] = []
-        all_downstream_pks: List[List[Any]] = []
-        overlap_ratios: List[float] = []
+        all_upstream_pks: list[list[Any]] = []
+        all_downstream_pks: list[list[Any]] = []
+        overlap_ratios: list[float] = []
 
         search_params = {"metric_type": metric_type}
 
@@ -1307,7 +1309,7 @@ class TestCDCSyncBase:
         downstream_client,
         collection_name: str,
         filter_expr: str,
-        output_fields: List[str] = None,
+        output_fields: list[str] = None,
     ):
         """
         Query both upstream and downstream with the same filter and compare PK sets.

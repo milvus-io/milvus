@@ -3,6 +3,7 @@ CDC sync tests for collection property operations.
 """
 
 import time
+
 from .base import TestCDCSyncBase, logger
 
 

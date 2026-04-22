@@ -3,9 +3,11 @@ CDC sync tests for advanced schema features (dynamic fields, nullable, default v
 partition keys, clustering keys, and combinations thereof).
 """
 
-import time
 import random
+import time
+
 from pymilvus import DataType
+
 from .base import TestCDCSyncBase, logger
 
 

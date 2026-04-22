@@ -2,10 +2,10 @@
 CDC sync tests for topology switchover and failover scenarios.
 """
 
+import random
 import subprocess
 import threading
 import time
-import random
 
 from .base import TestCDCSyncBase, logger
 

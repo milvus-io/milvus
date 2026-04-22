@@ -2,10 +2,12 @@
 CDC sync tests for full-text search (BM25), text match, and phrase match operations.
 """
 
-import time
 import random
+import time
+
 import pytest
-from pymilvus import DataType, AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, DataType, RRFRanker
+
 from .base import TestCDCSyncBase, logger
 
 

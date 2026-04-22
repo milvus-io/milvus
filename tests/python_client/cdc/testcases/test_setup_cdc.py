@@ -3,10 +3,13 @@ CDC topology setup and configuration test cases.
 """
 
 import time
+
 import pytest
 from common.common_type import CaseLabel
-from .base import TestCDCSyncBase
+
 from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
+
+from .base import TestCDCSyncBase
 
 
 @pytest.mark.tags(CaseLabel.CDC)

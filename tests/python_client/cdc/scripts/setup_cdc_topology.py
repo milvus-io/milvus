@@ -1,6 +1,8 @@
-from pymilvus import MilvusClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
+from pymilvus import MilvusClient
+
 
 def setup_cdc_topology(upstream_uri, downstream_uri, removed_clusters_uri, upstream_token, downstream_token, removed_clusters_token, source_cluster_id, target_cluster_id, removed_clusters_id, pchannel_num):
     print(f"DEBUG: upstream_uri: {upstream_uri}, downstream_uri: {downstream_uri}, upstream_token: {upstream_token}, downstream_token: {downstream_token}, source_cluster_id: {source_cluster_id}, target_cluster_id: {target_cluster_id}, pchannel_num: {pchannel_num}")
@@ -147,13 +149,13 @@ if __name__ == "__main__":
 
     parser.add_argument('--pchannel_num', type=int, default=16, help='pchannel num')
     args = parser.parse_args()
-    setup_cdc_topology(args.upstream_uri, 
-                        args.downstream_uri, 
+    setup_cdc_topology(args.upstream_uri,
+                        args.downstream_uri,
                         args.removed_clusters_uri,
-                        args.upstream_token, 
-                        args.downstream_token, 
+                        args.upstream_token,
+                        args.downstream_token,
                         args.removed_clusters_token,
-                        args.source_cluster_id, 
+                        args.source_cluster_id,
                         args.target_cluster_id,
                         args.removed_clusters_id,
                         args.pchannel_num)
