@@ -632,3 +632,24 @@ func TestClientBase_ServerIDMismatch_NodeFastFail(t *testing.T) {
 	// The caller should be invoked exactly once (no retries)
 	assert.Equal(t, 1, callCount)
 }
+
+func TestIsConnectionClosingErr(t *testing.T) {
+	// Positive case — the exact exported sentinel
+	assert.True(t, IsConnectionClosingErr(grpc.ErrClientConnClosing))
+
+	// Positive case — wrapped sentinel still matches via errors.Is
+	err := errors.Wrap(grpc.ErrClientConnClosing, "outer context")
+	assert.True(t, IsConnectionClosingErr(err))
+
+	// Positive case — status with same code and message (proto.Equal match)
+	err = status.Error(codes.Canceled, "grpc: the client connection is closing")
+	assert.True(t, IsConnectionClosingErr(err))
+
+	// Negative — normal canceled
+	err = status.Error(codes.Canceled, "context canceled")
+	assert.False(t, IsConnectionClosingErr(err))
+
+	// Negative — non-grpc error
+	err = errors.New("random error")
+	assert.False(t, IsConnectionClosingErr(err))
+}

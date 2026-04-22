@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -318,6 +319,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 					if errors.Is(err, merr.ErrNodeNotFound) {
 						log.Warn("try to delete data on non-exist node")
 						// cancel other request
+						cancel()
+						return false, err
+					} else if grpcclient.IsServerIDMismatchErr(err) {
+						log.Warn("try to delete data on mismatched node, node has been replaced", zap.Error(err))
 						cancel()
 						return false, err
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
