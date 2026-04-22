@@ -7,7 +7,7 @@ import time
 import pytest
 from common.common_type import CaseLabel
 
-from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
+from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, apply_replicate_configuration
 
 from .base import TestCDCSyncBase
 
@@ -65,8 +65,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         # Test normal topology setup
-        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
-        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
+        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
 
         # Wait for configuration to take effect
         time.sleep(3)
@@ -128,10 +127,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
 
-        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config)
-        downstream_client.update_replicate_configuration(
-            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config
-        )
+        apply_replicate_configuration([(upstream_client, original_config), (downstream_client, original_config)])
         time.sleep(3)
 
         # Now switch the direction (target -> source)
@@ -160,10 +156,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         # Apply switched configuration
-        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config)
-        downstream_client.update_replicate_configuration(
-            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config
-        )
+        apply_replicate_configuration([(upstream_client, switched_config), (downstream_client, switched_config)])
         time.sleep(3)
 
         # Test the switched topology by creating collection on downstream (now source)
@@ -356,8 +349,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
 
-        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
-        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
+        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
         time.sleep(3)
 
         # Verify topology is working
@@ -397,11 +389,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             "cross_cluster_topology": [],
         }
         # Apply empty configuration to disconnect CDC
-        upstream_client.update_replicate_configuration(
-            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_upstream_config
-        )
-        downstream_client.update_replicate_configuration(
-            timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_downstream_config
+        apply_replicate_configuration(
+            [(upstream_client, empty_upstream_config), (downstream_client, empty_downstream_config)]
         )
         time.sleep(3)
 

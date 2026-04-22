@@ -1,5 +1,6 @@
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
 from pymilvus import MilvusClient
@@ -9,6 +10,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS = 600
+
+
+def apply_replicate_configuration(tasks, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS):
+    # Fan out in parallel: the server blocks non-primary clusters in
+    # waitUntilPrimaryChangeOrConfigurationSame until the primary's broadcast
+    # propagates via CDC, so a sequential call where the first client happens
+    # to be a replica deadlocks on the client's RPC timeout.
+    with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = [
+            executor.submit(client.update_replicate_configuration, timeout=timeout, **config)
+            for client, config in tasks
+        ]
+        wait(futures)
+    for f in futures:
+        f.result()
 
 
 def pytest_addoption(parser):
@@ -194,8 +210,7 @@ def switchover_helper(request, upstream_client, downstream_client):
             ],
             "cross_cluster_topology": [{"source_cluster_id": new_source_id, "target_cluster_id": new_target_id}],
         }
-        upstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
-        downstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
+        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
         logger.info("Switchover completed, waiting 10s for stabilization...")
         time.sleep(10)
 
@@ -243,8 +258,7 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
 
     try:
         # Update replication configuration on both clusters
-        upstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
-        downstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
+        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
         logger.info("CDC topology setup completed successfully")
 
         # Allow some time for CDC to initialize
