@@ -1640,8 +1640,6 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
-    auto index_type = vec_index->GetIndexType();
-    auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
     if (has_raw_data) {
@@ -1674,6 +1672,109 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
 
     AssertInfo(false, "get_vector called on vector index without raw data");
     return nullptr;
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
+                                       FieldId field_id,
+                                       const FieldMeta& field_meta,
+                                       const int64_t* seg_offsets,
+                                       int64_t count) const {
+    AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
+               "get_emb_list only supports VECTOR_ARRAY");
+
+    if (!get_bit(index_ready_bitset_, field_id) &&
+        !get_bit(binlog_index_bitset_, field_id)) {
+        return fill_with_empty(field_id, count);
+    }
+
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto cache_index = field_indexing->indexing_;
+    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+    AssertInfo(vec_index, "invalid vector indexing");
+    auto has_raw_data = vec_index->HasRawData();
+    AssertInfo(has_raw_data,
+               "get_emb_list called on vector index without raw data");
+
+    auto metric_type = vec_index->GetMetricType();
+
+    // Build el_ids dataset from seg_offsets (seg_offsets are el_ids for VECTOR_ARRAY)
+    auto ids_ds = GenIdsDataset(count, seg_offsets);
+
+    auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
+    AssertInfo(offsets.size() == static_cast<size_t>(count + 1),
+               "GetEmbListByIds returned invalid offsets size {}, expected {}",
+               offsets.size(),
+               count + 1);
+
+    auto dim = field_meta.get_dim();
+    auto element_type = field_meta.get_element_type();
+    const size_t vec_size_per_element =
+        milvus::vector_bytes_per_element(element_type, dim);
+
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(
+        field_meta.get_data_type()));
+
+    auto vector_array = data_array->mutable_vectors();
+    auto obj = vector_array->mutable_vector_array();
+    obj->set_dim(dim);
+    obj->set_element_type(milvus::ToProtoDataType(element_type));
+
+    // Build a VectorFieldProto for each embedding list
+    for (int64_t i = 0; i < count; i++) {
+        auto* entry = obj->mutable_data()->Add();
+        entry->set_dim(dim);
+        size_t vec_start = offsets[i];
+        size_t vec_count = offsets[i + 1] - offsets[i];
+        if (vec_count == 0) {
+            continue;
+        }
+        size_t byte_offset = vec_start * vec_size_per_element;
+        size_t byte_len = vec_count * vec_size_per_element;
+
+        switch (element_type) {
+            case DataType::VECTOR_FLOAT: {
+                auto* src = reinterpret_cast<const float*>(raw_data.data() +
+                                                           byte_offset);
+                entry->mutable_float_vector()->mutable_data()->Add(
+                    src, src + vec_count * dim);
+                break;
+            }
+            case DataType::VECTOR_BINARY: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_binary_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_float16_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_bfloat16_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_int8_vector()->assign(src, byte_len);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    return data_array;
 }
 
 void
@@ -3104,7 +3205,12 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
     std::unique_ptr<DataArray> vector{nullptr};
     // Try index first: if vector index exists and has raw data, read from index
     if (IndexHasRawData(field_id)) {
-        vector = get_vector(op_ctx, field_id, seg_offsets, count);
+        if (IsVectorArrayDataType(field_meta.get_data_type())) {
+            vector =
+                get_emb_list(op_ctx, field_id, field_meta, seg_offsets, count);
+        } else {
+            vector = get_vector(op_ctx, field_id, seg_offsets, count);
+        }
     } else {
         // Fallback to field data
         auto [field, exist] = GetFieldDataIfExist(field_id);

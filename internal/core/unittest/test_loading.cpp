@@ -51,10 +51,24 @@ class IndexLoadTest : public ::testing::TestWithParam<Param> {
             data_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
         } else if (field_type == "vector_int8") {
             data_type = milvus::DataType::VECTOR_INT8;
+        } else if (field_type == "vector_array") {
+            data_type = milvus::DataType::VECTOR_ARRAY;
         } else if (field_type == "array") {
             data_type = milvus::DataType::ARRAY;
         } else {
             data_type = milvus::DataType::STRING;
+        }
+
+        element_data_type = milvus::DataType::NONE;
+        if (index_params.find("element_type") != index_params.end()) {
+            std::string et = index_params["element_type"];
+            if (et == "vector_float") {
+                element_data_type = milvus::DataType::VECTOR_FLOAT;
+            } else if (et == "vector_fp16") {
+                element_data_type = milvus::DataType::VECTOR_FLOAT16;
+            } else if (et == "vector_bf16") {
+                element_data_type = milvus::DataType::VECTOR_BFLOAT16;
+            }
         }
 
         expected = param.second;
@@ -69,6 +83,7 @@ class IndexLoadTest : public ::testing::TestWithParam<Param> {
     std::map<std::string, std::string> index_params;
     bool enable_mmap;
     milvus::DataType data_type;
+    milvus::DataType element_data_type;
     LoadResourceRequest expected;
 };
 
@@ -238,7 +253,40 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
-         false}));
+         false}),
+    // VECTOR_ARRAY + HNSW (FLAT): has_raw_data = true
+    std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+        {{"index_type", "HNSW"},
+         {"metric_type", "MAX_SIM"},
+         {"efConstrcution", "300"},
+         {"M", "30"},
+         {"mmap", "false"},
+         {"field_type", "vector_array"},
+         {"element_type", "vector_float"}},
+        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
+    // VECTOR_ARRAY + HNSW_SQ (SQ8, fp32): has_raw_data = false (lossy)
+    std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+        {{"index_type", "HNSW_SQ"},
+         {"metric_type", "MAX_SIM"},
+         {"efConstrcution", "300"},
+         {"M", "30"},
+         {"sq_type", "SQ8"},
+         {"mmap", "false"},
+         {"field_type", "vector_array"},
+         {"element_type", "vector_float"}},
+        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
+    // VECTOR_ARRAY + HNSW_PQ (no refine): has_raw_data = false
+    std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
+        {{"index_type", "HNSW_PQ"},
+         {"metric_type", "MAX_SIM"},
+         {"efConstrcution", "300"},
+         {"M", "30"},
+         {"pq_m", "8"},
+         {"nbits", "8"},
+         {"mmap", "false"},
+         {"field_type", "vector_array"},
+         {"element_type", "vector_float"}},
+        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}));
 
 INSTANTIATE_TEST_SUITE_P(IndexTypeLoadInfo,
                          IndexLoadTest,
@@ -252,6 +300,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.segment_id = 3;
     loadIndexInfo.field_id = 4;
     loadIndexInfo.field_type = data_type;
+    loadIndexInfo.element_type = element_data_type;
     loadIndexInfo.enable_mmap = enable_mmap;
     loadIndexInfo.mmap_dir_path = "/tmp/mmap";
     loadIndexInfo.index_id = 5;

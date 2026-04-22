@@ -103,6 +103,10 @@ class VectorMemIndex : public VectorIndex {
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
+    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr dataset,
+                    const std::string& metric_type) const override;
+
     std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
     GetSparseVector(const DatasetPtr dataset) const override;
 
