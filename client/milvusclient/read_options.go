@@ -428,6 +428,16 @@ func vector2Placeholder(vectors []entity.Vector) (*commonpb.PlaceholderValue, er
 		placeHolderType = commonpb.PlaceholderType_Int8Vector
 	case entity.Text:
 		placeHolderType = commonpb.PlaceholderType_VarChar
+	case entity.FloatVectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListFloatVector
+	case entity.Float16VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListFloat16Vector
+	case entity.BFloat16VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListBFloat16Vector
+	case entity.BinaryVectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListBinaryVector
+	case entity.Int8VectorArray:
+		placeHolderType = commonpb.PlaceholderType_EmbListInt8Vector
 	default:
 		return nil, errors.Newf("unsupported search data type: %T", vectors[0])
 	}

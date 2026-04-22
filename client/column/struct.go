@@ -24,6 +24,9 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
+// columnStructArray represents a struct-array field. Each sub-column must itself be an
+// "array-of-X" column (e.g. ColumnInt32Array, ColumnFloatVectorArray) so that one entry
+// in the column corresponds to one row's variable-length list of struct elements.
 type columnStructArray struct {
 	fields []Column
 	name   string
@@ -41,14 +44,27 @@ func (c *columnStructArray) Name() string {
 }
 
 func (c *columnStructArray) Type() entity.FieldType {
+	// Surface as FieldTypeArray to match the user-facing schema field, whose DataType is Array
+	// and ElementType is Struct. This keeps processInsertColumns' type comparison happy.
 	return entity.FieldTypeArray
 }
 
+// Len returns the row count of the struct array. All sub-columns must have identical length;
+// a mismatch indicates data corruption from a failed partial append and is reported via panic
+// with a descriptive message (sub-fields are fully decoupled columns, so this check is the
+// earliest opportunity to surface the invariant violation).
 func (c *columnStructArray) Len() int {
-	for _, field := range c.fields {
-		return field.Len()
+	if len(c.fields) == 0 {
+		return 0
 	}
-	return 0
+	first := c.fields[0].Len()
+	for i := 1; i < len(c.fields); i++ {
+		if got := c.fields[i].Len(); got != first {
+			panic(errors.Newf("struct array %q sub-field %q length %d mismatches first sub-field %q length %d",
+				c.name, c.fields[i].Name(), got, c.fields[0].Name(), first).Error())
+		}
+	}
+	return first
 }
 
 func (c *columnStructArray) Slice(start, end int) Column {
@@ -56,13 +72,15 @@ func (c *columnStructArray) Slice(start, end int) Column {
 	for idx, subField := range c.fields {
 		fields[idx] = subField.Slice(start, end)
 	}
-	c.fields = fields
-	return c
+	return &columnStructArray{
+		name:   c.name,
+		fields: fields,
+	}
 }
 
 func (c *columnStructArray) FieldData() *schemapb.FieldData {
 	return &schemapb.FieldData{
-		Type:      schemapb.DataType_Array,
+		Type:      schemapb.DataType_ArrayOfStruct,
 		FieldName: c.name,
 		Field: &schemapb.FieldData_StructArrays{
 			StructArrays: &schemapb.StructArrayField{
@@ -74,8 +92,36 @@ func (c *columnStructArray) FieldData() *schemapb.FieldData {
 	}
 }
 
+// AppendValue appends one row of struct elements. The row must be a map[string]any whose keys
+// match the sub-field names; each value must match what the corresponding sub-column's AppendValue
+// accepts (typically `[]T` for scalar arrays or `[][]float32`/`[][]byte` for vector arrays).
+//
+// If any sub-field append fails, previously appended sub-fields are rolled back to their pre-call
+// lengths so sub-columns stay in lock-step.
 func (c *columnStructArray) AppendValue(value any) error {
-	return errors.New("not implemented")
+	row, ok := value.(map[string]any)
+	if !ok {
+		return errors.Newf("struct array AppendValue expects map[string]any, got %T", value)
+	}
+	// pre-check all keys exist before mutating any sub-column.
+	for _, sub := range c.fields {
+		if _, present := row[sub.Name()]; !present {
+			return errors.Newf("struct array AppendValue: missing sub-field %q", sub.Name())
+		}
+	}
+	preLens := make([]int, len(c.fields))
+	for i, sub := range c.fields {
+		preLens[i] = sub.Len()
+	}
+	for i, sub := range c.fields {
+		if err := sub.AppendValue(row[sub.Name()]); err != nil {
+			for j := 0; j < i; j++ {
+				c.fields[j] = c.fields[j].Slice(0, preLens[j])
+			}
+			return errors.Wrapf(err, "struct array AppendValue: sub-field %q", sub.Name())
+		}
+	}
+	return nil
 }
 
 func (c *columnStructArray) Get(idx int) (any, error) {
@@ -107,11 +153,11 @@ func (c *columnStructArray) GetAsBool(idx int) (bool, error) {
 }
 
 func (c *columnStructArray) IsNull(idx int) (bool, error) {
-	return false, errors.New("not implemented")
+	return false, nil
 }
 
 func (c *columnStructArray) AppendNull() error {
-	return errors.New("not implemented")
+	return errors.New("struct array column does not support AppendNull")
 }
 
 func (c *columnStructArray) Nullable() bool {

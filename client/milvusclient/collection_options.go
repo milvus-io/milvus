@@ -122,6 +122,15 @@ func (opt *createCollectionOption) WithNumPartitions(numPartitions int64) *creat
 	return opt
 }
 
+// Validate runs client-side sanity checks against the user-provided schema. Invoked automatically
+// from Client.CreateCollection via interface assertion.
+func (opt *createCollectionOption) Validate() error {
+	if opt.schema == nil {
+		return nil
+	}
+	return opt.schema.Validate()
+}
+
 func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 	// fast create collection
 	if opt.isFast {
