@@ -255,6 +255,24 @@ func TestValidateFieldPartialUpdateOps_SkipsCapacityWhenUnset(t *testing.T) {
 	assert.True(t, seen)
 }
 
+func TestValidateFieldPartialUpdateOps_RejectsNilArrayData(t *testing.T) {
+	// FieldData declares type=Array but carries no ArrayData: the merge
+	// path would deref nil; validate must reject up front.
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{arrayIntFieldSchema("tags", false, 8)}}
+	fdNoArray := &schemapb.FieldData{
+		FieldName: "tags",
+		Type:      schemapb.DataType_Array,
+		Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}},
+	}
+	req := &milvuspb.UpsertRequest{
+		FieldsData: []*schemapb.FieldData{fdNoArray},
+		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
+	}
+	_, err := validateFieldPartialUpdateOps(req, schema)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not an Array")
+}
+
 func TestValidateFieldPartialUpdateOps_SkipsCapacityWhenMalformed(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
 		Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
@@ -308,12 +326,12 @@ func TestReadMaxCapacity(t *testing.T) {
 	assert.Equal(t, 42, readMaxCapacity(fs))
 
 	fs = &schemapb.FieldSchema{TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "not-int"}}}
-	assert.Equal(t, 0, readMaxCapacity(fs))
+	assert.Equal(t, -1, readMaxCapacity(fs))
 
 	fs = &schemapb.FieldSchema{TypeParams: []*commonpb.KeyValuePair{{Key: "other", Value: "42"}}}
-	assert.Equal(t, 0, readMaxCapacity(fs))
+	assert.Equal(t, -1, readMaxCapacity(fs))
 
-	assert.Equal(t, 0, readMaxCapacity(&schemapb.FieldSchema{}))
+	assert.Equal(t, -1, readMaxCapacity(&schemapb.FieldSchema{}))
 }
 
 func TestFindFieldSchemaByName(t *testing.T) {

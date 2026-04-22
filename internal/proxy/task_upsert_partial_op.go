@@ -121,6 +121,13 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 			return false, merr.WrapErrParameterInvalidMsg(
 				fmt.Sprintf("partial-update op targets field %q not present in fields_data", name))
 		}
+		// Reject malformed FieldData early -- a request that declares an
+		// Array op but carries no ArrayData would otherwise panic on a nil
+		// deref inside the merge path.
+		if fd.GetScalars() == nil || fd.GetScalars().GetArrayData() == nil {
+			return false, merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("partial-update op field %q payload is not an Array", name))
+		}
 		if got := fd.GetScalars().GetArrayData().GetElementType(); got != schemapb.DataType_None && got != fieldSchema.GetElementType() {
 			return false, merr.WrapErrParameterInvalidMsg(
 				fmt.Sprintf("field %q expects element type %s but request provides %s",
@@ -170,7 +177,7 @@ func findFieldSchemaByName(schema *schemapb.CollectionSchema, name string) (*sch
 // no-op (matches the behavior of legacy upserts with no capacity gate).
 func checkArrayAppendPayloadWithinCapacity(fd *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	maxCap := readMaxCapacity(fieldSchema)
-	if maxCap <= 0 {
+	if maxCap < 0 {
 		return nil
 	}
 	rows := fd.GetScalars().GetArrayData().GetData()
@@ -186,8 +193,9 @@ func checkArrayAppendPayloadWithinCapacity(fd *schemapb.FieldData, fieldSchema *
 }
 
 // readMaxCapacity returns the declared max_capacity of an Array field, or
-// 0 when missing/invalid. The value lives in type_params under the
-// well-known common.MaxCapacityKey key.
+// -1 when missing / malformed. -1 is a sentinel understood by both the
+// proxy pre-check and typeutil.ApplyArrayRowOp as "no capacity gate",
+// keeping the two sides consistent.
 func readMaxCapacity(fieldSchema *schemapb.FieldSchema) int {
 	for _, kv := range fieldSchema.GetTypeParams() {
 		if kv.GetKey() != common.MaxCapacityKey {
@@ -195,11 +203,11 @@ func readMaxCapacity(fieldSchema *schemapb.FieldSchema) int {
 		}
 		v, err := strconv.Atoi(kv.GetValue())
 		if err != nil {
-			return 0
+			return -1
 		}
 		return v
 	}
-	return 0
+	return -1
 }
 
 // perRowArrayLen returns the element count of a single Array row given

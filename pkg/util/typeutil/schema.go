@@ -1738,16 +1738,30 @@ func UpdateArrayFieldByColumnWithOp(
 	}
 	baseScalar := base.GetScalars()
 	updateScalar := update.GetScalars()
+	if baseScalar.GetArrayData() == nil || updateScalar.GetArrayData() == nil {
+		return fmt.Errorf("op %s requires non-nil ArrayData on both base and update", op.String())
+	}
 	baseData := baseScalar.GetArrayData().Data
 	updateData := updateScalar.GetArrayData().Data
 	elementType := baseScalar.GetArrayData().GetElementType()
 	for i, baseIdx := range baseIndices {
 		updateIdx := updateIndices[i]
+		// If the upsert payload row is explicitly null, there is nothing to
+		// append/remove; leave the existing base row untouched.
+		if len(update.ValidData) > 0 && !update.ValidData[updateIdx] {
+			continue
+		}
 		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
 		if err != nil {
 			return err
 		}
 		baseData[baseIdx] = merged
+		// After a successful merge the base row carries concrete data and
+		// must be marked valid, otherwise downstream readers keep treating
+		// it as null and drop the merged payload silently.
+		if len(base.ValidData) > 0 {
+			base.ValidData[baseIdx] = true
+		}
 	}
 	return nil
 }

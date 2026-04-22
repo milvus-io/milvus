@@ -409,3 +409,59 @@ func TestNewArrayCapacityError(t *testing.T) {
 	assert.Contains(t, err.Error(), "10")
 	assert.Contains(t, err.Error(), "5")
 }
+
+// Regression: a successful APPEND / REMOVE on a previously-null base row
+// must flip ValidData back to true, otherwise downstream readers keep the
+// row as null and silently drop the merged payload.
+func TestUpdateArrayFieldByColumnWithOp_FlipsValidDataOnMerge(t *testing.T) {
+	base := arrayField([]*schemapb.ScalarField{longRow(), longRow(1, 2)}, schemapb.DataType_Int64)
+	base.ValidData = []bool{false, true}
+	update := arrayField([]*schemapb.ScalarField{longRow(5, 6), longRow(3)}, schemapb.DataType_Int64)
+
+	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0, 1}, []int64{0, 1},
+		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, true}, base.ValidData)
+	rows := base.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{5, 6}, rows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{1, 2, 3}, rows[1].GetLongData().GetData())
+}
+
+// Regression: a null upsert payload row (update.ValidData[i]=false) must
+// leave the base row and its ValidData bit untouched.
+func TestUpdateArrayFieldByColumnWithOp_SkipsNullUpdatePayload(t *testing.T) {
+	base := arrayField([]*schemapb.ScalarField{longRow(1, 2)}, schemapb.DataType_Int64)
+	base.ValidData = []bool{true}
+	update := arrayField([]*schemapb.ScalarField{longRow(9)}, schemapb.DataType_Int64)
+	update.ValidData = []bool{false}
+
+	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0}, []int64{0},
+		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
+	require.NoError(t, err)
+	rows := base.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{1, 2}, rows[0].GetLongData().GetData())
+	assert.Equal(t, []bool{true}, base.ValidData)
+}
+
+// Regression: a malformed FieldData (type=Array but ArrayData=nil) must
+// be rejected deterministically instead of panicking inside the merge.
+func TestUpdateArrayFieldByColumnWithOp_RejectsNilArrayData(t *testing.T) {
+	base := arrayField([]*schemapb.ScalarField{longRow(1)}, schemapb.DataType_Int64)
+
+	updateNoArray := &schemapb.FieldData{
+		Type:  schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}},
+	}
+	err := UpdateArrayFieldByColumnWithOp(base, updateNoArray, []int64{0}, []int64{0},
+		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
+	require.Error(t, err)
+
+	baseNoArray := &schemapb.FieldData{
+		Type:  schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}},
+	}
+	good := arrayField([]*schemapb.ScalarField{longRow(1)}, schemapb.DataType_Int64)
+	err = UpdateArrayFieldByColumnWithOp(baseNoArray, good, []int64{0}, []int64{0},
+		schemapb.FieldPartialUpdateOp_ARRAY_APPEND, -1)
+	require.Error(t, err)
+}
