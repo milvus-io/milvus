@@ -175,6 +175,17 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
+	// Fast-fail when the queue is already full, before any potentially-blocking
+	// allocation. The authoritative check remains in addUnissuedTask; this
+	// snapshot only prevents a rejected request from queuing behind a slow
+	// TSO/ID allocator (#49223).
+	queue.utLock.RLock()
+	full := queue.utFull()
+	queue.utLock.RUnlock()
+	if full {
+		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
+	}
+
 	var ts Timestamp
 	var id UniqueID
 	if t.CanSkipAllocTimestamp() {
