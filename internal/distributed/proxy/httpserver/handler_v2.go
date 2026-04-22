@@ -2029,6 +2029,16 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.StructArrayFields = append(collSchema.StructArrayFields, structProto)
 			fieldNames[structField.FieldName] = true
+			// Register sub-field qualified names (structName[subName]) so
+			// indexParams in /collections/create can target a struct sub-vector
+			// directly, matching the pymilvus
+			// `index_params.add_index(field_name="struct[sub]")` convention.
+			// Short sub-field names are intentionally not registered because
+			// they are not globally unique across structs.
+			for _, sub := range structProto.GetFields() {
+				qualified := typeutil.ConcatStructFieldName(structField.FieldName, sub.GetName())
+				fieldNames[qualified] = true
+			}
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}

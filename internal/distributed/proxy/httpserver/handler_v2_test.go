@@ -1271,9 +1271,9 @@ func TestCreateCollection(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(15)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(8)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
@@ -1544,6 +1544,49 @@ func TestCreateCollection(t *testing.T) {
 			`"params": {"max_length": 256, "enableDynamicField": 100, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
 		errMsg:  "parse enableDynamicField fail, err:strconv.ParseBool: parsing \"100\": invalid syntax",
 		errCode: 65535,
+	})
+
+	// Struct sub-vector index via collection_create indexParams: the
+	// structName[subName] form is registered in fieldNames so users can
+	// create the sub-vector index alongside top-level indexes in one call.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"},
+	        {"fieldName": "my_struct[sub_vec]", "indexName": "sub_vec_idx", "metricType": "L2"}
+	    ]}`),
+	})
+
+	// Struct sub-field qualified name that does not exist in schema is rejected.
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+	        "fields": [
+	            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+	            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+	        ],
+	        "structFields": [{
+	            "fieldName": "my_struct",
+	            "fields": [
+	                {"fieldName": "sub_vec", "dataType": "ArrayOfVector", "elementDataType": "FloatVector", "elementTypeParams": {"dim": 2, "max_capacity": 4}}
+	            ]
+	        }]
+	    }, "indexParams": [
+	        {"fieldName": "my_struct[nonexistent]", "indexName": "bad", "metricType": "L2"}
+	    ]}`),
+		errMsg:  "missing required parameters, error: `my_struct[nonexistent]` hasn't defined in schema",
+		errCode: 1802,
 	})
 
 	for _, testcase := range postTestCases {
