@@ -1358,8 +1358,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("field", [ct.default_int64_field_name, ct.default_float_field_name])
-    def test_milvus_client_query_expr_not_in_term(self, field):
+    def test_milvus_client_query_expr_not_in_term(self):
         """
         target: test query with `not in` expr
         method: query with not in expr
@@ -1381,21 +1380,22 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # query with not in expression
-        values = [row[field] for row in rows]
-        pos = 100
-        term_expr = f'{field} not in {values[pos:]}'
-        df = pd.DataFrame(rows)
-        res = df.iloc[:pos, :3].to_dict('records')
-        self.query(client, collection_name, filter=term_expr,
-                   output_fields=[ct.default_float_field_name, ct.default_int64_field_name,
-                                  ct.default_string_field_name],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+        fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        for field in fields:
+            values = [row[field] for row in rows]
+            pos = 100
+            term_expr = f'{field} not in {values[pos:]}'
+            df = pd.DataFrame(rows)
+            res = df.iloc[:pos, :3].to_dict('records')
+            self.query(client, collection_name, filter=term_expr,
+                    output_fields=[ct.default_float_field_name, ct.default_int64_field_name,
+                                    ct.default_string_field_name],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("pos", [0, default_nb])
-    def test_milvus_client_query_expr_not_in_empty_and_all(self, pos):
+    def test_milvus_client_query_expr_not_in_empty_and_all(self):
         """
         target: test query with `not in` expr
         method: query with `not in` expr for (non)empty collection
@@ -1421,13 +1421,15 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with not in expression
         int64_values = [row[ct.default_int64_field_name] for row in rows]
-        term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
-        df = pd.DataFrame(rows)
-        res = df.iloc[:pos, :1].to_dict('records')
-        self.query(client, collection_name, filter=term_expr,
-                   output_fields=[ct.default_int64_field_name],
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+        pos_s = [0, default_nb]
+        for pos in pos_s:
+            term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
+            df = pd.DataFrame(rows)
+            res = df.iloc[:pos, :1].to_dict('records')
+            self.query(client, collection_name, filter=term_expr,
+                    output_fields=[ct.default_int64_field_name],
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -1950,9 +1952,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [100, 1000])
-    @pytest.mark.parametrize("limit", [100, 1000])
-    def test_milvus_client_query_expr_empty_with_random_pk(self, limit, offset):
+    def test_milvus_client_query_expr_empty_with_random_pk(self):
         """
         target: test query with empty expression
         method: create a collection using random pk, query empty expression with a limit
@@ -1986,20 +1986,24 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with empty expr and check the result
-        exp_ids, res = sorted(unordered_ids)[:limit], []
-        for ids in exp_ids:
-            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
-        res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
-        # 5. query with pagination
-        exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
-        for ids in exp_ids:
-            res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
-        res = self.query(client, collection_name, filter="", limit=limit, offset=offset,
-                         output_fields=[ct.default_string_field_name],
-                         check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        limits = [100, 1000]
+        offsets = [100, 1000]
+        for limit in limits:
+            for offset in offsets:
+                exp_ids, res = sorted(unordered_ids)[:limit], []
+                for ids in exp_ids:
+                    res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+                res = self.query(client, collection_name, filter="", limit=limit, output_fields=[ct.default_string_field_name],
+                                check_task=CheckTasks.check_query_results,
+                                check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+                # 5. query with pagination
+                exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
+                for ids in exp_ids:
+                    res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
+                res = self.query(client, collection_name, filter="", limit=limit, offset=offset,
+                                output_fields=[ct.default_string_field_name],
+                                check_task=CheckTasks.check_query_results,
+                                check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -4372,8 +4376,7 @@ class TestQueryString(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
-    def test_milvus_client_query_string_expr_with_like_auto_index(self, expression):
+    def test_milvus_client_query_string_expr_with_like_auto_index(self):
         """
         target: test query with like string expression and indexed with auto index
         expected: verify query successfully
@@ -4396,16 +4399,18 @@ class TestQueryString(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with auto index and get baseline result count
-        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len = len(result)
-        # 5. drop auto index and verify query result remains same
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, ct.default_string_field_name)
-        self.load_collection(client, collection_name)
-        result_without_index = \
-        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len_without_index = len(result_without_index)
-        assert res_len_without_index == res_len
+        expressions = [perfix_expr, suffix_expr, inner_match_expr]
+        for expression in expressions:
+            result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+            res_len = len(result)
+            # 5. drop auto index and verify query result remains same
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, ct.default_string_field_name)
+            self.load_collection(client, collection_name)
+            result_without_index = \
+            self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+            res_len_without_index = len(result_without_index)
+            assert res_len_without_index == res_len
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -4565,8 +4570,7 @@ class TestQueryString(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", [perfix_expr, suffix_expr, inner_match_expr])
-    def test_milvus_client_query_string_expr_with_prefixes_bitmap(self, expression):
+    def test_milvus_client_query_string_expr_with_prefixes_bitmap(self):
         """
         target: test query with prefix string expression and indexed with bitmap
         expected: verify query successfully
@@ -4589,16 +4593,18 @@ class TestQueryString(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with bitmap index and get baseline result count
-        result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len = len(result)
-        # 5. drop bitmap index and verify query result remains same
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, ct.default_string_field_name)
-        self.load_collection(client, collection_name)
-        result_without_index = \
-        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
-        res_len_without_index = len(result_without_index)
-        assert res_len_without_index == res_len
+        expressions = [perfix_expr, suffix_expr, inner_match_expr]
+        for expression in expressions:
+            result = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+            res_len = len(result)
+            # 5. drop bitmap index and verify query result remains same
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, ct.default_string_field_name)
+            self.load_collection(client, collection_name)
+            result_without_index = \
+            self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+            res_len_without_index = len(result_without_index)
+            assert res_len_without_index == res_len
         # 6. clean up
         self.drop_collection(client, collection_name)
 
