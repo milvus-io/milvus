@@ -739,6 +739,47 @@ class TestExternalCrossBucket(TestMilvusClientV2Base):
             cleanup_minio_prefix(minio_client, external_bucket, f"{ext_path}/")
 
 
+class TestForceNullableExternalFields(TestMilvusClientV2Base):
+    """Force nullable on external user fields (Part8-1/4 #49061).
+
+    Parquet columns can legitimately contain nulls, and a non-nullable
+    field would silently produce incorrect results. typeutil.IsExternalCollection
+    triggers a normalization pass in CreateCollection that sets
+    field.Nullable = true on every user field, regardless of what the
+    client requested. Only the virtual PK / system fields are exempt.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_user_fields_forced_to_nullable(self):
+        """Client creates fields without explicit nullable; describe should return nullable=True."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(
+            external_source="s3://test-bucket/data/",
+            external_spec='{"format":"parquet"}',
+        )
+        # Intentionally do NOT pass nullable — rely on server-side force-nullable.
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("v", DataType.VARCHAR, max_length=64, external_field="v")
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4, external_field="vec")
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            info = client.describe_collection(collection_name)
+            fields_by_name = {f["name"]: f for f in info["fields"]}
+
+            for user_field in ("id", "v", "vec"):
+                f = fields_by_name[user_field]
+                assert f.get("nullable") is True, \
+                    f"user field '{user_field}' should be force-nullable, got {f}"
+
+            # Virtual PK must NOT be touched by the force-nullable pass.
+            vpk = fields_by_name.get("__virtual_pk__")
+            assert vpk is not None and vpk.get("is_primary") is True, \
+                "__virtual_pk__ should exist as the primary key"
+        finally:
+            client.drop_collection(collection_name)
+
+
 class TestSchemalessReader(TestMilvusClientV2Base):
     """Schemaless reader with column projection (Part8-1/4 #49061).
 
