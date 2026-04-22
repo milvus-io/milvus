@@ -232,6 +232,8 @@ type commonConfig struct {
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -703,6 +705,38 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
+
+	p.ArrowIOThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.ioThreadPoolCoefficient",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Coefficient for arrow's internal IO thread pool size ` +
+			`(threads = CPU cores × coefficient, then clamped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
+			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
+			`S3 GetObject requests — it is the real ceiling on parallel ` +
+			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
+			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
+			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
+			`arrow's default (and the cap is ignored).`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowIOThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.ioThreadPoolMaxCapacity",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
+			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
+			`threads = coefficient × CPU cores is clamped to this value — ` +
+			`useful on very large hosts where the coefficient would otherwise ` +
+			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
+			`can service. 0 disables the cap. Has no effect when coefficient ` +
+			`is 0.`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
