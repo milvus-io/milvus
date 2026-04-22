@@ -538,6 +538,7 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			NumRows:                   fii.GetNumRows(),
 			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
+			IndexStorePathVersion:     fii.GetIndexStorePathVersion(),
 		})
 	}
 	return result
