@@ -137,6 +137,46 @@ func (b *balancerImpl) GetAvailableStreamingNodes(ctx context.Context) (map[int6
 	return filtered, nil
 }
 
+// ConfirmPrimaryResourceGroupReady returns nil iff every RW pchannel is currently
+// assigned to a streaming node that belongs to the configured primary resource group.
+// If streaming.primaryResourceGroup is not configured, returns nil.
+func (b *balancerImpl) ConfirmPrimaryResourceGroupReady(ctx context.Context) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("balancer is closing")
+	}
+	defer b.lifetime.Done()
+
+	primaryRG := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
+	if primaryRG == "" {
+		return nil
+	}
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return err
+	}
+	assignment, err := b.channelMetaManager.GetLatestChannelAssignment()
+	if err != nil {
+		return err
+	}
+	for _, rel := range assignment.Relations {
+		// Only RW pchannels carry WAL writes; RO pchannels (e.g., CDC source) are
+		// not constrained by the local primary RG.
+		if rel.Channel.AccessMode != types.AccessModeRW {
+			continue
+		}
+		node, ok := nodes[rel.Node.ServerID]
+		if !ok {
+			return status.NewInner("pchannel %s: assigned node %d not found in streaming nodes",
+				rel.Channel.Name, rel.Node.ServerID)
+		}
+		if node.ResourceGroup != primaryRG {
+			return status.NewInner("pchannel %s still on rg=%s, expected primary rg=%s (WAL migration in progress)",
+				rel.Channel.Name, node.ResourceGroup, primaryRG)
+		}
+	}
+	return nil
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
 	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
