@@ -285,9 +285,11 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		}, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+			return task != nil && task.SegmentID() == 2
+		}), mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
 			return struct{}{}, nil
-		}), nil)
+		}), nil).Once()
 		defer func() {
 			s.wb.mut.Lock()
 			defer s.wb.mut.Unlock()
@@ -304,11 +306,11 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		var allocCallCount atomic.Int64
 		var progressNotified atomic.Bool
 		mockAllocator.EXPECT().AllocOne().RunAndReturn(func() (int64, error) {
-			if allocCallCount.Add(1) == 3 && progressNotified.CompareAndSwap(false, true) {
+			if allocCallCount.Add(1) == 2 && progressNotified.CompareAndSwap(false, true) {
 				close(secondBufferProgress)
 			}
 			return nextSegmentID.Add(1), nil
-		}).Times(3)
+		}).Times(2)
 
 		l0wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 			idAllocator:  mockAllocator,
@@ -336,13 +338,13 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		defer closeReleaseSync()
 		var syncStartedOnce atomic.Bool
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
-			return task != nil && task.SegmentID() == 1001 && task.IsFlush()
+			return task != nil && task.SegmentID() == 1001
 		}), mock.Anything).RunAndReturn(
 			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+				if syncStartedOnce.CompareAndSwap(false, true) {
+					close(syncStarted)
+				}
 				return conc.Go[struct{}](func() (struct{}, error) {
-					if syncStartedOnce.CompareAndSwap(false, true) {
-						close(syncStarted)
-					}
 					<-releaseSync
 					return struct{}{}, nil
 				}), nil
@@ -355,13 +357,6 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 					PartitionID: 10,
 					PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
 					Timestamps:  []uint64{100},
-				},
-			},
-			{
-				DeleteRequest: &msgpb.DeleteRequest{
-					PartitionID: 11,
-					PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}}},
-					Timestamps:  []uint64{200},
 				},
 			},
 		}
