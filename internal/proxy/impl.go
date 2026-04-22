@@ -1393,6 +1393,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollection")
 	defer sp.End()
+
 	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
