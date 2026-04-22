@@ -3964,18 +3964,6 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 	})
 }
 
-func TestServer_CreateExternalCollection_NoOp(t *testing.T) {
-	server := &Server{}
-	req := &msgpb.CreateCollectionRequest{
-		CollectionName: "test_external",
-	}
-
-	resp, err := server.CreateExternalCollection(context.Background(), req)
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.False(t, merr.Ok(resp.GetStatus()))
-}
-
 func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 	t.Run("dbID_flows_through_when_collectionID_is_zero", func(t *testing.T) {
 		ctx := context.Background()

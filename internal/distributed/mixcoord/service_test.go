@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -898,20 +897,6 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.ListRefreshExternalCollectionJobs(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(resp.GetJobs()))
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("CreateExternalCollection", func(t *testing.T) {
-		req := &msgpb.CreateCollectionRequest{
-			CollectionName: "test_external_collection",
-		}
-		mockCreate := mockey.Mock(mockey.GetMethod(mockMixCoord, "CreateExternalCollection")).
-			Return(&datapb.CreateExternalCollectionResponse{
-				Status: merr.Success(),
-			}, nil).Build()
-		defer mockCreate.UnPatch()
-		resp, err := server.CreateExternalCollection(ctx, req)
-		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }

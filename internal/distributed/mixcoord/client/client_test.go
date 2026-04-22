@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/mock"
@@ -3008,66 +3007,6 @@ func TestClient_BatchUpdateManifest(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-func Test_CreateExternalCollection(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	client, err := NewClient(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	defer client.Close()
-
-	config := &Params.RootCoordGrpcClientCfg
-	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
-	client.(*Client).grpcClient = grpcClient
-	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
-		Return(nil).Build()
-	defer mockClose.UnPatch()
-	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
-		Return(1).Build()
-	defer mockGetNodeID.UnPatch()
-
-	req := &msgpb.CreateCollectionRequest{
-		CollectionName: "test_external_collection",
-	}
-
-	// 构造一个 MixCoordClient，用于在 ReCall 中使用
-	mockMix := MixCoordClient{
-		DataCoordClient: datapb.NewDataCoordClient(nil),
-	}
-
-	// Test success case
-	// Mock DataCoordClient 的 CreateExternalCollection 方法
-	mockCreate := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
-		Return(&datapb.CreateExternalCollectionResponse{
-			Status: merr.Success(),
-		}, nil).Build()
-
-	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
-		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-			return f(mockMix)
-		}).Build()
-
-	_, err = client.CreateExternalCollection(ctx, req)
-	assert.Nil(t, err)
-	mockCreate.UnPatch()
-	mockReCall.UnPatch()
-
-	// Test error case
-	mockCreateErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
-		Return(nil, mockErr).Build()
-	defer mockCreateErr.UnPatch()
-
-	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
-		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-			return f(mockMix)
-		}).Build()
-	defer mockReCall.UnPatch()
-
-	_, err = client.CreateExternalCollection(ctx, req)
-	assert.NotNil(t, err)
 }
 
 func Test_RefreshExternalCollection(t *testing.T) {
