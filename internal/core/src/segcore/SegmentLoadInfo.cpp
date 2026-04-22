@@ -62,6 +62,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     // Extract field ID
     auto field_id = FieldId(field_index_info->fieldid());
     load_index_info.field_id = field_id.get();
+    load_index_info.collection_id = GetCollectionID();
     load_index_info.partition_id = GetPartitionID();
 
     // Get field type from schema
