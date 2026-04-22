@@ -536,6 +536,102 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_SingleShardMat
 	}
 }
 
+// TestReduceCosineScoreClamping is a regression test for
+// https://github.com/milvus-io/milvus/issues/49059.
+//
+// Knowhere/Segcore can return cosine similarity values slightly outside [-1, 1]
+// (e.g. 1.0000001192092896) due to floating-point rounding during the dot
+// product computation. All reduce paths must clamp these values to the
+// mathematically valid range before returning results to the client.
+func (struts *SearchReduceUtilTestSuite) TestReduceCosineScoreClamping() {
+	// fp32 precision overflow: 1 + epsilon (same as reported in the issue)
+	overflowScore := float32(1.0000001192092896)
+	underflowScore := float32(-1.0000001192092896)
+
+	makeData := func(scores []float32) *schemapb.SearchResultData {
+		n := int64(len(scores))
+		ids := make([]int64, n)
+		for i := range ids {
+			ids[i] = int64(i + 1)
+		}
+		return &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       n,
+			Topks:      []int64{n},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: ids},
+				},
+			},
+			Scores: append([]float32(nil), scores...),
+		}
+	}
+
+	struts.Run("reduceSearchResultDataNoGroupBy clamps COSINE overflow", func() {
+		data := makeData([]float32{overflowScore, 0.5, underflowScore})
+		result, err := reduceSearchResultDataNoGroupBy(
+			context.Background(),
+			[]*schemapb.SearchResultData{data, makeData([]float32{0.3})},
+			1, 3, "COSINE", schemapb.DataType_Int64, 0,
+		)
+		struts.Require().NoError(err)
+		scores := result.Results.GetScores()
+		for _, s := range scores {
+			struts.LessOrEqual(s, float32(1.0), "COSINE score must be <= 1.0, got %v", s)
+			struts.GreaterOrEqual(s, float32(-1.0), "COSINE score must be >= -1.0, got %v", s)
+		}
+	})
+
+	struts.Run("reduceAdvanceGroupBy clamps COSINE overflow (single shard)", func() {
+		groups := []string{"A", "B", "C"}
+		data := &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+				},
+			},
+			Scores: []float32{overflowScore, 0.5, underflowScore},
+			GroupByFieldValue: &schemapb.FieldData{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: "category",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: groups},
+						},
+					},
+				},
+			},
+		}
+		result, err := reduceAdvanceGroupBy(context.Background(),
+			[]*schemapb.SearchResultData{data}, 1, 3, schemapb.DataType_Int64, "COSINE")
+		struts.Require().NoError(err)
+		for _, s := range result.Results.GetScores() {
+			struts.LessOrEqual(s, float32(1.0), "COSINE score must be <= 1.0, got %v", s)
+			struts.GreaterOrEqual(s, float32(-1.0), "COSINE score must be >= -1.0, got %v", s)
+		}
+	})
+
+	struts.Run("non-COSINE metrics are not clamped (IP can exceed 1.0)", func() {
+		data := makeData([]float32{5.0, 100.0, -3.0})
+		result, err := reduceSearchResultDataNoGroupBy(
+			context.Background(),
+			[]*schemapb.SearchResultData{data},
+			1, 3, "IP", schemapb.DataType_Int64, 0,
+		)
+		struts.Require().NoError(err)
+		scores := result.Results.GetScores()
+		// IP scores outside [-1, 1] must be preserved exactly.
+		struts.Equal(float32(100.0), scores[0])
+		struts.Equal(float32(5.0), scores[1])
+		struts.Equal(float32(-3.0), scores[2])
+	})
+}
+
 func TestSearchReduceUtilTestSuite(t *testing.T) {
 	suite.Run(t, new(SearchReduceUtilTestSuite))
 }

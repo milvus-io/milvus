@@ -30,3 +30,34 @@ func PositivelyRelated(metricType string) bool {
 		mUpper == strings.ToUpper(MaxSimIP) ||
 		mUpper == strings.ToUpper(MaxSimCosine)
 }
+
+// IsBounded returns true for metric types whose scores have a well-defined
+// mathematical range that must be enforced. Floating-point arithmetic in the
+// C++ core (Knowhere/Segcore) can produce values outside this range for
+// identical or near-identical vectors due to precision loss.
+func IsBounded(metricType string) bool {
+	mUpper := strings.ToUpper(metricType)
+	return mUpper == strings.ToUpper(COSINE) ||
+		mUpper == strings.ToUpper(MaxSimCosine)
+}
+
+// ClampCosineScores clamps each score in-place to [-1, 1] for metric types
+// that are mathematically bounded in that range (COSINE, MAX_SIM_COSINE).
+// For all other metric types this is a no-op.
+//
+// Floating-point arithmetic in Knowhere/Segcore can produce values such as
+// 1.0000001192092896 for identical vectors. Without clamping, callers see
+// distances that violate the mathematical definition of cosine similarity and
+// may fail downstream validation (e.g. range filters, client-side assertions).
+func ClampCosineScores(scores []float32, metricType string) {
+	if !IsBounded(metricType) {
+		return
+	}
+	for i, s := range scores {
+		if s > 1.0 {
+			scores[i] = 1.0
+		} else if s < -1.0 {
+			scores[i] = -1.0
+		}
+	}
+}
