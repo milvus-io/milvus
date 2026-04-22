@@ -225,16 +225,17 @@ class SegmentExpr : public Expr {
             pk_type_ = field_meta.get_data_type();
         }
 
-        pinned_index_ = PinIndex(op_ctx_,
-                                 segment_,
-                                 field_meta,
-                                 nested_path_,
-                                 value_type_,
-                                 allow_any_json_cast_type_,
-                                 is_json_contains_);
-        if (pinned_index_.size() > 0) {
-            num_index_chunk_ = pinned_index_.size();
-        }
+        // Scalar index is pinned lazily by EnsurePinnedIndex() when (and only
+        // when) DetermineExecPath() commits to ExprExecPath::ScalarIndex.
+        // num_index_chunk_ stays 0 here and is set to pinned_index_.size()
+        // inside EnsurePinnedIndex(), so the invariant
+        //   num_index_chunk_ == pinned_index_.size()
+        // always holds. Pre-pin existence checks go through
+        // HasCompatibleScalarIndex(), which asks the segment directly and
+        // does not require a pin -- so short-circuit exec paths
+        // (TextIndex/PkIndex/JsonStats) and the RawData path never pay for a
+        // PinCells() cold fetch under tiered storage.
+
         // if index not include raw data, also need load data
         if (segment_->HasFieldData(field_id_)) {
             if (segment_->is_chunked()) {
@@ -243,6 +244,29 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    // Pin the scalar index cell. Called by DetermineExecPath() only after the
+    // expression has committed to ExprExecPath::ScalarIndex, so the pin's
+    // lifetime matches real usage: short-circuit paths
+    // (TextIndex/PkIndex/JsonStats) and the RawData path never call it and
+    // the scalar index cell stays cold in tiered storage. Idempotent.
+    void
+    EnsurePinnedIndex() {
+        if (pinned_index_initialized_) {
+            return;
+        }
+        pinned_index_initialized_ = true;
+        auto& schema = segment_->get_schema();
+        auto& field_meta = schema[field_id_];
+        pinned_index_ = PinIndex(op_ctx_,
+                                 segment_,
+                                 field_meta,
+                                 nested_path_,
+                                 value_type_,
+                                 allow_any_json_cast_type_,
+                                 is_json_contains_);
+        num_index_chunk_ = pinned_index_.size();
     }
 
     virtual bool
@@ -1926,37 +1950,50 @@ class SegmentExpr : public Expr {
     // Only called internally by DetermineExecPath() and CanUseNestedIndex().
     bool
     HasCompatibleScalarIndex() const {
+        // Queries segment metadata directly -- no pin required, so short-
+        // circuit exec paths and the RawData fallback skip the cold fetch.
+        // JSON-specific path compatibility is handled by the separate
+        // IsJsonPathCompatible() helper, which also avoids pinning.
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
-        // TODO: if multiple indexes are supported, this logic should be changed
-        if (num_index_chunk_ == 0 || CanUseNgramIndex()) {
-            return false;
-        }
+        return segment_->HasIndex(field_id_) && !CanUseNgramIndex();
+    }
 
+    // JSON fields only: verify that a JsonFlatIndex exists for the expr's
+    // nested path and that prefix matching is valid. Reads segment-level
+    // JSON index metadata via GetJsonFlatIndexNestedPath() -- does NOT pin
+    // the index cell, so callers can use this to skip ScalarIndex
+    // commitment (and its associated cold fetch) before paying for
+    // EnsurePinnedIndex(). Returns true for non-JSON fields and for JSON
+    // fields without a JsonFlatIndex covering the query path.
+    bool
+    IsJsonPathCompatible() const {
         // For JSON fields with JsonFlatIndex, check if prefix matching is valid.
         // Tantivy JSON index can handle nested object paths (e.g., "a.b") but NOT
         // numeric array indices (e.g., "a.0"). Per RFC 6901, JSON Pointer doesn't
         // distinguish between array indices and object keys syntactically. Since
         // Tantivy doesn't store array index information, we must fall back to
         // brute-force search when the relative path contains numeric segments.
-        if (field_type_ != DataType::JSON || pinned_index_.empty()) {
+        if (field_type_ != DataType::JSON) {
             return true;
         }
 
-        auto json_flat_index =
-            dynamic_cast<const index::JsonFlatIndex*>(pinned_index_[0].get());
-        if (json_flat_index == nullptr) {
-            return true;
-        }
-
-        auto index_path = json_flat_index->GetNestedPath();
         auto query_path = milvus::Json::pointer(nested_path_);
+        auto index_path =
+            segment_->GetJsonFlatIndexNestedPath(field_id_, query_path);
+        if (index_path.empty()) {
+            // No JsonFlatIndex covers this path; nothing JSON-specific to
+            // reject here. The caller will decide between ScalarIndex and
+            // RawData based on HasCompatibleScalarIndex() alone.
+            return true;
+        }
 
         // Exact match - safe to use index
         if (index_path == query_path) {
             return true;
         }
 
-        // PinJsonIndex guarantees index_path is a prefix of query_path
+        // GetJsonFlatIndexNestedPath guarantees index_path is a prefix of
+        // query_path.
 
         // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
         // relative_path="/0/b")
@@ -2092,10 +2129,29 @@ class SegmentExpr : public Expr {
     // Determine the execution path for this expression.
     // Called during initialization by subclass constructors.
     // Subclasses should override to implement operator-specific logic.
+    // The scalar index is pinned only when we commit to the ScalarIndex
+    // path. JSON path compatibility is checked via segment-level metadata
+    // (GetJsonFlatIndexNestedPath) before any pin, so an incompatible
+    // nested path falls back to RawData without ever touching the cache
+    // slot. Short-circuit subclass paths (TextIndex/PkIndex/JsonStats)
+    // bypass this method entirely and never pin either.
     virtual void
     DetermineExecPath() {
-        exec_path_ = HasCompatibleScalarIndex() ? ExprExecPath::ScalarIndex
-                                                : ExprExecPath::RawData;
+        if (!HasCompatibleScalarIndex() || !IsJsonPathCompatible()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        EnsurePinnedIndex();
+        // HasCompatibleScalarIndex() queries HasIndex(), which can return
+        // true for a vector/binlog-index-only field or a mid-load state
+        // where PinIndex() still yields nothing. Fall back to RawData when
+        // the pin actually came up empty so pinned_index_ is non-empty iff
+        // exec_path_ == ScalarIndex holds.
+        if (pinned_index_.empty()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        exec_path_ = ExprExecPath::ScalarIndex;
     }
 
     // Slice cached result bitmap for the current batch.
@@ -2178,7 +2234,13 @@ class SegmentExpr : public Expr {
     bool execute_all_at_once_{false};
     // used for reducing cache miss latency in tiered storage
     bool prefetched_{false};
+    // Scalar index is pinned lazily by EnsurePinnedIndex(). Pre-pin
+    // existence checks (HasCompatibleScalarIndex) query segment metadata
+    // directly, so expressions on short-circuit paths (TextIndex, PkIndex,
+    // JsonStats) and RawData never force a PinCells() cold fetch. After
+    // the pin, num_index_chunk_ == pinned_index_.size() always.
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
+    bool pinned_index_initialized_{false};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
