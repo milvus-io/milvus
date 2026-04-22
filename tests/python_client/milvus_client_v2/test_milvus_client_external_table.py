@@ -440,6 +440,144 @@ def _schema_missing_ext_field(client):
     return schema
 
 
+# Property keys recognized by DDL for external collections (see pkg/common/common.go).
+EXT_SOURCE_KEY = "collection.external_source"
+EXT_SPEC_KEY = "collection.external_spec"
+
+
+def _build_minimal_external_schema(client, source, spec='{"format":"parquet"}'):
+    """Minimal valid external-collection schema: id + vec, both mapped to external fields."""
+    schema = client.create_schema(external_source=source, external_spec=spec)
+    schema.add_field("id", DataType.INT64, external_field="id")
+    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4, external_field="vec")
+    return schema
+
+
+class TestExternalSourceValidation(TestMilvusClientV2Base):
+    """DDL validation of ExternalSource URL (Part8-2/4 #49062, Part8-1/4 #49061).
+
+    RootCoord calls externalspec.ValidateSourceAndSpec whenever the schema
+    has any field with external_field set (IsExternalCollection == true).
+    See internal/rootcoord/create_collection_task.go and
+    pkg/util/externalspec/external_spec.go.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("scheme", ["s3", "s3a", "aws", "minio", "oss", "gs", "gcs"])
+    def test_allowed_schemes_accepted(self, scheme):
+        """All schemes in the allowlist should be accepted."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, f"{scheme}://bucket/prefix/")
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            assert client.has_collection(collection_name)
+        finally:
+            client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_relative_path_no_scheme_allowed(self):
+        """A relative path with no scheme should be accepted (same-bucket default)."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, "my-data/parquet/")
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            assert client.has_collection(collection_name)
+        finally:
+            client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("source", [
+        "http://169.254.169.254/metadata",
+        "ftp://example.com/data",
+        "xyz://bucket/prefix",
+    ], ids=["http", "ftp", "xyz"])
+    def test_disallowed_scheme_rejected(self, source):
+        """Schemes outside the allowlist should be rejected with 'not allowed'."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, source)
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=collection_name, schema=schema)
+        assert "not allowed" in str(exc_info.value).lower(), \
+            f"Expected 'not allowed' in error, got: {exc_info.value}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_file_scheme_rejected(self):
+        """file:// is not allowed — would let an operator read from the node's local FS."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, "file:///tmp/data")
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=collection_name, schema=schema)
+        assert "not allowed" in str(exc_info.value).lower(), \
+            f"Expected 'not allowed' in error, got: {exc_info.value}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_userinfo_in_url_rejected(self):
+        """Embedded credentials like s3://ak:sk@bucket/prefix must be rejected."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, "s3://ak:sk@bucket/prefix")
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=collection_name, schema=schema)
+        assert "credentials" in str(exc_info.value).lower(), \
+            f"Expected credentials rejection, got: {exc_info.value}"
+
+
+class TestAlterExternalCollection(TestMilvusClientV2Base):
+    """Alter external_source / external_spec via alter_collection_properties.
+
+    Introduced in Part8-2/4 (#49062). Property keys are
+    'collection.external_source' and 'collection.external_spec'
+    (see pkg/common/common.go).
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_alter_updates_external_source_and_spec(self):
+        """Alter both source and spec together; describe should reflect the new values."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, "s3://bucket/old/", '{"format":"parquet"}')
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            new_source = "s3://bucket/new/"
+            new_spec = '{"format":"lance"}'
+            client.alter_collection_properties(
+                collection_name,
+                properties={EXT_SOURCE_KEY: new_source, EXT_SPEC_KEY: new_spec},
+            )
+            info = client.describe_collection(collection_name)
+            assert info.get("external_source") == new_source, \
+                f"expected source {new_source}, got {info.get('external_source')}"
+            assert info.get("external_spec") == new_spec, \
+                f"expected spec {new_spec}, got {info.get('external_spec')}"
+        finally:
+            client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_alter_source_only_resets_spec(self):
+        """Per Part8-2/4 semantics: when the alter request omits external_spec,
+        spec is cleared. See ddl_callbacks_alter_collection_properties_test.go:608."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = _build_minimal_external_schema(client, "s3://bucket/old/", '{"format":"parquet"}')
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            new_source = "s3://bucket/new-source-only/"
+            client.alter_collection_properties(
+                collection_name,
+                properties={EXT_SOURCE_KEY: new_source},
+            )
+            info = client.describe_collection(collection_name)
+            assert info.get("external_source") == new_source
+            assert info.get("external_spec") in ("", None), \
+                f"expected spec to be reset, got {info.get('external_spec')!r}"
+        finally:
+            client.drop_collection(collection_name)
+
+
 class TestExternalTableDataTypesE2E(TestMilvusClientV2Base):
     """E2E lifecycle per scalar type: parquet → refresh → index → load → query → search."""
 
