@@ -837,6 +837,65 @@ class TestRefreshUpdatesSchema(TestMilvusClientV2Base):
             cleanup_minio_prefix(minio_client, minio_cfg["bucket"], f"{base}/")
 
 
+def generate_parquet_bytes_with_codec(num_rows, start_id, codec, dim=TEST_VEC_DIM):
+    """Like generate_parquet_bytes but with an explicit Parquet compression codec."""
+    ids = list(range(start_id, start_id + num_rows))
+    values = [float(i) * 1.5 for i in ids]
+    vectors = np.array(
+        [[float(i) * 0.1 + d for d in range(dim)] for i in ids],
+        dtype=np.float32,
+    )
+    table = pa.table({
+        "id": pa.array(ids, type=pa.int64()),
+        "value": pa.array(values, type=pa.float32()),
+        "embedding": pa.FixedSizeListArray.from_arrays(
+            vectors.flatten(), list_size=dim,
+        ),
+    })
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=codec)
+    return buf.getvalue()
+
+
+class TestParquetCompressionCodecs(TestMilvusClientV2Base):
+    """Parquet compression codec support (Part8-1/4 #49061, regresses #48869).
+
+    Part 8 added arrow:with_snappy=True and arrow:with_lz4=True to the conan
+    recipe. If either is dropped or the bundled Arrow is rebuilt without codec
+    support, external collections backed by compressed parquet silently break
+    at query time.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("codec", ["snappy", "lz4", "gzip", "zstd", "none"])
+    def test_parquet_codec_readable(self, codec, minio_client_and_cfg):
+        """Upload a parquet compressed with `codec`, refresh and verify row count."""
+        minio_client, minio_cfg = minio_client_and_cfg
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name() + f"_{codec}"
+        ext_path = f"external-e2e-test/{collection_name}"
+
+        num_rows = 256
+        # pyarrow uses the string 'none' for uncompressed; keep it consistent.
+        pq_codec = codec.upper() if codec == "none" else codec
+        data = generate_parquet_bytes_with_codec(num_rows, 0, pq_codec)
+        upload_to_minio(minio_client, minio_cfg["bucket"],
+                        f"{ext_path}/data.parquet", data)
+
+        schema = create_basic_external_schema(client, ext_path)
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            refresh_and_wait(client, collection_name)
+            index_and_load(client, collection_name)
+            count = query_count(client, collection_name)
+            assert count == num_rows, \
+                f"codec={codec}: expected {num_rows} rows, got {count}"
+            log.info(f"[codec={codec}] ✓ {num_rows} rows read back")
+        finally:
+            client.drop_collection(collection_name)
+            cleanup_minio_prefix(minio_client, minio_cfg["bucket"], f"{ext_path}/")
+
+
 class TestForceNullableExternalFields(TestMilvusClientV2Base):
     """Force nullable on external user fields (Part8-1/4 #49061).
 
