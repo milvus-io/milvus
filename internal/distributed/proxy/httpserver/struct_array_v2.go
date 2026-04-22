@@ -421,7 +421,7 @@ func isEmbeddingListData(body string) bool {
 //
 // Request shape examples:
 //   - FloatVector element: [ [[0.1,0.2,0.3,0.4], [0.5,0.6,0.7,0.8]],
-//                            [[0.9,1.0,1.1,1.2]] ]
+//     [[0.9,1.0,1.1,1.2]] ]
 //   - BinaryVector element: [ ["base64_1", "base64_2"], ["base64_3"] ]
 func convertEmbListQueries2Placeholder(body string, elemType schemapb.DataType, dim int64) (*commonpb.PlaceholderValue, error) {
 	raw := gjson.Get(body, HTTPRequestData)
