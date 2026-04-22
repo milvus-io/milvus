@@ -151,6 +151,15 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 	}, nil
 }
 
+// AsNewColumnGroups marks this writer so that Close() calls loon_transaction_add_column_group
+// for each written column group instead of loon_transaction_append_files.
+// Call this when the written columns are brand-new additions to an existing manifest
+// (e.g. function-field backfill), not when appending more files to the same column structure.
+func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
+	pw.addNewColumnGroups = true
+	return pw
+}
+
 func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	var caa cdata.CArrowArray
 	var cas cdata.CArrowSchema
@@ -167,7 +176,25 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return HandleLoonFFIResult(result)
 }
 
+// Destroy releases the underlying C writer handle and properties. Idempotent;
+// safe to call multiple times. Use as `defer w.Destroy()` after construction so
+// resources are freed on every error path (Close already invokes Destroy on
+// success).
+func (pw *FFIPackedWriter) Destroy() {
+	if pw.destroyed {
+		return
+	}
+	pw.destroyed = true
+	C.loon_writer_destroy(pw.cWriterHandle)
+	if pw.cProperties != nil {
+		C.loon_properties_free(pw.cProperties)
+		pw.cProperties = nil
+	}
+}
+
 func (pw *FFIPackedWriter) Close() (string, error) {
+	defer pw.Destroy()
+
 	var cColumnGroups *C.LoonColumnGroups
 
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
@@ -185,9 +212,20 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	}
 	defer C.loon_transaction_destroy(transationHandle)
 
-	result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return "", err
+	if pw.addNewColumnGroups {
+		numGroups := int(cColumnGroups.num_of_column_groups)
+		colGroupSlice := (*[1 << 20]C.LoonColumnGroup)(unsafe.Pointer(cColumnGroups.column_group_array))[:numGroups:numGroups]
+		for i := range colGroupSlice {
+			result = C.loon_transaction_add_column_group(transationHandle, &colGroupSlice[i])
+			if err := HandleLoonFFIResult(result); err != nil {
+				return "", err
+			}
+		}
+	} else {
+		result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
+		if err := HandleLoonFFIResult(result); err != nil {
+			return "", err
+		}
 	}
 
 	var cCommitVersion C.int64_t
@@ -198,6 +236,5 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
 
-	defer C.loon_properties_free(pw.cProperties)
 	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
 }

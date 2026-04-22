@@ -20,6 +20,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
+// BM25StatsPath returns the packed file path for the BM25 stats blob of a
+// given output field. Layout must stay in sync with QueryNode's StatsResolver
+// (internal/storagev2/packed/stats_resolver.go resolveStatPaths).
+func BM25StatsPath(basePath string, fieldID int64, batch int) string {
+	return fmt.Sprintf("%s/_stats/bm25.%d/%d", basePath, fieldID, batch)
+}
+
+// BM25StatsEntry builds a StatEntry for a BM25 stats blob.
+func BM25StatsEntry(fieldID int64, filePath string, memorySize int) StatEntry {
+	return StatEntry{
+		Key:      fmt.Sprintf("bm25.%d", fieldID),
+		Files:    []string{filePath},
+		Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", memorySize)},
+	}
+}
+
 // FieldBinlogStatEntry builds a StatEntry from a FieldBinlog with the given key prefix.
 // For example: FieldBinlogStatEntry("bloom_filter", stats.GetFieldID(), stats)
 func FieldBinlogStatEntry(prefix string, fieldID int64, fb *datapb.FieldBinlog) StatEntry {

@@ -2130,7 +2130,7 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 		Name:           "external_col",
 		ExternalSource: "s3://bucket/path",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2162,7 +2162,7 @@ func TestProxy_Insert_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2191,7 +2191,7 @@ func TestProxy_Delete_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2221,7 +2221,7 @@ func TestProxy_Upsert_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2250,7 +2250,7 @@ func TestProxy_Flush_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2279,7 +2279,7 @@ func TestProxy_CreatePartition_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2309,7 +2309,7 @@ func TestProxy_DropPartition_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2339,7 +2339,7 @@ func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2368,7 +2368,7 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
@@ -2400,7 +2400,7 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	externalSchema := &schemapb.CollectionSchema{
 		Name: "external_col",
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
 		},
 	}
 
