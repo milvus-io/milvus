@@ -83,6 +83,17 @@ class FieldData<Geometry> : public FieldDataGeometryImpl {
 };
 
 template <>
+class FieldData<Mol> : public FieldDataMolImpl {
+ public:
+    static_assert(IsScalar<Mol>);
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataMolImpl(data_type, nullable, buffered_num_rows) {
+    }
+};
+
+template <>
 class FieldData<Array> : public FieldDataArrayImpl {
  public:
     static_assert(IsScalar<Array> || std::is_same_v<std::string, PkType>);

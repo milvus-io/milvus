@@ -265,6 +265,162 @@ TEST(UtilSegcore, CheckCancellationCancelledWithFieldId) {
     }
 }
 
+// =====================================================================
+// MOL-specific segcore utility tests
+// =====================================================================
+
+TEST(Util_Segcore, GetRawDataSizeOfDataArray_Mol) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto mol_fid = schema->AddDebugField("mol", DataType::MOL);
+    auto& field_meta = (*schema)[mol_fid];
+
+    // Build a DataArray with mol_data
+    DataArray data_array;
+    auto* mol_data = data_array.mutable_scalars()->mutable_mol_data();
+    mol_data->add_data("C");         // 1 byte
+    mol_data->add_data("CC");        // 2 bytes
+    mol_data->add_data("CCO");       // 3 bytes
+    mol_data->add_data("c1ccccc1");  // 8 bytes
+
+    auto result = GetRawDataSizeOfDataArray(&data_array, field_meta, 4);
+    EXPECT_EQ(result, 1 + 2 + 3 + 8);
+}
+
+TEST(Util_Segcore, SetUpScalarFieldData_Mol) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    DataArray data_array;
+    auto* scalar_array = data_array.mutable_scalars();
+    SetUpScalarFieldData(scalar_array, DataType::MOL, DataType::NONE, 3);
+
+    ASSERT_NE(scalar_array, nullptr);
+    EXPECT_EQ(scalar_array->mol_data().data_size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(scalar_array->mol_data().data(i), "");
+    }
+}
+
+TEST(Util_Segcore, CreateScalarDataArrayFrom_Mol) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto mol_fid = schema->AddDebugField("mol", DataType::MOL);
+    auto& field_meta = (*schema)[mol_fid];
+
+    std::vector<std::string> mol_data = {"C", "CC", "CCO", "c1ccccc1"};
+
+    auto result =
+        CreateScalarDataArrayFrom(mol_data.data(), nullptr, 4, field_meta);
+
+    ASSERT_NE(result, nullptr);
+    auto& mol_result = result->scalars().mol_data();
+    EXPECT_EQ(mol_result.data_size(), 4);
+    EXPECT_EQ(mol_result.data(0), "C");
+    EXPECT_EQ(mol_result.data(1), "CC");
+    EXPECT_EQ(mol_result.data(2), "CCO");
+    EXPECT_EQ(mol_result.data(3), "c1ccccc1");
+}
+
+TEST(Util_Segcore, CreateScalarDataArrayFrom_MolNullable) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto mol_fid = schema->AddDebugField("mol", DataType::MOL, true);
+    auto& field_meta = (*schema)[mol_fid];
+
+    std::vector<std::string> mol_data = {"C", "", "CCO", ""};
+    bool valid_data[] = {true, false, true, false};
+
+    auto result =
+        CreateScalarDataArrayFrom(mol_data.data(), valid_data, 4, field_meta);
+
+    ASSERT_NE(result, nullptr);
+    auto& mol_result = result->scalars().mol_data();
+    EXPECT_EQ(mol_result.data_size(), 4);
+    EXPECT_EQ(mol_result.data(0), "C");
+    EXPECT_EQ(mol_result.data(2), "CCO");
+    EXPECT_EQ(result->valid_data_size(), 4);
+    EXPECT_TRUE(result->valid_data(0));
+    EXPECT_FALSE(result->valid_data(1));
+    EXPECT_TRUE(result->valid_data(2));
+    EXPECT_FALSE(result->valid_data(3));
+}
+
+TEST(Util_Segcore, MergeDataArray_Mol) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto mol_fid = schema->AddDebugField("mol", DataType::MOL);
+    auto& field_meta = (*schema)[mol_fid];
+
+    // Create source data array with 5 mol values
+    std::vector<std::string> mol_data = {
+        "C", "CC", "CCO", "c1ccccc1", "CC(=O)O"};
+    auto data_array =
+        CreateScalarDataArrayFrom(mol_data.data(), nullptr, 5, field_meta);
+
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data;
+    output_fields_data[mol_fid] = std::move(data_array);
+
+    // Pick rows 0, 2, 4 to merge
+    std::vector<MergeBase> merge_bases;
+    merge_bases.emplace_back(&output_fields_data, 0);
+    merge_bases.emplace_back(&output_fields_data, 2);
+    merge_bases.emplace_back(&output_fields_data, 4);
+
+    auto merged_result = MergeDataArray(merge_bases, field_meta);
+
+    ASSERT_NE(merged_result, nullptr);
+    auto& mol_result = merged_result->scalars().mol_data();
+    EXPECT_EQ(mol_result.data_size(), 3);
+    EXPECT_EQ(mol_result.data(0), "C");
+    EXPECT_EQ(mol_result.data(1), "CCO");
+    EXPECT_EQ(mol_result.data(2), "CC(=O)O");
+}
+
+TEST(Util_Segcore, MergeDataArray_MolNullable) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto mol_fid = schema->AddDebugField("mol", DataType::MOL, true);
+    auto& field_meta = (*schema)[mol_fid];
+
+    // Create source data array with valid_data
+    std::vector<std::string> mol_data = {"C", "", "CCO", ""};
+    bool valid_data[] = {true, false, true, false};
+    auto data_array =
+        CreateScalarDataArrayFrom(mol_data.data(), valid_data, 4, field_meta);
+
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data;
+    output_fields_data[mol_fid] = std::move(data_array);
+
+    // Merge rows 0, 2 (both valid)
+    std::vector<MergeBase> merge_bases;
+    merge_bases.emplace_back(&output_fields_data, 0);
+    merge_bases.back().setValidDataOffset(mol_fid, 0);
+    merge_bases.emplace_back(&output_fields_data, 2);
+    merge_bases.back().setValidDataOffset(mol_fid, 2);
+
+    auto merged_result = MergeDataArray(merge_bases, field_meta);
+
+    ASSERT_NE(merged_result, nullptr);
+    auto& mol_result = merged_result->scalars().mol_data();
+    EXPECT_EQ(mol_result.data_size(), 2);
+    EXPECT_EQ(mol_result.data(0), "C");
+    EXPECT_EQ(mol_result.data(1), "CCO");
+    EXPECT_EQ(merged_result->valid_data_size(), 2);
+    EXPECT_TRUE(merged_result->valid_data(0));
+    EXPECT_TRUE(merged_result->valid_data(1));
+}
+
 TEST(UtilSegcore, CheckCancellationCancelAfterCheck) {
     using namespace milvus;
     using namespace milvus::segcore;

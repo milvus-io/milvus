@@ -35,6 +35,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
 #include "common/Json.h"
+#include "common/Mol.h"
 #include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -489,6 +490,83 @@ TEST(storage, InsertDataGeometryNullable) {
     }
     ASSERT_EQ(data, new_data);
 }
+
+TEST(storage, InsertDataMol) {
+    // Prepare MOL data using SMILES strings stored as binary
+    FixedVector<std::string> data = {"C", "CC", "CCO", "c1ccccc1", "CC(=O)O"};
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::MOL);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    FixedVector<std::string> new_data(data.size());
+    ASSERT_EQ(new_payload->get_null_count(), 0);
+    for (int i = 0; i < data.size(); ++i) {
+        new_data[i] =
+            *static_cast<const std::string*>(new_payload->RawValue(i));
+        ASSERT_EQ(new_payload->DataSize(i), data[i].size());
+    }
+    ASSERT_EQ(data, new_data);
+}
+
+TEST(storage, InsertDataMolNullable) {
+    // Prepare MOL data with nulls
+    FixedVector<std::string> data = {"C", "CC", "CCO", "c1ccccc1", "CC(=O)O"};
+
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, true);
+    // valid_data bitmap: 0xF3 (11110011 b) – rows 0,1,4 valid; rows 2,3 null
+    uint8_t valid_data_storage[1] = {0xF3};
+    uint8_t* valid_data = valid_data_storage;
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::MOL);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+
+    FixedVector<std::string> new_data(data.size());
+    for (int i = 0; i < data.size(); ++i) {
+        new_data[i] =
+            *static_cast<const std::string*>(new_payload->RawValue(i));
+        ASSERT_EQ(new_payload->DataSize(i), data[i].size());
+    }
+    ASSERT_EQ(data, new_data);
+}
+
 TEST(storage, InsertDataString) {
     FixedVector<std::string> data = {
         "test1", "test2", "test3", "test4", "test5"};
@@ -1347,4 +1425,153 @@ TEST(storage, InsertDataJsonFillWithNull) {
     ASSERT_EQ(new_payload->get_num_rows(), size);
     ASSERT_EQ(new_payload->get_null_count(), size);
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+}
+
+// =====================================================================
+// MOL FieldData unit tests
+// =====================================================================
+
+TEST(storage, MolFieldDataDataSize) {
+    // Test FieldDataMolImpl DataSize methods
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, false);
+    FixedVector<std::string> data = {"C", "CC", "CCO", "c1ccccc1", "CC(=O)O"};
+    field_data->FillFieldData(data.data(), data.size());
+
+    // Total DataSize should be sum of all string lengths
+    int64_t expected_total = 0;
+    for (const auto& s : data) {
+        expected_total += s.size();
+    }
+    ASSERT_EQ(field_data->DataSize(), expected_total);
+
+    // Individual DataSize
+    for (size_t i = 0; i < data.size(); ++i) {
+        ASSERT_EQ(field_data->DataSize(i),
+                  static_cast<int64_t>(data[i].size()));
+    }
+}
+
+TEST(storage, MolFieldDataFillFromArrowArray) {
+    // Test FillFieldData from arrow::BinaryArray
+    arrow::BinaryBuilder builder;
+    std::vector<std::string> mol_data = {"C", "CC", "CCO", "c1ccccc1"};
+    for (const auto& s : mol_data) {
+        auto st = builder.Append(reinterpret_cast<const uint8_t*>(s.data()),
+                                 static_cast<int32_t>(s.size()));
+        ASSERT_TRUE(st.ok());
+    }
+    std::shared_ptr<arrow::Array> arr;
+    ASSERT_TRUE(builder.Finish(&arr).ok());
+
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, false, 4);
+    field_data->FillFieldData(arr);
+
+    ASSERT_EQ(field_data->get_num_rows(), 4);
+    for (size_t i = 0; i < mol_data.size(); ++i) {
+        auto val = *static_cast<const std::string*>(field_data->RawValue(i));
+        ASSERT_EQ(val, mol_data[i]);
+    }
+}
+
+TEST(storage, MolFieldDataFillFromArrowBinaryArrayNullable) {
+    // Test FillFieldData from arrow::BinaryArray with nulls
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder.Append("C", 1).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append("CCO", 3).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+
+    std::shared_ptr<arrow::Array> arr;
+    ASSERT_TRUE(builder.Finish(&arr).ok());
+
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, true, 4);
+    field_data->FillFieldData(arr);
+
+    ASSERT_EQ(field_data->get_num_rows(), 4);
+    ASSERT_EQ(field_data->get_null_count(), 2);
+
+    // Valid rows should have correct data
+    auto val0 = *static_cast<const std::string*>(field_data->RawValue(0));
+    ASSERT_EQ(val0, "C");
+    auto val2 = *static_cast<const std::string*>(field_data->RawValue(2));
+    ASSERT_EQ(val2, "CCO");
+}
+
+TEST(storage, MolCreateFieldData) {
+    // Test that CreateFieldData for MOL returns correct type
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, false);
+    ASSERT_NE(field_data, nullptr);
+    ASSERT_EQ(field_data->get_data_type(), storage::DataType::MOL);
+}
+
+TEST(storage, MolCreateFieldDataNullable) {
+    // Test that CreateFieldData for MOL with nullable returns correct type
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, true);
+    ASSERT_NE(field_data, nullptr);
+    ASSERT_EQ(field_data->get_data_type(), storage::DataType::MOL);
+    ASSERT_TRUE(field_data->IsNullable());
+}
+
+TEST(storage, MolCreateArrowBuilderAndSchema) {
+    // Test CreateArrowBuilder for MOL type
+    auto arrow_builder =
+        milvus::storage::CreateArrowBuilder(storage::DataType::MOL);
+    ASSERT_NE(arrow_builder, nullptr);
+    // MOL should use BinaryBuilder
+    auto* binary_builder =
+        dynamic_cast<arrow::BinaryBuilder*>(arrow_builder.get());
+    ASSERT_NE(binary_builder, nullptr);
+
+    // Test CreateArrowSchema for MOL type
+    auto schema =
+        milvus::storage::CreateArrowSchema(storage::DataType::MOL, false);
+    ASSERT_NE(schema, nullptr);
+    ASSERT_EQ(schema->num_fields(), 1);
+    ASSERT_TRUE(schema->field(0)->type()->Equals(arrow::binary()));
+    ASSERT_FALSE(schema->field(0)->nullable());
+
+    // Test nullable schema
+    auto schema_nullable =
+        milvus::storage::CreateArrowSchema(storage::DataType::MOL, true);
+    ASSERT_NE(schema_nullable, nullptr);
+    ASSERT_TRUE(schema_nullable->field(0)->nullable());
+}
+
+TEST(storage, MolInitScalarFieldData) {
+    // Test InitScalarFieldData for MOL type
+    auto field_data = milvus::InitScalarFieldData(DataType::MOL, false, 10);
+    ASSERT_NE(field_data, nullptr);
+    ASSERT_EQ(field_data->get_data_type(), DataType::MOL);
+}
+
+TEST(storage, MolFieldDataFillWithDefaultValue) {
+    // Test FillFieldData with a default value for MOL type
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, true, 3);
+
+    milvus::proto::schema::ValueField default_value;
+    default_value.set_string_data("CCO");
+    field_data->FillFieldData(default_value, 3);
+
+    ASSERT_EQ(field_data->get_num_rows(), 3);
+    for (int i = 0; i < 3; ++i) {
+        auto val = *static_cast<const std::string*>(field_data->RawValue(i));
+        ASSERT_EQ(val, "CCO");
+    }
+}
+
+TEST(storage, MolFieldDataFillWithNullDefault) {
+    // Test FillFieldData without a default value (fill with nulls)
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::MOL, DataType::NONE, true, 3);
+
+    field_data->FillFieldData(std::nullopt, 3);
+
+    ASSERT_EQ(field_data->get_num_rows(), 3);
+    ASSERT_EQ(field_data->get_null_count(), 3);
 }
