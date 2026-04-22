@@ -1509,8 +1509,12 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use: external fields use their external name,
-    // internal fields use the numeric field ID string.
+    // Determine the column name to use:
+    //   - external input fields: external column name
+    //   - internal fields: numeric field ID string
+    //   - function output fields on external collections: field name fallback
+    //     (external function_executor writes columns into the manifest by
+    //     field name; internal BM25 uses numeric field_id like other fields)
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
     if (!ext_field.empty()) {
@@ -1520,14 +1524,23 @@ GetFieldDatasFromManifest(
     }
 
     // TODO remove manual check after loon support read null for non-exists field
-    bool field_exists = false;
-    for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
-        auto column_group = column_groups->at(i);
-        for (const auto& column : column_group->columns) {
-            if (column == column_name) {
-                field_exists = true;
-                break;
+    auto column_exists = [&](const std::string& name) {
+        for (size_t i = 0; i < column_groups->size(); i++) {
+            for (const auto& column : column_groups->at(i)->columns) {
+                if (column == name) {
+                    return true;
+                }
             }
+        }
+        return false;
+    };
+    bool field_exists = column_exists(column_name);
+    if (!field_exists && field_meta.field_schema.is_function_output()) {
+        // External function output fallback: try field name.
+        const auto& fname = field_meta.field_schema.name();
+        if (!fname.empty() && column_exists(fname)) {
+            column_name = fname;
+            field_exists = true;
         }
     }
     if (!field_exists) {

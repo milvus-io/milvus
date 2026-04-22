@@ -5176,12 +5176,10 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
-	t.Run("functions disabled", func(t *testing.T) {
+	t.Run("functions allowed", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		err := NormalizeAndValidateExternalCollectionSchema(schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("dynamic field disabled", func(t *testing.T) {

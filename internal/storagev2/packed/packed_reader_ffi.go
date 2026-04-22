@@ -39,7 +39,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
-func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
+// ExternalReaderContext carries per-collection context needed by the FFI
+// reader to resolve extfs aliases for external collections. Zero value is
+// safe for non-external collections.
+type ExternalReaderContext struct {
+	CollectionID int64
+	Source       string
+	Spec         string
+}
+
+func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
+	collectionID := ext.CollectionID
+	externalSource := ext.Source
+	externalSpec := ext.Spec
 	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
@@ -110,7 +122,19 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		cNeededColumnArray := (**C.char)(unsafe.Pointer(&cNeededColumn[0]))
 		cNumColumns := C.int64_t(len(neededColumns))
 
-		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr)
+		// Avoid C.CString allocations on the non-external hot path. The C side
+		// treats nullptr the same as an empty string (empty-source guard).
+		var cExternalSource, cExternalSpec *C.char
+		if externalSource != "" {
+			cExternalSource = C.CString(externalSource)
+			defer C.free(unsafe.Pointer(cExternalSource))
+			if externalSpec != "" {
+				cExternalSpec = C.CString(externalSpec)
+				defer C.free(unsafe.Pointer(cExternalSpec))
+			}
+		}
+
+		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr, C.int64_t(collectionID), cExternalSource, cExternalSpec)
 	} else {
 		return nil, fmt.Errorf("storageConfig is required")
 	}

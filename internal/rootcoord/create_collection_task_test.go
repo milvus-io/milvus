@@ -970,42 +970,6 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
 	})
-
-	t.Run("external schema reject functions", func(t *testing.T) {
-		collectionName := funcutil.GenRandomStr()
-		task := createCollectionTask{
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-			},
-		}
-		schema := &schemapb.CollectionSchema{
-			Name:           collectionName,
-			ExternalSource: "s3://bucket/object",
-			ExternalSpec:   `{"format":"parquet"}`,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:          "text_field",
-					DataType:      schemapb.DataType_VarChar,
-					ExternalField: "text_col",
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.MaxLengthKey, Value: "64"},
-					},
-				},
-				{
-					Name:          "vec_field",
-					DataType:      schemapb.DataType_FloatVector,
-					ExternalField: "vec_col",
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.DimKey, Value: "16"},
-					},
-				},
-			},
-			Functions: []*schemapb.FunctionSchema{{Name: "test_func"}},
-		}
-		err := task.validateSchema(context.TODO(), schema)
-		assert.Error(t, err)
-	})
 }
 
 func Test_createCollectionTask_prepareSchema(t *testing.T) {

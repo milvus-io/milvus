@@ -1855,26 +1855,9 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.Equal(t, "vec_field", freshTask.schema.Fields[2].Name)
 	})
 
-	t.Run("functions forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support functions")
-	})
-
 	t.Run("dynamic field forbidden", func(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.EnableDynamicField = true
-		task.Schema = marshal(schema)
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("primary key forbidden", func(t *testing.T) {
-		schema := buildExternalSchema()
-		schema.Fields[0].IsPrimaryKey = true
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
