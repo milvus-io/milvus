@@ -5748,3 +5748,126 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))
 }
+
+// newArrayOfVectorFieldData builds a dense (post-FillWithNullValue) ArrayOfVector
+// FieldData with len(Data) == len(validData). Null rows are empty placeholders.
+func newArrayOfVectorFieldData(fieldID int64, fieldName string, dim int64, elementType schemapb.DataType, validData []bool) *schemapb.FieldData {
+	data := make([]*schemapb.VectorField, len(validData))
+	for i := range validData {
+		if validData[i] {
+			data[i] = &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{float32(i + 1)}},
+				},
+			}
+		} else {
+			data[i] = &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+			}
+		}
+	}
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		FieldId:   fieldID,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        data,
+						Dim:         dim,
+						ElementType: elementType,
+					},
+				},
+			},
+		},
+		ValidData: append([]bool{}, validData...),
+	}
+}
+
+func TestFieldDataIdxComputer_ArrayOfVectorIsNonVector(t *testing.T) {
+	scalar := &schemapb.FieldData{
+		Type:    schemapb.DataType_Int64,
+		FieldId: 100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true, false},
+	}
+
+	// Compact vector: 2 valid rows out of 4; Data len==2.
+	vec := &schemapb.FieldData{
+		Type:    schemapb.DataType_FloatVector,
+		FieldId: 101,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 1,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true, false},
+	}
+
+	arrVec := newArrayOfVectorFieldData(102, "arrvec", 1, schemapb.DataType_FloatVector,
+		[]bool{true, false, true, false})
+
+	c := NewFieldDataIdxComputer([]*schemapb.FieldData{scalar, vec, arrVec})
+
+	// The key invariant: for every row, ArrayOfVector's index must equal rowIdx
+	// (dense/scalar semantics), never the compact index like a regular vector.
+	// Regular vector uses compact indexing, which diverges from rowIdx at row 2:
+	// rowIdx=2 but there's only one valid row before it, so compact index == 1.
+	for rowIdx := int64(0); rowIdx < 4; rowIdx++ {
+		got := c.Compute(rowIdx)
+		assert.Equal(t, rowIdx, got[0], "scalar row %d", rowIdx)
+		assert.Equal(t, rowIdx, got[2], "ArrayOfVector row %d must follow rowIdx", rowIdx)
+	}
+
+	// Reset by calling Compute on a smaller rowIdx.
+	c.Compute(0)
+	// At row 2 (the second valid row), compact vector index is 1, which differs
+	// from rowIdx=2. This confirms ArrayOfVector is NOT using the compact path.
+	got := c.Compute(2)
+	assert.Equal(t, int64(1), got[1], "compact vector at row 2 -> compact index 1")
+	assert.Equal(t, int64(2), got[2], "ArrayOfVector at row 2 -> rowIdx 2")
+}
+
+func TestAppendFieldData_ArrayOfVectorNullRowAppendsPlaceholder(t *testing.T) {
+	validData := []bool{true, false, true, false}
+	src := newArrayOfVectorFieldData(200, "arrvec", 1, schemapb.DataType_FloatVector, validData)
+
+	// dst is a slice of same length as src, elements will be filled on first append.
+	dst := make([]*schemapb.FieldData, 1)
+
+	// Walk rows 0..3, fieldIdx == rowIdx because IdxComputer treats ArrayOfVector
+	// as non-vector.
+	for i := int64(0); i < 4; i++ {
+		AppendFieldData(dst, []*schemapb.FieldData{src}, i, i)
+	}
+
+	require.NotNil(t, dst[0])
+	got := dst[0].GetVectors().GetVectorArray()
+	require.NotNil(t, got)
+	// All 4 rows must be present — null rows are placeholders, not skipped.
+	require.Len(t, got.GetData(), 4)
+	// Valid rows preserve their marker.
+	assert.Equal(t, []float32{1}, got.GetData()[0].GetFloatVector().GetData())
+	assert.Equal(t, []float32{3}, got.GetData()[2].GetFloatVector().GetData())
+	// Null rows are empty placeholders.
+	assert.Empty(t, got.GetData()[1].GetFloatVector().GetData())
+	assert.Empty(t, got.GetData()[3].GetFloatVector().GetData())
+	// ValidData propagated row-by-row.
+	assert.Equal(t, validData, dst[0].GetValidData())
+	// VectorArray-level metadata carried through.
+	assert.EqualValues(t, 1, got.GetDim())
+	assert.Equal(t, schemapb.DataType_FloatVector, got.GetElementType())
+}

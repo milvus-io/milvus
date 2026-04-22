@@ -1075,8 +1075,13 @@ func TestProxy(t *testing.T) {
 	// an int64 field (pk) & a float vector field
 	schema := constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
 	// Mark the struct field nullable so we can exercise the "struct column omitted" insert path below.
+	// ValidateStructArrayField propagates Nullable=true to sub-fields server-side; mirror that here
+	// so DescribeCollection's response matches the local schema under proto.Equal.
 	for _, s := range schema.StructArrayFields {
 		s.Nullable = true
+		for _, sub := range s.Fields {
+			sub.Nullable = true
+		}
 	}
 	createCollectionReq := constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
 
@@ -1493,7 +1498,11 @@ func TestProxy(t *testing.T) {
 		// Third insert: struct present, but row-level ValidData mask marks half of
 		// the rows null. Exercises the hasDataCount > 0 path + user-supplied ValidData,
 		// which is the default pymilvus traffic shape.
-		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
+		//
+		// Wire convention is compact: each sub-field carries Data for only the valid
+		// rows (len == mixedValidHalf) while ValidData has length == NumRows with
+		// true/false per row. Proxy-side FillWithNullValue expands it to dense.
+		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, mixedValidHalf, dim)
 		mask := make([]bool, rowNum)
 		for i := 0; i < mixedValidHalf; i++ {
 			mask[i] = true
@@ -2425,7 +2434,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		rowNumStr := funcutil.KeyValuePair2Map(resp.Stats)["row_count"]
-		assert.Equal(t, strconv.Itoa(rowNum*2), rowNumStr)
+		// 3 inserts in "insert" subtest (full/omit-struct/mixed-null) + 1 in "insert partition".
+		assert.Equal(t, strconv.Itoa(rowNum*4), rowNumStr)
 
 		// get statistics of other collection -> fail
 		resp, err = proxy.GetStatistics(ctx, &milvuspb.GetStatisticsRequest{
@@ -2499,6 +2509,39 @@ func TestProxy(t *testing.T) {
 				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
+
+		// Upsert with struct column present but half the rows null via a compact
+		// ValidData mask — mirrors insert scenario 3, confirming Upsert goes through
+		// the same FillWithNullValue path for ArrayOfVector sub-fields.
+		halfRows := 2
+		validHalf := halfRows / 2
+		pkMixed := newScalarFieldData(schema.Fields[0], int64Field, halfRows)
+		pkMixed.GetScalars().GetLongData().Data = insertedIDs[:halfRows]
+		mixedStruct := newStructArrayFieldData(schema.StructArrayFields[0], structField, validHalf, dim)
+		mask := make([]bool, halfRows)
+		for i := 0; i < validHalf; i++ {
+			mask[i] = true
+		}
+		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
+			sf.ValidData = mask
+		}
+		mixedUpsertReq := &milvuspb.UpsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData: []*schemapb.FieldData{
+				pkMixed,
+				newFloatVectorFieldData(floatVecField, halfRows, dim),
+				newBinaryVectorFieldData(binaryVecField, halfRows, dim),
+				mixedStruct,
+			},
+			HashKeys: testutils.GenerateHashKeys(halfRows),
+			NumRows:  uint32(halfRows),
+		}
+		mixedUpsertResp, err := proxy.Upsert(ctx, mixedUpsertReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, mixedUpsertResp.GetStatus().GetErrorCode(),
+			"reason: %s", mixedUpsertResp.GetStatus().GetReason())
+		assert.Equal(t, int64(halfRows), mixedUpsertResp.UpsertCnt)
 	})
 
 	t.Run("release partition", func(t *testing.T) {

@@ -405,9 +405,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
+			// ArrayOfVector is dense after fillWithValue: null rows are filled with empty
+			// per-row VectorField placeholders, so Data length must equal numRows.
 			if field.GetVectors() == nil || field.GetVectors().GetVectorArray() == nil {
-				if expectedRows != 0 {
+				if numRows != 0 {
 					return errNumRowsMismatch(field.GetFieldName(), 0)
 				}
 				continue
@@ -424,7 +425,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			n := uint64(len(field.GetVectors().GetVectorArray().GetData()))
-			if n != expectedRows {
+			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -563,11 +564,69 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		}
 
 	case *schemapb.FieldData_Vectors:
+		// Only ArrayOfVector needs null-expansion. Regular vectors stay compact and
+		// rely on ValidData + isNullRow to carry null semantics downstream.
+		// ArrayOfVector is treated as a per-row array whose null rows are represented
+		// by an empty VectorField placeholder, so downstream consumers can read it
+		// uniformly as "row has zero vectors" without special null handling.
+		if field.Type == schemapb.DataType_ArrayOfVector {
+			vectorArray := field.GetVectors().GetVectorArray()
+			if vectorArray == nil {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("array of vector data is nil, field: %s", field.GetFieldName()))
+			}
+			expanded, err := fillVectorArrayNullValueImpl(vectorArray.GetData(), field.GetValidData(), vectorArray.GetDim(), vectorArray.GetElementType())
+			if err != nil {
+				return err
+			}
+			vectorArray.Data = expanded
+		}
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}
 
 	return nil
+}
+
+func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []bool, dim int64, elementType schemapb.DataType) ([]*schemapb.VectorField, error) {
+	n := getValidNumber(validData)
+	if len(array) != n {
+		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
+	}
+	if n == len(validData) {
+		return array, nil
+	}
+	res := make([]*schemapb.VectorField, len(validData))
+	srcIdx := 0
+	for i, v := range validData {
+		if v {
+			res[i] = array[srcIdx]
+			srcIdx++
+		} else {
+			res[i] = newEmptyPerRowVectorField(dim, elementType)
+		}
+	}
+	return res, nil
+}
+
+// newEmptyPerRowVectorField builds a placeholder VectorField representing a single
+// ArrayOfVector row with zero vectors. Dim matches the field schema, and the Data
+// oneof is populated with an empty container of the element type so that the
+// placeholder structure is consistent with non-null rows.
+func newEmptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	}
+	return vf
 }
 
 func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
