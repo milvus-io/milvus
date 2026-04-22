@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -102,39 +101,6 @@ func TestMLoggerRatedLog(t *testing.T) {
 	success = Ctx(ctx).RatedInfo(3.0, "info test")
 	assert.True(t, success)
 	Ctx(ctx).Sync()
-}
-
-func TestMLoggerWithContext(t *testing.T) {
-	ts := newTestLogSpy(t)
-	logger, p, _ := InitTestLogger(ts, &Config{Level: "debug", DisableTimestamp: true})
-	ReplaceGlobals(logger, p)
-	replaceLeveledLoggers(logger)
-
-	t.Run("nil context returns receiver unchanged", func(t *testing.T) {
-		m := &MLogger{Logger: ctxL()}
-		//nolint:staticcheck // deliberately testing nil ctx path
-		assert.Same(t, m, m.WithContext(nil))
-	})
-
-	t.Run("context without span returns receiver unchanged", func(t *testing.T) {
-		m := &MLogger{Logger: ctxL()}
-		assert.Same(t, m, m.WithContext(context.Background()))
-	})
-
-	t.Run("valid span context attaches traceID field", func(t *testing.T) {
-		traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
-		spanID, _ := trace.SpanIDFromHex("0102030405060708")
-		sc := trace.NewSpanContext(trace.SpanContextConfig{
-			TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled,
-		})
-		ctx := trace.ContextWithSpanContext(context.Background(), sc)
-
-		ts.CleanBuffer()
-		m := (&MLogger{Logger: ctxL()}).WithContext(ctx)
-		m.Info("with-context message")
-		_ = m.Sync()
-		ts.assertLastMessageContains("traceID=" + traceID.String())
-	})
 }
 
 func TestNewIntentContext(t *testing.T) {
