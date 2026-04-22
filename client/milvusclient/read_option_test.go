@@ -143,6 +143,31 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 			expectType: commonpb.PlaceholderType_VarChar,
 		},
 		{
+			tag:        "emb_list_float",
+			input:      []entity.Vector{entity.FloatVectorArray{entity.FloatVector([]float32{0.1, 0.2})}},
+			expectType: commonpb.PlaceholderType_EmbListFloatVector,
+		},
+		{
+			tag:        "emb_list_fp16",
+			input:      []entity.Vector{entity.Float16VectorArray{entity.Float16Vector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListFloat16Vector,
+		},
+		{
+			tag:        "emb_list_bf16",
+			input:      []entity.Vector{entity.BFloat16VectorArray{entity.BFloat16Vector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListBFloat16Vector,
+		},
+		{
+			tag:        "emb_list_binary",
+			input:      []entity.Vector{entity.BinaryVectorArray{entity.BinaryVector([]byte{})}},
+			expectType: commonpb.PlaceholderType_EmbListBinaryVector,
+		},
+		{
+			tag:        "emb_list_int8",
+			input:      []entity.Vector{entity.Int8VectorArray{entity.Int8Vector([]int8{})}},
+			expectType: commonpb.PlaceholderType_EmbListInt8Vector,
+		},
+		{
 			tag:         "non_supported",
 			input:       []entity.Vector{nonSupportData{}},
 			expectError: true,
