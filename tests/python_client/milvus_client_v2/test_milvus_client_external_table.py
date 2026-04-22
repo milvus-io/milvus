@@ -689,6 +689,56 @@ class TestRefreshAndVerifySegments(TestMilvusClientV2Base):
             cleanup_minio_prefix(minio_client, minio_cfg["bucket"], f"{ext_path}/")
 
 
+class TestExternalCrossBucket(TestMilvusClientV2Base):
+    """Cross-bucket external source (Part8-1/4 #49061).
+
+    External data can live in a different MinIO bucket than Milvus's own
+    bucket. The s3:///<bucket>/<path> form (empty host) lets resolve_config
+    match any endpoint so only the bucket needs to resolve against an
+    extfs.* config entry.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_cross_bucket_source(self, minio_client_and_cfg):
+        """External data in a separate bucket should be readable end-to-end."""
+        minio_client, main_cfg = minio_client_and_cfg
+        external_bucket = "external-bucket"
+
+        if not minio_client.bucket_exists(external_bucket):
+            minio_client.make_bucket(external_bucket)
+            log.info(f"Created cross-bucket: {external_bucket}")
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        ext_path = f"external-e2e-test/{collection_name}"
+
+        num_files = 2
+        rows_per_file = 500
+        total_rows = num_files * rows_per_file
+        for i in range(num_files):
+            data = generate_parquet_bytes(rows_per_file, i * rows_per_file)
+            upload_to_minio(minio_client, external_bucket,
+                            f"{ext_path}/data{i}.parquet", data)
+        log.info(f"Uploaded {total_rows} rows across {num_files} files to "
+                 f"s3://{external_bucket}/{ext_path}/")
+
+        # empty-host URI tells resolve_config to match any endpoint by bucket.
+        external_source = f"s3:///{external_bucket}/{ext_path}"
+        schema = create_basic_external_schema(client, external_source)
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            refresh_and_wait(client, collection_name)
+            index_and_load(client, collection_name)
+            count = query_count(client, collection_name)
+            assert count == total_rows, \
+                f"cross-bucket load: expected {total_rows} rows, got {count}"
+            log.info(f"[cross-bucket] ✓ {total_rows} rows loaded from "
+                     f"{external_bucket} while Milvus uses {main_cfg['bucket']}")
+        finally:
+            client.drop_collection(collection_name)
+            cleanup_minio_prefix(minio_client, external_bucket, f"{ext_path}/")
+
+
 class TestExternalCollectionLoadAndQuery(TestMilvusClientV2Base):
     """Full lifecycle: query count, filter, search, hybrid, pagination, multi-vector, output vector."""
 
