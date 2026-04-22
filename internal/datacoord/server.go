@@ -626,7 +626,14 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		var rawPersist OptimisticTxnPersist
+		if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+			rawPersist = NewOptimisticTxnTiKVPersist(s.tikvCli)
+		} else {
+			rawPersist = NewOptimisticTxnEtcdPersist(s.etcdCli)
+		}
+		segmentPersist := NewSegmentTxnWrapper(rawPersist)
+		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker, segmentPersist, s.metaRootPath)
 		if err != nil {
 			return err
 		}
@@ -1008,12 +1015,16 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) error {
 	return retry.Do(ctx, func() error {
 		// set segment to SegmentState_Flushed
-		var operators []UpdateOperator
-		if enableSortCompaction() {
-			operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+		mutations := map[int64][]SegmentOperator{
+			segmentID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				if enableSortCompaction() {
+					seg.IsInvisible = true
+				}
+				seg.State = commonpb.SegmentState_Flushed
+				return BinlogIncrement{}, true
+			}},
 		}
-		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
-		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		if err := s.meta.UpdateSegmentsInfo(ctx, mutations); err != nil {
 			mlog.Warn(ctx, "flush segment complete failed", mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			if ctx.Err() != nil {
 				return ctx.Err()

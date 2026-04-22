@@ -893,14 +893,14 @@ func (_c *MockCompactionMeta_SetSegmentsCompacting_Call) RunAndReturn(run func(c
 	return _c
 }
 
-// UpdateSegmentsInfo provides a mock function with given fields: ctx, operators
-func (_m *MockCompactionMeta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
-	_va := make([]interface{}, len(operators))
-	for _i := range operators {
-		_va[_i] = operators[_i]
+// UpdateSegmentsInfo provides a mock function with given fields: ctx, mutations, newSegments
+func (_m *MockCompactionMeta) UpdateSegmentsInfo(ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+	_va := make([]interface{}, len(newSegments))
+	for _i := range newSegments {
+		_va[_i] = newSegments[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, ctx)
+	_ca = append(_ca, ctx, mutations)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
@@ -909,8 +909,8 @@ func (_m *MockCompactionMeta) UpdateSegmentsInfo(ctx context.Context, operators 
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, ...UpdateOperator) error); ok {
-		r0 = rf(ctx, operators...)
+	if rf, ok := ret.Get(0).(func(context.Context, map[int64][]SegmentOperator, ...*datapb.SegmentInfo) error); ok {
+		r0 = rf(ctx, mutations, newSegments...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -925,21 +925,22 @@ type MockCompactionMeta_UpdateSegmentsInfo_Call struct {
 
 // UpdateSegmentsInfo is a helper method to define mock.On call
 //   - ctx context.Context
-//   - operators ...UpdateOperator
-func (_e *MockCompactionMeta_Expecter) UpdateSegmentsInfo(ctx interface{}, operators ...interface{}) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+//   - mutations map[int64][]SegmentOperator
+//   - newSegments ...*datapb.SegmentInfo
+func (_e *MockCompactionMeta_Expecter) UpdateSegmentsInfo(ctx interface{}, mutations interface{}, newSegments ...interface{}) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	return &MockCompactionMeta_UpdateSegmentsInfo_Call{Call: _e.mock.On("UpdateSegmentsInfo",
-		append([]interface{}{ctx}, operators...)...)}
+		append([]interface{}{ctx, mutations}, newSegments...)...)}
 }
 
-func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Run(run func(ctx context.Context, operators ...UpdateOperator)) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Run(run func(ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo)) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]UpdateOperator, len(args)-1)
-		for i, a := range args[1:] {
+		variadicArgs := make([]*datapb.SegmentInfo, len(args)-2)
+		for i, a := range args[2:] {
 			if a != nil {
-				variadicArgs[i] = a.(UpdateOperator)
+				variadicArgs[i] = a.(*datapb.SegmentInfo)
 			}
 		}
-		run(args[0].(context.Context), variadicArgs...)
+		run(args[0].(context.Context), args[1].(map[int64][]SegmentOperator), variadicArgs...)
 	})
 	return _c
 }
@@ -949,7 +950,7 @@ func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) Return(_a0 error) *MockCom
 	return _c
 }
 
-func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(context.Context, ...UpdateOperator) error) *MockCompactionMeta_UpdateSegmentsInfo_Call {
+func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(context.Context, map[int64][]SegmentOperator, ...*datapb.SegmentInfo) error) *MockCompactionMeta_UpdateSegmentsInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

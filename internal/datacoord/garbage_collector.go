@@ -859,7 +859,70 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.recycleDroppedSegment(ctx, segmentID, segment)
+		cloned := segment.Clone()
+
+		// V3 segment: delete entire basePath recursively
+		if cloned.GetStorageVersion() == storage.StorageV3 {
+			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
+			if err != nil {
+				log.Warn("GC V3 segment failed to parse manifest path",
+					zap.String("manifestPath", cloned.GetManifestPath()),
+					zap.Error(err))
+				cloned = nil
+				continue
+			}
+			log.Info("GC V3 segment start, removing basePath...",
+				zap.String("basePath", basePath))
+			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+				log.Warn("GC V3 segment remove basePath failed",
+					zap.String("basePath", basePath),
+					zap.Error(err))
+				cloned = nil
+				continue
+			}
+			if err := gc.meta.DropSegment(ctx, cloned); err != nil {
+				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+				cloned = nil
+				continue
+			}
+			gc.meta.PruneSegment(cloned.GetID())
+			log.Info("GC V3 segment done")
+			cloned = nil
+			continue
+		}
+
+		// V1/V2 segment: delete individual log files
+		binlog.DecompressBinLogs(cloned.SegmentInfo)
+
+		logs := getLogs(cloned)
+		for key := range getTextLogs(cloned) {
+			logs[key] = struct{}{}
+		}
+
+		for key := range getJSONKeyLogs(cloned, gc) {
+			logs[key] = struct{}{}
+		}
+
+		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
+			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
+			zap.Int("stats_logs", len(cloned.GetStatslogs())),
+			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
+			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
+		if err := gc.removeObjectFiles(ctx, logs); err != nil {
+			log.Warn("GC segment remove logs failed", zap.Error(err))
+			cloned = nil
+			continue
+		}
+
+		if err := gc.meta.DropSegment(ctx, cloned); err != nil {
+			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+			cloned = nil
+			continue
+		}
+		gc.meta.PruneSegment(cloned.GetID())
+		log.Info("GC segment meta drop segment done")
+		cloned = nil // release memory
 	}
 }
 
