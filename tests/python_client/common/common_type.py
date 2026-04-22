@@ -90,7 +90,7 @@ all_scalar_data_types = [
     DataType.DOUBLE,
     DataType.VARCHAR,
     DataType.ARRAY,
-    DataType.JSON, 
+    DataType.JSON,
     DataType.GEOMETRY,
     ]
 
