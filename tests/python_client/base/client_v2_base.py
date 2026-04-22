@@ -1822,8 +1822,9 @@ class TestMilvusClientV2Base(Base):
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.add_file_resource, name, path], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       name=name, path=path, **kwargs).run()
+        check_result = ResponseChecker(
+            res, func_name, check_task, check_items, check, name=name, path=path, **kwargs
+        ).run()
         return res, check_result
 
     @trace()
@@ -1833,8 +1834,7 @@ class TestMilvusClientV2Base(Base):
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.remove_file_resource, name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       name=name, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, name=name, **kwargs).run()
         return res, check_result
 
     @trace()
@@ -1844,6 +1844,5 @@ class TestMilvusClientV2Base(Base):
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.list_file_resources], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
