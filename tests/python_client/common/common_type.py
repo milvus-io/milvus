@@ -24,13 +24,13 @@ max_top_k = 16384
 max_nq = 16384
 max_partition_num = 1024
 max_role_num = 10
-default_partition_num = 16   # default num_partitions for partition key feature
+default_partition_num = 16  # default num_partitions for partition key feature
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
 default_alias = "default"
 default_user = "root"
 default_password = "Milvus"
-default_primary_field_name = 'pk'
+default_primary_field_name = "pk"
 default_bool_field_name = "bool"
 default_int8_field_name = "int8"
 default_int16_field_name = "int16"
@@ -63,13 +63,13 @@ default_reranker_field_name = "reranker_field"
 default_new_field_name = "field_new"
 
 all_vector_types = [
-        DataType.FLOAT_VECTOR,
-        DataType.FLOAT16_VECTOR,
-        DataType.BFLOAT16_VECTOR,
-        DataType.SPARSE_FLOAT_VECTOR,
-        DataType.INT8_VECTOR,
-        DataType.BINARY_VECTOR,
-    ]
+    DataType.FLOAT_VECTOR,
+    DataType.FLOAT16_VECTOR,
+    DataType.BFLOAT16_VECTOR,
+    DataType.SPARSE_FLOAT_VECTOR,
+    DataType.INT8_VECTOR,
+    DataType.BINARY_VECTOR,
+]
 
 default_metric_for_vector_type = {
     DataType.FLOAT_VECTOR: "COSINE",
@@ -92,32 +92,48 @@ all_scalar_data_types = [
     DataType.ARRAY,
     DataType.JSON,
     DataType.GEOMETRY,
-    ]
+]
 
 default_field_name_map = {
-            DataType.INT8: default_int8_field_name,
-            DataType.INT16: default_int16_field_name,
-            DataType.INT32: default_int32_field_name,
-            DataType.INT64: default_int64_field_name,
-            DataType.BOOL: default_bool_field_name,
-            DataType.FLOAT: default_float_field_name,
-            DataType.DOUBLE: default_double_field_name,
-            DataType.VARCHAR: default_string_field_name,
-            DataType.ARRAY: default_array_field_name,
-            DataType.JSON: default_json_field_name,
-            DataType.FLOAT_VECTOR: default_float_vec_field_name,
-            DataType.FLOAT16_VECTOR: default_float16_vec_field_name,
-            DataType.BFLOAT16_VECTOR: default_bfloat16_vec_field_name,
-            DataType.SPARSE_FLOAT_VECTOR: default_sparse_vec_field_name,
-            DataType.INT8_VECTOR: default_int8_vec_field_name,
-            DataType.BINARY_VECTOR: default_binary_vec_field_name,
-        }
+    DataType.INT8: default_int8_field_name,
+    DataType.INT16: default_int16_field_name,
+    DataType.INT32: default_int32_field_name,
+    DataType.INT64: default_int64_field_name,
+    DataType.BOOL: default_bool_field_name,
+    DataType.FLOAT: default_float_field_name,
+    DataType.DOUBLE: default_double_field_name,
+    DataType.VARCHAR: default_string_field_name,
+    DataType.ARRAY: default_array_field_name,
+    DataType.JSON: default_json_field_name,
+    DataType.FLOAT_VECTOR: default_float_vec_field_name,
+    DataType.FLOAT16_VECTOR: default_float16_vec_field_name,
+    DataType.BFLOAT16_VECTOR: default_bfloat16_vec_field_name,
+    DataType.SPARSE_FLOAT_VECTOR: default_sparse_vec_field_name,
+    DataType.INT8_VECTOR: default_int8_vec_field_name,
+    DataType.BINARY_VECTOR: default_binary_vec_field_name,
+}
 
-append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
-all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR]
-all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+append_vector_type = [
+    DataType.FLOAT16_VECTOR,
+    DataType.BFLOAT16_VECTOR,
+    DataType.SPARSE_FLOAT_VECTOR,
+    DataType.INT8_VECTOR,
+]
+all_dense_vector_types = [
+    DataType.FLOAT_VECTOR,
+    DataType.FLOAT16_VECTOR,
+    DataType.BFLOAT16_VECTOR,
+    DataType.INT8_VECTOR,
+]
+all_float_vector_dtypes = [
+    DataType.FLOAT_VECTOR,
+    DataType.FLOAT16_VECTOR,
+    DataType.BFLOAT16_VECTOR,
+    DataType.SPARSE_FLOAT_VECTOR,
+    DataType.INT8_VECTOR,
+]
 default_partition_name = "_default"
-default_resource_group_name = '__default_resource_group'
+default_resource_group_name = "__default_resource_group"
 default_resource_group_capacity = 1000000
 default_tag = "1970_01_01"
 row_count = "row_count"
@@ -178,43 +194,37 @@ rows_all_data_type_file_path = "/tmp/rows_all_data_type"
 
 """" List of parameters used to pass """
 invalid_resource_names = [
-    None,               # None
-    " ",                # space
-    "",                 # empty
-    "12name",           # start with number
-    "n12 ame",          # contain space
-    "n-ame",            # contain hyphen
-    "nam(e)",           # contain special character
-    "name中文",          # contain Chinese character
-    "name%$#",          # contain special character
-    "".join("a" for i in range(max_name_length + 1))]           # exceed max length
+    None,  # None
+    " ",  # space
+    "",  # empty
+    "12name",  # start with number
+    "n12 ame",  # contain space
+    "n-ame",  # contain hyphen
+    "nam(e)",  # contain special character
+    "name中文",  # contain Chinese character
+    "name%$#",  # contain special character
+    "".join("a" for i in range(max_name_length + 1)),
+]  # exceed max length
 
 valid_resource_names = [
-    "name",             # valid name
-    "_name",            # start with underline
-    "_12name",          # start with underline and contains number
-    "n12ame_",          # end with letter and contains number and underline
-    "nam_e",             # contains underline
-    "".join("a" for i in range(max_name_length))]       # max length
+    "name",  # valid name
+    "_name",  # start with underline
+    "_12name",  # start with underline and contains number
+    "n12ame_",  # end with letter and contains number and underline
+    "nam_e",  # contains underline
+    "".join("a" for i in range(max_name_length)),
+]  # max length
 
-invalid_dims = [min_dim-1, 32.1, -32, "vii", "十六", max_dim+1]
+invalid_dims = [min_dim - 1, 32.1, -32, "vii", "十六", max_dim + 1]
 
-get_not_string = [
-    [],
-    {},
-    None,
-    (1,),
-    1,
-    1.0,
-    [1, "2", 3]
-]
+get_not_string = [[], {}, None, (1,), 1, 1.0, [1, "2", 3]]
 
 get_invalid_vectors = [
     "1*2",
     [1],
     [1, 2],
     [" "],
-    ['a'],
+    ["a"],
     [None],
     None,
     (1, 2),
@@ -224,7 +234,7 @@ get_invalid_vectors = [
     "String",
     " siede ",
     "中文",
-    "a".join("a" for i in range(256))
+    "a".join("a" for i in range(256)),
 ]
 
 get_invalid_ints = [
@@ -238,7 +248,7 @@ get_invalid_ints = [
     "String",
     "=c",
     "中文",
-    "a".join("a" for i in range(256))
+    "a".join("a" for i in range(256)),
 ]
 
 get_invalid_dict = [
@@ -253,7 +263,7 @@ get_invalid_dict = [
     {1: 1},
     {"中文": 1},
     {"%$#": ["a"]},
-    {"a".join("a" for i in range(256)): "a"}
+    {"a".join("a" for i in range(256)): "a"},
 ]
 
 get_invalid_metric_type = [
@@ -268,55 +278,105 @@ get_invalid_metric_type = [
     "(mn)",
     "中文",
     "%$#",
-    "".join("a" for i in range(max_name_length + 1))]
-
-get_dict_without_host_port = [
-    {"host": "host"},
-    {"": ""}
+    "".join("a" for i in range(max_name_length + 1)),
 ]
 
-get_wrong_format_dict = [
-    {"host": "string_host", "port": {}},
-    {"host": 0, "port": 19520}
-]
+get_dict_without_host_port = [{"host": "host"}, {"": ""}]
+
+get_wrong_format_dict = [{"host": "string_host", "port": {}}, {"host": 0, "port": 19520}]
 
 get_all_kind_data_distribution = [
-    1, np.float64(1.0), np.double(1.0), 9707199254740993.0, 9707199254740992,
-    '1', '123', '321', '213', True, False, None, [1, 2], [1.0, 2],  {}, {"a": 1},
-    {'a': 1.0}, {'a': 9707199254740993.0}, {'a': 9707199254740992}, {'a': '1'}, {'a': '123'},
-    {'a': '321'}, {'a': '213'}, {'a': True}, {'a': [1, 2, 3]}, {'a': [1.0, 2, '1']}, {'a': [1.0, 2]},
-    {'a': None}, {'a': {'b': 1}}, {'a': {'b': 1.0}}, {'a': [{'b': 1}, 2.0, np.double(3.0), '4', True, [1, 3.0], None]}
+    1,
+    np.float64(1.0),
+    np.double(1.0),
+    9707199254740993.0,
+    9707199254740992,
+    "1",
+    "123",
+    "321",
+    "213",
+    True,
+    False,
+    None,
+    [1, 2],
+    [1.0, 2],
+    {},
+    {"a": 1},
+    {"a": 1.0},
+    {"a": 9707199254740993.0},
+    {"a": 9707199254740992},
+    {"a": "1"},
+    {"a": "123"},
+    {"a": "321"},
+    {"a": "213"},
+    {"a": True},
+    {"a": [1, 2, 3]},
+    {"a": [1.0, 2, "1"]},
+    {"a": [1.0, 2]},
+    {"a": None},
+    {"a": {"b": 1}},
+    {"a": {"b": 1.0}},
+    {"a": [{"b": 1}, 2.0, np.double(3.0), "4", True, [1, 3.0], None]},
 ]
 
 """ Specially defined list """
 L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
-                   "IVF_RABITQ",
-                   "HNSW", "SCANN", "DISKANN",
-                   "BIN_FLAT", "BIN_IVF_FLAT",
-                   "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
-                   "GPU_IVF_FLAT", "GPU_IVF_PQ"]
+all_index_types = [
+    "FLAT",
+    "IVF_FLAT",
+    "IVF_SQ8",
+    "IVF_PQ",
+    "IVF_RABITQ",
+    "HNSW",
+    "SCANN",
+    "DISKANN",
+    "BIN_FLAT",
+    "BIN_IVF_FLAT",
+    "SPARSE_INVERTED_INDEX",
+    "SPARSE_WAND",
+    "GPU_IVF_FLAT",
+    "GPU_IVF_PQ",
+]
 
-all_dense_float_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
-                               "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"]
+all_dense_float_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"]
 
-inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
+inverted_index_algo = ["TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE"]
 
 int8_vector_index = ["HNSW"]
 
-default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                              {"nlist": 128, "refine": 'true', "refine_type": "SQ8"},
-                              {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
-                              {}, {"nlist": 64},
-                              {}, {"drop_ratio_build": 0.2},
-                              {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
+default_all_indexes_params = [
+    {},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16, "nbits": 8},
+    {"nlist": 128, "refine": "true", "refine_type": "SQ8"},
+    {"M": 32, "efConstruction": 360},
+    {"nlist": 128},
+    {},
+    {},
+    {"nlist": 64},
+    {},
+    {"drop_ratio_build": 0.2},
+    {"nlist": 64},
+    {"nlist": 64, "m": 16, "nbits": 8},
+]
 
-default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
-                                    {"nprobe": 8, "rbq_bits_query": 8, "refine_k": 10.0},
-                                    {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
-                                    {}, {"nprobe": 32},
-                                    {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},
-                                    {}, {}]
+default_all_search_params_params = [
+    {},
+    {"nprobe": 32},
+    {"nprobe": 32},
+    {"nprobe": 32},
+    {"nprobe": 8, "rbq_bits_query": 8, "refine_k": 10.0},
+    {"ef": 100},
+    {"nprobe": 32, "reorder_k": 100},
+    {"search_list": 30},
+    {},
+    {"nprobe": 32},
+    {"drop_ratio_search": "0.2"},
+    {"drop_ratio_search": "0.2"},
+    {},
+    {},
+]
 
 Handler_type = ["GRPC", "HTTP"]
 binary_supported_index_types = ["BIN_FLAT", "BIN_IVF_FLAT"]
@@ -335,10 +395,20 @@ numeric_supported_index_types = ["STL_SORT", "INVERTED", "AUTOINDEX", ""]
 
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default_L0_metric}
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
-default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
-                                 "params": {"drop_ratio_build": 0.2}}
-default_text_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25",
-                                      "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
+default_sparse_inverted_index = {
+    "index_type": "SPARSE_INVERTED_INDEX",
+    "metric_type": "IP",
+    "params": {"drop_ratio_build": 0.2},
+}
+default_text_sparse_inverted_index = {
+    "index_type": "SPARSE_INVERTED_INDEX",
+    "metric_type": "BM25",
+    "params": {
+        "drop_ratio_build": 0.2,
+        "bm25_k1": 1.5,
+        "bm25_b": 0.75,
+    },
+}
 default_search_params = {"params": {"nlist": 128}}
 default_search_ip_params = {"metric_type": "IP", "params": {"nlist": 128}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
@@ -348,46 +418,108 @@ default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metr
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 default_text_sparse_search_params = {"metric_type": "BM25", "params": {}}
-built_in_privilege_groups = ["CollectionReadWrite", "CollectionReadOnly", "CollectionAdmin",
-                             "DatabaseReadWrite", "DatabaseReadOnly", "DatabaseAdmin",
-                             "ClusterReadWrite", "ClusterReadOnly", "ClusterAdmin"]
-privilege_group_privilege_dict = {"Query": False, "Search": False, "GetLoadState": False,
-                                  "GetLoadingProgress": False, "HasPartition": False, "ShowPartitions": False,
-                                  "ShowCollections": False, "ListAliases": False, "ListDatabases": False,
-                                  "DescribeDatabase": False, "DescribeAlias": False, "GetStatistics": False,
-                                  "CreateIndex": False, "DropIndex": False, "CreatePartition": False,
-                                  "DropPartition": False, "Load": False, "Release": False,
-                                  "Insert": False, "Delete": False, "Upsert": False,
-                                  "Import": False, "Flush": False, "Compaction": False,
-                                  "LoadBalance": False, "RenameCollection": False, "CreateAlias": False,
-                                  "DropAlias": False, "CreateCollection": False, "DropCollection": False,
-                                  "CreateOwnership": False, "DropOwnership": False, "SelectOwnership": False,
-                                  "ManageOwnership": False, "UpdateUser": False, "SelectUser": False,
-                                  "CreateResourceGroup": False, "DropResourceGroup": False,
-                                  "UpdateResourceGroups": False,
-                                  "DescribeResourceGroup": False, "ListResourceGroups": False, "TransferNode": False,
-                                  "TransferReplica": False, "CreateDatabase": False, "DropDatabase": False,
-                                  "AlterDatabase": False, "FlushAll": False, "ListPrivilegeGroups": False,
-                                  "CreatePrivilegeGroup": False, "DropPrivilegeGroup": False,
-                                  "OperatePrivilegeGroup": False}
-all_expr_fields = [default_int8_field_name, default_int16_field_name,
-                   default_int32_field_name, default_int64_field_name,
-                   default_float_field_name, default_double_field_name,
-                   default_string_field_name, default_bool_field_name,
-                   default_int8_array_field_name, default_int16_array_field_name,
-                   default_int32_array_field_name, default_int64_array_field_name,
-                   default_bool_array_field_name, default_float_array_field_name,
-                   default_double_array_field_name, default_string_array_field_name]
+built_in_privilege_groups = [
+    "CollectionReadWrite",
+    "CollectionReadOnly",
+    "CollectionAdmin",
+    "DatabaseReadWrite",
+    "DatabaseReadOnly",
+    "DatabaseAdmin",
+    "ClusterReadWrite",
+    "ClusterReadOnly",
+    "ClusterAdmin",
+]
+privilege_group_privilege_dict = {
+    "Query": False,
+    "Search": False,
+    "GetLoadState": False,
+    "GetLoadingProgress": False,
+    "HasPartition": False,
+    "ShowPartitions": False,
+    "ShowCollections": False,
+    "ListAliases": False,
+    "ListDatabases": False,
+    "DescribeDatabase": False,
+    "DescribeAlias": False,
+    "GetStatistics": False,
+    "CreateIndex": False,
+    "DropIndex": False,
+    "CreatePartition": False,
+    "DropPartition": False,
+    "Load": False,
+    "Release": False,
+    "Insert": False,
+    "Delete": False,
+    "Upsert": False,
+    "Import": False,
+    "Flush": False,
+    "Compaction": False,
+    "LoadBalance": False,
+    "RenameCollection": False,
+    "CreateAlias": False,
+    "DropAlias": False,
+    "CreateCollection": False,
+    "DropCollection": False,
+    "CreateOwnership": False,
+    "DropOwnership": False,
+    "SelectOwnership": False,
+    "ManageOwnership": False,
+    "UpdateUser": False,
+    "SelectUser": False,
+    "CreateResourceGroup": False,
+    "DropResourceGroup": False,
+    "UpdateResourceGroups": False,
+    "DescribeResourceGroup": False,
+    "ListResourceGroups": False,
+    "TransferNode": False,
+    "TransferReplica": False,
+    "CreateDatabase": False,
+    "DropDatabase": False,
+    "AlterDatabase": False,
+    "FlushAll": False,
+    "ListPrivilegeGroups": False,
+    "CreatePrivilegeGroup": False,
+    "DropPrivilegeGroup": False,
+    "OperatePrivilegeGroup": False,
+}
+all_expr_fields = [
+    default_int8_field_name,
+    default_int16_field_name,
+    default_int32_field_name,
+    default_int64_field_name,
+    default_float_field_name,
+    default_double_field_name,
+    default_string_field_name,
+    default_bool_field_name,
+    default_int8_array_field_name,
+    default_int16_array_field_name,
+    default_int32_array_field_name,
+    default_int64_array_field_name,
+    default_bool_array_field_name,
+    default_float_array_field_name,
+    default_double_array_field_name,
+    default_string_array_field_name,
+]
 
-not_supported_json_cast_types = [DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
-                                              DataType.INT64.name, DataType.FLOAT.name,
-                                              DataType.ARRAY.name, DataType.FLOAT_VECTOR.name,
-                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
-                                              DataType.BINARY_VECTOR.name,
-                                              DataType.SPARSE_FLOAT_VECTOR.name, DataType.INT8_VECTOR.name]
+not_supported_json_cast_types = [
+    DataType.INT8.name,
+    DataType.INT16.name,
+    DataType.INT32.name,
+    DataType.INT64.name,
+    DataType.FLOAT.name,
+    DataType.ARRAY.name,
+    DataType.FLOAT_VECTOR.name,
+    DataType.FLOAT16_VECTOR.name,
+    DataType.BFLOAT16_VECTOR.name,
+    DataType.BINARY_VECTOR.name,
+    DataType.SPARSE_FLOAT_VECTOR.name,
+    DataType.INT8_VECTOR.name,
+]
+
 
 class CheckTasks:
-    """ The name of the method used to check the result """
+    """The name of the method used to check the result"""
+
     check_nothing = "check_nothing"
     err_res = "error_response"
     ccr = "check_connection_result"
@@ -451,6 +583,7 @@ class CaseLabel:
         GPU:
             For GPU supported cases
     """
+
     L0 = "L0"
     L1 = "L1"
     L2 = "L2"
