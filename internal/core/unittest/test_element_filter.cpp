@@ -16,6 +16,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
+#include <set>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -2869,4 +2871,488 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
             << "doc_id=" << doc_id << " elem_idx=" << elem_idx
             << " element_value=" << element_value << " should be < 400";
     }
+}
+
+namespace {
+
+constexpr int kElemDim = 4;
+constexpr int kElemArrayLen = 3;
+constexpr size_t kElemN = 200;
+constexpr uint64_t kFixtureVecSeed = 0x5EEDBEEFULL;
+constexpr int kElemTopK = 10;
+// Ground-truth target: the query vector equals row kElemTargetDoc's element
+// kElemTargetElem, so an exact (BF) search must return it first with
+// distance ~0. A mid-range row + non-zero elem index makes "always returns
+// the first element" bugs visible.
+constexpr int64_t kElemTargetDoc = 5;
+constexpr int32_t kElemTargetElem = 1;
+
+struct ElementSearchFixture {
+    SchemaPtr schema;
+    FieldId vec_fid;
+    FieldId int64_fid;
+    GeneratedData raw_data;
+    std::vector<float> flat_data;   // kN * kArrayLen * kDim
+    std::vector<float> query_data;  // kDim
+};
+
+inline ElementSearchFixture
+MakeElementSearchFixture() {
+    ElementSearchFixture f;
+    f.schema = std::make_shared<Schema>();
+    f.vec_fid = f.schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, kElemDim, "L2");
+    f.int64_fid = f.schema->AddDebugField("id", DataType::INT64);
+    f.schema->set_primary_field_id(f.int64_fid);
+
+    f.raw_data = DataGen(f.schema, kElemN, 42, 0, 1, kElemArrayLen);
+
+    // DataGen's VECTOR_ARRAY branch uses the same seed for every row, so all
+    // rows share identical element vectors. Overwrite the whole vector-array
+    // field with per-(row, elem) unique values so that brute-force search has
+    // no ties and iterator_v2 batch boundaries see strictly increasing
+    // distances.
+    {
+        std::mt19937_64 rng(kFixtureVecSeed);
+        std::normal_distribution<float> distr(0.0f, 1.0f);
+        for (int i = 0; i < f.raw_data.raw_->fields_data_size(); ++i) {
+            auto* fd = f.raw_data.raw_->mutable_fields_data(i);
+            if (fd->field_id() != f.vec_fid.get()) {
+                continue;
+            }
+            auto* vec_array = fd->mutable_vectors()->mutable_vector_array();
+            for (int row = 0; row < vec_array->data_size(); ++row) {
+                auto* row_data = vec_array->mutable_data(row)
+                                     ->mutable_float_vector()
+                                     ->mutable_data();
+                for (int k = 0; k < kElemArrayLen * kElemDim; ++k) {
+                    row_data->Set(k, distr(rng));
+                }
+            }
+            // Pin the target element to a unique sentinel so exact search
+            // deterministically returns (kElemTargetDoc, kElemTargetElem).
+            auto* target_row = vec_array->mutable_data(kElemTargetDoc)
+                                   ->mutable_float_vector()
+                                   ->mutable_data();
+            for (int k = 0; k < kElemDim; ++k) {
+                target_row->Set(kElemTargetElem * kElemDim + k, 7.0f);
+            }
+            break;
+        }
+    }
+
+    auto array_vec_values = f.raw_data.get_col<VectorFieldProto>(f.vec_fid);
+    f.flat_data.resize(array_vec_values.size() * kElemArrayLen * kElemDim);
+    for (size_t i = 0; i < array_vec_values.size(); ++i) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < kElemArrayLen * kElemDim; ++j) {
+            f.flat_data[i * kElemArrayLen * kElemDim + j] = float_vec[j];
+        }
+    }
+    const size_t target_off =
+        (kElemTargetDoc * kElemArrayLen + kElemTargetElem) * kElemDim;
+    f.query_data.assign(f.flat_data.begin() + target_off,
+                        f.flat_data.begin() + target_off + kElemDim);
+    return f;
+}
+
+inline proto::common::PlaceholderGroup
+MakeElementLevelPlaceholder(const std::vector<float>& query_data) {
+    auto raw = CreatePlaceholderGroupFromBlob<milvus::FloatVector>(
+        /*num_queries=*/1, kElemDim, query_data.data());
+    raw.mutable_placeholders(0)->set_element_level(true);
+    return raw;
+}
+
+inline void
+LoadElementHnswIndex(SegmentSealed* segment,
+                     FieldId vec_fid,
+                     const std::vector<float>& flat_data) {
+    auto indexing = GenVecIndexing(kElemN * kElemArrayLen,
+                                   kElemDim,
+                                   flat_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+}
+
+inline void
+ExpectElementLevelShape(const milvus::SearchResult& sr) {
+    ASSERT_TRUE(sr.element_level_);
+    ASSERT_FALSE(sr.seg_offsets_.empty());
+    ASSERT_EQ(sr.element_indices_.size(), sr.seg_offsets_.size());
+    for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
+        if (sr.seg_offsets_[i] < 0) {
+            continue;
+        }
+        ASSERT_GE(sr.element_indices_[i], 0);
+        ASSERT_LT(sr.element_indices_[i], kElemArrayLen);
+    }
+}
+
+inline void
+ExpectSortedAscending(const milvus::SearchResult& sr) {
+    int valid = 0;
+    for (size_t i = 0; i < sr.distances_.size(); ++i) {
+        if (sr.seg_offsets_[i] < 0) {
+            continue;
+        }
+        ++valid;
+        if (i > 0 && sr.seg_offsets_[i - 1] >= 0) {
+            ASSERT_LE(sr.distances_[i - 1], sr.distances_[i]);
+        }
+    }
+    ASSERT_GT(valid, 0);
+}
+
+inline void
+ExpectWithinRadius(const milvus::SearchResult& sr, float radius) {
+    for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
+        if (sr.seg_offsets_[i] < 0) {
+            continue;
+        }
+        ASSERT_LT(sr.distances_[i], radius);
+        ASSERT_GE(sr.distances_[i], 0.0f);
+    }
+}
+
+// Exact path (BF): the target element must sit at index 0 with distance ~0.
+inline void
+ExpectTopOneIsTarget(const milvus::SearchResult& sr) {
+    ASSERT_FALSE(sr.seg_offsets_.empty());
+    ASSERT_EQ(sr.seg_offsets_[0], kElemTargetDoc);
+    ASSERT_EQ(sr.element_indices_[0], kElemTargetElem);
+    ASSERT_NEAR(sr.distances_[0], 0.0f, 1e-5f);
+}
+
+// Approximate path (HNSW): the target must appear in the top-K, but may not
+// be strictly first.
+inline void
+ExpectTargetInTopK(const milvus::SearchResult& sr) {
+    bool found = false;
+    for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
+        if (sr.seg_offsets_[i] == kElemTargetDoc &&
+            sr.element_indices_[i] == kElemTargetElem) {
+            found = true;
+            EXPECT_NEAR(sr.distances_[i], 0.0f, 1e-3f);
+            break;
+        }
+    }
+    ASSERT_TRUE(found) << "Target (doc=" << kElemTargetDoc
+                       << ", elem=" << kElemTargetElem
+                       << ") not found in approximate search result";
+}
+
+}  // namespace
+
+TEST(ElementVectorSearch, GrowingBruteForce_RangeSearch) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateGrowingSegment(f.schema, empty_index_meta);
+    segment->PreInsert(kElemN);
+    segment->Insert(0,
+                    kElemN,
+                    f.raw_data.row_ids_.data(),
+                    f.raw_data.timestamps_.data(),
+                    f.raw_data.raw_);
+
+    ScopedSchemaHandle handle(*f.schema);
+    const float radius = 1e6f;
+    const std::string search_params =
+        R"({"radius": )" + std::to_string(radius) + R"(, "range_filter": 0.0})";
+    auto plan_bytes = handle.ParseSearch(
+        "", "structA[array_vec]", kElemTopK, "L2", search_params, 3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectWithinRadius(*sr, radius);
+    ExpectTopOneIsTarget(*sr);
+}
+
+TEST(ElementVectorSearch, GrowingBruteForce_IteratorV2) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateGrowingSegment(f.schema, empty_index_meta);
+    segment->PreInsert(kElemN);
+    segment->Insert(0,
+                    kElemN,
+                    f.raw_data.row_ids_.data(),
+                    f.raw_data.timestamps_.data(),
+                    f.raw_data.raw_);
+
+    ScopedSchemaHandle handle(*f.schema);
+    auto plan_bytes =
+        handle.ParseSearchIterator("",
+                                   "structA[array_vec]",
+                                   kElemTopK,
+                                   "L2",
+                                   R"({"ef": 50})",
+                                   static_cast<uint32_t>(kElemTopK),
+                                   "",
+                                   std::nullopt,
+                                   3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectSortedAscending(*sr);
+    ExpectTopOneIsTarget(*sr);
+}
+
+TEST(ElementVectorSearch, SealedBruteForce_RangeSearch) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateSealedWithFieldDataLoaded(f.schema, f.raw_data);
+
+    ScopedSchemaHandle handle(*f.schema);
+    const float radius = 1e6f;
+    const std::string search_params =
+        R"({"radius": )" + std::to_string(radius) + R"(, "range_filter": 0.0})";
+    auto plan_bytes = handle.ParseSearch(
+        "", "structA[array_vec]", kElemTopK, "L2", search_params, 3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectWithinRadius(*sr, radius);
+    ExpectTopOneIsTarget(*sr);
+}
+
+TEST(ElementVectorSearch, SealedBruteForce_IteratorV2) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateSealedWithFieldDataLoaded(f.schema, f.raw_data);
+
+    ScopedSchemaHandle handle(*f.schema);
+    auto plan_bytes =
+        handle.ParseSearchIterator("",
+                                   "structA[array_vec]",
+                                   kElemTopK,
+                                   "L2",
+                                   R"({"ef": 50})",
+                                   static_cast<uint32_t>(kElemTopK),
+                                   "",
+                                   std::nullopt,
+                                   3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectSortedAscending(*sr);
+    ExpectTopOneIsTarget(*sr);
+}
+
+TEST(ElementVectorSearch, SealedIndex_RangeSearch) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateSealedWithFieldDataLoaded(f.schema, f.raw_data);
+    LoadElementHnswIndex(segment.get(), f.vec_fid, f.flat_data);
+
+    ScopedSchemaHandle handle(*f.schema);
+    const float radius = 1e6f;
+    const std::string search_params = R"({"ef": 50, "radius": )" +
+                                      std::to_string(radius) +
+                                      R"(, "range_filter": 0.0})";
+    auto plan_bytes = handle.ParseSearch(
+        "", "structA[array_vec]", kElemTopK, "L2", search_params, 3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectWithinRadius(*sr, radius);
+    ExpectTargetInTopK(*sr);
+}
+
+TEST(ElementVectorSearch, SealedIndex_IteratorV2) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateSealedWithFieldDataLoaded(f.schema, f.raw_data);
+    LoadElementHnswIndex(segment.get(), f.vec_fid, f.flat_data);
+
+    ScopedSchemaHandle handle(*f.schema);
+    auto plan_bytes =
+        handle.ParseSearchIterator("",
+                                   "structA[array_vec]",
+                                   kElemTopK,
+                                   "L2",
+                                   R"({"ef": 50})",
+                                   static_cast<uint32_t>(kElemTopK),
+                                   "",
+                                   std::nullopt,
+                                   3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectSortedAscending(*sr);
+    ExpectTargetInTopK(*sr);
+}
+
+// ---- Multi-chunk growing -------------------------------------------------
+// Default chunk_rows is 1024, so the 6 tests above fit in one chunk. Here
+// we shrink chunk_rows so N=200 spans ~4 chunks, exercising the per-chunk
+// flatten loop in SearchOnGrowing.cpp and the chunk merge in
+// ChunkMergeIterator.
+
+namespace {
+
+constexpr int64_t kElemChunkRows = 64;
+
+inline SegmentGrowingPtr
+CreateMultiChunkGrowingSegment(const ElementSearchFixture& f) {
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(kElemChunkRows);
+    auto segment = CreateGrowingSegment(f.schema, empty_index_meta, 1, config);
+    segment->PreInsert(kElemN);
+    segment->Insert(0,
+                    kElemN,
+                    f.raw_data.row_ids_.data(),
+                    f.raw_data.timestamps_.data(),
+                    f.raw_data.raw_);
+    static_assert(kElemN > kElemChunkRows,
+                  "N must exceed chunk_rows to exercise multi-chunk paths");
+    return segment;
+}
+
+}  // namespace
+
+TEST(ElementVectorSearch, GrowingMultiChunk_RangeSearch) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateMultiChunkGrowingSegment(f);
+
+    ScopedSchemaHandle handle(*f.schema);
+    const float radius = 1e6f;
+    const std::string search_params =
+        R"({"radius": )" + std::to_string(radius) + R"(, "range_filter": 0.0})";
+    auto plan_bytes = handle.ParseSearch(
+        "", "structA[array_vec]", kElemTopK, "L2", search_params, 3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectWithinRadius(*sr, radius);
+    ExpectTopOneIsTarget(*sr);
+}
+
+TEST(ElementVectorSearch, GrowingMultiChunk_IteratorV2) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateMultiChunkGrowingSegment(f);
+
+    ScopedSchemaHandle handle(*f.schema);
+    auto plan_bytes =
+        handle.ParseSearchIterator("",
+                                   "structA[array_vec]",
+                                   kElemTopK,
+                                   "L2",
+                                   R"({"ef": 50})",
+                                   static_cast<uint32_t>(kElemTopK),
+                                   "",
+                                   std::nullopt,
+                                   3);
+    auto plan =
+        CreateSearchPlanByExpr(f.schema, plan_bytes.data(), plan_bytes.size());
+
+    auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(sr, nullptr);
+    ExpectElementLevelShape(*sr);
+    ExpectSortedAscending(*sr);
+    ExpectTopOneIsTarget(*sr);
+}
+
+// ---- Iterator_v2: consecutive NextBatch rounds ---------------------------
+// Each search call runs exactly one NextBatch. Chain rounds by feeding the
+// previous batch's last distance as last_bound: post-round distances must
+// stay strictly greater than that bound (L2, lower-is-better).
+
+TEST(ElementVectorSearch, SealedBruteForce_IteratorV2_MultiBatch) {
+    auto f = MakeElementSearchFixture();
+    auto segment = CreateSealedWithFieldDataLoaded(f.schema, f.raw_data);
+
+    ScopedSchemaHandle handle(*f.schema);
+    std::optional<float> last_bound;
+    std::set<std::pair<int64_t, int32_t>> seen;
+    const int kRounds = 3;
+    for (int round = 0; round < kRounds; ++round) {
+        auto plan_bytes =
+            handle.ParseSearchIterator("",
+                                       "structA[array_vec]",
+                                       kElemTopK,
+                                       "L2",
+                                       R"({"ef": 50})",
+                                       static_cast<uint32_t>(kElemTopK),
+                                       "",
+                                       last_bound,
+                                       3);
+        auto plan = CreateSearchPlanByExpr(
+            f.schema, plan_bytes.data(), plan_bytes.size());
+        auto ph_group_raw = MakeElementLevelPlaceholder(f.query_data);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        ASSERT_NE(sr, nullptr);
+        ExpectElementLevelShape(*sr);
+        ExpectSortedAscending(*sr);
+
+        float round_last = last_bound.value_or(-1.0f);
+        for (size_t i = 0; i < sr->seg_offsets_.size(); ++i) {
+            if (sr->seg_offsets_[i] < 0) {
+                continue;
+            }
+            if (last_bound.has_value()) {
+                ASSERT_GT(sr->distances_[i], *last_bound)
+                    << "round " << round
+                    << " returned a distance not strictly past last_bound";
+            }
+            auto key =
+                std::make_pair(sr->seg_offsets_[i], sr->element_indices_[i]);
+            ASSERT_TRUE(seen.insert(key).second)
+                << "iterator returned duplicate (doc=" << key.first
+                << ", elem=" << key.second << ") across rounds";
+            round_last = sr->distances_[i];
+        }
+        last_bound = round_last;
+    }
+    ASSERT_GE(seen.size(), static_cast<size_t>(kElemTopK))
+        << "multi-batch iterator should accumulate strictly more results "
+        << "than a single batch";
 }

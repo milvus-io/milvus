@@ -34,7 +34,7 @@
 #include "exec/operator/AggregationNode.h"
 #include "exec/operator/CallbackSink.h"
 #include "exec/operator/ElementFilterBitsNode.h"
-#include "exec/operator/ElementFilterNode.h"
+#include "exec/operator/IterativeElementFilterNode.h"
 #include "exec/operator/FilterBitsNode.h"
 #include "exec/operator/IterativeFilterNode.h"
 #include "exec/operator/MvccNode.h"
@@ -80,10 +80,9 @@ DriverFactory::CreateDriver(
             tracer::AddEvent("create_operator: FilterBitsNode");
             operators.push_back(std::make_unique<PhyFilterBitsNode>(
                 id, ctx.get(), filterbitsnode));
-        } else if (auto filternode =
-                       std::dynamic_pointer_cast<const plan::FilterNode>(
-                           plannode)) {
-            tracer::AddEvent("create_operator: FilterNode");
+        } else if (auto filternode = std::dynamic_pointer_cast<
+                       const plan::IterativeFilterNode>(plannode)) {
+            tracer::AddEvent("create_operator: IterativeFilterNode");
             operators.push_back(std::make_unique<PhyIterativeFilterNode>(
                 id, ctx.get(), filternode));
         } else if (auto mvccnode =
@@ -134,12 +133,11 @@ DriverFactory::CreateDriver(
             tracer::AddEvent("create_operator: RescoresNode");
             operators.push_back(
                 std::make_unique<PhyRescoresNode>(id, ctx.get(), rescoresnode));
-        } else if (auto node =
-                       std::dynamic_pointer_cast<const plan::ElementFilterNode>(
-                           plannode)) {
-            tracer::AddEvent("create_operator: ElementFilterNode");
-            operators.push_back(
-                std::make_unique<PhyElementFilterNode>(id, ctx.get(), node));
+        } else if (auto node = std::dynamic_pointer_cast<
+                       const plan::IterativeElementFilterNode>(plannode)) {
+            tracer::AddEvent("create_operator: IterativeElementFilterNode");
+            operators.push_back(std::make_unique<PhyIterativeElementFilterNode>(
+                id, ctx.get(), node));
         } else if (auto node = std::dynamic_pointer_cast<
                        const plan::ElementFilterBitsNode>(plannode)) {
             tracer::AddEvent("create_operator: ElementFilterBitsNode");

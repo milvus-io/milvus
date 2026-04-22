@@ -32,12 +32,13 @@
 namespace milvus {
 namespace exec {
 
-class PhyElementFilterNode : public Operator {
+class PhyIterativeElementFilterNode : public Operator {
  public:
-    PhyElementFilterNode(int32_t operator_id,
-                         DriverContext* ctx,
-                         const std::shared_ptr<const plan::ElementFilterNode>&
-                             element_filter_node);
+    PhyIterativeElementFilterNode(
+        int32_t operator_id,
+        DriverContext* ctx,
+        const std::shared_ptr<const plan::IterativeElementFilterNode>&
+            element_filter_node);
 
     bool
     IsFilter() const override {
@@ -75,7 +76,7 @@ class PhyElementFilterNode : public Operator {
 
     std::string
     ToString() const override {
-        return "PhyElementFilterNode";
+        return "PhyIterativeElementFilterNode";
     }
 
  private:

@@ -190,6 +190,51 @@ func ConstructEmbeddingListSearchRequest(
 	return constructSearchRequest(dbName, collectionName, expr, vecField, true, vectorType, outputFields, metricType, params, nq, dim, topk, roundDecimal)
 }
 
+// ConstructElementLevelSearchRequest builds a search request that runs
+// element-level search against a VECTOR_ARRAY field. The placeholder carries
+// a single query vector per nq row with element_level=true.
+func ConstructElementLevelSearchRequest(
+	dbName, collectionName string,
+	expr string,
+	vecField string,
+	vectorType schemapb.DataType,
+	outputFields []string,
+	metricType string,
+	params map[string]any,
+	nq, dim int, topk, roundDecimal int,
+) *milvuspb.SearchRequest {
+	b, err := json.Marshal(params)
+	if err != nil {
+		panic(err)
+	}
+	plg := constructPlaceholderGroup(nq, dim, vectorType, false)
+	for _, ph := range plg.Placeholders {
+		ph.ElementLevel = true
+	}
+	plgBs, err := proto.Marshal(plg)
+	if err != nil {
+		panic(err)
+	}
+	return &milvuspb.SearchRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: outputFields,
+		SearchParams: []*commonpb.KeyValuePair{
+			{Key: common.MetricTypeKey, Value: metricType},
+			{Key: proxy.ParamsKey, Value: string(b)},
+			{Key: AnnsFieldKey, Value: vecField},
+			{Key: common.TopKKey, Value: strconv.Itoa(topk)},
+			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
+		},
+		Nq: int64(nq),
+	}
+}
+
 func constructSearchRequest(
 	dbName, collectionName string,
 	expr string,

@@ -568,38 +568,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
 
-	// 7. check search for embedding list
-	annsFieldName, _ := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, searchParamsPair)
-	if annsFieldName != "" {
-		annField := typeutil.GetFieldByName(schema, annsFieldName)
-		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if isRangeSearch {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			// For hybrid search (rankInfo != nil), group by on vector array is not supported.
-			// For simple search, group by validation is handled in initSearchRequest()
-			// where placeholder type is available to distinguish element-level vs embedding list.
-			if groupByFieldId > 0 && rankParams != nil {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-
-			if isIterator {
-				return nil, merr.WrapErrParameterInvalid("", "",
-					"search iterator is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
-			}
-		}
-	}
-
-	// 8. parse order_by_fields
+	// 7. parse order_by_fields
 	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	// 9. validate iterator + order_by combination is not allowed
+	// 8. validate iterator + order_by combination is not allowed
 	if isIterator && len(orderByFields) > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"order_by is not supported when using search iterator")

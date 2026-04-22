@@ -19,6 +19,7 @@
 #include "common/Utils.h"
 #include "knowhere/index/index_node.h"
 #include "common/ArrayOffsets.h"
+#include "query/Utils.h"
 
 namespace milvus::query {
 class SubSearchResult {
@@ -119,23 +120,7 @@ class SubSearchResult {
 
     std::pair<std::vector<int64_t>, std::vector<int32_t>>
     convert_to_element_offsets(const IArrayOffsets* array_offsets) {
-        std::vector<int64_t> doc_offsets;
-        std::vector<int32_t> element_indices;
-        doc_offsets.reserve(offsets_.size());
-        element_indices.reserve(offsets_.size());
-        for (size_t i = 0; i < offsets_.size(); i++) {
-            if (offsets_[i] == INVALID_SEG_OFFSET) {
-                doc_offsets.push_back(INVALID_SEG_OFFSET);
-                element_indices.push_back(-1);
-            } else {
-                auto [doc_id, elem_index] =
-                    array_offsets->ElementIDToRowID(offsets_[i]);
-                doc_offsets.push_back(doc_id);
-                element_indices.push_back(elem_index);
-            }
-        }
-        return std::make_pair(std::move(doc_offsets),
-                              std::move(element_indices));
+        return milvus::query::ApplyElementIDMapping(offsets_, *array_offsets);
     }
 
  private:

@@ -537,7 +537,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             // Add element-level filter if needed
             if (is_element_level) {
                 bool has_doc_pred = (doc_expr != nullptr);
-                plannode = std::make_shared<plan::ElementFilterNode>(
+                plannode = std::make_shared<plan::IterativeElementFilterNode>(
                     milvus::plan::GetNextPlanNodeId(),
                     element_expr,
                     struct_name,
@@ -548,7 +548,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
             // Add doc-level filter if present
             if (doc_expr) {
-                plannode = std::make_shared<plan::FilterNode>(
+                plannode = std::make_shared<plan::IterativeFilterNode>(
                     milvus::plan::GetNextPlanNodeId(), doc_expr, sources);
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             }
@@ -598,8 +598,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         }
     } else {
         // No user filter. Force non-iterative: the iterative path requires
-        // a FilterNode for row-by-row post-filtering, which doesn't apply
-        // here (TTL uses bitmap pre-filtering via FilterBitsNode).
+        // an IterativeFilterNode for row-by-row post-filtering, which doesn't
+        // apply here (TTL uses bitmap pre-filtering via FilterBitsNode).
         plan_node->search_info_.iterative_filter_execution = false;
 
         // When entity-level TTL is enabled, add an AlwaysTrueExpr so that

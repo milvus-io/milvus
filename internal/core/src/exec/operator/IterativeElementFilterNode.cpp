@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "ElementFilterNode.h"
+#include "IterativeElementFilterNode.h"
 #include "exec/operator/Utils.h"
 
 #include <algorithm>
@@ -43,15 +43,16 @@
 namespace milvus {
 namespace exec {
 
-PhyElementFilterNode::PhyElementFilterNode(
+PhyIterativeElementFilterNode::PhyIterativeElementFilterNode(
     int32_t operator_id,
     DriverContext* driverctx,
-    const std::shared_ptr<const plan::ElementFilterNode>& element_filter_node)
+    const std::shared_ptr<const plan::IterativeElementFilterNode>&
+        element_filter_node)
     : Operator(driverctx,
                element_filter_node->output_type(),
                operator_id,
                element_filter_node->id(),
-               "PhyElementFilterNode"),
+               "PhyIterativeElementFilterNode"),
       struct_name_(element_filter_node->struct_name()),
       has_doc_predicate_(element_filter_node->has_doc_predicate()) {
     ExecContext* exec_context = operator_context_->get_exec_context();
@@ -62,18 +63,19 @@ PhyElementFilterNode::PhyElementFilterNode(
 }
 
 void
-PhyElementFilterNode::AddInput(RowVectorPtr& input) {
+PhyIterativeElementFilterNode::AddInput(RowVectorPtr& input) {
     input_ = std::move(input);
 }
 
 RowVectorPtr
-PhyElementFilterNode::GetOutput() {
+PhyIterativeElementFilterNode::GetOutput() {
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyElementFilterNode::GetOutput", tracer::GetRootSpan(), true);
+    tracer::AutoSpan span("PhyIterativeElementFilterNode::GetOutput",
+                          tracer::GetRootSpan(),
+                          true);
 
     DeferLambda([&]() { is_finished_ = true; });
 
@@ -89,13 +91,14 @@ PhyElementFilterNode::GetOutput() {
 
     if (!search_result.element_level_) {
         ThrowInfo(ExprInvalid,
-                  "PhyElementFilterNode expects element-level search result");
+                  "PhyIterativeElementFilterNode expects element-level search "
+                  "result");
     }
 
     if (!search_result.vector_iterators_.has_value()) {
-        ThrowInfo(
-            ExprInvalid,
-            "PhyElementFilterNode expects vector_iterators in search result");
+        ThrowInfo(ExprInvalid,
+                  "PhyIterativeElementFilterNode expects vector_iterators in "
+                  "search result");
     }
 
     auto segment = query_context_->get_segment();
@@ -132,7 +135,7 @@ PhyElementFilterNode::GetOutput() {
                                : 0;
 
     // Step 4: If no doc-level predicate, collect results directly
-    // (otherwise, downstream FilterNode will do this)
+    // (otherwise, downstream IterativeFilterNode will do this)
     if (!has_doc_predicate_) {
         CollectResults(search_result, array_offsets.get());
     }
@@ -146,21 +149,21 @@ PhyElementFilterNode::GetOutput() {
         std::chrono::duration<double, std::micro>(end_time - start_time)
             .count();
 
-    tracer::AddEvent(
-        fmt::format("PhyElementFilterNode: wrapped {} iterators, struct_name: "
-                    "{}, has_doc_predicate: {}, cost_us: {}",
-                    num_iterators,
-                    struct_name_,
-                    has_doc_predicate_,
-                    cost));
+    tracer::AddEvent(fmt::format(
+        "PhyIterativeElementFilterNode: wrapped {} iterators, struct_name: "
+        "{}, has_doc_predicate: {}, cost_us: {}",
+        num_iterators,
+        struct_name_,
+        has_doc_predicate_,
+        cost));
 
     // Pass through input to downstream
     return input_;
 }
 
 void
-PhyElementFilterNode::CollectResults(SearchResult& search_result,
-                                     const IArrayOffsets* array_offsets) {
+PhyIterativeElementFilterNode::CollectResults(
+    SearchResult& search_result, const IArrayOffsets* array_offsets) {
     // When there's no doc-level predicate, we need to consume the iterators
     // and collect the top-K results ourselves.
     //
@@ -231,7 +234,9 @@ PhyElementFilterNode::CollectResults(SearchResult& search_result,
     search_result.vector_iterators_.reset();
 
     tracer::AddEvent(fmt::format(
-        "PhyElementFilterNode::CollectResults: nq={}, topk={}", nq, topk));
+        "PhyIterativeElementFilterNode::CollectResults: nq={}, topk={}",
+        nq,
+        topk));
 }
 
 }  // namespace exec
