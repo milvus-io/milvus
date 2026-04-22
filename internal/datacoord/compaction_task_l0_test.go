@@ -667,9 +667,14 @@ func (s *L0CompactionTaskSuite) TestSelectSealedSegment_ForceSelectAllFlag() {
 			},
 		}
 		return &LevelZeroSegmentsView{
-			label:                     label,
-			segments:                  l0Segs,
-			earliestGrowingSegmentPos: &msgpb.MsgPosition{ChannelName: channel, Timestamp: realL0DmlTs},
+			label:    label,
+			segments: l0Segs,
+			// Must be strictly greater than realL0DmlTs so L0 segments pass the
+			// dmlPos < earliestGrowingSegmentPos filter inside Trigger(), and
+			// strictly less than highPosSeg.StartPosition (20000) so that the
+			// flag-off case excludes highPosSeg while the flag-on case (MaxUint64)
+			// includes it.
+			earliestGrowingSegmentPos: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 10000},
 		}
 	}
 
