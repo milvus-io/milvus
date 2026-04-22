@@ -495,6 +495,12 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 }
 
 template <typename T>
+bool
+VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
+    return index_.IsIndexRefineEnabled();
+}
+
+template <typename T>
 std::vector<uint8_t>
 VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto index_type = GetIndexType();
@@ -573,6 +579,18 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     }
 
     return load_config;
+}
+
+template <typename T>
+knowhere::expected<knowhere::DataSetPtr>
+VectorDiskAnnIndex<T>::CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                                     const BitsetView& bitset,
+                                     const int64_t* labels,
+                                     size_t labels_len,
+                                     bool is_cosine,
+                                     milvus::OpContext* op_context) const {
+    return index_.CalcDistByIDs(
+        query_dataset, bitset, labels, labels_len, is_cosine, op_context);
 }
 
 template class VectorDiskAnnIndex<float>;

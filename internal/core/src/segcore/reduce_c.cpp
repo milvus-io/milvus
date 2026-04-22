@@ -32,6 +32,7 @@ CStatus
 ReduceSearchResultsAndFillData(CTraceContext c_trace,
                                CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
+                               CPlaceholderGroup c_placeholder_group,
                                CSearchResult* c_search_results,
                                int64_t num_segments,
                                int64_t* slice_nqs,
@@ -42,6 +43,9 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
     try {
         // get SearchResult and SearchPlan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
+        auto placeholder_group =
+            static_cast<const milvus::query::PlaceholderGroup*>(
+                c_placeholder_group);
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
         auto trace_ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
@@ -58,18 +62,20 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
                 std::make_shared<milvus::segcore::GroupReduceHelper>(
                     search_results,
                     plan,
+                    placeholder_group,
                     slice_nqs,
                     slice_topKs,
                     num_slices,
                     &trace_ctx);
         } else {
-            reduce_helper =
-                std::make_shared<milvus::segcore::ReduceHelper>(search_results,
-                                                                plan,
-                                                                slice_nqs,
-                                                                slice_topKs,
-                                                                num_slices,
-                                                                &trace_ctx);
+            reduce_helper = std::make_shared<milvus::segcore::ReduceHelper>(
+                search_results,
+                plan,
+                placeholder_group,
+                slice_nqs,
+                slice_topKs,
+                num_slices,
+                &trace_ctx);
         }
         reduce_helper->Reduce();
         reduce_helper->Marshal();

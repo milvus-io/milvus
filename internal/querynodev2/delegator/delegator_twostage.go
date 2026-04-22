@@ -125,7 +125,7 @@ func (sd *shardDelegator) twoStageSearch(
 	// ==================== Optimize with actual stats ====================
 	log.Debug("Optimizing search params with actual stats")
 	const isSecondStageSearch = true
-	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch)
+	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn("Two-stage search: failed to optimize search params", zap.Error(err))
 		return nil, false, err

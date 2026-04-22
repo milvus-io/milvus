@@ -646,6 +646,12 @@ VectorMemIndex<T>::HasRawData() const {
 }
 
 template <typename T>
+bool
+VectorMemIndex<T>::IsIndexRefineEnabled() const {
+    return index_.IsIndexRefineEnabled();
+}
+
+template <typename T>
 std::vector<uint8_t>
 VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto index_type = GetIndexType();
@@ -915,6 +921,18 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());
+}
+
+template <typename T>
+knowhere::expected<knowhere::DataSetPtr>
+VectorMemIndex<T>::CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                                 const BitsetView& bitset,
+                                 const int64_t* labels,
+                                 size_t labels_len,
+                                 bool is_cosine,
+                                 milvus::OpContext* op_context) const {
+    return index_.CalcDistByIDs(
+        query_dataset, bitset, labels, labels_len, is_cosine, op_context);
 }
 
 template class VectorMemIndex<float>;

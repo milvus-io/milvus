@@ -86,6 +86,8 @@ message QueryInfo {
   string json_path = 14;
   schema.DataType json_type = 15;
   bool strict_cast = 16;
+  float search_topk_ratio = 17;
+  float refine_topk_ratio = 18;
 }
 
 message ColumnInfo {

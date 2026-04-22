@@ -266,6 +266,7 @@ func (t *SearchTask) Execute() error {
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
 		searchReq.Plan(),
+		searchReq.PlaceholderGroup(),
 		results,
 		int64(len(results)),
 		t.originNqs,
