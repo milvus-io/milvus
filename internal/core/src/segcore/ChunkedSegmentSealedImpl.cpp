@@ -3133,9 +3133,24 @@ ChunkedSegmentSealedImpl::bulk_subscript(
 
 bool
 ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
-    std::shared_lock lck(mutex_);
-    return get_bit(index_ready_bitset_, field_id) ||
-           get_bit(binlog_index_bitset_, field_id);
+    {
+        std::shared_lock lck(mutex_);
+        if (get_bit(index_ready_bitset_, field_id) ||
+            get_bit(binlog_index_bitset_, field_id)) {
+            return true;
+        }
+    }
+    // JSON indexes (flat + cast) live in a separate per-segment vector and
+    // are not tracked in either bitset. Check them last so the fast path for
+    // fields with a scalar/vector/binlog index pays no extra lock cost.
+    return json_indices.withRLock([&](const auto& vec) {
+        for (const auto& index : vec) {
+            if (index.field_id == field_id) {
+                return true;
+            }
+        }
+        return false;
+    });
 }
 
 bool
