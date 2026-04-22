@@ -548,11 +548,13 @@ func (struts *SearchReduceUtilTestSuite) TestReduceCosineScoreClamping() {
 	overflowScore := float32(1.0000001192092896)
 	underflowScore := float32(-1.0000001192092896)
 
-	makeData := func(scores []float32) *schemapb.SearchResultData {
+	// makeShardData builds a single-shard result with topk matching len(scores).
+	// idBase lets callers produce non-overlapping IDs across shards.
+	makeShardData := func(scores []float32, idBase int64) *schemapb.SearchResultData {
 		n := int64(len(scores))
 		ids := make([]int64, n)
 		for i := range ids {
-			ids[i] = int64(i + 1)
+			ids[i] = idBase + int64(i)
 		}
 		return &schemapb.SearchResultData{
 			NumQueries: 1,
@@ -567,19 +569,37 @@ func (struts *SearchReduceUtilTestSuite) TestReduceCosineScoreClamping() {
 		}
 	}
 
-	struts.Run("reduceSearchResultDataNoGroupBy clamps COSINE overflow", func() {
-		data := makeData([]float32{overflowScore, 0.5, underflowScore})
-		result, err := reduceSearchResultDataNoGroupBy(
-			context.Background(),
-			[]*schemapb.SearchResultData{data, makeData([]float32{0.3})},
-			1, 3, "COSINE", schemapb.DataType_Int64, 0,
-		)
-		struts.Require().NoError(err)
-		scores := result.Results.GetScores()
+	assertCosineRange := func(scores []float32) {
 		for _, s := range scores {
 			struts.LessOrEqual(s, float32(1.0), "COSINE score must be <= 1.0, got %v", s)
 			struts.GreaterOrEqual(s, float32(-1.0), "COSINE score must be >= -1.0, got %v", s)
 		}
+	}
+
+	// Single-shard path (offset=0, subSearchNum=1) exercises the early-return
+	// branch inside reduceSearchResultDataNoGroupBy.
+	struts.Run("reduceSearchResultDataNoGroupBy clamps COSINE overflow (single shard)", func() {
+		data := makeShardData([]float32{overflowScore, 0.5, underflowScore}, 1)
+		result, err := reduceSearchResultDataNoGroupBy(
+			context.Background(),
+			[]*schemapb.SearchResultData{data},
+			1, 3, "COSINE", schemapb.DataType_Int64, 0,
+		)
+		struts.Require().NoError(err)
+		assertCosineRange(result.Results.GetScores())
+	})
+
+	// Multi-shard path: both shards declare the same topk so checkResultDatas passes.
+	struts.Run("reduceSearchResultDataNoGroupBy clamps COSINE overflow (multi shard)", func() {
+		shard1 := makeShardData([]float32{overflowScore, 0.5, 0.3}, 1)
+		shard2 := makeShardData([]float32{0.9, underflowScore, 0.1}, 100)
+		result, err := reduceSearchResultDataNoGroupBy(
+			context.Background(),
+			[]*schemapb.SearchResultData{shard1, shard2},
+			1, 3, "COSINE", schemapb.DataType_Int64, 0,
+		)
+		struts.Require().NoError(err)
+		assertCosineRange(result.Results.GetScores())
 	})
 
 	struts.Run("reduceAdvanceGroupBy clamps COSINE overflow (single shard)", func() {
@@ -617,7 +637,8 @@ func (struts *SearchReduceUtilTestSuite) TestReduceCosineScoreClamping() {
 	})
 
 	struts.Run("non-COSINE metrics are not clamped (IP can exceed 1.0)", func() {
-		data := makeData([]float32{5.0, 100.0, -3.0})
+		// IP scores are sorted descending (positively related), so 100 > 5 > -3.
+		data := makeShardData([]float32{100.0, 5.0, -3.0}, 1)
 		result, err := reduceSearchResultDataNoGroupBy(
 			context.Background(),
 			[]*schemapb.SearchResultData{data},
