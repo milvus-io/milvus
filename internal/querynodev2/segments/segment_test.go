@@ -263,6 +263,89 @@ func (suite *SegmentSuite) TestDeleteSameTimestampAcrossBatches() {
 	suite.Equal(int64(100), suite.sealed.InsertCount())
 }
 
+// TestLoadDeltaData_LowerTsNotSkipped guards against the bug where L0-forwarded
+// deletes with ts lower than the already-applied manifest-delta watermark
+// were silently dropped, causing snapshot restore to retain deleted rows.
+//
+// Reproduction: apply a delete at a high ts (simulating segment's own _delta/
+// loaded from manifest), then apply a delete for a DIFFERENT PK at a lower ts
+// (simulating L0 segment delete forwarded by delegator). Both must take effect.
+// Before the fix, the second call was skipped entirely via:
+//
+//	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] { return nil }
+func (suite *SegmentSuite) TestLoadDeltaData_LowerTsNotSkipped() {
+	ctx := context.Background()
+
+	// Phase 1: apply delete for PK=80 at ts=2000 (simulates manifest _delta/).
+	pksHigh := storage.NewInt64PrimaryKeys(1)
+	pksHigh.AppendRaw(80)
+	ddHigh, err := storage.NewDeltaDataWithData(pksHigh, []uint64{2000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddHigh))
+	suite.EqualValues(2000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+
+	// Phase 2: L0-forwarded delete for PK=10 at ts=1000 (LOWER than watermark).
+	// Must be applied — before the fix this was silently dropped.
+	pksLow := storage.NewInt64PrimaryKeys(1)
+	pksLow.AppendRaw(10)
+	ddLow, err := storage.NewDeltaDataWithData(pksLow, []uint64{1000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddLow))
+
+	// Both PKs deleted => RowNum = 100 - 2 = 98.
+	suite.EqualValues(98, suite.sealed.RowNum())
+	// Watermark stays at max, not regresses to 1000.
+	suite.EqualValues(2000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestLoadDeltaData_UnsortedBatchAllApplied guards against the BufferForwarder
+// interaction: rangeHitL0Deletions iterates L0 segments in unsorted order, so
+// tss[last] is whichever L0 segment was visited last, NOT the batch max.
+// A batch like tss=[1500, 500] would previously be compared as tss[1]=500
+// against watermark and (if watermark >= 500) get entirely dropped, including
+// the PK at ts=1500 that was ABOVE the watermark.
+func (suite *SegmentSuite) TestLoadDeltaData_UnsortedBatchAllApplied() {
+	ctx := context.Background()
+
+	// Establish watermark at 1000.
+	pksInit := storage.NewInt64PrimaryKeys(1)
+	pksInit.AppendRaw(99)
+	ddInit, err := storage.NewDeltaDataWithData(pksInit, []uint64{1000})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddInit))
+
+	// Unsorted batch: first ts=1500 (above watermark), last ts=500 (below).
+	// Must apply both. Before fix: tss[last]=500 <= 1000 => entire batch dropped.
+	pksMixed := storage.NewInt64PrimaryKeys(2)
+	pksMixed.AppendRaw(20, 30)
+	ddMixed, err := storage.NewDeltaDataWithData(pksMixed, []uint64{1500, 500})
+	suite.Require().NoError(err)
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddMixed))
+
+	suite.EqualValues(97, suite.sealed.RowNum()) // 100 - 3 deletes
+	// Watermark advances to batch max, not last.
+	suite.EqualValues(1500, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestAdvanceLastDeltaTimestamp_NeverRegresses verifies the watermark is
+// monotonic: a lower-max batch after a higher-max batch must not regress it.
+func (suite *SegmentSuite) TestAdvanceLastDeltaTimestamp_NeverRegresses() {
+	ctx := context.Background()
+
+	pksA := storage.NewInt64PrimaryKeys(1)
+	pksA.AppendRaw(11)
+	ddA, _ := storage.NewDeltaDataWithData(pksA, []uint64{5000})
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddA))
+	suite.EqualValues(5000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+
+	pksB := storage.NewInt64PrimaryKeys(1)
+	pksB.AppendRaw(12)
+	ddB, _ := storage.NewDeltaDataWithData(pksB, []uint64{2000})
+	suite.Require().NoError(suite.sealed.(*LocalSegment).LoadDeltaData(ctx, ddB))
+	// Watermark stays at 5000, not regresses to 2000.
+	suite.EqualValues(5000, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release(context.Background())
 
