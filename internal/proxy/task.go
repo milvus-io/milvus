@@ -931,17 +931,26 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 		return validateDropFunction(t.oldSchema, id.FunctionName)
 
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
-		fieldName := ""
 		for _, f := range t.oldSchema.Fields {
 			if f.FieldID == id.FieldId {
-				fieldName = f.Name
-				break
+				return validateDropField(t.oldSchema, f.Name)
 			}
 		}
-		if fieldName == "" {
-			return merr.WrapErrParameterInvalidMsg("field not found with id: %d", id.FieldId)
+		// Struct array field and its sub-fields share the FieldID namespace but
+		// live outside schema.Fields. Route struct-level drops to the normal
+		// by-name path; sub-field drops are not supported in this change.
+		for _, sf := range t.oldSchema.StructArrayFields {
+			if sf.FieldID == id.FieldId {
+				return validateDropField(t.oldSchema, sf.Name)
+			}
+			for _, sub := range sf.Fields {
+				if sub.FieldID == id.FieldId {
+					return merr.WrapErrParameterInvalidMsg(
+						"cannot drop sub-field of struct array field: %s.%s", sf.Name, sub.Name)
+				}
+			}
 		}
-		return validateDropField(t.oldSchema, fieldName)
+		return merr.WrapErrParameterInvalidMsg("field not found with id: %d", id.FieldId)
 
 	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
 		return validateDropField(t.oldSchema, id.FieldName)
@@ -977,7 +986,22 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		return merr.WrapErrParameterInvalidMsg("field name is empty")
 	}
 
-	// Find the target field
+	// Struct array fields share the name namespace with top-level fields but
+	// live in schema.StructArrayFields. Dropping the whole struct is allowed;
+	// dropping a single sub-field is not (no symmetric add-sub-field support).
+	for _, sf := range schema.StructArrayFields {
+		if sf.Name == fieldName {
+			return validateDropStructArrayField(schema, sf)
+		}
+		for _, sub := range sf.Fields {
+			if sub.Name == fieldName {
+				return merr.WrapErrParameterInvalidMsg(
+					"cannot drop sub-field of struct array field: %s.%s", sf.Name, fieldName)
+			}
+		}
+	}
+
+	// Find the target field in top-level Fields.
 	var targetField *schemapb.FieldSchema
 	for _, field := range schema.Fields {
 		if field.Name == fieldName {
@@ -1014,15 +1038,10 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		return merr.WrapErrParameterInvalidMsg("cannot drop dynamic field: %s, use AlterCollection to disable dynamic schema instead", fieldName)
 	}
 
-	// Check: cannot drop the last vector field
+	// Check: cannot drop the last vector field. GetVectorFieldSchemas counts
+	// vectors in both top-level Fields and StructArrayField sub-fields.
 	if typeutil.IsVectorType(targetField.DataType) {
-		vectorCount := 0
-		for _, f := range schema.Fields {
-			if typeutil.IsVectorType(f.DataType) {
-				vectorCount++
-			}
-		}
-		if vectorCount <= 1 {
+		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
 			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
 		}
 	}
@@ -1044,18 +1063,58 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	return nil
 }
 
-// validateDropFunction checks that the function exists in the schema.
+// validateDropStructArrayField validates that a whole struct array field can
+// be dropped. Struct array fields are never PK / partition key / clustering
+// key / dynamic and are not referenced by functions (schema.proto TODO), so
+// the only cross-cutting invariant is "at least one vector remains".
+func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemapb.StructArrayFieldSchema) error {
+	removedVectors := 0
+	for _, sub := range sf.Fields {
+		if typeutil.IsVectorType(sub.DataType) {
+			removedVectors++
+		}
+	}
+	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot drop struct array field %s: it would leave no vector field in the collection",
+			sf.Name)
+	}
+	return nil
+}
+
+// validateDropFunction checks that the function exists, and that the cascade
+// removal of its output fields would not leave the collection without any
+// vector field. Without this check, a user told to "drop function first" by
+// validateDropField could end up with an unsearchable collection.
 func validateDropFunction(schema *schemapb.CollectionSchema, functionName string) error {
 	if functionName == "" {
 		return merr.WrapErrParameterInvalidMsg("function name is empty")
 	}
 
+	var targetFunc *schemapb.FunctionSchema
 	for _, fn := range schema.Functions {
 		if fn.Name == functionName {
-			return nil
+			targetFunc = fn
+			break
 		}
 	}
-	return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	if targetFunc == nil {
+		return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
+	}
+
+	// Cascade removes the function's output fields; refuse if it removes all vectors.
+	removedVectors := 0
+	for _, name := range targetFunc.OutputFieldNames {
+		if f := typeutil.GetFieldByName(schema, name); f != nil && typeutil.IsVectorType(f.DataType) {
+			removedVectors++
+		}
+	}
+	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot drop function %s: it would leave no vector field in the collection",
+			functionName)
+	}
+	return nil
 }
 
 type dropCollectionTask struct {

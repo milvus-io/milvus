@@ -612,6 +612,42 @@ func TestBuildSchemaForDropField(t *testing.T) {
 		}
 		require.True(t, found)
 	})
+
+	collWithStruct := func() *model.Collection {
+		return &model.Collection{
+			Name: "test_coll",
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "vec"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*model.Field{
+						{FieldID: 103, Name: "para_text"},
+						{FieldID: 104, Name: "para_embed"},
+					},
+				},
+			},
+			SchemaVersion: 3,
+		}
+	}
+
+	t.Run("drop whole struct array field by name", func(t *testing.T) {
+		schema, _, droppedFieldIds, err := buildSchemaForDropField(collWithStruct(), "paragraphs", 0)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(schema.Fields))            // pk + vec unchanged
+		require.Equal(t, 0, len(schema.StructArrayFields)) // struct removed
+		require.ElementsMatch(t, []int64{102, 103, 104}, droppedFieldIds)
+		require.Equal(t, int32(4), schema.Version)
+	})
+
+	t.Run("drop whole struct array field by id", func(t *testing.T) {
+		schema, _, droppedFieldIds, err := buildSchemaForDropField(collWithStruct(), "", 102)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(schema.StructArrayFields))
+		require.ElementsMatch(t, []int64{102, 103, 104}, droppedFieldIds)
+	})
 }
 
 func TestCascadeDropFieldIndexesInline(t *testing.T) {
@@ -661,7 +697,11 @@ func TestCascadeDropFieldIndexesInline(t *testing.T) {
 		cb := &DDLCallback{Core: c}
 		err := cb.cascadeDropFieldIndexesInline(context.Background(), buildResult([]int64{101}))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "cascade drop")
+		// Match the stable prefix of the DescribeIndex failure path. The
+		// "for cascade drop" suffix is incidental and may be reworded without
+		// changing behavior, so we don't assert on it.
+		require.Contains(t, err.Error(), "failed to describe indexes")
+		require.ErrorContains(t, err, "rpc unavailable")
 	})
 
 	t.Run("no matching indexes for dropped field", func(t *testing.T) {

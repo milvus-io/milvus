@@ -1438,6 +1438,24 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollection")
 	defer sp.End()
+
+	// Altering the dynamic field flag modifies the schema (add/remove $meta and
+	// bumps SchemaVersion), so it must share the same gates as AlterCollectionSchema
+	// to avoid racing with an in-flight physical backfill.
+	if isAlterDynamic, _, _ := common.IsEnableDynamicSchema(request.GetProperties()); isAlterDynamic {
+		collKey := request.GetDbName() + "/" + request.GetCollectionName()
+		if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
+			return merr.Status(merr.WrapErrParameterInvalidMsg(
+				"another schema alteration is already in progress for collection %s",
+				request.GetCollectionName())), nil
+		}
+		defer node.alterSchemaInFlight.Delete(collKey)
+
+		if err := node.checkSchemaVersionConsistency(ctx, request.GetDbName(), request.GetCollectionName()); err != nil {
+			return merr.Status(err), nil
+		}
+	}
+
 	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 

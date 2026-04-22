@@ -2857,6 +2857,120 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 	})
 }
 
+func TestProxy_AlterCollection_DynamicFieldGate(t *testing.T) {
+	// AlterCollection shares the schema-change gates (alterSchemaInFlight and
+	// checkSchemaVersionConsistency) with AlterCollectionSchema only when the
+	// request alters enable_dynamic_field, because that path bumps SchemaVersion.
+	t.Run("non-dynamic alter skips the gate", func(t *testing.T) {
+		mockey.PatchConvey("ttl-only alter does not enter schema gate", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			// Pre-occupy the gate key to prove the dynamic branch is NOT taken.
+			collKey := "db/test_coll"
+			node.alterSchemaInFlight.Store(collKey, struct{}{})
+			defer node.alterSchemaInFlight.Delete(collKey)
+
+			// checkSchemaVersionConsistency must not be called.
+			consistencyCalled := false
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).To(
+				func(_ *Proxy, _ context.Context, _, _ string) error {
+					consistencyCalled = true
+					return nil
+				}).Build()
+
+			// Stub the rest of the pipeline so the handler returns success.
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			_, err := node.AlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "db",
+				CollectionName: "test_coll",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.CollectionTTLConfigKey, Value: "3600"},
+				},
+			})
+			assert.NoError(t, err)
+			assert.False(t, consistencyCalled, "ttl-only alter must not invoke checkSchemaVersionConsistency")
+		})
+	})
+
+	t.Run("dynamic alter rejected when another in flight", func(t *testing.T) {
+		mockey.PatchConvey("second concurrent dynamic alter is rejected", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			collKey := "db/test_coll"
+			node.alterSchemaInFlight.Store(collKey, struct{}{})
+			defer node.alterSchemaInFlight.Delete(collKey)
+
+			resp, err := node.AlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "db",
+				CollectionName: "test_coll",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.EnableDynamicSchemaKey, Value: "false"},
+				},
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "another schema alteration")
+		})
+	})
+
+	t.Run("dynamic alter rejected when schema version inconsistent", func(t *testing.T) {
+		mockey.PatchConvey("consistency check failure", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
+				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+			).Build()
+
+			resp, err := node.AlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "db",
+				CollectionName: "test_coll",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.EnableDynamicSchemaKey, Value: "true"},
+				},
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+
+			// Gate must be released after the handler returns even on failure.
+			_, stillHeld := node.alterSchemaInFlight.Load("db/test_coll")
+			assert.False(t, stillHeld, "alterSchemaInFlight must be released after handler returns")
+		})
+	})
+
+	t.Run("dynamic alter happy path releases the gate", func(t *testing.T) {
+		mockey.PatchConvey("happy path", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			_, err := node.AlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "db",
+				CollectionName: "test_coll",
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.EnableDynamicSchemaKey, Value: "true"},
+				},
+			})
+			assert.NoError(t, err)
+			_, stillHeld := node.alterSchemaInFlight.Load("db/test_coll")
+			assert.False(t, stillHeld, "alterSchemaInFlight must be released after happy path")
+		})
+	})
+}
+
 func TestCheckSchemaVersionConsistency(t *testing.T) {
 	t.Run("GetCollectionStatistics returns error", func(t *testing.T) {
 		mockey.PatchConvey("error from GetCollectionStatistics", t, func() {
