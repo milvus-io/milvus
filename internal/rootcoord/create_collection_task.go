@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -179,8 +180,20 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := typeutil.ValidateExternalCollectionSchema(schema); err != nil {
+	// Note: this call mutates schema (sets nullable=true on every user field).
+	// See NormalizeAndValidateExternalCollectionSchema for the rationale.
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
 		return err
+	}
+
+	// For external collections, validate the source URL scheme allowlist and
+	// the JSON spec structure (extfs allowlist + format whitelist) at the
+	// RootCoord side as well — defense in depth in case a request bypasses
+	// proxy-side validation.
+	if typeutil.IsExternalCollection(schema) {
+		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+			return err
+		}
 	}
 
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {

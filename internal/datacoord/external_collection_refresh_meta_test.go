@@ -244,8 +244,9 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		mockSave := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save error")).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateJobState(1, indexpb.JobState_JobStateInProgress, "")
+		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
+		assert.False(t, applied)
 
 		// State should remain Init
 		assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetJob(1).GetState())
@@ -257,8 +258,9 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, jobs, nil)
 
-		err := meta.UpdateJobState(1, indexpb.JobState_JobStateInProgress, "")
+		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateInProgress, "")
 		assert.NoError(t, err)
+		assert.True(t, applied)
 
 		job := meta.GetJob(1)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, job.GetState())
@@ -270,8 +272,9 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, jobs, nil)
 
-		err := meta.UpdateJobState(1, indexpb.JobState_JobStateFinished, "")
+		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateFinished, "")
 		assert.NoError(t, err)
+		assert.True(t, applied)
 
 		job := meta.GetJob(1)
 		assert.Equal(t, indexpb.JobState_JobStateFinished, job.GetState())
@@ -285,8 +288,9 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		}
 		meta := createMetaTestRefreshMeta(t, jobs, nil)
 
-		err := meta.UpdateJobState(1, indexpb.JobState_JobStateFailed, "timeout")
+		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateFailed, "timeout")
 		assert.NoError(t, err)
+		assert.True(t, applied)
 
 		job := meta.GetJob(1)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
@@ -294,11 +298,32 @@ func TestExternalCollectionRefreshMeta_UpdateJobState(t *testing.T) {
 		assert.Greater(t, job.GetEndTime(), int64(0))
 	})
 
+	t.Run("terminal_state_guard_skips_write", func(t *testing.T) {
+		// Once a job is Finished, a follow-up UpdateJobState(Failed) must
+		// NOT persist the transition and MUST return applied=false so the
+		// caller can distinguish "silently skipped" from "persisted". This
+		// is the signal tryTimeoutJob relies on to avoid poisoning the
+		// manager's notifiedJobs dedup map during a race with the eager
+		// Finished path.
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+		meta := createMetaTestRefreshMeta(t, jobs, nil)
+
+		applied, err := meta.UpdateJobState(1, indexpb.JobState_JobStateFailed, "timeout")
+		assert.NoError(t, err)
+		assert.False(t, applied, "terminal-state guard must report applied=false")
+
+		job := meta.GetJob(1)
+		assert.Equal(t, indexpb.JobState_JobStateFinished, job.GetState(), "state must remain Finished")
+	})
+
 	t.Run("job_not_found", func(t *testing.T) {
 		meta := createMetaTestRefreshMeta(t, nil, nil)
 
-		err := meta.UpdateJobState(999, indexpb.JobState_JobStateInProgress, "")
+		applied, err := meta.UpdateJobState(999, indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
+		assert.False(t, applied)
 	})
 }
 

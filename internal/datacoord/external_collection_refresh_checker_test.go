@@ -46,7 +46,7 @@ func TestExternalCollectionRefreshChecker_NewChecker(t *testing.T) {
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, refreshMeta, closeChan)
+	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil)
 	assert.NotNil(t, checker)
 }
 
@@ -67,7 +67,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -88,7 +88,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -109,7 +109,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -135,7 +135,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -164,7 +164,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -193,7 +193,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -222,7 +222,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -251,7 +251,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -274,7 +274,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -307,7 +307,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -321,6 +321,100 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 		updatedTask := meta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, updatedTask.GetState())
 		assert.Equal(t, "job timeout", updatedTask.GetFailReason())
+	})
+
+	// Regression: when the checker's tryTimeoutJob races with the eager
+	// path and observes a stale InProgress snapshot that a concurrent
+	// task-success path has already transitioned to Finished, the
+	// UpdateJobState terminal guard silently returns applied=false. In
+	// that case tryTimeoutJob MUST NOT fire onJobFailed — firing it would
+	// poison the manager's notifiedJobs dedup map and cause the eager
+	// path's later handleJobFinished to short-circuit, so schemaUpdater
+	// would never be called and the external collection would silently
+	// never pick up its refreshed schema.
+	t.Run("timeout_guard_skip_does_not_fire_onJobFailed", func(t *testing.T) {
+		timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
+		oldStartTime := time.Now().Add(-timeout - time.Hour).UnixMilli()
+
+		catalog := &stubCatalog{}
+		// Snapshot claims InProgress so tryTimeoutJob enters the timeout
+		// branch, but the underlying meta entry is already Finished —
+		// simulating the race where aggregateJobState already transitioned
+		// the job between GetAllJobs() and tryTimeoutJob.
+		snapshotJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        77,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInProgress,
+			StartTime:    oldStartTime,
+		}
+		committedJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        77,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateFinished,
+			Progress:     100,
+			StartTime:    oldStartTime,
+			EndTime:      time.Now().UnixMilli(),
+		}
+		jobs := []*datapb.ExternalCollectionRefreshJob{committedJob}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		var failedCalls []int64
+		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+
+		// Feed tryTimeoutJob the STALE InProgress snapshot, not the
+		// committed Finished entry.
+		checker.tryTimeoutJob(snapshotJob)
+
+		// The terminal-state guard inside UpdateJobState must have kept
+		// the committed state Finished, AND tryTimeoutJob must NOT have
+		// fired onJobFailed, since the path that actually owns the
+		// transition (the eager Finished path) is responsible for any
+		// per-job callback.
+		assert.Empty(t, failedCalls, "tryTimeoutJob must not fire onJobFailed when the terminal guard skipped the write")
+		assert.Equal(t, indexpb.JobState_JobStateFinished, meta.GetJob(77).GetState(), "committed state must remain Finished")
+	})
+
+	// Regression for #48626 Failed-path cleanup: tryTimeoutJob must fire
+	// onJobFailed so the per-job explore temp dir gets reclaimed without
+	// waiting for the retention-gated GC path.
+	t.Run("timeout_fires_onJobFailed", func(t *testing.T) {
+		timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
+		oldStartTime := time.Now().Add(-timeout - time.Hour).UnixMilli()
+
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 99, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		var failedCalls []int64
+		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+
+		job := meta.GetJob(99)
+		checker.tryTimeoutJob(job)
+
+		assert.Equal(t, []int64{99}, failedCalls, "timeout path must fire onJobFailed with the jobID")
+		assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetJob(99).GetState())
 	})
 }
 
@@ -341,7 +435,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -363,7 +457,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -391,7 +485,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -424,7 +518,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -450,7 +544,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -475,7 +569,7 @@ func TestExternalCollectionRefreshChecker_Run(t *testing.T) {
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, refreshMeta, closeChan)
+	checker := newRefreshChecker(ctx, refreshMeta, closeChan, nil, nil, nil, nil)
 
 	// Run checker in goroutine and close immediately to test the run loop
 	done := make(chan struct{})
@@ -519,7 +613,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_UpdateStateFailed(t 
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -549,7 +643,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUp
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -583,7 +677,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob_UpdateStateFailed(t *tes
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.tryTimeoutJob(job)
@@ -615,7 +709,7 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, meta, closeChan)
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.checkGC(job)
@@ -638,7 +732,7 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		// Should not panic on empty jobs
 		checker.logJobStats(map[int64]*datapb.ExternalCollectionRefreshJob{})
@@ -654,7 +748,7 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, meta, closeChan)
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
 
 		jobs := map[int64]*datapb.ExternalCollectionRefreshJob{
 			1: {JobId: 1, State: indexpb.JobState_JobStateInit},
@@ -665,5 +759,356 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 
 		// Should not panic and should log stats
 		checker.logJobStats(jobs)
+	})
+}
+
+func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	t.Run("callback_called_on_finished", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		callbackCalled := false
+		var callbackJob *datapb.ExternalCollectionRefreshJob
+		onFinished := func(_ context.Context, job *datapb.ExternalCollectionRefreshJob) {
+			callbackCalled = true
+			callbackJob = job
+		}
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+
+		// Drive a full processing pass: aggregateJobState transitions the
+		// job to Finished, then ensureJobFinishedNotified fires the callback.
+		checker.processJobs()
+
+		// Callback should have been called
+		assert.True(t, callbackCalled, "onJobFinished callback should be called when job transitions to Finished")
+		assert.NotNil(t, callbackJob)
+		assert.Equal(t, int64(1), callbackJob.GetJobId())
+
+		// Job state should be Finished
+		updatedJob := meta.GetJob(1)
+		assert.Equal(t, indexpb.JobState_JobStateFinished, updatedJob.GetState())
+	})
+
+	t.Run("callback_not_called_on_failed", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 50},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		callbackCalled := false
+		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
+			callbackCalled = true
+		}
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+
+		checker.processJobs()
+
+		// Callback should NOT have been called for failed state
+		assert.False(t, callbackCalled, "onJobFinished callback should NOT be called when job transitions to Failed")
+
+		// Job state should be Failed
+		updatedJob := meta.GetJob(1)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, updatedJob.GetState())
+	})
+
+	t.Run("callback_not_called_on_progress_only", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 30},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 60},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		callbackCalled := false
+		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
+			callbackCalled = true
+		}
+		checker := newRefreshChecker(ctx, meta, closeChan, onFinished, nil, nil, nil)
+
+		checker.processJobs()
+
+		// Callback should NOT have been called for progress-only update
+		assert.False(t, callbackCalled, "onJobFinished callback should NOT be called for progress-only updates")
+	})
+
+	t.Run("nil_callback_no_panic", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		// nil onJobFinished - should not panic
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+
+		assert.NotPanics(t, func() {
+			checker.processJobs()
+		})
+
+		// Job should still transition to Finished
+		updatedJob := meta.GetJob(1)
+		assert.Equal(t, indexpb.JobState_JobStateFinished, updatedJob.GetState())
+	})
+
+	// Regression: the Failed transition path must fire onJobFailed so the
+	// manager can reclaim the per-job explore temp dir immediately instead
+	// of waiting 24h for the retention-gated GC path.
+	t.Run("onJobFailed_fired_on_aggregate_failed", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 42, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 40},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 42, State: indexpb.JobState_JobStateFailed, Progress: 40, FailReason: "boom"},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		var failedJobs []int64
+		onFailed := func(jobID int64) {
+			failedJobs = append(failedJobs, jobID)
+		}
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+
+		checker.processJobs()
+
+		assert.Equal(t, []int64{42}, failedJobs, "onJobFailed must fire exactly once with the transitioning jobID")
+		assert.Equal(t, indexpb.JobState_JobStateFailed, meta.GetJob(42).GetState())
+	})
+
+	t.Run("onJobFailed_not_fired_on_finished", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 43, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 80},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 43, State: indexpb.JobState_JobStateFinished, Progress: 100},
+		}
+
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+		mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+		defer mockSaveJob.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		failedCalled := false
+		onFailed := func(_ int64) { failedCalled = true }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, onFailed, nil, nil)
+
+		checker.processJobs()
+
+		assert.False(t, failedCalled, "onJobFailed must NOT fire when job transitions to Finished")
+	})
+}
+
+// TestExternalCollectionRefreshChecker_RunGracefulShutdown covers the closeChan exit
+// path inside run() (lines 99-101).
+func TestExternalCollectionRefreshChecker_RunGracefulShutdown(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		checker.run()
+		close(done)
+	}()
+
+	// Signal shutdown immediately
+	close(closeChan)
+
+	select {
+	case <-done:
+		// run() returned via closeChan — success
+	case <-time.After(5 * time.Second):
+		t.Fatal("checker.run() did not exit after closeChan was closed")
+	}
+}
+
+// TestExternalCollectionRefreshChecker_AggregateJobState_ProgressOnlyUpdateFailed
+// covers the else-if branch where only progress changed but UpdateJobProgress fails (lines 224-230).
+func TestExternalCollectionRefreshChecker_AggregateJobState_ProgressOnlyUpdateFailed(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	// Job in InProgress with progress=10
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10},
+	}
+	// Task also in InProgress with higher progress — triggers progress-only update
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
+	}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	// Save succeeds for job state queries, but we'll mock UpdateJobProgress to fail
+	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("progress save failed")).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, nil)
+
+	job := meta.GetJob(1)
+	checker.aggregateJobState(job)
+
+	// Progress update failed — job progress should stay at original value
+	assert.Equal(t, int64(10), meta.GetJob(1).GetProgress())
+}
+
+// TestExternalCollectionRefreshChecker_OnInitJobPending verifies the lazy
+// retry hook for Phase B of job submission: when a checker tick visits a
+// job still in Init with no tasks, it must call onInitJobPending so the
+// manager can re-run the async explore + task creation. This is the safety
+// net that guarantees a transient S3 failure in the WAL ack path doesn't
+// strand the job forever.
+func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	t.Run("fires_for_init_job_without_tasks", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 42, CollectionId: 100, State: indexpb.JobState_JobStateInit, TaskIds: nil},
+		}
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		var gotJobID int64
+		onInit := func(jobID int64) { gotJobID = jobID }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+
+		checker.processJob(meta.GetJob(42))
+		assert.Equal(t, int64(42), gotJobID, "onInitJobPending should be called for Init job without tasks")
+	})
+
+	t.Run("does_not_fire_for_init_job_with_tasks", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 43, CollectionId: 100, State: indexpb.JobState_JobStateInit, TaskIds: []int64{1001}},
+		}
+		tasks := []*datapb.ExternalCollectionRefreshTask{
+			{TaskId: 1001, JobId: 43, State: indexpb.JobState_JobStateInit},
+		}
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		called := false
+		onInit := func(jobID int64) { called = true }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+
+		checker.processJob(meta.GetJob(43))
+		assert.False(t, called, "onInitJobPending must not fire once tasks exist")
+	})
+
+	t.Run("does_not_fire_for_in_progress_job", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 44, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: nil},
+		}
+		mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+		defer mockListJobs.UnPatch()
+		mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+		defer mockListTasks.UnPatch()
+
+		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+		closeChan := make(chan struct{})
+
+		called := false
+		onInit := func(jobID int64) { called = true }
+		checker := newRefreshChecker(ctx, meta, closeChan, nil, nil, nil, onInit)
+
+		checker.processJob(meta.GetJob(44))
+		assert.False(t, called, "onInitJobPending must only fire for Init state")
 	})
 }
