@@ -1380,22 +1380,60 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_overwrite_file_content_same_path(self, file_resource_env):
         """
-        target: overwrite MinIO file then re-add (same name+path)
-        method: upload v1 -> add -> upload v2 -> add again (idempotent)
-        expected: no error
+        target: overwrite MinIO file then re-add (same name+path) and confirm
+                the new content is actually picked up by BM25 tokenization.
+        method: upload v1 -> add -> create col_v1 -> run_analyzer (v1 stop set)
+                -> upload v2 -> re-add -> create col_v2 -> run_analyzer (v2 set)
+        expected: col_v1 filters only v1 stop words; col_v2 also filters the
+                  v2-only words (在/了/和) proving the overwrite took effect
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         remote_path = "update_test/custom_stop.txt"
-        # 1. upload v1, register MinIO cleanup, and add
+        text = "这是一个在测试的文本和数据在这里了"
+        v1_only_stop = {"的", "是"}
+        v2_only_stop = {"在", "了", "和"}
+        # analyzer_params factory — references the remote resource by name.
+        analyzer_params = {
+            "tokenizer": "jieba",
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words_file": {
+                        "type": "remote",
+                        "resource_name": res_name,
+                        "file_name": "custom_stop.txt",
+                    },
+                }
+            ],
+        }
+
+        # 1. upload v1 (only 的/是) and add resource
         self._minio_objects_to_cleanup.append((bucket, remote_path))
-        content1 = "的\n是\n"
-        content1_bytes = content1.encode("utf-8")
+        content1_bytes = "的\n是\n".encode()
         self._minio_client.put_object(bucket, remote_path, io.BytesIO(content1_bytes), len(content1_bytes))
         self.add_file_resource(client, res_name, remote_path)
-        # 2. overwrite with v2 and re-add (idempotent)
-        content2 = "的\n是\n在\n了\n和\n"
-        content2_bytes = content2.encode("utf-8")
+
+        # 2. first collection uses v1 content — 在/了/和 should still appear as tokens
+        col_v1 = cf.gen_unique_str(prefix)
+        self.create_bm25_collection(client, col_v1, analyzer_params)
+        res_v1, _ = self.run_analyzer(client, text, None, collection_name=col_v1, field_name="text")
+        tokens_v1 = set(res_v1.tokens)
+        assert not (v1_only_stop & tokens_v1), f"v1 stop words should be filtered, got {tokens_v1}"
+        assert v2_only_stop & tokens_v1, (
+            f"v2-only stop words should NOT be filtered under v1 content, tokens={tokens_v1}"
+        )
+
+        # 3. overwrite MinIO object with v2 (adds 在/了/和) and re-add (idempotent)
+        content2_bytes = "的\n是\n在\n了\n和\n".encode()
         self._minio_client.put_object(bucket, remote_path, io.BytesIO(content2_bytes), len(content2_bytes))
         self.add_file_resource(client, res_name, remote_path)
+
+        # 4. fresh collection should read v2 content — 在/了/和 now filtered too
+        col_v2 = cf.gen_unique_str(prefix)
+        self.create_bm25_collection(client, col_v2, analyzer_params)
+        res_v2, _ = self.run_analyzer(client, text, None, collection_name=col_v2, field_name="text")
+        tokens_v2 = set(res_v2.tokens)
+        all_stop = v1_only_stop | v2_only_stop
+        assert not (all_stop & tokens_v2), f"All stop words (v1+v2) should be filtered after overwrite, got {tokens_v2}"
