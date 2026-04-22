@@ -539,6 +539,38 @@ class Schema {
     std::pair<bool, std::string>
     WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
 
+    // True if the field is declared as a function output (derived from the
+    // FunctionSchema list on the collection proto).
+    bool
+    is_function_output(const FieldId& field_id) const {
+        return function_output_field_ids_.count(field_id) > 0;
+    }
+
+    const std::unordered_set<FieldId>&
+    function_output_field_ids() const {
+        return function_output_field_ids_;
+    }
+
+    void
+    add_function_output_field_id(const FieldId& field_id) {
+        function_output_field_ids_.insert(field_id);
+    }
+
+    // Storage column name used by packed manifests for a given field:
+    // external_field mapping for external input columns, the field name for
+    // function-output columns, the numeric field id otherwise.
+    std::string
+    get_storage_column_name(const FieldId& field_id) const {
+        const auto& meta = operator[](field_id);
+        if (meta.is_external_field()) {
+            return meta.get_external_field();
+        }
+        if (is_function_output(field_id)) {
+            return meta.get_name().get();
+        }
+        return std::to_string(field_id.get());
+    }
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
@@ -585,6 +617,10 @@ class Schema {
         external_source_;  // External data source identifier (e.g., S3 path, table name)
     std::string
         external_spec_;  // External data source specification (JSON format)
+
+    // Field ids declared as function outputs in the collection's FunctionSchema
+    // list. Populated during ParseFrom after all fields are added.
+    std::unordered_set<FieldId> function_output_field_ids_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

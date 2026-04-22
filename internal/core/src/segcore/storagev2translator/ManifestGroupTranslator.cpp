@@ -412,10 +412,17 @@ ManifestGroupTranslator::load_group_chunk(
         try {
             field_id = std::stoll(column_name);
         } catch (const std::exception&) {
-            // External collection fallback: resolve by column name
+            // External collection fallback: column_name is non-numeric, so it
+            // comes from an external manifest — either an external_field
+            // mapping or a function-output field name. Normal fields are
+            // stored by numeric field id and take the stoll path above.
             for (const auto& [fid, meta] : field_metas_) {
                 if (meta.is_external_field() &&
                     meta.get_external_field() == column_name) {
+                    field_id = fid.get();
+                    break;
+                }
+                if (meta.get_name().get() == column_name) {
                     field_id = fid.get();
                     break;
                 }

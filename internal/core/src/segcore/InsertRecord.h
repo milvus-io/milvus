@@ -288,6 +288,15 @@ class OffsetMap {
 
     virtual size_t
     memory_size() const = 0;
+
+    // Returns true if the implementation stores nothing per-row (e.g.
+    // VirtualPKOffsetMap derives pk→offset via bit-extract). Callers that
+    // fall back to full pk-column scans (GetAllChunks + two-pointers) can
+    // short-circuit to find_range() when this is true — O(M) not O(M+N).
+    virtual bool
+    is_zero_storage() const {
+        return false;
+    }
 };
 
 template <typename T>
@@ -956,6 +965,11 @@ class VirtualPKOffsetMap : public OffsetMap {
         return sizeof(VirtualPKOffsetMap);
     }
 
+    bool
+    is_zero_storage() const override {
+        return true;
+    }
+
  private:
     int64_t truncated_segment_id_;
     int64_t shifted_segment_id_;
@@ -1039,6 +1053,14 @@ class InsertRecordSealed {
                     BitsetTypeView& bitset) const {
         pk2offset_->find_range(
             pk, op, bitset, [](int64_t offset) { return true; });
+    }
+
+    // Returns true when the owned pk2offset_ is a zero-storage map
+    // (currently only VirtualPKOffsetMap). Used by sealed-segment search_pks
+    // to short-circuit the sorted two-pointers path.
+    bool
+    pk2offset_is_zero_storage() const {
+        return pk2offset_ != nullptr && pk2offset_->is_zero_storage();
     }
 
     void
@@ -1348,6 +1370,14 @@ class InsertRecordGrowing {
                     BitsetTypeView& bitset) const {
         pk2offset_->find_range(
             pk, op, bitset, [](int64_t offset) { return true; });
+    }
+
+    // Returns true when the owned pk2offset_ is a zero-storage map
+    // (currently only VirtualPKOffsetMap). Used by sealed-segment search_pks
+    // to short-circuit the sorted two-pointers path.
+    bool
+    pk2offset_is_zero_storage() const {
+        return pk2offset_ != nullptr && pk2offset_->is_zero_storage();
     }
 
     void

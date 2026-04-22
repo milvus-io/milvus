@@ -129,6 +129,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema->set_external_spec(schema_proto.external_spec());
     }
 
+    // Collect function output field ids from FunctionSchema list.
+    for (const auto& fn : schema_proto.functions()) {
+        for (auto out_id : fn.output_field_ids()) {
+            schema->add_function_output_field_id(FieldId(out_id));
+        }
+    }
+
     return schema;
 }
 
@@ -237,8 +244,13 @@ Schema::GetExternalColumnNames() const {
     auto columns = std::make_shared<std::vector<std::string>>();
     for (const auto& field_id : field_ids_) {
         auto it = fields_.find(field_id);
-        if (it != fields_.end() && it->second.is_external_field()) {
+        if (it == fields_.end()) continue;
+        if (it->second.is_external_field()) {
             columns->push_back(it->second.get_external_field());
+        } else if (is_function_output(field_id)) {
+            // Function output fields are computed and stored in the manifest
+            // alongside external columns. Use field name as column name.
+            columns->push_back(it->second.get_name().get());
         }
     }
     return columns;
@@ -250,6 +262,11 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
         for (const auto& [fid, meta] : fields_) {
             if (meta.is_external_field() &&
                 meta.get_external_field() == column_name) {
+                return fid;
+            }
+            // Function output fields use field name as column name in manifest
+            if (is_function_output(fid) &&
+                meta.get_name().get() == column_name) {
                 return fid;
             }
         }

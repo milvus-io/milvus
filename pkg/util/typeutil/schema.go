@@ -2199,10 +2199,6 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return nil
 	}
 
-	if len(schema.GetFunctions()) > 0 {
-		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
-	}
-
 	if schema.GetEnableDynamicField() {
 		return fmt.Errorf("external collection %s does not support dynamic field", schema.GetName())
 	}
@@ -2214,12 +2210,20 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+
+		// Function output fields are computed internally, skip all external-data checks.
+		if field.GetIsFunctionOutput() {
+			if field.GetExternalField() != "" {
+				return fmt.Errorf("function output field '%s' in external collection %s must not have external_field mapping", field.GetName(), schema.GetName())
+			}
 			continue
 		}
 
 		if field.GetIsPrimaryKey() {
-			return fmt.Errorf("external collection %s does not support primary key field %s", schema.GetName(), field.GetName())
+			return fmt.Errorf("external collection %s does not support user-defined primary key field %s", schema.GetName(), field.GetName())
 		}
 		if field.GetIsPartitionKey() {
 			return fmt.Errorf("external collection %s does not support partition key field %s", schema.GetName(), field.GetName())
@@ -2250,7 +2254,11 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	// Force nullable for external fields: Parquet columns can contain nulls,
 	// and a non-nullable field would silently produce incorrect results.
 	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) {
+		if IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		// Function output fields are computed internally.
+		if field.GetIsFunctionOutput() {
 			continue
 		}
 		if !field.GetNullable() {
@@ -2261,7 +2269,10 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	return nil
 }
 
-func isExternalSystemOrVirtualField(name string) bool {
+// IsExternalSystemOrVirtualField returns true for names reserved by the
+// external-table pipeline (RowID, Timestamp, VirtualPK) and never present in
+// user-provided external source data.
+func IsExternalSystemOrVirtualField(name string) bool {
 	return name == common.RowIDFieldName ||
 		name == common.TimeStampFieldName ||
 		name == common.VirtualPKFieldName

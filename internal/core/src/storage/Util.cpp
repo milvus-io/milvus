@@ -1509,12 +1509,17 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    // Determine the column name to use: external fields use their external name,
-    // internal fields use the numeric field ID string.
+    // Determine the column name to use:
+    //   - external input fields: external column name
+    //   - function output fields on external collections: field name
+    //     (function_executor writes columns into the manifest by field name)
+    //   - internal fields: numeric field ID string
     std::string column_name;
     const auto& ext_field = field_meta.field_schema.external_field();
     if (!ext_field.empty()) {
         column_name = ext_field;
+    } else if (field_meta.field_schema.is_function_output()) {
+        column_name = field_meta.field_schema.name();
     } else {
         column_name = std::to_string(field_meta.field_id);
     }
