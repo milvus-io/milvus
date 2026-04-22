@@ -6,6 +6,7 @@ import time
 import pytest
 from common.common_type import CaseLabel
 from .base import TestCDCSyncBase
+from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
 
 
 @pytest.mark.tags(CaseLabel.CDC)
@@ -67,8 +68,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         # Test normal topology setup
-        upstream_client.update_replicate_configuration(**config)
-        downstream_client.update_replicate_configuration(**config)
+        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
+        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
 
         # Wait for configuration to take effect
         time.sleep(3)
@@ -138,8 +139,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
 
-        upstream_client.update_replicate_configuration(**original_config)
-        downstream_client.update_replicate_configuration(**original_config)
+        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config)
+        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **original_config)
         time.sleep(3)
 
         # Now switch the direction (target -> source)
@@ -174,8 +175,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         # Apply switched configuration
-        upstream_client.update_replicate_configuration(**switched_config)
-        downstream_client.update_replicate_configuration(**switched_config)
+        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config)
+        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **switched_config)
         time.sleep(3)
 
         # Test the switched topology by creating collection on downstream (now source)
@@ -229,7 +230,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
         }
 
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(**invalid_config_1)
+            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_1)
 
         # Test case 4.2: Circular dependency (A -> B, B -> A)
         invalid_config_2 = {
@@ -262,7 +263,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
 
         # This may or may not fail depending on implementation, but test it
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(**invalid_config_2)
+            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_2)
 
         # Test case 4.3: Invalid connection parameters
         invalid_config_3 = {
@@ -292,7 +293,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(**invalid_config_3)
+            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_3)
 
         # Test case 4.4: Empty cluster list but non-empty topology
         invalid_config_4 = {
@@ -305,7 +306,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(**invalid_config_4)
+            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_4)
 
         # Test case 4.5: Invalid pchannel format
         invalid_config_5 = {
@@ -319,7 +320,7 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             "cross_cluster_topology": [],
         }
         with pytest.raises(Exception):
-            upstream_client.update_replicate_configuration(**invalid_config_5)
+            upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **invalid_config_5)
 
     @pytest.mark.order(-1)
     def test_clear_configuration_disconnect(
@@ -366,8 +367,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             ],
         }
 
-        upstream_client.update_replicate_configuration(**config)
-        downstream_client.update_replicate_configuration(**config)
+        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
+        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config)
         time.sleep(3)
 
         # Verify topology is working
@@ -415,8 +416,8 @@ class TestCDCTopologySetup(TestCDCSyncBase):
             "cross_cluster_topology": [],
         }
         # Apply empty configuration to disconnect CDC
-        upstream_client.update_replicate_configuration(**empty_upstream_config)
-        downstream_client.update_replicate_configuration(**empty_downstream_config)
+        upstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_upstream_config)
+        downstream_client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **empty_downstream_config)
         time.sleep(3)
 
         # Test that CDC is disconnected - create new collection and verify it doesn't sync

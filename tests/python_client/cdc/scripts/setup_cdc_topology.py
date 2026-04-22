@@ -1,5 +1,6 @@
 from pymilvus import MilvusClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
 
 def setup_cdc_topology(upstream_uri, downstream_uri, removed_clusters_uri, upstream_token, downstream_token, removed_clusters_token, source_cluster_id, target_cluster_id, removed_clusters_id, pchannel_num):
     print(f"DEBUG: upstream_uri: {upstream_uri}, downstream_uri: {downstream_uri}, upstream_token: {upstream_token}, downstream_token: {downstream_token}, source_cluster_id: {source_cluster_id}, target_cluster_id: {target_cluster_id}, pchannel_num: {pchannel_num}")
@@ -77,7 +78,7 @@ def setup_cdc_topology(upstream_uri, downstream_uri, removed_clusters_uri, upstr
 
     def update_client_config(client, config_to_use, client_type=""):
         try:
-            client.update_replicate_configuration(**config_to_use)
+            client.update_replicate_configuration(timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS, **config_to_use)
             return f"{client_type} updated successfully"
         except Exception as e:
             print(f"Failed to update {client_type}: {e}")

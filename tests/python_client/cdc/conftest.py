@@ -9,6 +9,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS = 600
+
 def pytest_addoption(parser):
     """Add command line options for pytest."""
     parser.addoption(
@@ -194,8 +196,8 @@ def switchover_helper(request, upstream_client, downstream_client):
             ],
             "cross_cluster_topology": [{"source_cluster_id": new_source_id, "target_cluster_id": new_target_id}],
         }
-        upstream_client.update_replicate_configuration(**config)
-        downstream_client.update_replicate_configuration(**config)
+        upstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
+        downstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
         logger.info("Switchover completed, waiting 10s for stabilization...")
         time.sleep(10)
 
@@ -251,8 +253,8 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
 
     try:
         # Update replication configuration on both clusters
-        upstream_client.update_replicate_configuration(**config)
-        downstream_client.update_replicate_configuration(**config)
+        upstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
+        downstream_client.update_replicate_configuration(**config, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS)
         logger.info("CDC topology setup completed successfully")
 
         # Allow some time for CDC to initialize
