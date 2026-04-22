@@ -40,10 +40,7 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	meta, err := newMemoryMeta(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
-		if segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Flushed {
-			segment.IsSorted = true
-		}
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())

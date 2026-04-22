@@ -466,28 +466,34 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 }
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
-	var operators []UpdateOperator
-	storageConfig := compaction.CreateStorageConfig()
+	mutations := map[int64][]SegmentOperator{}
 	for _, seg := range outputSegs {
-		if len(seg.GetDeltalogs()) > 0 {
-			operators = append(operators, AddL0DeltalogsAndUpdateManifestOperator(
-				seg.GetSegmentID(),
-				seg.GetDeltalogs(),
-				storageConfig,
-				t.committedV3Manifests,
-			))
-		}
+		deltalogs := seg.GetDeltalogs() // capture
+		manifest := seg.GetManifest()   // capture
+		mutations[seg.GetSegmentID()] = []SegmentOperator{func(s *SegmentInfo) (BinlogIncrement, bool) {
+			if manifest != "" {
+				s.ManifestPath = manifest
+				return BinlogIncrement{}, true
+			}
+			s.Deltalogs = mergeFieldBinlogs(s.GetDeltalogs(), deltalogs)
+			return BinlogIncrement{Deltalogs: s.Deltalogs}, true
+		}}
 	}
 
 	for _, segID := range t.GetTaskProto().InputSegments {
-		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
+		mutations[segID] = []SegmentOperator{func(s *SegmentInfo) (BinlogIncrement, bool) {
+			s.State = commonpb.SegmentState_Dropped
+			s.DroppedAt = uint64(time.Now().UnixNano())
+			s.Compacted = true
+			return BinlogIncrement{}, true
+		}}
 	}
 
 	mlog.Info(context.TODO(), "meta update: update segments info for level zero compaction",
 		mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
-	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
+	return t.meta.UpdateSegmentsInfo(context.TODO(), mutations)
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

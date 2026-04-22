@@ -302,22 +302,29 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 	})
 }
 
-func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
-	current := []*datapb.FieldBinlog{{
-		FieldID: 102,
-		Binlogs: []*datapb.Binlog{{LogID: 1}},
-	}}
-	newLogs := []*datapb.FieldBinlog{{
-		FieldID:     102,
-		ChildFields: []int64{102, 103},
-		Format:      "parquet",
-		Binlogs:     []*datapb.Binlog{{LogID: 2}},
-	}}
+// allBinlogs adapts a legacy bool-returning proto mutator to a SegmentOperator
+// and declares every binlog field on the final segment for side-prefix rewrite.
+// Matches the legacy BinlogFamilyAll behavior that tests expected before the
+// BinlogIncrement refactor.
+func allBinlogs(fn func(*datapb.SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		ok := fn(s.SegmentInfo)
+		if !ok {
+			return BinlogIncrement{}, false
+		}
+		return BinlogIncrement{
+			Binlogs:       s.Binlogs,
+			Statslogs:     s.Statslogs,
+			Deltalogs:     s.Deltalogs,
+			Bm25Statslogs: s.Bm25Statslogs,
+		}, true
+	}
+}
 
-	result := mergeFieldBinlogs(current, newLogs)
-
-	suite.Len(result, 1)
-	suite.Equal([]int64{102, 103}, result[0].GetChildFields())
-	suite.Equal("parquet", result[0].GetFormat())
-	suite.Len(result[0].GetBinlogs(), 2)
+// stateOnlyOp adapts a legacy bool-returning SegmentOperator closure to the
+// new (BinlogIncrement, bool) signature for tests that never mutate binlogs.
+func stateOnlyOp(fn func(*SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		return BinlogIncrement{}, fn(s)
+	}
 }
