@@ -1720,15 +1720,15 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 	s.meta = &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 	}
-	s.meta.segments.segments[1] = NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                   1,
 		CollectionID:         0,
 		PartitionID:          0,
 		State:                commonpb.SegmentState_Growing,
 		IsCreatedByStreaming: false,
-	})
+	}), 0)
 
 	assert.NoError(t, err)
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
@@ -1843,7 +1843,7 @@ func createTestFlushAllServer() *Server {
 		meta: &meta{
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			channelCPs:  newChannelCps(),
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -2243,8 +2243,8 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		// Set segment channel
 		seg1.InsertChannel = channelName
 		seg2.InsertChannel = channelName
-		meta.segments.SetSegment(seg1.ID, seg1)
-		meta.segments.SetSegment(seg2.ID, seg2)
+		meta.segments.SetSegment(seg1.ID, seg1, 0)
+		meta.segments.SetSegment(seg2.ID, seg2, 0)
 
 		err = s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
 		assert.NoError(t, err)
@@ -4231,14 +4231,14 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
 				return nil
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -4273,7 +4273,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -4302,14 +4302,14 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
 				return errors.New("update segments info failed")
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)

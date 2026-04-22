@@ -539,20 +539,18 @@ func TestGetDistJSON(t *testing.T) {
 		ctx := context.Background()
 
 		svr.meta = &meta{
-			segments: &SegmentsInfo{
-				segments: map[int64]*SegmentInfo{
-					1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:            1,
-							CollectionID:  1,
-							PartitionID:   1,
-							InsertChannel: "channel1",
-							Level:         datapb.SegmentLevel_L1,
-							State:         commonpb.SegmentState_Flushed,
-						},
+			segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            1,
+						CollectionID:  1,
+						PartitionID:   1,
+						InsertChannel: "channel1",
+						Level:         datapb.SegmentLevel_L1,
+						State:         commonpb.SegmentState_Flushed,
 					},
 				},
-			},
+			}),
 		}
 
 		segments := []*metricsinfo.Segment{
@@ -581,7 +579,7 @@ func TestGetDistJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		svr.meta = &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}}}
+		svr.meta = &meta{segments: NewCachedSegmentsInfo()}
 		expectedJSON := "{}"
 		actualJSON := svr.getDistJSON(ctx, req)
 		assert.Equal(t, expectedJSON, actualJSON)
@@ -610,18 +608,16 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 	segIndexes.Insert(1000, segIdx0)
 	s := &Server{
 		meta: &meta{
-			segments: &SegmentsInfo{
-				segments: map[int64]*SegmentInfo{
-					1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:            1,
-							CollectionID:  1,
-							PartitionID:   2,
-							InsertChannel: "channel1",
-						},
+			segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            1,
+						CollectionID:  1,
+						PartitionID:   2,
+						InsertChannel: "channel1",
 					},
 				},
-			},
+			}),
 			indexMeta: &indexMeta{
 				segmentIndexes: segIndexes,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{

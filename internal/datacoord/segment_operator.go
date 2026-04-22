@@ -16,66 +16,156 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+import (
+	"context"
 
-// SegmentOperator is function type to update segment info.
-type SegmentOperator func(segment *SegmentInfo) bool
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+// SegmentOperator mutates a segment in place and reports:
+//   - the binlog fields it changed (if any) so the caller can rewrite the
+//     matching side-prefix KVs;
+//   - whether the write should proceed at all.
+//
+// Return (BinlogIncrement{}, true) for state-only mutations.
+// Return (_, false) to skip the write for this segment.
+type SegmentOperator func(segment *SegmentInfo) (BinlogIncrement, bool)
 
 func SetMaxRowCount(maxRow int64) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.MaxRowNum == maxRow {
-			return false
+			return BinlogIncrement{}, false
 		}
 		segment.MaxRowNum = maxRow
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.TextStatsLogs == nil {
 			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
 		}
 		for field, logs := range textIndexLogs {
 			segment.TextStatsLogs[field] = logs
 		}
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		segment.Statslogs = statslogs
-		return true
+		return BinlogIncrement{Statslogs: statslogs}, true
 	}
 }
 
 func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		segment.Bm25Statslogs = bm25Statslogs
-		return true
+		return BinlogIncrement{Bm25Statslogs: bm25Statslogs}, true
 	}
 }
 
 func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.JsonKeyStats == nil {
 			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
 		}
 		for field, logs := range jsonKeyIndexLogs {
 			segment.JsonKeyStats[field] = logs
 		}
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetSchemaVersion(schemaVersion int32) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.GetSchemaVersion() == schemaVersion {
-			return false
+			return BinlogIncrement{}, false
 		}
 		segment.SchemaVersion = schemaVersion
-		return true
+		return BinlogIncrement{}, true
+	}
+}
+
+// UpdateSegmentColumnGroupsOperator upserts storage-v2 column groups on a
+// segment's FieldBinlogs and removes the listed child fields from any other
+// pre-existing group whose child_fields contained them, so that every field
+// lives in exactly one column group. Idempotent: if a group with the same
+// top-level fieldID already exists, it is replaced in place.
+func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		incomingChildFields := typeutil.NewSet[int64]()
+		for _, g := range groups {
+			incomingChildFields.Insert(g.GetChildFields()...)
+		}
+
+		var droppedFieldIDs []int64
+		kept := segment.Binlogs[:0]
+		for _, existing := range segment.Binlogs {
+			if _, replaced := groups[existing.GetFieldID()]; replaced {
+				continue
+			}
+			if len(existing.GetChildFields()) > 0 {
+				existing.ChildFields = lo.Filter(existing.GetChildFields(), func(fid int64, _ int) bool {
+					return !incomingChildFields.Contain(fid)
+				})
+				if len(existing.ChildFields) == 0 {
+					droppedFieldIDs = append(droppedFieldIDs, existing.GetFieldID())
+					continue
+				}
+			}
+			kept = append(kept, existing)
+		}
+		segment.Binlogs = kept
+
+		for _, g := range groups {
+			segment.Binlogs = append(segment.Binlogs, g)
+		}
+
+		// Bump DataVersion so querynodes with the segment already loaded will Reopen;
+		// ManifestPath is intentionally not moved here (see segment_checker.isSegmentUpdate).
+		segment.DataVersion++
+
+		return BinlogIncrement{
+			Binlogs:               segment.Binlogs,
+			DroppedBinlogFieldIDs: droppedFieldIDs,
+		}, true
+	}
+}
+
+func UpdateManifestVersion(segmentID int64, manifestVersion int64) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		if segment.GetManifestPath() == "" {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - no manifest path",
+				zap.Int64("segmentID", segmentID))
+			return BinlogIncrement{}, false
+		}
+		basePath, currentVer, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return BinlogIncrement{}, false
+		}
+		// Guard against version rollback. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but a concurrent compaction may advance
+		// ManifestPath between pre-check and this apply.
+		if currentVer >= manifestVersion {
+			if currentVer > manifestVersion {
+				log.Ctx(context.TODO()).Warn("meta update: update manifest version rejected - would regress",
+					zap.Int64("segmentID", segmentID),
+					zap.Int64("currentVer", currentVer),
+					zap.Int64("incomingVer", manifestVersion))
+			}
+			return BinlogIncrement{}, false
+		}
+		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		return BinlogIncrement{}, true
 	}
 }
 

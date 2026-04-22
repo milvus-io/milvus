@@ -130,3 +130,11 @@ func (m *ConcurrentMap[K, V]) Keys() []K {
 	})
 	return ret
 }
+
+func (m *ConcurrentMap[K, V]) CompareAndSwap(key K, old, new V) bool {
+	return m.inner.CompareAndSwap(key, old, new)
+}
+
+func (m *ConcurrentMap[K, V]) CompareAndDelete(key K, old V) bool {
+	return m.inner.CompareAndDelete(key, old)
+}

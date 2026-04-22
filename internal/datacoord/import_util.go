@@ -856,8 +856,15 @@ func createSortCompactionTask(ctx context.Context,
 ) (*datapb.CompactionTask, error) {
 	log := log.Ctx(ctx).With(WrapTaskLog(t)...)
 	if originSegment.GetNumOfRows() == 0 {
-		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
-		err := meta.UpdateSegmentsInfo(ctx, operator)
+		segID := originSegment.GetID()
+		mutations := map[int64][]SegmentOperator{
+			segID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+				return BinlogIncrement{}, true
+			}},
+		}
+		err := meta.UpdateSegmentsInfo(ctx, mutations)
 		if err != nil {
 			log.Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
 			return nil, err

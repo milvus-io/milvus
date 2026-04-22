@@ -374,7 +374,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
 
@@ -395,7 +395,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).
 			Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)
@@ -415,7 +415,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)

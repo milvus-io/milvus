@@ -91,11 +91,11 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	}
 	segments := genSegmentsForMeta(s.testLabel)
 	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -713,7 +713,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: 1,
 			},
-		})
+		}, 0)
 
 		// Inline views come from TriggerInline(), not Trigger(). Trigger() returns nothing.
 		// The inline view is applied before isFull() is even consulted, so schema version
@@ -786,7 +786,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: 1,
 			},
-		})
+		}, 0)
 
 		mockPolicy := &testCompactionPolicy{
 			enabled:    true,

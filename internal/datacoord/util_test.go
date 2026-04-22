@@ -268,3 +268,30 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 		suite.Equal(1, len(fb104.Binlogs))
 	})
 }
+
+// allBinlogs adapts a legacy bool-returning proto mutator to a SegmentOperator
+// and declares every binlog field on the final segment for side-prefix rewrite.
+// Matches the legacy BinlogFamilyAll behavior that tests expected before the
+// BinlogIncrement refactor.
+func allBinlogs(fn func(*datapb.SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		ok := fn(s.SegmentInfo)
+		if !ok {
+			return BinlogIncrement{}, false
+		}
+		return BinlogIncrement{
+			Binlogs:       s.Binlogs,
+			Statslogs:     s.Statslogs,
+			Deltalogs:     s.Deltalogs,
+			Bm25Statslogs: s.Bm25Statslogs,
+		}, true
+	}
+}
+
+// stateOnlyOp adapts a legacy bool-returning SegmentOperator closure to the
+// new (BinlogIncrement, bool) signature for tests that never mutate binlogs.
+func stateOnlyOp(fn func(*SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		return BinlogIncrement{}, fn(s)
+	}
+}

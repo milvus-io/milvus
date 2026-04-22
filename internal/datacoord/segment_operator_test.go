@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -37,11 +38,11 @@ func (s *TestSegmentOperatorSuite) TestSetMaxRowCount() {
 	}
 
 	ops := SetMaxRowCount(20000)
-	updated := ops(segment)
+	_, updated := ops(segment)
 	s.Require().True(updated)
 	s.EqualValues(20000, segment.GetMaxRowNum())
 
-	updated = ops(segment)
+	_, updated = ops(segment)
 	s.False(updated)
 }
 
@@ -50,17 +51,25 @@ func TestSegmentOperators(t *testing.T) {
 }
 
 func TestUpdateImportSegmentPosition(t *testing.T) {
-	t.Run("segment not found", func(t *testing.T) {
-		// Create a meta with empty segments to properly test the "not found" case
-		segments := NewSegmentsInfo()
-		m := &meta{segments: segments}
-		modPack := &updateSegmentPack{
-			meta:     m,
-			segments: make(map[int64]*SegmentInfo),
+	updateImportSegmentPosition := func(segment *SegmentInfo, startTs, dmlTs uint64) bool {
+		if segment == nil {
+			return false
 		}
-		op := UpdateImportSegmentPosition(100, 1000, 2000)
-		result := op(modPack)
-		assert.False(t, result)
+
+		channel := segment.GetInsertChannel()
+		segment.StartPosition = &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   startTs,
+		}
+		segment.DmlPosition = &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   dmlTs,
+		}
+		return true
+	}
+
+	t.Run("segment not found", func(t *testing.T) {
+		assert.False(t, updateImportSegmentPosition(nil, 1000, 2000))
 	})
 
 	t.Run("update position successfully", func(t *testing.T) {
@@ -70,13 +79,7 @@ func TestUpdateImportSegmentPosition(t *testing.T) {
 				InsertChannel: "test_channel",
 			},
 		}
-		modPack := &updateSegmentPack{
-			segments: map[int64]*SegmentInfo{
-				100: segment,
-			},
-		}
-		op := UpdateImportSegmentPosition(100, 1000, 2000)
-		result := op(modPack)
+		result := updateImportSegmentPosition(segment, 1000, 2000)
 		assert.True(t, result)
 
 		// Verify StartPosition
@@ -99,13 +102,7 @@ func TestUpdateImportSegmentPosition(t *testing.T) {
 				InsertChannel: "channel_2",
 			},
 		}
-		modPack := &updateSegmentPack{
-			segments: map[int64]*SegmentInfo{
-				101: segment,
-			},
-		}
-		op := UpdateImportSegmentPosition(101, 0, 0)
-		result := op(modPack)
+		result := updateImportSegmentPosition(segment, 0, 0)
 		assert.True(t, result)
 
 		assert.NotNil(t, segment.GetStartPosition())

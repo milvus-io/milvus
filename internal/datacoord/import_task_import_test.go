@@ -321,7 +321,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			alloc: nil,
 			meta: &meta{
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -362,7 +362,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			alloc: nil,
 			meta: &meta{
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -376,13 +376,13 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				ID:        5,
 				NumOfRows: 100,
 			},
-		})
+		}, 0)
 		task.meta.segments.SetSegment(6, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        6,
 				NumOfRows: 100,
 			},
-		})
+		}, 0)
 
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
@@ -439,7 +439,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			alloc: nil,
 			meta: &meta{
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -453,13 +453,13 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				ID:        5,
 				NumOfRows: 100,
 			},
-		})
+		}, 0)
 		task.meta.segments.SetSegment(6, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        6,
 				NumOfRows: 100,
 			},
-		})
+		}, 0)
 
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
