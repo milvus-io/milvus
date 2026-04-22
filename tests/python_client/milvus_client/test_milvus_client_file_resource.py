@@ -284,7 +284,7 @@ class TestMilvusClientFileResourceRemove(FileResourceTestBase):
         self.remove_file_resource(client, cf.gen_unique_str(prefix))
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_remove_idempotent(self, file_resource_env):
+    def test_remove_idempotent_double_remove(self, file_resource_env):
         """
         target: double remove is idempotent
         method: add -> remove -> remove
