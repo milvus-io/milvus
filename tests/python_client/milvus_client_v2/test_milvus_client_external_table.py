@@ -739,6 +739,61 @@ class TestExternalCrossBucket(TestMilvusClientV2Base):
             cleanup_minio_prefix(minio_client, external_bucket, f"{ext_path}/")
 
 
+class TestSchemalessReader(TestMilvusClientV2Base):
+    """Schemaless reader with column projection (Part8-1/4 #49061).
+
+    The reader opens parquet with a nullptr arrow schema and an explicit
+    needed_columns projection, instead of requiring the parquet schema to
+    match the collection schema exactly. Extra columns in the source file
+    should be ignored silently.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_parquet_with_extra_columns_ignored(self, minio_client_and_cfg):
+        """9-column parquet + 3-column external schema: extra columns are silently dropped."""
+        minio_client, minio_cfg = minio_client_and_cfg
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        ext_path = f"external-e2e-test/{collection_name}"
+
+        num_rows = 200
+        data = generate_multi_type_parquet_bytes(num_rows, 0)
+        upload_to_minio(minio_client, minio_cfg["bucket"],
+                        f"{ext_path}/data.parquet", data)
+
+        # Parquet has 9 columns; schema only projects 3 of them.
+        schema = client.create_schema(
+            external_source=ext_path,
+            external_spec='{"format":"parquet"}',
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("int32_val", DataType.INT32, external_field="int32_val")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_VEC_DIM,
+                         external_field="embedding")
+
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            refresh_and_wait(client, collection_name)
+            index_and_load(client, collection_name)
+
+            count = query_count(client, collection_name)
+            assert count == num_rows, f"expected {num_rows} rows, got {count}"
+
+            # Spot-check that the 3 projected columns carry the right values
+            # (id=5 → int32_val = 5*100 = 500), confirming the reader selected
+            # the right columns from the 9-column file rather than mis-mapping.
+            res = client.query(collection_name, filter="id == 5",
+                               output_fields=["id", "int32_val"])
+            assert len(res) == 1, f"expected 1 match for id==5, got {len(res)}"
+            assert res[0]["id"] == 5
+            assert res[0]["int32_val"] == 500
+            log.info(f"[schemaless] ✓ {num_rows} rows via 3-col projection "
+                     f"from 9-col parquet; id=5 → int32_val=500")
+        finally:
+            client.drop_collection(collection_name)
+            cleanup_minio_prefix(minio_client, minio_cfg["bucket"], f"{ext_path}/")
+
+
 class TestExternalCollectionLoadAndQuery(TestMilvusClientV2Base):
     """Full lifecycle: query count, filter, search, hybrid, pagination, multi-vector, output vector."""
 
