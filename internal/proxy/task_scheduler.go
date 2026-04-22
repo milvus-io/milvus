@@ -93,7 +93,13 @@ func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 		return merr.WrapErrTooManyRequests(int32(queue.getMaxTaskNum()))
 	}
 	queue.unissuedTasks.PushBack(t)
-	queue.utBufChan <- 1
+	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
+	// means "the unissued list is non-empty, wake the scheduler". Concurrent
+	// sends coalesce; the scheduler drains the list on each wake.
+	select {
+	case queue.utBufChan <- 1:
+	default:
+	}
 	return nil
 }
 
@@ -230,7 +236,7 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
 		maxTaskNum:      Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
-		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum.GetAsInt()),
+		utBufChan:       make(chan int, 1),
 		tsoAllocatorIns: tsoAllocatorIns,
 	}
 }
@@ -546,10 +552,10 @@ func (sched *taskScheduler) definitionLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.ddQueue.utChan():
-			if !sched.ddQueue.utEmpty() {
-				t := sched.scheduleDdTask()
+			for t := sched.scheduleDdTask(); t != nil; t = sched.scheduleDdTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.ddQueue)
+					sched.processTask(task, sched.ddQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -569,10 +575,10 @@ func (sched *taskScheduler) controlLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dcQueue.utChan():
-			if !sched.dcQueue.utEmpty() {
-				t := sched.scheduleDcTask()
+			for t := sched.scheduleDcTask(); t != nil; t = sched.scheduleDcTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dcQueue)
+					sched.processTask(task, sched.dcQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -590,10 +596,10 @@ func (sched *taskScheduler) manipulationLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dmQueue.utChan():
-			if !sched.dmQueue.utEmpty() {
-				t := sched.scheduleDmTask()
+			for t := sched.scheduleDmTask(); t != nil; t = sched.scheduleDmTask() {
+				task := t
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dmQueue)
+					sched.processTask(task, sched.dmQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -616,19 +622,17 @@ func (sched *taskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.dqQueue.utChan():
-			if !sched.dqQueue.utEmpty() {
-				t := sched.scheduleDqTask()
+			for t := sched.scheduleDqTask(); t != nil; t = sched.scheduleDqTask() {
+				task := t
 				p := pool
 				// if task is sub task spawned by another, use sub task pool in case of deadlock
-				if t.IsSubTask() {
+				if task.IsSubTask() {
 					p = subTaskPool
 				}
 				p.Submit(func() (struct{}, error) {
-					sched.processTask(t, sched.dqQueue)
+					sched.processTask(task, sched.dqQueue)
 					return struct{}{}, nil
 				})
-			} else {
-				log.Ctx(context.TODO()).Debug("query queue is empty ...")
 			}
 			sched.dqQueue.updateMetrics()
 		}
