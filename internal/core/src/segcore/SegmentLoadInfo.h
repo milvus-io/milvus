@@ -830,6 +830,11 @@ class SegmentLoadInfo {
                created_text_indexes_.end();
     }
 
+    [[nodiscard]] const std::unordered_set<FieldId>&
+    GetCreatedTextIndexes() const {
+        return created_text_indexes_;
+    }
+
     // ==================== Diff Computation ====================
 
     /**
