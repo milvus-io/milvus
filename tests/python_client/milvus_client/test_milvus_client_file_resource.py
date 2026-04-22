@@ -131,17 +131,32 @@ class FileResourceTestBase(TestMilvusClientV2Base):
             field_name="sparse_vector",
             index_type="SPARSE_INVERTED_INDEX",
             metric_type="BM25",
+            index_name="sparse_vector",
         )
         self.create_index(client, col_name, index_params)
+        # Poll until the sparse index finishes building before loading.
+        assert self.wait_for_index_ready(client, col_name, "sparse_vector"), (
+            f"sparse_vector index not ready within timeout for {col_name}"
+        )
         self.load_collection(client, col_name)
-        time.sleep(1)
 
     def insert_and_build_bm25(self, client, col_name, texts):
-        """Insert rows, build sparse index, load collection."""
+        """Insert rows, flush to make segments visible, then build and load."""
         data = [{"text": t} for t in texts]
         self.insert(client, col_name, data)
-        time.sleep(2)
+        # flush is synchronous and waits for segments to be persisted —
+        # replaces the previous arbitrary time.sleep(2).
+        self.flush(client, col_name)
         self.build_and_load_bm25(client, col_name)
+
+    def wait_until(self, condition, timeout=30, interval=1):
+        """Poll `condition` callable until it returns truthy or timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if condition():
+                return True
+            time.sleep(interval)
+        return False
 
 
 class TestMilvusClientFileResourceAdd(FileResourceTestBase):
@@ -919,9 +934,8 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         # 2. create two collections referencing the resource
         self.create_bm25_collection_with_stop_filter(client, col1, res_name)
         self.create_bm25_collection_with_stop_filter(client, col2, res_name)
-        # 3. drop one collection
+        # 3. drop one collection (drop_collection is synchronous at meta layer)
         self.drop_collection(client, col1)
-        time.sleep(1)
         # 4. remove should still fail (col2 still references)
         error = {ct.err_code: 65535, ct.err_msg: "is still in use"}
         self.remove_file_resource(client, res_name, check_task=CheckTasks.err_res, check_items=error)
@@ -941,9 +955,20 @@ class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
         # 2. create and drop collection
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         self.drop_collection(client, col_name)
-        time.sleep(1)
-        # 3. remove should succeed
-        self.remove_file_resource(client, res_name)
+
+        # 3. remove should succeed — poll until async refcount release lands.
+        def _remove_ok():
+            try:
+                self.remove_file_resource(client, res_name)
+                return True
+            except Exception as exc:
+                if "is still in use" in str(exc):
+                    return False
+                raise
+
+        assert self.wait_until(_remove_ok, timeout=30, interval=1), (
+            f"{res_name} still marked in-use after all referencing collections dropped"
+        )
 
 
 class TestMilvusClientFileResourceSyncCheck(FileResourceTestBase):
