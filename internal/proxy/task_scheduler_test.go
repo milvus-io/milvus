@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestBaseTaskQueue(t *testing.T) {
@@ -675,4 +677,49 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 		err := queue.Enqueue(st)
 		assert.Error(t, err)
 	})
+}
+
+// blockingTsoAllocator blocks AllocOne on the caller's context so that a test
+// can distinguish "we reached the TSO allocator" from "we fast-failed".
+type blockingTsoAllocator struct {
+	calls atomic.Int64
+}
+
+func (b *blockingTsoAllocator) AllocOne(ctx context.Context) (Timestamp, error) {
+	b.calls.Add(1)
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// TestBaseTaskQueue_EnqueueFastFailBeforeAlloc verifies that Enqueue rejects
+// a task immediately with ErrServiceTooManyRequests when the queue is already
+// full, without invoking the TSO allocator. Regression test for #49223.
+func TestBaseTaskQueue_EnqueueFastFailBeforeAlloc(t *testing.T) {
+	tsoAllocatorIns := newMockTsoAllocator()
+	queue := newBaseTaskQueue(tsoAllocatorIns)
+	queue.setMaxTaskNum(2)
+
+	// Fill queue to capacity with the non-blocking mock allocator.
+	for i := 0; i < 2; i++ {
+		assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	}
+	assert.True(t, queue.utFull())
+
+	// Swap in an allocator that would hang forever if reached.
+	blocking := &blockingTsoAllocator{}
+	queue.tsoAllocatorIns = blocking
+
+	done := make(chan error, 1)
+	go func() {
+		done <- queue.Enqueue(newDefaultMockTask())
+	}()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Enqueue did not fast-fail; reached blocking TSO allocator")
+	}
+	assert.Equal(t, int64(0), blocking.calls.Load(),
+		"Enqueue must not reach the TSO allocator when the queue is already full")
 }
