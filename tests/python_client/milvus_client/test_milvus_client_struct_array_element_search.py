@@ -10,7 +10,6 @@ from common.constants import *  # noqa
 from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
 from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *  # noqa: F403
 
 prefix = "struct_elem_search"
 epsilon = 0.001
@@ -6113,7 +6112,8 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         struct_schema.add_field("color", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
-            "structA", datatype=DataType.ARRAY,
+            "structA",
+            datatype=DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct_schema,
             max_capacity=10,
@@ -6147,12 +6147,14 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
             "id": row_id,
             "doc_int": row_id,
             "normal_vector": _seed_vector(row_id + 999999),
-            "structA": [{
-                "embedding": _seed_vector(row_id * 1000),
-                "int_val": 0,
-                "str_val": f"inert_{row_id}",
-                "color": "Inert",
-            }],
+            "structA": [
+                {
+                    "embedding": _seed_vector(row_id * 1000),
+                    "int_val": 0,
+                    "str_val": f"inert_{row_id}",
+                    "color": "Inert",
+                }
+            ],
         }
 
     def _setup_collection(self, client, collection_name, controlled_rows):
@@ -6162,18 +6164,20 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="FLAT", metric_type="COSINE",
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="FLAT", metric_type="COSINE",
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         bg_start = 100000
         for start in range(0, default_nb, insert_batch_size):
-            batch = [self._make_inert_row(bg_start + start + k)
-                     for k in range(insert_batch_size)]
+            batch = [self._make_inert_row(bg_start + start + k) for k in range(insert_batch_size)]
             self.insert(client, collection_name, batch)
 
         half = len(controlled_rows) // 2
@@ -6183,39 +6187,38 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
             self.insert(client, collection_name, sealed_part)
         self.flush(client, collection_name)
 
-        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
-                      for k in range(default_growing_nb)]
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k) for k in range(default_growing_nb)]
         self.insert(client, collection_name, growing_bg)
         if growing_part:
             self.insert(client, collection_name, growing_part)
 
         self.load_collection(client, collection_name)
 
-    def _setup_collection_split(self, client, collection_name,
-                                 sealed_rows, growing_rows):
+    def _setup_collection_split(self, client, collection_name, sealed_rows, growing_rows):
         """Same as _setup_collection but with explicit sealed/growing row groups."""
         schema = self._create_schema(client)
         index_params = client.prepare_index_params()
         index_params.add_index(
-            field_name="normal_vector", index_type="FLAT", metric_type="COSINE",
+            field_name="normal_vector",
+            index_type="FLAT",
+            metric_type="COSINE",
         )
         index_params.add_index(
-            field_name="structA[embedding]", index_type="FLAT", metric_type="COSINE",
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
         )
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         bg_start = 100000
         for start in range(0, default_nb, insert_batch_size):
-            batch = [self._make_inert_row(bg_start + start + k)
-                     for k in range(insert_batch_size)]
+            batch = [self._make_inert_row(bg_start + start + k) for k in range(insert_batch_size)]
             self.insert(client, collection_name, batch)
         if sealed_rows:
             self.insert(client, collection_name, sealed_rows)
         self.flush(client, collection_name)
 
-        growing_bg = [self._make_inert_row(bg_start + default_nb + k)
-                      for k in range(default_growing_nb)]
+        growing_bg = [self._make_inert_row(bg_start + default_nb + k) for k in range(default_growing_nb)]
         self.insert(client, collection_name, growing_bg)
         if growing_rows:
             self.insert(client, collection_name, growing_rows)
@@ -6225,7 +6228,8 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
     def _search_ids(self, client, collection_name, expr, limit=None):
         """Run search() with given filter, return sorted unique controlled IDs."""
         results, check = self.search(
-            client, collection_name,
+            client,
+            collection_name,
             data=[self._query_vec()],
             anns_field="normal_vector",
             search_params={"metric_type": "COSINE"},
@@ -6257,8 +6261,9 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, rows)
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] == 100',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] == 100",
         )
         assert ids == [1, 2], f"Expected [1, 2], got {ids}"
 
@@ -6270,18 +6275,15 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_cmp")
 
-        rows = [
-            self._make_row(i, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
         self._setup_collection(client, collection_name, rows)
 
         cases = [
-            ('id < 100 && structA[0][int_val] != 30', [0, 1, 3, 4]),
-            ('id < 100 && structA[0][int_val] > 30', [3, 4]),
-            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4]),
-            ('id < 100 && structA[0][int_val] < 30', [0, 1]),
-            ('id < 100 && structA[0][int_val] <= 30', [0, 1, 2]),
+            ("id < 100 && structA[0][int_val] != 30", [0, 1, 3, 4]),
+            ("id < 100 && structA[0][int_val] > 30", [3, 4]),
+            ("id < 100 && structA[0][int_val] >= 30", [2, 3, 4]),
+            ("id < 100 && structA[0][int_val] < 30", [0, 1]),
+            ("id < 100 && structA[0][int_val] <= 30", [0, 1, 2]),
         ]
         for expr, expected in cases:
             ids = self._search_ids(client, collection_name, expr)
@@ -6295,21 +6297,20 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_in")
 
-        rows = [
-            self._make_row(i, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
         self._setup_collection(client, collection_name, rows)
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] in [10, 30, 50, 999]',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] in [10, 30, 50, 999]",
         )
         assert ids == [0, 2, 4], f"IN expected [0,2,4], got {ids}"
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] not in [10, 30, 50]',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] not in [10, 30, 50]",
         )
         assert ids == [1, 3], f"NOT IN expected [1,3], got {ids}"
 
@@ -6321,17 +6322,14 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_range")
 
-        rows = [
-            self._make_row(i, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
+        rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
         self._setup_collection(client, collection_name, rows)
 
         cases = [
-            ('id < 100 && 20 < structA[0][int_val] < 40', [2]),
-            ('id < 100 && 20 <= structA[0][int_val] <= 40', [1, 2, 3]),
-            ('id < 100 && 40 > structA[0][int_val] > 20', [2]),
-            ('id < 100 && 40 >= structA[0][int_val] >= 20', [1, 2, 3]),
+            ("id < 100 && 20 < structA[0][int_val] < 40", [2]),
+            ("id < 100 && 20 <= structA[0][int_val] <= 40", [1, 2, 3]),
+            ("id < 100 && 40 > structA[0][int_val] > 20", [2]),
+            ("id < 100 && 40 >= structA[0][int_val] >= 20", [1, 2, 3]),
         ]
         for expr, expected in cases:
             ids = self._search_ids(client, collection_name, expr)
@@ -6354,13 +6352,15 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, rows)
 
         ids = self._search_ids(
-            client, collection_name,
+            client,
+            collection_name,
             'id < 100 && structA[0][str_val] == "apple"',
         )
         assert ids == [0, 2]
 
         ids = self._search_ids(
-            client, collection_name,
+            client,
+            collection_name,
             'id < 100 && structA[0][str_val] in ["banana", "cherry"]',
         )
         assert ids == [1, 3]
@@ -6383,14 +6383,16 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, rows)
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] > 50 && structA[1][int_val] < 10',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] > 50 && structA[1][int_val] < 10",
         )
         assert ids == [0, 3, 4]
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && (structA[0][int_val] > 150 || structA[1][int_val] == 50)',
+            client,
+            collection_name,
+            "id < 100 && (structA[0][int_val] > 150 || structA[1][int_val] == 50)",
         )
         assert ids == [1, 3]
 
@@ -6412,10 +6414,10 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         self._setup_collection(client, collection_name, rows)
 
         cases = [
-            ('id < 100 && array_contains(structA[int_val], 100)', [0, 4]),
-            ('id < 100 && array_contains(structA[int_val], 200)', [1, 3]),
-            ('id < 100 && array_contains(structA[int_val], 999)', [3]),
-            ('id < 100 && array_contains(structA[int_val], 12345)', []),
+            ("id < 100 && array_contains(structA[int_val], 100)", [0, 4]),
+            ("id < 100 && array_contains(structA[int_val], 200)", [1, 3]),
+            ("id < 100 && array_contains(structA[int_val], 999)", [3]),
+            ("id < 100 && array_contains(structA[int_val], 12345)", []),
         ]
         for expr, expected in cases:
             ids = self._search_ids(client, collection_name, expr)
@@ -6443,10 +6445,8 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
 
         # ALL
         cases_all = [
-            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue"])',
-             [1, 3]),
-            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue", "Green"])',
-             [3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue"])', [1, 3]),
+            ('id < 100 && array_contains_all(structA[str_val], ["Red", "Blue", "Green"])', [3]),
             ('id < 100 && array_contains_all(structA[str_val], ["Yellow"])', []),
         ]
         for expr, expected in cases_all:
@@ -6455,12 +6455,9 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
 
         # ANY
         cases_any = [
-            ('id < 100 && array_contains_any(structA[str_val], ["Red", "Yellow"])',
-             [0, 1, 3, 4]),
-            ('id < 100 && array_contains_any(structA[str_val], ["Blue", "Green"])',
-             [1, 2, 3, 4]),
-            ('id < 100 && array_contains_any(structA[str_val], ["Yellow", "Magenta"])',
-             []),
+            ('id < 100 && array_contains_any(structA[str_val], ["Red", "Yellow"])', [0, 1, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Blue", "Green"])', [1, 2, 3, 4]),
+            ('id < 100 && array_contains_any(structA[str_val], ["Yellow", "Magenta"])', []),
         ]
         for expr, expected in cases_any:
             ids = self._search_ids(client, collection_name, expr)
@@ -6474,16 +6471,13 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_arrlen")
 
-        rows = [
-            self._make_row(i, [{"int_val": j} for j in range(i + 1)])
-            for i in range(5)
-        ]
+        rows = [self._make_row(i, [{"int_val": j} for j in range(i + 1)]) for i in range(5)]
         self._setup_collection(client, collection_name, rows)
 
         cases = [
-            ('id < 100 && array_length(structA[int_val]) == 3', [2]),
-            ('id < 100 && array_length(structA[int_val]) >= 4', [3, 4]),
-            ('id < 100 && array_length(structA[int_val]) < 3', [0, 1]),
+            ("id < 100 && array_length(structA[int_val]) == 3", [2]),
+            ("id < 100 && array_length(structA[int_val]) >= 4", [3, 4]),
+            ("id < 100 && array_length(structA[int_val]) < 3", [0, 1]),
         ]
         for expr, expected in cases:
             ids = self._search_ids(client, collection_name, expr)
@@ -6504,32 +6498,23 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_segments")
 
         pattern = [10, 20, 30, 40, 50]
-        sealed_rows = [
-            self._make_row(i, [{"int_val": v}]) for i, v in enumerate(pattern)
-        ]
-        growing_rows = [
-            self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate(pattern)
-        ]
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate(pattern)]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate(pattern)]
         self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
 
         cases = [
-            ('id < 100 && structA[0][int_val] == 30', [2], [7]),
-            ('id < 100 && structA[0][int_val] >= 30', [2, 3, 4], [7, 8, 9]),
-            ('id < 100 && structA[0][int_val] in [10, 50]', [0, 4], [5, 9]),
+            ("id < 100 && structA[0][int_val] == 30", [2], [7]),
+            ("id < 100 && structA[0][int_val] >= 30", [2, 3, 4], [7, 8, 9]),
+            ("id < 100 && structA[0][int_val] in [10, 50]", [0, 4], [5, 9]),
         ]
         for expr, exp_sealed, exp_growing in cases:
             ids = self._search_ids(client, collection_name, expr)
             sealed_part = [i for i in ids if i < 5]
             growing_part = [i for i in ids if 5 <= i < 100]
-            assert sealed_part == exp_sealed, (
-                f"{expr}: sealed expected {exp_sealed}, got {sealed_part}"
-            )
-            assert growing_part == exp_growing, (
-                f"{expr}: growing expected {exp_growing}, got {growing_part}"
-            )
+            assert sealed_part == exp_sealed, f"{expr}: sealed expected {exp_sealed}, got {sealed_part}"
+            assert growing_part == exp_growing, f"{expr}: growing expected {exp_growing}, got {growing_part}"
             assert [i + 5 for i in sealed_part] == growing_part, (
-                f"{expr}: sealed/growing not mirrored: "
-                f"sealed={sealed_part} growing={growing_part}"
+                f"{expr}: sealed/growing not mirrored: sealed={sealed_part} growing={growing_part}"
             )
 
     # ---- 10.11 search after delete ----
@@ -6540,31 +6525,28 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_delete")
 
-        sealed_rows = [
-            self._make_row(i, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
-        growing_rows = [
-            self._make_row(i + 5, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
         self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
 
         # Baseline
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] >= 30',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
         )
         assert ids == [2, 3, 4, 7, 8, 9]
 
         # Delete 4 (sealed match), 7 (growing match), 0 (non-matching)
         self.delete(client, collection_name, ids=[4, 7, 0])
         import time
+
         time.sleep(1)
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] >= 30',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
         )
         assert ids == [2, 3, 8, 9], f"After delete expected [2,3,8,9], got {ids}"
 
@@ -6576,20 +6558,15 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_search_upsert")
 
-        sealed_rows = [
-            self._make_row(i, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
-        growing_rows = [
-            self._make_row(i + 5, [{"int_val": v}])
-            for i, v in enumerate([10, 20, 30, 40, 50])
-        ]
+        sealed_rows = [self._make_row(i, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
+        growing_rows = [self._make_row(i + 5, [{"int_val": v}]) for i, v in enumerate([10, 20, 30, 40, 50])]
         self._setup_collection_split(client, collection_name, sealed_rows, growing_rows)
 
         # Baseline
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] >= 30',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
         )
         assert ids == [2, 3, 4, 7, 8, 9]
 
@@ -6601,12 +6578,12 @@ class TestMilvusClientStructArrayIndexAccessSearch(TestMilvusClientV2Base):
         ]
         self.upsert(client, collection_name, upserts)
         import time
+
         time.sleep(1)
 
         ids = self._search_ids(
-            client, collection_name,
-            'id < 100 && structA[0][int_val] >= 30',
+            client,
+            collection_name,
+            "id < 100 && structA[0][int_val] >= 30",
         )
-        assert ids == [1, 2, 3, 4, 7, 8], (
-            f"After upsert expected [1,2,3,4,7,8], got {ids}"
-        )
+        assert ids == [1, 2, 3, 4, 7, 8], f"After upsert expected [1,2,3,4,7,8], got {ids}"
