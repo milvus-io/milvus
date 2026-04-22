@@ -26,6 +26,8 @@ def wait_for_restore_complete(client, job_id, timeout=60):
             raise Exception(f"Restore snapshot failed: {state.reason}")
         time.sleep(1)
     raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
+
+
 default_nb = 3000
 default_nq = 2
 default_limit = 10
@@ -53,18 +55,20 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         # 1. Create collection and insert data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-            default_float_field_name: i * 1.0,
-            default_string_field_name: str(i)
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # 2. Create snapshot
-        self.create_snapshot(client, collection_name, snapshot_name,
-                             description="Test snapshot for L0")
+        self.create_snapshot(client, collection_name, snapshot_name, description="Test snapshot for L0")
 
         # 3. List snapshots
         snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
@@ -98,12 +102,15 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         # 1. Create collection and insert data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-            default_float_field_name: i * 1.0,
-            default_string_field_name: str(i)
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -111,8 +118,9 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 3. Restore snapshot to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         assert job_id > 0, "restore_snapshot should return a valid job_id"
 
         # 4. Wait for restore to complete
@@ -120,16 +128,13 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
 
         # 5. Verify restored collection data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name, filter="",
-                            output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="", output_fields=["count(*)"])
         restored_count = res[0]["count(*)"]
-        assert restored_count == default_nb, \
-            f"Restored collection should have {default_nb} rows, got {restored_count}"
+        assert restored_count == default_nb, f"Restored collection should have {default_nb} rows, got {restored_count}"
 
         # 6. Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
@@ -149,8 +154,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
 
         # SDK validates snapshot_name and raises ParamError
         error = {ct.err_code: 1, ct.err_msg: "snapshot_name must be a non-empty string"}
-        self.create_snapshot(client, collection_name, snapshot_name,
-                             check_task=CheckTasks.err_res, check_items=error)
+        self.create_snapshot(client, collection_name, snapshot_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_create_whitespace_name(self):
@@ -167,8 +171,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
 
         # Server validates snapshot name and rejects whitespace-only names
         error = {ct.err_code: 1100, ct.err_msg: "snapshot name should be not empty"}
-        self.create_snapshot(client, collection_name, " ",
-                             check_task=CheckTasks.err_res, check_items=error)
+        self.create_snapshot(client, collection_name, " ", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_create_collection_not_exist(self):
@@ -182,8 +185,9 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
         non_existent_collection = cf.gen_unique_str("non_existent")
 
         error = {ct.err_code: 100, ct.err_msg: "collection not found"}
-        self.create_snapshot(client, non_existent_collection, snapshot_name,
-                             check_task=CheckTasks.err_res, check_items=error)
+        self.create_snapshot(
+            client, non_existent_collection, snapshot_name, check_task=CheckTasks.err_res, check_items=error
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_create_duplicate_name(self):
@@ -201,8 +205,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
 
         # Try to create another snapshot with same name
         error = {ct.err_code: 1, ct.err_msg: "already exists"}
-        self.create_snapshot(client, collection_name, snapshot_name,
-                             check_task=CheckTasks.err_res, check_items=error)
+        self.create_snapshot(client, collection_name, snapshot_name, check_task=CheckTasks.err_res, check_items=error)
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -283,8 +286,7 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
 
         # SDK validates snapshot_name and raises ParamError before checking collection_name
         error = {ct.err_code: 1, ct.err_msg: "snapshot_name must be a non-empty string"}
-        self.drop_snapshot(client, snapshot_name, "",
-                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_snapshot(client, snapshot_name, "", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_drop_whitespace_name(self):
@@ -301,8 +303,7 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
 
         # Server validates snapshot name and rejects whitespace-only names
         error = {ct.err_code: 1100, ct.err_msg: "snapshot name should be not empty"}
-        self.drop_snapshot(client, " ", collection_name,
-                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_snapshot(client, " ", collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_drop_not_exist(self):
@@ -335,10 +336,13 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         # 1. Create collection and insert data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -346,8 +350,9 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 3. Start restore (creates CopySegment jobs referencing the snapshot)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
 
         # 4. Wait until restore is actively in progress (ref count registered)
         #    before attempting drop, to avoid timing-dependent flakiness
@@ -363,8 +368,7 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         # PR #48143 introduced pin-based protection: restore jobs pin the snapshot
         # and Drop fails with "active pins exist, unpin before dropping".
         error = {ct.err_code: 2601, ct.err_msg: "active pins exist"}
-        self.drop_snapshot(client, snapshot_name, collection_name,
-                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_snapshot(client, snapshot_name, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
         # 6. Wait for restore to complete
         wait_for_restore_complete(client, job_id)
@@ -464,8 +468,7 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
         snapshot_name = cf.gen_unique_str("non_existent")
 
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.describe_snapshot(client, snapshot_name, collection_name,
-                               check_task=CheckTasks.err_res, check_items=error)
+        self.describe_snapshot(client, snapshot_name, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_describe_with_description(self):
@@ -511,10 +514,10 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
 
             # switch active db back to default but query via db_name kwarg
             client.using_database("default")
-            snapshots, _ = self.list_snapshots(client, collection_name=collection_name,
-                                               db_name=target_db)
-            assert snapshot_name in snapshots, \
+            snapshots, _ = self.list_snapshots(client, collection_name=collection_name, db_name=target_db)
+            assert snapshot_name in snapshots, (
                 f"{snapshot_name} missing when listing via db_name={target_db}, got {snapshots}"
+            )
 
             # cleanup while still in target db context
             client.using_database(target_db)
@@ -546,10 +549,13 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
             client.using_database(target_db)
             self.create_collection(client, collection_name, default_dim)
             rng = np.random.default_rng(seed=19530)
-            rows = [{
-                default_primary_key_field_name: i,
-                default_vector_field_name: list(rng.random(default_dim)),
-            } for i in range(500)]
+            rows = [
+                {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: list(rng.random(default_dim)),
+                }
+                for i in range(500)
+            ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
             self.create_snapshot(client, collection_name, snapshot_name)
@@ -557,26 +563,21 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
             # Explicitly pin both source and target to target_db so the job is
             # recorded under target_db's DbId (default empty target_db_name
             # resolves to "default" on the server side)
-            job_id = client.restore_snapshot(snapshot_name, collection_name,
-                                             restored_name,
-                                             source_db_name=target_db,
-                                             target_db_name=target_db)
+            job_id = client.restore_snapshot(
+                snapshot_name, collection_name, restored_name, source_db_name=target_db, target_db_name=target_db
+            )
             wait_for_restore_complete(client, job_id)
 
             # list jobs via explicit db_name kwarg from default db context
             client.using_database("default")
-            jobs_target, _ = self.list_restore_snapshot_jobs(client, collection_name="",
-                                                             db_name=target_db)
+            jobs_target, _ = self.list_restore_snapshot_jobs(client, collection_name="", db_name=target_db)
             job_ids = [j.job_id for j in jobs_target]
-            assert job_id in job_ids, \
-                f"Job {job_id} should appear when listing via db_name={target_db}, got {job_ids}"
+            assert job_id in job_ids, f"Job {job_id} should appear when listing via db_name={target_db}, got {job_ids}"
 
             # jobs in default db must not include this job
-            jobs_default, _ = self.list_restore_snapshot_jobs(client, collection_name="",
-                                                              db_name="default")
+            jobs_default, _ = self.list_restore_snapshot_jobs(client, collection_name="", db_name="default")
             default_job_ids = [j.job_id for j in jobs_default]
-            assert job_id not in default_job_ids, \
-                f"Job {job_id} leaked into default db listing: {default_job_ids}"
+            assert job_id not in default_job_ids, f"Job {job_id} leaked into default db listing: {default_job_ids}"
 
             # Cleanup: both collections are in target_db
             client.using_database(target_db)
@@ -608,9 +609,14 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
         target_collection_name = cf.gen_unique_str(prefix + "_target")
 
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.restore_snapshot(client, snapshot_name, target_collection_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.err_res, check_items=error)
+        self.restore_snapshot(
+            client,
+            snapshot_name,
+            target_collection_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_restore_collection_exist(self):
@@ -632,9 +638,14 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
         self.create_collection(client, target_collection_name, default_dim)
 
         error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(client, snapshot_name, target_collection_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.err_res, check_items=error)
+        self.restore_snapshot(
+            client,
+            snapshot_name,
+            target_collection_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -654,8 +665,7 @@ class TestMilvusClientSnapshotRestoreState(TestMilvusClientV2Base):
         invalid_job_id = 999999999
 
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.get_restore_snapshot_state(client, invalid_job_id,
-                                        check_task=CheckTasks.err_res, check_items=error)
+        self.get_restore_snapshot_state(client, invalid_job_id, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_snapshot_list_restore_jobs(self):
@@ -688,23 +698,26 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create collection with Int64 PK
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["id"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["id"])
         assert len(res) == 100
         ids = sorted([r["id"] for r in res])
         assert ids == list(range(100))
@@ -733,27 +746,29 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "pk": f"key_{i}",
-            "vector": list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                "pk": f"key_{i}",
+                "vector": list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="pk like 'key_%'", output_fields=["pk"])
+        res, _ = self.query(client, restored_collection_name, filter="pk like 'key_%'", output_fields=["pk"])
         assert len(res) == 100
 
         # Cleanup
@@ -782,28 +797,30 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         index_params.add_index("float_vector", metric_type="COSINE")
         index_params.add_index("binary_vector", metric_type="HAMMING")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "float_vector": list(rng.random((1, default_dim))[0]),
-            "binary_vector": bytes(rng.integers(0, 256, size=16, dtype=np.uint8)),
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "float_vector": list(rng.random((1, default_dim))[0]),
+                "binary_vector": bytes(rng.integers(0, 256, size=16, dtype=np.uint8)),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100
 
         # Cleanup
@@ -831,28 +848,30 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random((1, default_dim))[0]),
-            "metadata": {"key": f"value_{i}", "number": i, "nested": {"a": i}},
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random((1, default_dim))[0]),
+                "metadata": {"key": f"value_{i}", "number": i, "nested": {"a": i}},
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify JSON data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 0", output_fields=["metadata"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 0", output_fields=["metadata"])
         assert res[0]["metadata"]["key"] == "value_0"
 
         # Cleanup
@@ -879,36 +898,39 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random((1, default_dim))[0]),
-            "dynamic_field_1": f"dynamic_{i}",
-            "dynamic_field_2": i * 10,
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random((1, default_dim))[0]),
+                "dynamic_field_1": f"dynamic_{i}",
+                "dynamic_field_2": i * 10,
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 0", output_fields=["dynamic_field_1", "dynamic_field_2"])
+        res, _ = self.query(
+            client, restored_collection_name, filter="id == 0", output_fields=["dynamic_field_1", "dynamic_field_2"]
+        )
         assert res[0]["dynamic_field_1"] == "dynamic_0"
         assert res[0]["dynamic_field_2"] == 0
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
@@ -937,17 +959,21 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         # Insert data into each partition
         rng = np.random.default_rng(seed=19530)
         for p_name in partition_names:
-            rows = [{
-                default_primary_key_field_name: i + partition_names.index(p_name) * 100,
-                default_vector_field_name: list(rng.random((1, default_dim))[0]),
-            } for i in range(100)]
+            rows = [
+                {
+                    default_primary_key_field_name: i + partition_names.index(p_name) * 100,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+                for i in range(100)
+            ]
             self.insert(client, collection_name, rows, partition_name=p_name)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify partitions are preserved
@@ -958,9 +984,9 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         # Verify data in each partition
         self.load_collection(client, restored_collection_name)
         for p_name in partition_names:
-            res, _ = self.query(client, restored_collection_name,
-                                filter="id >= 0", partition_names=[p_name],
-                                output_fields=["count(*)"])
+            res, _ = self.query(
+                client, restored_collection_name, filter="id >= 0", partition_names=[p_name], output_fields=["count(*)"]
+            )
             assert res[0]["count(*)"] == 100, f"Partition {p_name} should have 100 rows"
 
         # Cleanup
@@ -985,10 +1011,13 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows, partition_name=partition_name)
         self.flush(client, collection_name)
 
@@ -1000,8 +1029,9 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         self.drop_partition(client, collection_name, partition_name)
 
         # Restore snapshot
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify partition is restored
@@ -1010,15 +1040,18 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", partition_names=[partition_name],
-                            output_fields=["count(*)"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id >= 0",
+            partition_names=[partition_name],
+            output_fields=["count(*)"],
+        )
         assert res[0]["count(*)"] == 100
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
@@ -1039,10 +1072,13 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         # Create and insert data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1055,14 +1091,14 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify only 50 rows remain
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 50
 
         # Cleanup
@@ -1084,10 +1120,13 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         # Create and insert initial data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1095,28 +1134,30 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Insert more data after snapshot
-        more_rows = [{
-            default_primary_key_field_name: i + 100,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(50)]
+        more_rows = [
+            {
+                default_primary_key_field_name: i + 100,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(50)
+        ]
         self.insert(client, collection_name, more_rows)
         self.flush(client, collection_name)
 
         # Verify source collection has 150 rows
         self.load_collection(client, collection_name)
-        res, _ = self.query(client, collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 150
 
         # Restore snapshot
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Restored collection should only have 100 rows (point-in-time)
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100
 
         # Cleanup
@@ -1155,27 +1196,32 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
 
         # First batch: insert and flush (this data should be in snapshot)
-        flushed_rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        flushed_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, flushed_rows)
         self.flush(client, collection_name)
         log.info("Inserted and flushed 100 rows")
 
         # Second batch: insert WITHOUT flush (growing segment, data in buffer)
-        unflushed_rows = [{
-            default_primary_key_field_name: i + 100,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-        } for i in range(50)]
+        unflushed_rows = [
+            {
+                default_primary_key_field_name: i + 100,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(50)
+        ]
         self.insert(client, collection_name, unflushed_rows)
         # Intentionally NOT calling flush - data stays in growing segment buffer
         log.info("Inserted 50 rows WITHOUT flush (growing segment)")
 
         # Verify source collection can query all 150 rows (growing + flushed)
         self.load_collection(client, collection_name)
-        res, _ = self.query(client, collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, collection_name, filter="id >= 0", output_fields=["count(*)"])
         source_count = res[0]["count(*)"]
         log.info(f"Source collection total rows (flushed + growing): {source_count}")
         assert source_count == 150, f"Source should have 150 rows, got {source_count}"
@@ -1185,14 +1231,14 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         log.info("Created snapshot (without triggering flush)")
 
         # Restore snapshot to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify restored collection data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         restored_count = res[0]["count(*)"]
         log.info(f"Restored collection rows: {restored_count}")
 
@@ -1200,23 +1246,23 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         # Growing segment data (50 rows) should NOT be captured
         # NOTE: This assertion documents the current behavior - snapshot does NOT include
         # growing segment data. If this test fails, it means the behavior has changed.
-        assert restored_count == 100, \
-            f"Expected 100 rows (only flushed data), got {restored_count}. " \
+        assert restored_count == 100, (
+            f"Expected 100 rows (only flushed data), got {restored_count}. "
             f"Growing segment data should NOT be included in snapshot."
+        )
 
         # Also verify the specific IDs: only 0-99 should exist, not 100-149
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 100", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 100", output_fields=["count(*)"])
         growing_data_count = res[0]["count(*)"]
-        assert growing_data_count == 0, \
+        assert growing_data_count == 0, (
             f"Growing segment data (id >= 100) should NOT be in snapshot, found {growing_data_count}"
+        )
 
         log.info("Verified: Snapshot does NOT include growing segment data")
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
@@ -1240,25 +1286,28 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="COSINE",
-                               index_type="HNSW",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            "vector", metric_type="COSINE", index_type="HNSW", params={"M": 16, "efConstruction": 200}
+        )
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random((1, default_dim))[0]),
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random((1, default_dim))[0]),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify index is preserved
@@ -1268,14 +1317,12 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
         # Verify search works
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random((1, default_dim))[0])]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             limit=10, output_fields=["id"])
+        res, _ = self.search(client, restored_collection_name, search_vectors, limit=10, output_fields=["id"])
         assert len(res[0]) == 10
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
@@ -1297,23 +1344,26 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=12345)  # Fixed seed for reproducibility
         original_vectors = [list(rng.random(default_dim)) for _ in range(100)]
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: original_vectors[i],
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: original_vectors[i],
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Query all vectors from restored collection
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["id", "vector"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["id", "vector"])
 
         # Verify each vector is identical
         for row in res:
@@ -1321,8 +1371,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
             restored_vec = row["vector"]
             # Compare with tolerance for floating point
             for j in range(default_dim):
-                assert abs(original_vec[j] - restored_vec[j]) < 1e-6, \
-                    f"Vector mismatch at id={row['id']}, dim={j}"
+                assert abs(original_vec[j] - restored_vec[j]) < 1e-6, f"Vector mismatch at id={row['id']}, dim={j}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -1343,36 +1392,41 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         # Create collection and insert data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(1000)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
         # Search on original collection
         query_vectors = [list(rng.random(default_dim)) for _ in range(10)]
-        original_results, _ = self.search(client, collection_name, query_vectors,
-                                          limit=10, output_fields=["id"])
+        original_results, _ = self.search(client, collection_name, query_vectors, limit=10, output_fields=["id"])
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Search on restored collection with same queries
         self.load_collection(client, restored_collection_name)
-        restored_results, _ = self.search(client, restored_collection_name, query_vectors,
-                                          limit=10, output_fields=["id"])
+        restored_results, _ = self.search(
+            client, restored_collection_name, query_vectors, limit=10, output_fields=["id"]
+        )
 
         # Compare search results
         for i in range(len(query_vectors)):
             original_ids = [r["id"] for r in original_results[i]]
             restored_ids = [r["id"] for r in restored_results[i]]
-            assert original_ids == restored_ids, \
+            assert original_ids == restored_ids, (
                 f"Search results mismatch for query {i}: original={original_ids}, restored={restored_ids}"
+            )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -1402,33 +1456,39 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data with various values
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "int_field": i * 10,
-            "float_field": i * 0.5,
-            "bool_field": i % 2 == 0,
-            "varchar_field": f"string_value_{i}",
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "int_field": i * 10,
+                "float_field": i * 0.5,
+                "bool_field": i % 2 == 0,
+                "varchar_field": f"string_value_{i}",
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Query and verify all scalar values
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0",
-                            output_fields=["id", "int_field", "float_field", "bool_field", "varchar_field"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id >= 0",
+            output_fields=["id", "int_field", "float_field", "bool_field", "varchar_field"],
+        )
 
         for row in res:
             i = row["id"]
@@ -1440,7 +1500,6 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
@@ -1530,16 +1589,20 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Create collection with more data to slow down restore
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(5000)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(5000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
 
         # Track progress
         progress_values = []
@@ -1560,8 +1623,9 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         assert 100 in progress_values, "Progress should reach 100 when completed"
         # Verify progress was monotonically increasing (or at least non-decreasing)
         for i in range(1, len(progress_values)):
-            assert progress_values[i] >= progress_values[i-1], \
-                f"Progress should not decrease: {progress_values[i-1]} -> {progress_values[i]}"
+            assert progress_values[i] >= progress_values[i - 1], (
+                f"Progress should not decrease: {progress_values[i - 1]} -> {progress_values[i]}"
+            )
 
         # Verify start_time and time_cost are set
         final_state, _ = self.get_restore_snapshot_state(client, job_id)
@@ -1591,10 +1655,13 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Create 3 snapshots at different data states
         for batch in range(3):
             # Insert 100 rows
-            rows = [{
-                default_primary_key_field_name: i + batch * 100,
-                default_vector_field_name: list(rng.random(default_dim)),
-            } for i in range(100)]
+            rows = [
+                {
+                    default_primary_key_field_name: i + batch * 100,
+                    default_vector_field_name: list(rng.random(default_dim)),
+                }
+                for i in range(100)
+            ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
 
@@ -1607,16 +1674,18 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Restore each snapshot and verify correct count
         for i, snapshot_name in enumerate(snapshots):
             restored_name = cf.gen_unique_str(prefix + "_restored")
-            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                                      source_collection_name=collection_name)
+            job_id, _ = self.restore_snapshot(
+                client, snapshot_name, restored_name, source_collection_name=collection_name
+            )
             wait_for_restore_complete(client, job_id)
 
             self.load_collection(client, restored_name)
             res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
             actual_count = res[0]["count(*)"]
 
-            assert actual_count == expected_counts[i], \
+            assert actual_count == expected_counts[i], (
                 f"Snapshot {i} should have {expected_counts[i]} rows, got {actual_count}"
+            )
 
             self.drop_collection(client, restored_name)
 
@@ -1638,10 +1707,13 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Create collection with data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -1656,8 +1728,9 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         for i in range(num_restores):
             restored_name = cf.gen_unique_str(prefix + f"_restored_{i}")
             restored_names.append(restored_name)
-            job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                                      source_collection_name=collection_name)
+            job_id, _ = self.restore_snapshot(
+                client, snapshot_name, restored_name, source_collection_name=collection_name
+            )
             restore_jobs.append(job_id)
 
         # Wait for all to complete
@@ -1673,7 +1746,6 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
-
 
 
 class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
@@ -1694,10 +1766,13 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         # Create collection and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -1707,9 +1782,14 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
 
         # Try to restore - should fail
         error = {ct.err_code: 1, ct.err_msg: "not found"}
-        self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.err_res, check_items=error)
+        self.restore_snapshot(
+            client,
+            snapshot_name,
+            restored_collection_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_cascade_delete_on_drop_collection(self):
@@ -1728,10 +1808,13 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         # Create collection and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -1748,8 +1831,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
 
         # Snapshots should not exist for the new collection
         snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
-        assert len(snapshots) == 0, \
-            "Snapshots should be cascade deleted when collection is dropped"
+        assert len(snapshots) == 0, "Snapshots should be cascade deleted when collection is dropped"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_schema_consistency_autoID(self):
@@ -1771,8 +1853,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data (no id needed since auto_id=True)
         rng = np.random.default_rng(seed=19530)
@@ -1782,8 +1863,9 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify schema of restored collection
@@ -1799,7 +1881,6 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
@@ -1835,37 +1916,51 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data with all scalar types
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "int8_field": np.int8(i % 127),
-            "int16_field": np.int16(i * 10),
-            "int32_field": np.int32(i * 100),
-            "bool_field": i % 2 == 0,
-            "float_field": float(i * 0.5),
-            "double_field": float(i * 1.5),
-            "varchar_field": f"string_{i}",
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "int8_field": np.int8(i % 127),
+                "int16_field": np.int16(i * 10),
+                "int32_field": np.int32(i * 100),
+                "bool_field": i % 2 == 0,
+                "float_field": float(i * 0.5),
+                "double_field": float(i * 1.5),
+                "varchar_field": f"string_{i}",
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify all scalar data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0",
-                            output_fields=["id", "int8_field", "int16_field", "int32_field",
-                                           "bool_field", "float_field", "double_field", "varchar_field"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id >= 0",
+            output_fields=[
+                "id",
+                "int8_field",
+                "int16_field",
+                "int32_field",
+                "bool_field",
+                "float_field",
+                "double_field",
+                "varchar_field",
+            ],
+        )
         assert len(res) == 100
 
         # Verify specific values
@@ -1901,40 +1996,47 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("int_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=50)
         schema.add_field("float_array", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=50)
-        schema.add_field("varchar_array", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_length=100, max_capacity=50)
+        schema.add_field(
+            "varchar_array", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=100, max_capacity=50
+        )
         schema.add_field("bool_array", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=50)
 
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data with array types
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "int_array": [i * j for j in range(10)],
-            "float_array": [float(i * j * 0.1) for j in range(10)],
-            "varchar_array": [f"str_{i}_{j}" for j in range(5)],
-            "bool_array": [j % 2 == 0 for j in range(5)],
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "int_array": [i * j for j in range(10)],
+                "float_array": [float(i * j * 0.1) for j in range(10)],
+                "varchar_array": [f"str_{i}_{j}" for j in range(5)],
+                "bool_array": [j % 2 == 0 for j in range(5)],
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify array data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 5",
-                            output_fields=["id", "int_array", "float_array", "varchar_array", "bool_array"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id == 5",
+            output_fields=["id", "int_array", "float_array", "varchar_array", "bool_array"],
+        )
         assert len(res) == 1
         row = res[0]
         assert row["int_array"] == [5 * j for j in range(10)]
@@ -1972,8 +2074,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         index_params.add_index("float16_vector", metric_type="L2")
         index_params.add_index("sparse_vector", metric_type="IP", index_type="SPARSE_INVERTED_INDEX")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Generate test data
         rng = np.random.default_rng(seed=19530)
@@ -1985,32 +2086,35 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
             # Sparse vector: {dim_index: value}
             sparse_vec = {j: float(rng.random()) for j in rng.choice(1000, size=10, replace=False)}
 
-            rows.append({
-                "id": i,
-                "float_vector": float_vec,
-                "binary_vector": binary_vec,
-                "float16_vector": float16_vec,
-                "sparse_vector": sparse_vec,
-            })
+            rows.append(
+                {
+                    "id": i,
+                    "float_vector": float_vec,
+                    "binary_vector": binary_vec,
+                    "float16_vector": float16_vec,
+                    "sparse_vector": sparse_vec,
+                }
+            )
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100
 
         # Verify search on float_vector works
         search_vectors = [list(rng.random(default_dim))]
-        search_res, _ = self.search(client, restored_collection_name, search_vectors,
-                                    anns_field="float_vector", limit=10, output_fields=["id"])
+        search_res, _ = self.search(
+            client, restored_collection_name, search_vectors, anns_field="float_vector", limit=10, output_fields=["id"]
+        )
         assert len(search_res[0]) == 10
 
         # Cleanup
@@ -2040,8 +2144,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Insert data with some null values
         rng = np.random.default_rng(seed=19530)
@@ -2060,26 +2163,33 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify nullable fields
         self.load_collection(client, restored_collection_name)
 
         # Check rows with null values
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 0",  # i=0 should have nullable_int=None
-                            output_fields=["nullable_int", "nullable_varchar", "nullable_float"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id == 0",  # i=0 should have nullable_int=None
+            output_fields=["nullable_int", "nullable_varchar", "nullable_float"],
+        )
         assert len(res) == 1
         assert res[0]["nullable_int"] is None, "nullable_int should be None for id=0"
         assert res[0]["nullable_varchar"] is None, "nullable_varchar should be None for id=0"
         assert res[0]["nullable_float"] is None, "nullable_float should be None for id=0"
 
         # Check rows with non-null values
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 7",  # i=7: nullable_int=70, nullable_varchar='str_7', nullable_float=3.5
-                            output_fields=["nullable_int", "nullable_varchar", "nullable_float"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id == 7",  # i=7: nullable_int=70, nullable_varchar='str_7', nullable_float=3.5
+            output_fields=["nullable_int", "nullable_varchar", "nullable_float"],
+        )
         assert len(res) == 1
         assert res[0]["nullable_int"] == 70
         assert res[0]["nullable_varchar"] == "str_7"
@@ -2105,23 +2215,18 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Generate comprehensive schema with all data types
         schema = cf.gen_all_datatype_collection_schema(
-            dim=default_dim,
-            enable_struct_array_field=True,
-            enable_dynamic_field=True,
-            nullable=True
+            dim=default_dim, enable_struct_array_field=True, enable_dynamic_field=True, nullable=True
         )
 
         # Create indexes for vector fields
         index_params = client.prepare_index_params()
         index_params.add_index("float_vector", metric_type="COSINE")
-        index_params.add_index("text_sparse_emb", metric_type="BM25",
-                               index_type="SPARSE_INVERTED_INDEX")
+        index_params.add_index("text_sparse_emb", metric_type="BM25", index_type="SPARSE_INVERTED_INDEX")
         index_params.add_index("minhash_emb", metric_type="HAMMING")
         # Struct array inner vector field also needs index
         index_params.add_index("array_struct[float_vector]", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         # Generate row data using schema-based data generator
         nb = 200
@@ -2131,43 +2236,43 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
         # Verify source collection
         self.load_collection(client, collection_name)
-        res, _ = self.query(client, collection_name, filter="",
-                            output_fields=["count(*)"])
+        res, _ = self.query(client, collection_name, filter="", output_fields=["count(*)"])
         assert res[0]["count(*)"] == nb
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify restored data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name, filter="",
-                            output_fields=["count(*)"])
-        assert res[0]["count(*)"] == nb, \
-            f"Expected {nb} rows, got {res[0]['count(*)']}"
+        res, _ = self.query(client, restored_collection_name, filter="", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == nb, f"Expected {nb} rows, got {res[0]['count(*)']}"
 
         # Verify text match works (BM25 function preserved)
-        res, _ = self.query(client, restored_collection_name,
-                            filter='TEXT_MATCH(text, "the")',
-                            output_fields=["id", "text"])
+        res, _ = self.query(
+            client, restored_collection_name, filter='TEXT_MATCH(text, "the")', output_fields=["id", "text"]
+        )
         log.info(f"Text match results: {len(res)} rows")
 
         # Verify float vector search works
         rng = np.random.default_rng(seed=19530)
         search_vectors = [list(rng.random(default_dim))]
-        search_res, _ = self.search(client, restored_collection_name, search_vectors,
-                                    anns_field="float_vector", limit=10,
-                                    output_fields=["id"])
+        search_res, _ = self.search(
+            client, restored_collection_name, search_vectors, anns_field="float_vector", limit=10, output_fields=["id"]
+        )
         assert len(search_res[0]) > 0, "Float vector search should return results"
 
         # Verify scalar fields are preserved (PK field name is "int64")
-        res, _ = self.query(client, restored_collection_name,
-                            filter="int64 >= 0",
-                            output_fields=["int64", "varchar", "json_field",
-                                           "array_int", "array_bool", "array_struct"],
-                            limit=10)
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="int64 >= 0",
+            output_fields=["int64", "varchar", "json_field", "array_int", "array_bool", "array_struct"],
+            limit=10,
+        )
         assert len(res) > 0
         # Check at least one row has non-null array fields
         has_array_data = False
@@ -2209,35 +2314,42 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         index_params.add_index("float_vector", metric_type="COSINE")
         index_params.add_index("bfloat16_vector", metric_type="L2")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "float_vector": list(rng.random(default_dim)),
-            "bfloat16_vector": np.array(rng.random(default_dim), dtype=bfloat16),
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "float_vector": list(rng.random(default_dim)),
+                "bfloat16_vector": np.array(rng.random(default_dim), dtype=bfloat16),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data count
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100
 
         # Verify search on bfloat16 vector works
         search_vectors = [np.array(rng.random(default_dim), dtype=bfloat16)]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             anns_field="bfloat16_vector", limit=10,
-                             output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            anns_field="bfloat16_vector",
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2266,43 +2378,56 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         schema.add_field("arr_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=20)
         schema.add_field("arr_double", DataType.ARRAY, element_type=DataType.DOUBLE, max_capacity=20)
         schema.add_field("arr_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=20)
-        schema.add_field("arr_varchar", DataType.ARRAY, element_type=DataType.VARCHAR,
-                         max_length=100, max_capacity=20)
+        schema.add_field("arr_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=100, max_capacity=20)
 
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "arr_int8": [int(np.int8(j)) for j in range(5)],
-            "arr_int16": [int(np.int16(i * 10 + j)) for j in range(5)],
-            "arr_int32": [i * 100 + j for j in range(5)],
-            "arr_int64": [i * 1000 + j for j in range(5)],
-            "arr_float": [float(i * 0.1 + j * 0.01) for j in range(5)],
-            "arr_double": [float(i * 1.1 + j * 0.11) for j in range(5)],
-            "arr_bool": [j % 2 == 0 for j in range(5)],
-            "arr_varchar": [f"s_{i}_{j}" for j in range(5)],
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "arr_int8": [int(np.int8(j)) for j in range(5)],
+                "arr_int16": [int(np.int16(i * 10 + j)) for j in range(5)],
+                "arr_int32": [i * 100 + j for j in range(5)],
+                "arr_int64": [i * 1000 + j for j in range(5)],
+                "arr_float": [float(i * 0.1 + j * 0.01) for j in range(5)],
+                "arr_double": [float(i * 1.1 + j * 0.11) for j in range(5)],
+                "arr_bool": [j % 2 == 0 for j in range(5)],
+                "arr_varchar": [f"s_{i}_{j}" for j in range(5)],
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 5",
-                            output_fields=["arr_int8", "arr_int16", "arr_int32", "arr_int64",
-                                           "arr_float", "arr_double", "arr_bool", "arr_varchar"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id == 5",
+            output_fields=[
+                "arr_int8",
+                "arr_int16",
+                "arr_int32",
+                "arr_int64",
+                "arr_float",
+                "arr_double",
+                "arr_bool",
+                "arr_varchar",
+            ],
+        )
         assert len(res) == 1
         row = res[0]
         assert row["arr_int32"] == [500, 501, 502, 503, 504]
@@ -2338,12 +2463,9 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="L2",
-                               index_type="IVF_FLAT",
-                               params={"nlist": 128})
+        index_params.add_index("vector", metric_type="L2", index_type="IVF_FLAT", params={"nlist": 128})
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(1000)]
@@ -2352,15 +2474,22 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify index and search
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random(default_dim))]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             search_params={"nprobe": 16}, limit=10, output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            search_params={"nprobe": 16},
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2384,12 +2513,9 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="L2",
-                               index_type="IVF_SQ8",
-                               params={"nlist": 128})
+        index_params.add_index("vector", metric_type="L2", index_type="IVF_SQ8", params={"nlist": 128})
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(1000)]
@@ -2398,15 +2524,22 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random(default_dim))]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             search_params={"nprobe": 16}, limit=10, output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            search_params={"nprobe": 16},
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2430,12 +2563,11 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="L2",
-                               index_type="IVF_PQ",
-                               params={"nlist": 128, "m": 16, "nbits": 8})
+        index_params.add_index(
+            "vector", metric_type="L2", index_type="IVF_PQ", params={"nlist": 128, "m": 16, "nbits": 8}
+        )
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(1000)]
@@ -2444,15 +2576,22 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random(default_dim))]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             search_params={"nprobe": 16}, limit=10, output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            search_params={"nprobe": 16},
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2476,11 +2615,9 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="L2",
-                               index_type="DISKANN")
+        index_params.add_index("vector", metric_type="L2", index_type="DISKANN")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(1000)]
@@ -2489,15 +2626,22 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random(default_dim))]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             search_params={"search_list": 100}, limit=10, output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            search_params={"search_list": 100},
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2521,12 +2665,9 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="L2",
-                               index_type="SCANN",
-                               params={"nlist": 128})
+        index_params.add_index("vector", metric_type="L2", index_type="SCANN", params={"nlist": 128})
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(1000)]
@@ -2535,15 +2676,22 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
         search_vectors = [list(rng.random(default_dim))]
-        res, _ = self.search(client, restored_collection_name, search_vectors,
-                             search_params={"nprobe": 16}, limit=10, output_fields=["id"])
+        res, _ = self.search(
+            client,
+            restored_collection_name,
+            search_vectors,
+            search_params={"nprobe": 16},
+            limit=10,
+            output_fields=["id"],
+        )
         assert len(res[0]) == 10
 
         # Cleanup
@@ -2573,39 +2721,39 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         index_params.add_index("category", index_type="STL_SORT")
         index_params.add_index("tag", index_type="INVERTED")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "category": i % 10,
-            "tag": f"tag_{i % 5}",
-        } for i in range(500)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "category": i % 10,
+                "tag": f"tag_{i % 5}",
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify scalar index works with filter
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="category == 5", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="category == 5", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 50  # 500/10 = 50 rows with category=5
 
-        res, _ = self.query(client, restored_collection_name,
-                            filter="tag == 'tag_3'", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="tag == 'tag_3'", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100  # 500/5 = 100 rows with tag='tag_3'
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
@@ -2628,16 +2776,14 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         description = "Test collection for snapshot with description preservation"
 
-        schema = client.create_schema(enable_dynamic_field=False, auto_id=False,
-                                       description=description)
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False, description=description)
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(100)]
@@ -2646,14 +2792,16 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify description is preserved
         desc = client.describe_collection(restored_collection_name)
-        assert desc.get("description") == description, \
+        assert desc.get("description") == description, (
             f"Description should be preserved, got: {desc.get('description')}"
+        )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -2680,8 +2828,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, num_shards=num_shards)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, num_shards=num_shards)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(100)]
@@ -2695,16 +2842,16 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify shard count is preserved
         desc = client.describe_collection(restored_collection_name)
         restored_shards = desc.get("num_shards") or desc.get("shards_num")
         log.info(f"Restored collection shards: {restored_shards}")
-        assert restored_shards == num_shards, \
-            f"Shard count should be {num_shards}, got: {restored_shards}"
+        assert restored_shards == num_shards, f"Shard count should be {num_shards}, got: {restored_shards}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -2730,8 +2877,9 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         index_params.add_index("vector", metric_type="COSINE")
 
         # Create collection with Bounded consistency
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, consistency_level="Bounded")
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params, consistency_level="Bounded"
+        )
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(100)]
@@ -2745,8 +2893,9 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify consistency level is preserved
@@ -2780,22 +2929,25 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params, num_partitions=16)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, num_partitions=16)
 
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "category": i % 100,
-        } for i in range(500)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "category": i % 100,
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify partition key is preserved in schema
@@ -2803,19 +2955,16 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         fields = desc.get("fields", [])
         category_field = [f for f in fields if f.get("name") == "category"]
         assert len(category_field) == 1
-        assert category_field[0].get("is_partition_key"), \
-            "Partition key should be preserved"
+        assert category_field[0].get("is_partition_key"), "Partition key should be preserved"
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 500
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
@@ -2840,22 +2989,28 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
 
         # Initial insert: ids 0-99
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-            default_float_field_name: float(i),
-            default_string_field_name: f"original_{i}",
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+                default_float_field_name: float(i),
+                default_string_field_name: f"original_{i}",
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Upsert: update ids 50-99 and insert ids 100-149
-        upsert_rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-            default_float_field_name: float(i * 10),  # Updated value
-            default_string_field_name: f"updated_{i}",
-        } for i in range(50, 150)]
+        upsert_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+                default_float_field_name: float(i * 10),  # Updated value
+                default_string_field_name: f"updated_{i}",
+            }
+            for i in range(50, 150)
+        ]
         self.upsert(client, collection_name, upsert_rows)
         self.flush(client, collection_name)
 
@@ -2863,36 +3018,30 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify
         self.load_collection(client, restored_collection_name)
 
         # Total count should be 150 (0-149)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 150, f"Expected 150 rows, got {res[0]['count(*)']}"
 
         # Check original data (0-49) unchanged
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 25",
-                            output_fields=["float", "varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 25", output_fields=["float", "varchar"])
         assert res[0]["float"] == 25.0
         assert res[0]["varchar"] == "original_25"
 
         # Check updated data (50-99)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 75",
-                            output_fields=["float", "varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 75", output_fields=["float", "varchar"])
         assert res[0]["float"] == 750.0  # Updated value
         assert res[0]["varchar"] == "updated_75"
 
         # Check new data (100-149)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 125",
-                            output_fields=["float", "varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 125", output_fields=["float", "varchar"])
         assert res[0]["float"] == 1250.0
         assert res[0]["varchar"] == "updated_125"
 
@@ -2916,10 +3065,13 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
 
         # Insert data
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(1000)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -2939,19 +3091,18 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data count (should be 700: 1000 - 300 deleted)
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 700, f"Expected 700 rows, got {res[0]['count(*)']}"
 
         # Verify deleted data is not present
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id < 300", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id < 300", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 0, "Deleted data should not be present"
 
         # Cleanup
@@ -2978,12 +3129,11 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
 
         index_params = client.prepare_index_params()
-        index_params.add_index("vector", metric_type="COSINE",
-                               index_type="HNSW",
-                               params={"M": 16, "efConstruction": 200})
+        index_params.add_index(
+            "vector", metric_type="COSINE", index_type="HNSW", params={"M": 16, "efConstruction": 200}
+        )
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(500)]
@@ -3000,9 +3150,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Create new IVF_FLAT index
         new_index_params = client.prepare_index_params()
-        new_index_params.add_index("vector", metric_type="L2",
-                                   index_type="IVF_FLAT",
-                                   params={"nlist": 128})
+        new_index_params.add_index("vector", metric_type="L2", index_type="IVF_FLAT", params={"nlist": 128})
         self.create_index(client, collection_name, new_index_params)
         log.info("Reindexed with IVF_FLAT")
 
@@ -3011,21 +3159,22 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         log.info("Created snapshot with IVF_FLAT index")
 
         # Restore snapshot 1 (HNSW)
-        job_id_1, _ = self.restore_snapshot(client, snapshot_name_1, restored_collection_name_1,
-                                                  source_collection_name=collection_name)
+        job_id_1, _ = self.restore_snapshot(
+            client, snapshot_name_1, restored_collection_name_1, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id_1)
 
         # Restore snapshot 2 (IVF_FLAT)
-        job_id_2, _ = self.restore_snapshot(client, snapshot_name_2, restored_collection_name_2,
-                                                  source_collection_name=collection_name)
+        job_id_2, _ = self.restore_snapshot(
+            client, snapshot_name_2, restored_collection_name_2, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id_2)
 
         # Verify both collections can search
         for restored_name in [restored_collection_name_1, restored_collection_name_2]:
             self.load_collection(client, restored_name)
             search_vectors = [list(rng.random(default_dim))]
-            res, _ = self.search(client, restored_name, search_vectors,
-                                 limit=10, output_fields=["id"])
+            res, _ = self.search(client, restored_name, search_vectors, limit=10, output_fields=["id"])
             assert len(res[0]) == 10, f"Search should return 10 results for {restored_name}"
 
         # Cleanup
@@ -3052,10 +3201,13 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         total_rows = 0
         # Insert multiple batches to create multiple segments
         for batch in range(5):
-            rows = [{
-                default_primary_key_field_name: i + batch * 200,
-                default_vector_field_name: list(rng.random(default_dim)),
-            } for i in range(200)]
+            rows = [
+                {
+                    default_primary_key_field_name: i + batch * 200,
+                    default_vector_field_name: list(rng.random(default_dim)),
+                }
+                for i in range(200)
+            ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
             total_rows += 200
@@ -3065,20 +3217,18 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify all data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
-        assert res[0]["count(*)"] == total_rows, \
-            f"Expected {total_rows} rows, got {res[0]['count(*)']}"
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == total_rows, f"Expected {total_rows} rows, got {res[0]['count(*)']}"
 
         # Verify data range
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["id"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["id"])
         ids = sorted([r["id"] for r in res])
         assert ids == list(range(total_rows)), "All IDs should be present"
 
@@ -3102,11 +3252,14 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
 
         # Step 1: Initial insert (0-199)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-            default_string_field_name: f"original_{i}",
-        } for i in range(200)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+                default_string_field_name: f"original_{i}",
+            }
+            for i in range(200)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         log.info("Initial insert: 200 rows (0-199)")
@@ -3118,11 +3271,14 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         log.info("Deleted rows 0-49")
 
         # Step 3: Upsert (update 100-149, insert 200-249)
-        upsert_rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-            default_string_field_name: f"upserted_{i}",
-        } for i in range(100, 250)]
+        upsert_rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+                default_string_field_name: f"upserted_{i}",
+            }
+            for i in range(100, 250)
+        ]
         self.upsert(client, collection_name, upsert_rows)
         self.flush(client, collection_name)
         log.info("Upserted rows 100-249 (update 100-149, insert 200-249)")
@@ -3131,36 +3287,32 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify final state
         self.load_collection(client, restored_collection_name)
 
         # Expected: rows 50-249 = 200 rows
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 200, f"Expected 200 rows, got {res[0]['count(*)']}"
 
         # Deleted rows (0-49) should not exist
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id < 50", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id < 50", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 0, "Deleted rows should not exist"
 
         # Original rows (50-99) should have original values
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 75", output_fields=["varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 75", output_fields=["varchar"])
         assert res[0]["varchar"] == "original_75"
 
         # Upserted rows (100-149) should have updated values
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 125", output_fields=["varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 125", output_fields=["varchar"])
         assert res[0]["varchar"] == "upserted_125"
 
         # New rows (200-249) should exist
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 225", output_fields=["varchar"])
+        res, _ = self.query(client, restored_collection_name, filter="id == 225", output_fields=["varchar"])
         assert res[0]["varchar"] == "upserted_225"
 
         # Cleanup
@@ -3188,16 +3340,18 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         # Insert data with categories
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "category": i % 10,
-        } for i in range(1000)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "category": i % 10,
+            }
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -3213,20 +3367,21 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # Restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 1000, f"Expected 1000 rows, got {res[0]['count(*)']}"
 
         # Verify category data integrity
         for cat in range(10):
-            res, _ = self.query(client, restored_collection_name,
-                                filter=f"category == {cat}", output_fields=["count(*)"])
+            res, _ = self.query(
+                client, restored_collection_name, filter=f"category == {cat}", output_fields=["count(*)"]
+            )
             assert res[0]["count(*)"] == 100, f"Category {cat} should have 100 rows"
 
         # Cleanup
@@ -3253,33 +3408,39 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         index_params = client.prepare_index_params()
         index_params.add_index("vector", metric_type="COSINE")
 
-        self.create_collection(client, collection_name, schema=schema,
-                               index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         rng = np.random.default_rng(seed=19530)
         # Insert data with dynamic fields
-        rows = [{
-            "id": i,
-            "vector": list(rng.random(default_dim)),
-            "dynamic_str": f"dynamic_{i}",
-            "dynamic_int": i * 100,
-            "dynamic_float": float(i * 0.5),
-            "dynamic_bool": i % 2 == 0,
-        } for i in range(100)]
+        rows = [
+            {
+                "id": i,
+                "vector": list(rng.random(default_dim)),
+                "dynamic_str": f"dynamic_{i}",
+                "dynamic_int": i * 100,
+                "dynamic_float": float(i * 0.5),
+                "dynamic_bool": i % 2 == 0,
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id == 50",
-                            output_fields=["id", "dynamic_str", "dynamic_int", "dynamic_float", "dynamic_bool"])
+        res, _ = self.query(
+            client,
+            restored_collection_name,
+            filter="id == 50",
+            output_fields=["id", "dynamic_str", "dynamic_int", "dynamic_float", "dynamic_bool"],
+        )
         assert len(res) == 1
         assert res[0]["dynamic_str"] == "dynamic_50"
         assert res[0]["dynamic_int"] == 5000
@@ -3287,14 +3448,12 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["dynamic_bool"] is True
 
         # Verify all data count
-        res, _ = self.query(client, restored_collection_name,
-                            filter="id >= 0", output_fields=["count(*)"])
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 100
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
-
 
 
 class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
@@ -3347,8 +3506,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         # Others should fail with "already exists" type error
         for err in errors:
-            assert "exist" in err.lower() or "duplicate" in err.lower(), \
-                f"Unexpected error: {err}"
+            assert "exist" in err.lower() or "duplicate" in err.lower(), f"Unexpected error: {err}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -3368,10 +3526,13 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
 
         # Insert initial data
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(1000)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(1000)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -3383,10 +3544,13 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
             nonlocal insert_count
             batch_id = 0
             while not stop_inserting.is_set():
-                batch_rows = [{
-                    default_primary_key_field_name: 10000 + batch_id * 100 + i,
-                    default_vector_field_name: list(rng.random(default_dim)),
-                } for i in range(100)]
+                batch_rows = [
+                    {
+                        default_primary_key_field_name: 10000 + batch_id * 100 + i,
+                        default_vector_field_name: list(rng.random(default_dim)),
+                    }
+                    for i in range(100)
+                ]
                 try:
                     self.insert(client, collection_name, batch_rows)
                     insert_count[0] += 100
@@ -3414,8 +3578,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         # Restore and verify consistency
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name, source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_name)
@@ -3429,8 +3592,9 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         # Snapshot should not have more than total inserted at snapshot time
         # (may have less due to unflushed data)
-        assert restored_count <= insert_count[0], \
+        assert restored_count <= insert_count[0], (
             f"Should not exceed total inserted: {restored_count} > {insert_count[0]}"
+        )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -3449,10 +3613,13 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -3466,8 +3633,9 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         def restore_thread(idx):
             restored_name = cf.gen_unique_str(prefix + f"_concurrent_{idx}")
             try:
-                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                                      source_collection_name=collection_name)
+                job_id, _ = self.restore_snapshot(
+                    client, snapshot_name, restored_name, source_collection_name=collection_name
+                )
                 with lock:
                     job_ids.append(job_id)
                     restored_names.append(restored_name)
@@ -3519,17 +3687,21 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Start restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
 
         # 3. Immediately drop the target collection while restore is in progress
         try:
@@ -3550,8 +3722,9 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         log.info(f"Restore final state after dropping target collection: {final_state}")
         # The restore should reach a terminal state (not hang forever)
-        assert final_state in ("RestoreSnapshotCompleted", "RestoreSnapshotFailed"), \
+        assert final_state in ("RestoreSnapshotCompleted", "RestoreSnapshotFailed"), (
             f"Restore job should reach terminal state, got: {final_state}"
+        )
 
         # 5. Log collection state for diagnostics (existence is timing-dependent)
         collections = client.list_collections()
@@ -3580,10 +3753,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -3594,14 +3770,14 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 3. Verify snapshot is still discoverable
         # list_snapshots with old name should fail (collection no longer exists)
         error = {ct.err_code: 100, ct.err_msg: "collection not found"}
-        self.list_snapshots(client, collection_name=collection_name,
-                            check_task=CheckTasks.err_res, check_items=error)
+        self.list_snapshots(client, collection_name=collection_name, check_task=CheckTasks.err_res, check_items=error)
 
         # list_snapshots with new name should find it
         snapshots_new, _ = self.list_snapshots(client, collection_name=new_collection_name)
         log.info(f"Snapshots listed with new name '{new_collection_name}': {snapshots_new}")
-        assert snapshot_name in snapshots_new, \
+        assert snapshot_name in snapshots_new, (
             f"Snapshot {snapshot_name} should be discoverable under new name '{new_collection_name}'"
+        )
 
         # 4. Describe snapshot should still work (use new collection name)
         info, _ = self.describe_snapshot(client, snapshot_name, new_collection_name)
@@ -3609,15 +3785,14 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         log.info(f"Snapshot collection_name after rename: {info.collection_name}")
 
         # 5. Restore should still work (snapshot data is independent of collection name)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=new_collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=new_collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_collection_name)
-        res, _ = self.query(client, restored_collection_name, filter="id >= 0",
-                            output_fields=["count(*)"])
-        assert res[0]["count(*)"] == default_nb, \
-            f"Restored collection should have {default_nb} rows"
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == default_nb, f"Restored collection should have {default_nb} rows"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, new_collection_name)
@@ -3640,17 +3815,21 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Start restore
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            client, snapshot_name, restored_collection_name, source_collection_name=collection_name
+        )
 
         # 3. Immediately try to create snapshot on the target collection
         snapshot_created = False
@@ -3667,15 +3846,14 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 5. If snapshot was created during restore, verify it captured a subset of data
         if snapshot_created:
             restored_from_partial = cf.gen_unique_str(prefix + "_from_partial")
-            job_id2, _ = self.restore_snapshot(client, snapshot_on_restored, restored_from_partial,
-                                               source_collection_name=restored_collection_name)
+            job_id2, _ = self.restore_snapshot(
+                client, snapshot_on_restored, restored_from_partial, source_collection_name=restored_collection_name
+            )
             wait_for_restore_complete(client, job_id2)
             self.load_collection(client, restored_from_partial)
-            res, _ = self.query(client, restored_from_partial, filter="id >= 0",
-                                output_fields=["count(*)"])
+            res, _ = self.query(client, restored_from_partial, filter="id >= 0", output_fields=["count(*)"])
             partial_count = res[0]["count(*)"]
-            log.info(f"Snapshot during restore captured {partial_count} rows "
-                     f"(original: {default_nb})")
+            log.info(f"Snapshot during restore captured {partial_count} rows (original: {default_nb})")
             # Should have at most the original count (might be less if data was still copying)
             assert partial_count <= default_nb
             self.drop_collection(client, restored_from_partial)
@@ -3700,10 +3878,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -3713,14 +3894,18 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         # 3. Restore to existing collection - should fail
         error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(client, snapshot_name, existing_collection,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.err_res, check_items=error)
+        self.restore_snapshot(
+            client,
+            snapshot_name,
+            existing_collection,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # 4. Verify the existing collection is untouched
         self.load_collection(client, existing_collection)
-        res, _ = self.query(client, existing_collection, filter="id >= 0",
-                            output_fields=["count(*)"])
+        res, _ = self.query(client, existing_collection, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == 0, "Existing collection should remain empty (untouched)"
 
         # 5. Verify snapshot is still usable after failed restore
@@ -3729,13 +3914,11 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         # 6. Successful restore to a new collection proves no state corruption
         clean_restored = cf.gen_unique_str(prefix + "_clean")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_restored,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_restored, source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, clean_restored)
-        res, _ = self.query(client, clean_restored, filter="id >= 0",
-                            output_fields=["count(*)"])
+        res, _ = self.query(client, clean_restored, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == default_nb
 
         # Cleanup
@@ -3757,10 +3940,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(100)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(100)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -3809,10 +3995,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -3855,12 +4044,12 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             if snapshot_name in all_snapshots:
                 # Still alive -- restore to verify data integrity
                 restored_name = cf.gen_unique_str(prefix + "_restored")
-                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                                  source_collection_name=collection_name)
+                job_id, _ = self.restore_snapshot(
+                    client, snapshot_name, restored_name, source_collection_name=collection_name
+                )
                 wait_for_restore_complete(client, job_id)
                 self.load_collection(client, restored_name)
-                res, _ = self.query(client, restored_name, filter="id >= 0",
-                                    output_fields=["count(*)"])
+                res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
                 assert res[0]["count(*)"] == default_nb
                 self.drop_collection(client, restored_name)
                 # Cleanup snapshot
@@ -3894,10 +4083,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data in default db and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -3909,9 +4101,9 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # SDK signature: restore_snapshot(snapshot_name, source_collection_name,
         #                                  target_collection_name,
         #                                  source_db_name="", target_db_name="", ...)
-        job_id = client.restore_snapshot(snapshot_name, collection_name,
-                                         restored_collection_name,
-                                         target_db_name=target_db)
+        job_id = client.restore_snapshot(
+            snapshot_name, collection_name, restored_collection_name, target_db_name=target_db
+        )
         wait_for_restore_complete(client, job_id, timeout=120)
 
         # Note: MilvusClient does not honor per-call db_name kwarg for list/load/
@@ -3921,23 +4113,23 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             client.using_database(target_db)
             target_collections = client.list_collections()
             log.info(f"Collections in target db '{target_db}': {target_collections}")
-            assert restored_collection_name in target_collections, \
+            assert restored_collection_name in target_collections, (
                 f"Restored collection should be in target db '{target_db}'"
+            )
 
             # 5. Verify collection is NOT in default db
             client.using_database("default")
             default_collections = client.list_collections()
             log.info(f"Collections in default db: {default_collections}")
-            assert restored_collection_name not in default_collections, \
+            assert restored_collection_name not in default_collections, (
                 "Restored collection should NOT be in default db"
+            )
 
             # 6. Verify data integrity in target db
             client.using_database(target_db)
             client.load_collection(restored_collection_name)
-            res = client.query(restored_collection_name, filter="id >= 0",
-                               output_fields=["count(*)"])
-            assert res[0]["count(*)"] == default_nb, \
-                f"Restored collection should have {default_nb} rows"
+            res = client.query(restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
+            assert res[0]["count(*)"] == default_nb, f"Restored collection should have {default_nb} rows"
 
             # Cleanup target-db collection while still in target context
             client.drop_collection(restored_collection_name)
@@ -3968,10 +4160,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # 1. Create collection with data and snapshot
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(default_nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -3983,8 +4178,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         def restore_thread():
             try:
                 # SDK positional args: (snapshot_name, source_collection_name, target_collection_name)
-                job_id = client.restore_snapshot(snapshot_name, collection_name,
-                                                 restored_collection_name, timeout=60)
+                job_id = client.restore_snapshot(snapshot_name, collection_name, restored_collection_name, timeout=60)
                 restore_result["job_id"] = job_id
             except Exception as e:
                 restore_result["error"] = str(e)
@@ -4027,8 +4221,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
                 # Verify data
                 self.load_collection(client, restored_collection_name)
-                res, _ = self.query(client, restored_collection_name, filter="id >= 0",
-                                    output_fields=["count(*)"])
+                res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
                 assert res[0]["count(*)"] == default_nb
             except Exception as e:
                 log.info(f"Restore ended with: {e}")
@@ -4039,8 +4232,9 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
                 # "active pins exist, unpin before dropping: snapshot is pinned"
                 log.info(f"Drop was blocked during restore: {drop_result['error']}")
                 err_lower = drop_result["error"].lower()
-                assert "pin" in err_lower or "restor" in err_lower, \
+                assert "pin" in err_lower or "restor" in err_lower, (
                     f"Drop error should mention pin/restore, got: {drop_result['error']}"
+                )
                 # Now drop should succeed
                 self.drop_snapshot(client, snapshot_name, collection_name)
             else:
@@ -4060,9 +4254,10 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             log.info(f"Restored collection {restored_collection_name} exists, verifying it can be dropped")
             self.drop_collection(client, restored_collection_name, timeout=30)
             collections_after = client.list_collections()
-            assert restored_collection_name not in collections_after, \
-                f"Restored collection {restored_collection_name} should be droppable after race condition, " \
+            assert restored_collection_name not in collections_after, (
+                f"Restored collection {restored_collection_name} should be droppable after race condition, "
                 f"but drop_collection did not remove it. Server may be stuck in infinite retry loop."
+            )
 
         # Cleanup snapshot (idempotent)
         try:
@@ -4084,10 +4279,13 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         """Helper: create collection, insert data, flush."""
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -4114,8 +4312,9 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
 
         # 4. Describe snapshot via alias should show the real collection name
         info, _ = self.describe_snapshot(client, snapshot_name, alias_name)
-        assert info.collection_name == collection_name, \
+        assert info.collection_name == collection_name, (
             f"Expected real collection name '{collection_name}', got '{info.collection_name}'"
+        )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4143,10 +4342,10 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         snapshots_via_alias, _ = self.list_snapshots(client, collection_name=alias_name)
         snapshots_via_name, _ = self.list_snapshots(client, collection_name=collection_name)
 
-        assert snapshot_name in snapshots_via_alias, \
-            f"Snapshot not found via alias. Got: {snapshots_via_alias}"
-        assert snapshots_via_alias == snapshots_via_name, \
+        assert snapshot_name in snapshots_via_alias, f"Snapshot not found via alias. Got: {snapshots_via_alias}"
+        assert snapshots_via_alias == snapshots_via_name, (
             f"Mismatch: via alias={snapshots_via_alias}, via name={snapshots_via_name}"
+        )
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4174,14 +4373,12 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.create_snapshot(client, alias_name, snapshot_name)
 
         # 3. Restore snapshot using alias as source (server resolves to real collection)
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                          source_collection_name=alias_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name, source_collection_name=alias_name)
         wait_for_restore_complete(client, job_id)
 
         # 4. Verify restored data
         self.load_collection(client, restored_name)
-        res, _ = self.query(client, restored_name, filter="id >= 0",
-                            output_fields=["count(*)"])
+        res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
         assert res[0]["count(*)"] == default_nb
 
         # Cleanup
@@ -4209,16 +4406,14 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.create_snapshot(client, collection_name, snapshot_name)
 
         # 2. Restore to new collection
-        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name, source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         # 3. Create alias on restored collection and list jobs via alias
         self.create_alias(client, restored_name, restored_alias)
         jobs, _ = self.list_restore_snapshot_jobs(client, collection_name=restored_alias)
         job_ids = [j.job_id for j in jobs]
-        assert job_id in job_ids, \
-            f"Restore job {job_id} not found via alias. Jobs: {job_ids}"
+        assert job_id in job_ids, f"Restore job {job_id} not found via alias. Jobs: {job_ids}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4247,8 +4442,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
 
         # 3. Create snapshot should fail with dropped alias
         error = {ct.err_code: 100, ct.err_msg: "not found"}
-        self.create_snapshot(client, alias_name, snapshot_name,
-                             check_task=CheckTasks.err_res, check_items=error)
+        self.create_snapshot(client, alias_name, snapshot_name, check_task=CheckTasks.err_res, check_items=error)
 
         # 4. Create snapshot with real name should succeed
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -4286,10 +4480,12 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
 
         # 4. List snapshots via alias should show col_b's snapshots
         snapshots_via_alias, _ = self.list_snapshots(client, collection_name=alias_name)
-        assert snapshot_b in snapshots_via_alias, \
+        assert snapshot_b in snapshots_via_alias, (
             f"Snapshot_b not found via retargeted alias. Got: {snapshots_via_alias}"
-        assert snapshot_a not in snapshots_via_alias, \
+        )
+        assert snapshot_a not in snapshots_via_alias, (
             f"Snapshot_a should not appear after alias retarget. Got: {snapshots_via_alias}"
+        )
 
         # 5. List directly should show each collection's own snapshots
         snapshots_a, _ = self.list_snapshots(client, collection_name=col_a)
@@ -4328,9 +4524,14 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
 
         # 2. Restore with target_collection_name = existing alias name must fail
         error = {ct.err_code: 65535, ct.err_msg: "conflicts with an existing alias"}
-        self.restore_snapshot(client, snapshot_name, alias_name,
-                              source_collection_name=col_src,
-                              check_task=CheckTasks.err_res, check_items=error)
+        self.restore_snapshot(
+            client,
+            snapshot_name,
+            alias_name,
+            source_collection_name=col_src,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
         # 3. Verify source, snapshot, and alias are all untouched
         snapshots, _ = self.list_snapshots(client, collection_name=col_src)
@@ -4339,8 +4540,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         # A restore succeeds with a fresh, non-conflicting target name — proves
         # the alias-conflict was a clean rejection, not a corrupted state.
         clean_target = cf.gen_unique_str(prefix + "_clean")
-        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_target,
-                                          source_collection_name=col_src)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_target, source_collection_name=col_src)
         wait_for_restore_complete(client, job_id)
 
         # Cleanup
@@ -4375,14 +4575,17 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         # because v2-granted privileges carry db_name="*" which v1 revoke cannot match.
         roles, _ = self.list_roles(client)
         for role in roles:
-            if role not in ['admin', 'public']:
+            if role not in ["admin", "public"]:
                 res, _ = self.describe_role(client, role)
-                if res and res.get('privileges'):
-                    for privilege in res['privileges']:
-                        self.revoke_privilege_v2(client, role,
-                                                 privilege["privilege"],
-                                                 privilege.get("object_name", "*"),
-                                                 privilege.get("db_name", "*"))
+                if res and res.get("privileges"):
+                    for privilege in res["privileges"]:
+                        self.revoke_privilege_v2(
+                            client,
+                            role,
+                            privilege["privilege"],
+                            privilege.get("object_name", "*"),
+                            privilege.get("db_name", "*"),
+                        )
                 self.drop_role(client, role)
 
         super().teardown_method(method)
@@ -4406,10 +4609,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         snapshot_name = cf.gen_unique_str(prefix)
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -4430,8 +4636,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # should be denied
         snapshot_name = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, snapshot_name,
-                             check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, snapshot_name, check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_create_allowed_after_grant_v2(self, host, port):
@@ -4444,10 +4649,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -4478,8 +4686,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
         # should be denied
-        self.drop_snapshot(user_client, snapshot_name, collection_name,
-                           check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4516,8 +4723,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
         # should be denied
-        self.list_snapshots(user_client, collection_name=collection_name,
-                            check_task=CheckTasks.check_permission_deny)
+        self.list_snapshots(user_client, collection_name=collection_name, check_task=CheckTasks.check_permission_deny)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4558,8 +4764,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, role_name = self._setup_user_with_role(client, host, port)
 
         # should be denied
-        self.describe_snapshot(user_client, snapshot_name, collection_name,
-                               check_task=CheckTasks.check_permission_deny)
+        self.describe_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4601,9 +4806,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # should be denied
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4626,8 +4835,9 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # should succeed
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            user_client, snapshot_name, restored_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # cleanup
@@ -4645,10 +4855,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -4665,14 +4878,15 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.revoke_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
         time.sleep(10)
         snapshot_name2 = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, snapshot_name2,
-                             check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, snapshot_name2, check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="Built-in CollectionReadOnly group on deployed server does "
-                              "not yet include DescribeSnapshot/ListSnapshots even though "
-                              "util.CollectionReadOnlyPrivileges defines them. Tracking: "
-                              "https://github.com/milvus-io/milvus/issues/47855")
+    @pytest.mark.xfail(
+        reason="Built-in CollectionReadOnly group on deployed server does "
+        "not yet include DescribeSnapshot/ListSnapshots even though "
+        "util.CollectionReadOnlyPrivileges defines them. Tracking: "
+        "https://github.com/milvus-io/milvus/issues/47855"
+    )
     def test_snapshot_v2_privilege_group_collection_readonly(self, host, port):
         """
         target: verify CollectionReadOnly v2 privilege group grants read snapshot ops
@@ -4699,22 +4913,26 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # write ops should be denied
         new_snap = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, new_snap,
-                             check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name, collection_name,
-                           check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, new_snap, check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="Built-in CollectionReadWrite group on deployed server does "
-                              "not yet include CreateSnapshot/DropSnapshot. Tracking: "
-                              "https://github.com/milvus-io/milvus/issues/47855")
+    @pytest.mark.xfail(
+        reason="Built-in CollectionReadWrite group on deployed server does "
+        "not yet include CreateSnapshot/DropSnapshot. Tracking: "
+        "https://github.com/milvus-io/milvus/issues/47855"
+    )
     def test_snapshot_v2_privilege_group_collection_readwrite(self, host, port):
         """
         target: verify CollectionReadWrite v2 privilege group grants CRUD snapshot ops
@@ -4727,10 +4945,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -4752,17 +4973,23 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # restore should still be denied (not in ReadWrite group)
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # drop should succeed
         self.drop_snapshot(user_client, snapshot_name, collection_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    @pytest.mark.xfail(reason="Built-in CollectionAdmin group on deployed server does not "
-                              "yet include Create/Drop/RestoreSnapshot. Tracking: "
-                              "https://github.com/milvus-io/milvus/issues/47855")
+    @pytest.mark.xfail(
+        reason="Built-in CollectionAdmin group on deployed server does not "
+        "yet include Create/Drop/RestoreSnapshot. Tracking: "
+        "https://github.com/milvus-io/milvus/issues/47855"
+    )
     def test_snapshot_v2_privilege_group_collection_admin(self, host, port):
         """
         target: verify CollectionAdmin v2 privilege group grants all snapshot ops
@@ -4790,8 +5017,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         assert info.name == new_snap
 
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(user_client, new_snap, restored_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(user_client, new_snap, restored_name, source_collection_name=collection_name)
         wait_for_restore_complete(client, job_id)
 
         self.drop_snapshot(user_client, new_snap, collection_name)
@@ -4811,10 +5037,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
@@ -4838,8 +5067,9 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         assert info.name == snapshot_name
 
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        job_id, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            admin_client, snapshot_name, restored_name, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         self.drop_snapshot(admin_client, snapshot_name, collection_name)
@@ -4871,14 +5101,16 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # write ops should be denied
         new_snap = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, new_snap,
-                             check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name, collection_name,
-                           check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, new_snap, check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4903,18 +5135,18 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # all ops should be denied
         new_snap = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, new_snap,
-                             check_task=CheckTasks.check_permission_deny)
-        self.list_snapshots(user_client, collection_name=collection_name,
-                            check_task=CheckTasks.check_permission_deny)
-        self.describe_snapshot(user_client, snapshot_name, collection_name,
-                               check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name, collection_name,
-                           check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, new_snap, check_task=CheckTasks.check_permission_deny)
+        self.list_snapshots(user_client, collection_name=collection_name, check_task=CheckTasks.check_permission_deny)
+        self.describe_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_name,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4931,8 +5163,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         user_client, _ = self._setup_user_with_role(client, host, port)
 
-        self.pin_snapshot_data(user_client, snapshot_name, collection_name,
-                               check_task=CheckTasks.check_permission_deny)
+        self.pin_snapshot_data(user_client, snapshot_name, collection_name, check_task=CheckTasks.check_permission_deny)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4954,10 +5185,10 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.grant_privilege_v2(client, role_name, "PinSnapshotData", "*", "*")
         time.sleep(10)
 
-        pin_id, _ = self.pin_snapshot_data(user_client, snapshot_name, collection_name,
-                                           ttl_seconds=60)
-        assert isinstance(pin_id, int) and pin_id > 0, \
+        pin_id, _ = self.pin_snapshot_data(user_client, snapshot_name, collection_name, ttl_seconds=60)
+        assert isinstance(pin_id, int) and pin_id > 0, (
             f"pin_snapshot_data should return a positive int pin_id, got {pin_id!r}"
+        )
 
         # Clean up with root (unpin doesn't need user privilege here)
         try:
@@ -4980,8 +5211,7 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         user_client, _ = self._setup_user_with_role(client, host, port)
 
         # Use an arbitrary pin_id — server must reject on privilege, not on lookup
-        self.unpin_snapshot_data(user_client, pin_id=123456789,
-                                 check_task=CheckTasks.check_permission_deny)
+        self.unpin_snapshot_data(user_client, pin_id=123456789, check_task=CheckTasks.check_permission_deny)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -5002,17 +5232,22 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.grant_privilege_v2(client, role_name, "RestoreSnapshot", "*", "*")
         time.sleep(10)
         restored_ok = cf.gen_unique_str(prefix + "_ok")
-        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_ok,
-                                          source_collection_name=collection_name)
+        job_id, _ = self.restore_snapshot(
+            user_client, snapshot_name, restored_ok, source_collection_name=collection_name
+        )
         wait_for_restore_complete(client, job_id)
 
         # revoke and verify denied
         self.revoke_privilege_v2(client, role_name, "RestoreSnapshot", "*", "*")
         time.sleep(10)
         restored_denied = cf.gen_unique_str(prefix + "_denied")
-        self.restore_snapshot(user_client, snapshot_name, restored_denied,
-                              source_collection_name=collection_name,
-                              check_task=CheckTasks.check_permission_deny)
+        self.restore_snapshot(
+            user_client,
+            snapshot_name,
+            restored_denied,
+            source_collection_name=collection_name,
+            check_task=CheckTasks.check_permission_deny,
+        )
 
         # cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -5039,16 +5274,18 @@ class TestMilvusClientSnapshotCreateParams(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(500)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(500)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
         # Call the SDK directly — wrapper forces description as kwarg ordering
-        client.create_snapshot(snapshot_name, collection_name,
-                               compaction_protection_seconds=3600)
+        client.create_snapshot(snapshot_name, collection_name, compaction_protection_seconds=3600)
 
         info, _ = self.describe_snapshot(client, snapshot_name, collection_name)
         assert info.name == snapshot_name
@@ -5070,11 +5307,11 @@ class TestMilvusClientSnapshotCreateParams(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
 
         with pytest.raises(Exception) as exc_info:
-            client.create_snapshot(snapshot_name, collection_name,
-                                   compaction_protection_seconds=-1)
+            client.create_snapshot(snapshot_name, collection_name, compaction_protection_seconds=-1)
         msg = str(exc_info.value).lower()
-        assert "non-negative" in msg or "compaction_protection_seconds" in msg, \
+        assert "non-negative" in msg or "compaction_protection_seconds" in msg, (
             f"Expected compaction_protection error, got: {exc_info.value}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_snapshot_compaction_protection_exceeds_max(self):
@@ -5091,11 +5328,11 @@ class TestMilvusClientSnapshotCreateParams(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
 
         with pytest.raises(Exception) as exc_info:
-            client.create_snapshot(snapshot_name, collection_name,
-                                   compaction_protection_seconds=999_999_999)
+            client.create_snapshot(snapshot_name, collection_name, compaction_protection_seconds=999_999_999)
         msg = str(exc_info.value).lower()
-        assert "not exceed" in msg or "exceeds" in msg or "compaction_protection_seconds" in msg, \
+        assert "not exceed" in msg or "exceeds" in msg or "compaction_protection_seconds" in msg, (
             f"Expected exceeds-max error, got: {exc_info.value}"
+        )
 
 
 class TestMilvusClientSnapshotRestoreParams(TestMilvusClientV2Base):
@@ -5124,37 +5361,40 @@ class TestMilvusClientSnapshotRestoreParams(TestMilvusClientV2Base):
             client.using_database(source_db)
             self.create_collection(client, collection_name, default_dim)
             rng = np.random.default_rng(seed=19530)
-            rows = [{
-                default_primary_key_field_name: i,
-                default_vector_field_name: list(rng.random(default_dim)),
-            } for i in range(default_nb)]
+            rows = [
+                {
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: list(rng.random(default_dim)),
+                }
+                for i in range(default_nb)
+            ]
             self.insert(client, collection_name, rows)
             self.flush(client, collection_name)
             self.create_snapshot(client, collection_name, snapshot_name)
 
             # 2. Switch to default db and restore via explicit source_db_name
             client.using_database("default")
-            job_id = client.restore_snapshot(snapshot_name, collection_name,
-                                             restored_name,
-                                             source_db_name=source_db,
-                                             target_db_name="default")
+            job_id = client.restore_snapshot(
+                snapshot_name, collection_name, restored_name, source_db_name=source_db, target_db_name="default"
+            )
             wait_for_restore_complete(client, job_id, timeout=120)
 
             # 3. Target collection lives in default db
             default_collections = client.list_collections()
-            assert restored_name in default_collections, \
+            assert restored_name in default_collections, (
                 f"Restored collection should be in default db, got {default_collections}"
+            )
 
             client.load_collection(restored_name)
             res = client.query(restored_name, filter="id >= 0", output_fields=["count(*)"])
-            assert res[0]["count(*)"] == default_nb, \
-                f"Restored collection should have {default_nb} rows"
+            assert res[0]["count(*)"] == default_nb, f"Restored collection should have {default_nb} rows"
 
             # 4. Source still exists in source_db
             client.using_database(source_db)
             source_collections = client.list_collections()
-            assert collection_name in source_collections, \
+            assert collection_name in source_collections, (
                 f"Source collection missing in {source_db}: {source_collections}"
+            )
 
             # Cleanup
             self.drop_snapshot(client, snapshot_name, collection_name)
@@ -5184,10 +5424,13 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         snapshot_name = cf.gen_unique_str(prefix)
         self.create_collection(client, collection_name, default_dim)
         rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random(default_dim)),
-        } for i in range(nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random(default_dim)),
+            }
+            for i in range(nb)
+        ]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.create_snapshot(client, collection_name, snapshot_name)
@@ -5203,10 +5446,10 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         client = self._client()
         collection_name, snapshot_name = self._prepare(client)
 
-        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name,
-                                           ttl_seconds=60)
-        assert isinstance(pin_id, int) and pin_id > 0, \
+        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name, ttl_seconds=60)
+        assert isinstance(pin_id, int) and pin_id > 0, (
             f"pin_snapshot_data should return a positive pin_id, got {pin_id!r}"
+        )
 
         self.unpin_snapshot_data(client, pin_id)
 
@@ -5229,15 +5472,13 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         client = self._client()
         collection_name, snapshot_name = self._prepare(client)
 
-        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name,
-                                           ttl_seconds=300)
+        pin_id, _ = self.pin_snapshot_data(client, snapshot_name, collection_name, ttl_seconds=300)
 
         # drop should be rejected while pinned
         with pytest.raises(Exception) as exc_info:
             client.drop_snapshot(snapshot_name, collection_name, timeout=30)
         err_msg = str(exc_info.value).lower()
-        assert "pin" in err_msg, \
-            f"Expected drop error to mention pin, got: {exc_info.value}"
+        assert "pin" in err_msg, f"Expected drop error to mention pin, got: {exc_info.value}"
 
         # Unpin releases the hold
         self.unpin_snapshot_data(client, pin_id)
@@ -5261,8 +5502,7 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         with pytest.raises(Exception) as exc_info:
             client.pin_snapshot_data(snapshot_name, collection_name, ttl_seconds=-1)
         msg = str(exc_info.value).lower()
-        assert "non-negative" in msg or "ttl_seconds" in msg, \
-            f"Expected ttl_seconds error, got: {exc_info.value}"
+        assert "non-negative" in msg or "ttl_seconds" in msg, f"Expected ttl_seconds error, got: {exc_info.value}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -5279,11 +5519,9 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         collection_name, snapshot_name = self._prepare(client)
 
         with pytest.raises(Exception) as exc_info:
-            client.pin_snapshot_data(snapshot_name, collection_name,
-                                     ttl_seconds=2_592_001)
+            client.pin_snapshot_data(snapshot_name, collection_name, ttl_seconds=2_592_001)
         msg = str(exc_info.value).lower()
-        assert "exceed" in msg or "ttl_seconds" in msg, \
-            f"Expected exceeds-max error, got: {exc_info.value}"
+        assert "exceed" in msg or "ttl_seconds" in msg, f"Expected exceeds-max error, got: {exc_info.value}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -5300,8 +5538,7 @@ class TestMilvusClientSnapshotPin(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
 
         with pytest.raises(Exception) as exc_info:
-            client.pin_snapshot_data(cf.gen_unique_str("ghost"), collection_name,
-                                     ttl_seconds=60)
+            client.pin_snapshot_data(cf.gen_unique_str("ghost"), collection_name, ttl_seconds=60)
         # Accept any error — the server may return "not found", "snapshot", or ParameterInvalid
         log.info(f"pin non-existent snapshot error: {exc_info.value}")
         assert str(exc_info.value), "pin_snapshot_data on non-existent snapshot must raise"
