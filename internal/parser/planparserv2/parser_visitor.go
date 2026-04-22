@@ -1598,6 +1598,9 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 	}
 
 	if len(column.NestedPath) != 0 {
+		if typeutil.IsArrayType(column.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on array element access, got: %s", ctx.GetText())
+		}
 		// convert json not null expr to exists expr, eg: json['a'] is not null -> exists json['a']
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_ExistsExpr{
@@ -1642,6 +1645,9 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	}
 
 	if len(column.NestedPath) != 0 {
+		if typeutil.IsArrayType(column.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on array element access, got: %s", ctx.GetText())
+		}
 		// convert json is null expr to not exists expr, eg: json['a'] is null -> not exists json['a']
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_ExistsExpr{
