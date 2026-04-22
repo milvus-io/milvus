@@ -745,6 +745,101 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 	})
 }
 
+func (s *ProxyManagementSuite) TestCommitBackfillResult() {
+	s.Run("missing_result_path", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		req, err := http.NewRequest(http.MethodGet, management.RouteCommitBackfill, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CommitBackfillResult(recorder, req)
+
+		s.Equal(http.StatusBadRequest, recorder.Code)
+		s.Contains(recorder.Body.String(), "result_path query parameter is required")
+	})
+
+	s.Run("success", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().CommitBackfillResult(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *datapb.CommitBackfillResultRequest, options ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+				s.Equal("s3a://bkt/foo.json", req.GetResultPath())
+				return &datapb.CommitBackfillResultResponse{
+					Status:            merr.Success(),
+					TotalSegments:     2,
+					CommittedSegments: 2,
+					SegmentStatuses: []*datapb.CommitBackfillResultSegmentStatus{
+						{SegmentId: 1, Ok: true, Kind: "v3"},
+						{SegmentId: 2, Ok: true, Kind: "v2"},
+					},
+				}, nil
+			})
+
+		req, err := http.NewRequest(http.MethodGet,
+			management.RouteCommitBackfill+"?result_path=s3a%3A%2F%2Fbkt%2Ffoo.json", nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CommitBackfillResult(recorder, req)
+
+		s.Equal(http.StatusOK, recorder.Code)
+		body := recorder.Body.String()
+		s.Contains(body, `"msg":"OK"`)
+		s.Contains(body, `"total_segments":2`)
+		s.Contains(body, `"committed_segments":2`)
+	})
+
+	s.Run("downstream_rpc_error", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().CommitBackfillResult(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *datapb.CommitBackfillResultRequest, options ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+				return nil, errors.New("network broken")
+			})
+
+		req, err := http.NewRequest(http.MethodGet,
+			management.RouteCommitBackfill+"?result_path=s3a%3A%2F%2Fbkt%2Ffoo.json", nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CommitBackfillResult(recorder, req)
+
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+		s.Contains(recorder.Body.String(), "network broken")
+	})
+
+	s.Run("downstream_status_error", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().CommitBackfillResult(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *datapb.CommitBackfillResultRequest, options ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+				return &datapb.CommitBackfillResultResponse{
+					Status:         merr.Status(merr.WrapErrParameterInvalidMsg("bad json")),
+					TotalSegments:  1,
+					FailedSegments: 1,
+					SegmentStatuses: []*datapb.CommitBackfillResultSegmentStatus{
+						{SegmentId: 1, Ok: false, Kind: "v3", Reason: "bad json"},
+					},
+				}, nil
+			})
+
+		req, err := http.NewRequest(http.MethodGet,
+			management.RouteCommitBackfill+"?result_path=s3a%3A%2F%2Fbkt%2Ffoo.json", nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CommitBackfillResult(recorder, req)
+
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+		body := recorder.Body.String()
+		s.Contains(body, "bad json")
+		s.Contains(body, `"failed_segments":1`)
+		s.Contains(body, `"segment_statuses"`)
+	})
+}
+
 func TestProxyManagement(t *testing.T) {
 	suite.Run(t, new(ProxyManagementSuite))
 }

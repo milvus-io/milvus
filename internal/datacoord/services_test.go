@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -29,9 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -3443,6 +3446,316 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 	})
 }
 
+// --- Test CommitBackfillResult ---
+
+func TestServer_CommitBackfillResult(t *testing.T) {
+	// Small helper to build a minimal Server with a healthy state and a
+	// chunk manager that always returns the supplied JSON bytes.
+	newServerForCommit := func(t *testing.T, m *meta, b broker.Broker, jsonBytes []byte) *Server {
+		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(jsonBytes, nil).Maybe()
+		m.chunkManager = cm
+		s := &Server{
+			meta:   m,
+			broker: b,
+		}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		return s
+	}
+
+	// V3 happy path: 2 V3 segments both belong to collection 100, broadcast is
+	// captured and inspected.
+	t.Run("v3_happy_path", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		for _, id := range []int64{1001, 1002} {
+			m.AddSegment(ctx, &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           id,
+					CollectionID: 100,
+					State:        commonpb.SegmentState_Flushed,
+					ManifestPath: packed.MarshalManifestPath("/seg/"+strconv.FormatInt(id, 10), 1),
+				},
+			})
+		}
+
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "1001": {"version": 10, "rowCount": 5, "outputPath": "s3a://bkt/seg/1001", "manifestPaths": []},
+            "1002": {"version": 20, "rowCount": 7, "outputPath": "s3a://bkt/seg/1002", "manifestPaths": []}
+          }
+        }`
+
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "test_collection",
+			}, nil)
+
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		var captured message.BroadcastMutableMessage
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				captured = msg
+				return &types2.BroadcastAppendResult{
+					BroadcastID: 1,
+					AppendResults: map[string]*types2.AppendResult{
+						"by-dev-rootcoord-dml_0": {
+							MessageID:              rmq.NewRmqID(1),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							LastConfirmedMessageID: rmq.NewRmqID(1),
+						},
+					},
+				}, nil
+			})
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/path/to/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(2), resp.GetTotalSegments())
+		assert.Equal(t, int32(2), resp.GetCommittedSegments())
+		assert.Equal(t, int32(0), resp.GetFailedSegments())
+		// Ensure the broadcast carries exactly two V3 items.
+		assert.NotNil(t, captured)
+		// Access the message body through the specialized wrapper.
+		specialized := message.MustAsMutableBatchUpdateManifestMessageV2(captured)
+		body := specialized.MustBody()
+		assert.Len(t, body.GetItems(), 2)
+		for _, it := range body.GetItems() {
+			assert.Nil(t, it.GetV2ColumnGroups())
+			assert.Greater(t, it.GetManifestVersion(), int64(0))
+		}
+	})
+
+	// Unhealthy state: reject without reading anything.
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success_false_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		jsonStr := `{"success": false, "collectionId": 1, "segments": {"1": {"version": 1}}}`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("bad_json_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		server := newServerForCommit(t, m, nil, []byte("not json"))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	// All segments fail pre-validation -> no broadcast, top-level error.
+	t.Run("all_segments_prevalidation_fail", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		// Seg 1 does NOT exist in meta, so pre-validation rejects it.
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "1": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetTotalSegments())
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		assert.Equal(t, int32(0), resp.GetCommittedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "not found")
+	})
+
+	// Mixed: one segment passes pre-validation (goes to broadcast), one fails
+	// (wrong collection).
+	t.Run("partial_failure_reported", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 101, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			ManifestPath: packed.MarshalManifestPath("/seg/101", 1),
+		}})
+		// 102 belongs to a different collection
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 102, CollectionID: 999, State: commonpb.SegmentState_Flushed,
+			ManifestPath: packed.MarshalManifestPath("/seg/102", 1),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "101": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []},
+            "102": {"version": 20, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
+			BroadcastID: 1,
+			AppendResults: map[string]*types2.AppendResult{
+				"by-dev-rootcoord-dml_0": {
+					MessageID:              rmq.NewRmqID(1),
+					TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+					LastConfirmedMessageID: rmq.NewRmqID(1),
+				},
+			},
+		}, nil)
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(2), resp.GetTotalSegments())
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+	})
+
+	// V2 happy path: one V2 column-group entry reaches broadcast with V2
+	// payload populated.
+	t.Run("v2_happy_path", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 201, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV2,
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "201": {
+              "version": -1,
+              "rowCount": 100,
+              "outputPath": "s3a://bkt/seg/201",
+              "manifestPaths": ["s3a://bkt/seg/201/100/7"],
+              "storage_version": 2,
+              "column_groups": [
+                {"field_ids":[100], "binlog_files":["s3a://bkt/seg/201/100/7"], "row_count": 100}
+              ]
+            }
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil)
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		var captured message.BroadcastMutableMessage
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				captured = msg
+				return &types2.BroadcastAppendResult{
+					BroadcastID: 1,
+					AppendResults: map[string]*types2.AppendResult{
+						"by-dev-rootcoord-dml_0": {
+							MessageID:              rmq.NewRmqID(1),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							LastConfirmedMessageID: rmq.NewRmqID(1),
+						},
+					},
+				}, nil
+			})
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+
+		specialized := message.MustAsMutableBatchUpdateManifestMessageV2(captured)
+		body := specialized.MustBody()
+		require.Len(t, body.GetItems(), 1)
+		it := body.GetItems()[0]
+		assert.Equal(t, int64(201), it.GetSegmentId())
+		assert.Equal(t, int64(0), it.GetManifestVersion())
+		require.NotNil(t, it.GetV2ColumnGroups())
+		require.Contains(t, it.GetV2ColumnGroups().GetColumnGroups(), int64(100))
+		fb := it.GetV2ColumnGroups().GetColumnGroups()[100]
+		require.Len(t, fb.GetBinlogs(), 1)
+		assert.Equal(t, int64(100), fb.GetBinlogs()[0].GetEntriesNum())
+	})
+}
+
 // --- Test BatchUpdateManifest ---
 
 func TestServer_BatchUpdateManifest(t *testing.T) {
@@ -3726,6 +4039,113 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.Error(t, err)
+	})
+
+	t.Run("v2_column_groups_dispatches_operator", func(t *testing.T) {
+		ctx := context.Background()
+
+		registry.ResetRegistration()
+
+		var capturedOps int
+		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
+			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+				capturedOps = len(operators)
+				return nil
+			}).Build()
+		defer mockUpdate.UnPatch()
+
+		server := &Server{
+			ctx:  ctx,
+			meta: &meta{segments: NewSegmentsInfo()},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+		RegisterDDLCallbacks(server)
+
+		msg := message.NewBatchUpdateManifestMessageBuilderV2().
+			WithHeader(&message.BatchUpdateManifestMessageHeader{
+				CollectionId: 100,
+			}).
+			WithBody(&message.BatchUpdateManifestMessageBody{
+				Items: []*messagespb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 15}, // V3
+					{
+						SegmentId: 2, // V2
+						V2ColumnGroups: &messagespb.BatchUpdateManifestV2ColumnGroups{
+							ColumnGroups: map[int64]*datapb.FieldBinlog{
+								200: {FieldID: 200, Binlogs: []*datapb.Binlog{{LogID: 7}}},
+							},
+						},
+					},
+				},
+			}).
+			WithBroadcast([]string{"control_channel"}).
+			MustBuildBroadcast()
+
+		err := registry.CallMessageAckCallback(ctx, msg, map[string]*message.AppendResult{
+			"control_channel": {
+				MessageID:              rmq.NewRmqID(1),
+				LastConfirmedMessageID: rmq.NewRmqID(1),
+				TimeTick:               1,
+			},
+		})
+		assert.NoError(t, err)
+		// Two operators dispatched: one V3 UpdateManifestVersion, one V2
+		// UpdateSegmentColumnGroupsOperator. Both flow through the single
+		// UpdateSegmentsInfo batch call.
+		assert.Equal(t, 2, capturedOps)
+	})
+
+	t.Run("item_with_both_v2_and_v3_is_skipped", func(t *testing.T) {
+		ctx := context.Background()
+
+		registry.ResetRegistration()
+
+		var capturedOps int
+		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
+			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+				capturedOps = len(operators)
+				return nil
+			}).Build()
+		defer mockUpdate.UnPatch()
+
+		server := &Server{
+			ctx:  ctx,
+			meta: &meta{segments: NewSegmentsInfo()},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+		RegisterDDLCallbacks(server)
+
+		msg := message.NewBatchUpdateManifestMessageBuilderV2().
+			WithHeader(&message.BatchUpdateManifestMessageHeader{
+				CollectionId: 100,
+			}).
+			WithBody(&message.BatchUpdateManifestMessageBody{
+				Items: []*messagespb.BatchUpdateManifestItem{
+					{
+						SegmentId:       1,
+						ManifestVersion: 15,
+						V2ColumnGroups: &messagespb.BatchUpdateManifestV2ColumnGroups{
+							ColumnGroups: map[int64]*datapb.FieldBinlog{
+								200: {FieldID: 200, Binlogs: []*datapb.Binlog{{LogID: 7}}},
+							},
+						},
+					},
+					{SegmentId: 2, ManifestVersion: 25}, // valid V3
+				},
+			}).
+			WithBroadcast([]string{"control_channel"}).
+			MustBuildBroadcast()
+
+		err := registry.CallMessageAckCallback(ctx, msg, map[string]*message.AppendResult{
+			"control_channel": {
+				MessageID:              rmq.NewRmqID(1),
+				LastConfirmedMessageID: rmq.NewRmqID(1),
+				TimeTick:               1,
+			},
+		})
+		assert.NoError(t, err)
+		// ambiguous item is skipped, only the valid V3 item becomes an operator
+		assert.Equal(t, 1, capturedOps)
 	})
 }
 
