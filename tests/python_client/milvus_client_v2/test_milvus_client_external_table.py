@@ -739,6 +739,104 @@ class TestExternalCrossBucket(TestMilvusClientV2Base):
             cleanup_minio_prefix(minio_client, external_bucket, f"{ext_path}/")
 
 
+class TestRefreshUpdatesSchema(TestMilvusClientV2Base):
+    """Refresh can rebind external_source/external_spec (Part8-2/4 #49062).
+
+    refresh_external_collection(external_source=, external_spec=) atomically
+    rebinds the collection to a new data path + spec and broadcasts the
+    schema DDL via the WAL updater. After the job completes, the refreshed
+    values must be visible through describe_collection.
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_refresh_with_new_source_and_spec_updates_schema(self, minio_client_and_cfg):
+        """First refresh at pathV1/specV1, second refresh with new pathV2/specV2,
+        describe should reflect the new values and row count should match pathV2."""
+        minio_client, minio_cfg = minio_client_and_cfg
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        base = f"external-e2e-test/{collection_name}"
+        path_v1 = f"{base}/v1"
+        path_v2 = f"{base}/v2"
+
+        rows_v1 = 100
+        rows_v2 = 250
+        upload_to_minio(minio_client, minio_cfg["bucket"],
+                        f"{path_v1}/data.parquet", generate_parquet_bytes(rows_v1, 0))
+        upload_to_minio(minio_client, minio_cfg["bucket"],
+                        f"{path_v2}/data.parquet", generate_parquet_bytes(rows_v2, 10_000))
+
+        spec_v1 = '{"format":"parquet"}'
+        spec_v2 = '{"format":"parquet","version":2}'
+
+        schema = client.create_schema(
+            external_source=path_v1,
+            external_spec=spec_v1,
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("value", DataType.FLOAT, external_field="value")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_VEC_DIM,
+                         external_field="embedding")
+        client.create_collection(collection_name=collection_name, schema=schema)
+        try:
+            initial = client.describe_collection(collection_name)
+            assert initial.get("external_source") == path_v1
+            assert initial.get("external_spec") == spec_v1
+
+            # Baseline refresh against v1.
+            refresh_and_wait(client, collection_name)
+            index_and_load(client, collection_name)
+            count_v1 = query_count(client, collection_name)
+            assert count_v1 == rows_v1, f"baseline: expected {rows_v1}, got {count_v1}"
+
+            # Second refresh with a new source + spec — WAL schema updater
+            # should pick up both changes.
+            job_id = client.refresh_external_collection(
+                collection_name=collection_name,
+                external_source=path_v2,
+                external_spec=spec_v2,
+            )
+            assert job_id > 0
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                progress = client.get_refresh_external_collection_progress(job_id=job_id)
+                if progress.state == "RefreshCompleted":
+                    break
+                if progress.state == "RefreshFailed":
+                    raise AssertionError(
+                        f"second refresh failed: {progress.reason}")
+                time.sleep(2)
+            else:
+                raise AssertionError(f"second refresh job {job_id} timed out")
+
+            # Describe should reflect the new source/spec.
+            updated = client.describe_collection(collection_name)
+            assert updated.get("external_source") == path_v2, \
+                f"source not rebounded: {updated.get('external_source')}"
+            assert updated.get("external_spec") == spec_v2, \
+                f"spec not rebounded: {updated.get('external_spec')}"
+
+            # Refresh reloads data; QueryNode needs release+load to drop the
+            # stale v1 segments and pull v2.
+            client.release_collection(collection_name)
+            client.load_collection(collection_name)
+
+            # Query must now see rows from v2, not v1.
+            count_v2 = query_count(client, collection_name)
+            assert count_v2 == rows_v2, \
+                f"after rebind: expected {rows_v2}, got {count_v2}"
+            res = client.query(collection_name, filter="id == 10000",
+                               output_fields=["id"])
+            assert len(res) == 1 and res[0]["id"] == 10000, \
+                f"expected id=10000 from v2 data, got {res}"
+            log.info(f"[refresh-rebind] ✓ source/spec updated, row count "
+                     f"{count_v1} → {count_v2}")
+        finally:
+            client.drop_collection(collection_name)
+            cleanup_minio_prefix(minio_client, minio_cfg["bucket"], f"{base}/")
+
+
 class TestForceNullableExternalFields(TestMilvusClientV2Base):
     """Force nullable on external user fields (Part8-1/4 #49061).
 
