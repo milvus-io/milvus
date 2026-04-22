@@ -26,14 +26,27 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// registerTestBalancer installs a mock balancer that returns the given error from
+// ConfirmPrimaryResourceGroupReady. Caller must invoke the returned cleanup.
+func registerTestBalancer(t *testing.T, primaryRGErr error) func() {
+	balance.ResetBalancer()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().ConfirmPrimaryResourceGroupReady(mock.Anything).Return(primaryRGErr).Maybe()
+	balance.Register(b)
+	return balance.ResetBalancer
+}
 
 func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 	paramtable.Init()
@@ -55,6 +68,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		coord := &mixCoordImpl{
 			queryCoordServer: &querycoordv2.Server{},
@@ -87,6 +101,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicas := []*meta.Replica{
 			meta.NewReplica(&querypb.Replica{
@@ -137,6 +152,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicas := []*meta.Replica{
 			meta.NewReplica(&querypb.Replica{
@@ -184,11 +200,40 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		assert.Contains(t, resp.Reason, "resource group mismatch")
 	})
 
+	t.Run("primary resource group not ready returns NotReady", func(t *testing.T) {
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, fmt.Errorf("pchannel p0 still on rg=rg_old, expected primary rg=rg_new (WAL migration in progress)"))()
+
+		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
+
+		mocker := mockey.Mock((*mixCoordImpl).ShowLoadCollections).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{100},
+			InMemoryPercentages: []int64{100},
+		}, nil).Build()
+		defer mocker.UnPatch()
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp LoadConfigComplianceResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, LoadConfigComplianceStateNotReady, resp.State)
+		assert.Contains(t, resp.Reason, "WAL placement")
+		assert.Contains(t, resp.Reason, "WAL migration in progress")
+	})
+
 	t.Run("delegator not serviceable returns NotReady", func(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 
@@ -228,6 +273,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicas := []*meta.Replica{
 			meta.NewReplica(&querypb.Replica{
@@ -284,6 +330,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicas := []*meta.Replica{
 			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
@@ -326,6 +373,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicas := []*meta.Replica{
 			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "rg1"}, typeutil.NewUniqueSet()),
@@ -365,6 +413,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		coord := &mixCoordImpl{
 			queryCoordServer: &querycoordv2.Server{},
@@ -394,6 +443,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
 		defer paramtable.Get().Reset(Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+		defer registerTestBalancer(t, nil)()
 
 		replicasMap := map[int64][]*meta.Replica{
 			100: {
