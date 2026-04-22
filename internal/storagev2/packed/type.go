@@ -45,6 +45,9 @@ type FFIPackedWriter struct {
 	// Use true when adding columns that do not yet exist in the manifest (e.g. backfill).
 	// Use false (default) when writing more files into the same column structure (e.g. multi-batch write).
 	addNewColumnGroups bool
+	// destroyed guards Destroy() against double-free when both Close() and a
+	// caller-side defer Destroy() run.
+	destroyed bool
 }
 
 type PackedReader struct {

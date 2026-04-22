@@ -36,9 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -443,164 +441,14 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 	log.Info("start to run embedding function")
-	if err := RunDenseEmbedding(task, data); err != nil {
-		return err
-	}
-
-	if err := RunBm25Function(task, data); err != nil {
-		return err
-	}
-
-	if err := RunMinHashFunction(task, data); err != nil {
-		return err
-	}
-	return nil
-}
-
-func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
-	log.Info("start to run dense embedding")
 	schema := task.GetSchema()
-	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
-	log.Info("allowNonBM25Outputs", zap.Any("allowNonBM25Outputs", allowNonBM25Outputs))
-	fieldIDs := lo.Keys(lo.PickBy(data.Data, func(_ int64, fd storage.FieldData) bool {
-		return fd.RowNum() > 0
-	}))
-	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
-	if err != nil {
+	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties())
+	if err := embedding.RunAll(context.Background(), schema, data, embedding.RunOptions{
+		ClusterID:           task.req.GetClusterID(),
+		DBName:              schema.GetDbName(),
+		AllowNonBM25Outputs: allowNonBM25Outputs,
+	}); err != nil {
 		return errors.Wrap(merr.ErrInvalidInsertData, err.Error())
-	}
-	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
-	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
-		log.Info("has non bm25/minhash functions")
-		extraInfo := &models.ModelExtraInfo{
-			ClusterID: task.req.ClusterID,
-			DBName:    task.req.Schema.DbName,
-		}
-		exec, err := embedding.NewFunctionExecutor(schema, needProcessFunctions, extraInfo)
-		if err != nil {
-			return err
-		}
-		if err := exec.ProcessBulkInsert(context.Background(), data); err != nil {
-			return err
-		}
-		log.Info("end to run dense embedding")
-	}
-	return nil
-}
-
-func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
-	log.Info("start to run bm25 function")
-	fns := task.GetSchema().GetFunctions()
-	for _, fn := range fns {
-		if fn.GetType() != schemapb.FunctionType_BM25 {
-			continue
-		}
-		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
-		if err != nil {
-			return err
-		}
-
-		if runner == nil {
-			continue
-		}
-
-		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
-		inputDatas := make([]any, 0, len(inputFieldIDs))
-		for _, inputFieldID := range inputFieldIDs {
-			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
-		}
-
-		outputFieldData, err := runner.BatchRun(inputDatas...)
-		runner.Close()
-		if err != nil {
-			return err
-		}
-		for i, outputFieldID := range fn.OutputFieldIds {
-			outputField := typeutil.GetField(task.GetSchema(), outputFieldID)
-			// TODO: added support for vector output field only, scalar output field in function is not supported yet
-			switch outputField.GetDataType() {
-			case schemapb.DataType_FloatVector:
-				data.Data[outputFieldID] = outputFieldData[i].(*storage.FloatVectorFieldData)
-			case schemapb.DataType_BFloat16Vector:
-				data.Data[outputFieldID] = outputFieldData[i].(*storage.BFloat16VectorFieldData)
-			case schemapb.DataType_Float16Vector:
-				data.Data[outputFieldID] = outputFieldData[i].(*storage.Float16VectorFieldData)
-			case schemapb.DataType_BinaryVector:
-				data.Data[outputFieldID] = outputFieldData[i].(*storage.BinaryVectorFieldData)
-			case schemapb.DataType_SparseFloatVector:
-				sparseArray := outputFieldData[i].(*schemapb.SparseFloatArray)
-				data.Data[outputFieldID] = &storage.SparseFloatVectorFieldData{
-					SparseFloatArray: schemapb.SparseFloatArray{
-						Dim:      sparseArray.GetDim(),
-						Contents: sparseArray.GetContents(),
-					},
-				}
-			default:
-				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
-			}
-		}
-	}
-	return nil
-}
-
-func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
-	fns := task.GetSchema().GetFunctions()
-	for _, fn := range fns {
-		if fn.GetType() != schemapb.FunctionType_MinHash {
-			continue
-		}
-		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
-		if err != nil {
-			return err
-		}
-
-		if runner == nil {
-			continue
-		}
-
-		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
-		inputDatas := make([]any, 0, len(inputFieldIDs))
-		for _, inputFieldID := range inputFieldIDs {
-			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
-		}
-
-		output, err := runner.BatchRun(inputDatas...)
-		runner.Close()
-		if err != nil {
-			return err
-		}
-
-		// Sanity check: ensure BatchRun returned at least one output
-		if len(output) == 0 {
-			return errors.New("MinHash embedding failed: runner.BatchRun returned empty output")
-		}
-
-		// MinHash function has only one output field
-		fieldData, ok := output[0].(*schemapb.FieldData)
-		if !ok {
-			return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
-		}
-
-		vectorField := fieldData.GetVectors()
-		if vectorField == nil {
-			return errors.New("MinHash embedding failed: output is not a vector field")
-		}
-
-		binaryVector := vectorField.GetBinaryVector()
-		if binaryVector == nil {
-			return errors.New("MinHash embedding failed: output is not a binary vector")
-		}
-
-		outputFields := runner.GetOutputFields()
-		if len(outputFields) == 0 {
-			return errors.New("MinHash embedding failed: runner has no output fields")
-		}
-
-		outputFieldId := outputFields[0].GetFieldID()
-		data.Data[outputFieldId] = &storage.BinaryVectorFieldData{
-			Data: binaryVector,
-			Dim:  int(vectorField.GetDim()),
-		}
 	}
 	return nil
 }

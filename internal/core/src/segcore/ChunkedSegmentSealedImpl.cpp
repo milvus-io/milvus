@@ -281,6 +281,11 @@ ChunkedSegmentSealedImpl::PinPkIndex(milvus::OpContext* op_ctx) const {
 
 bool
 ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
+    // Zero-storage pk2offset (VirtualPKOffsetMap) resolves PKs by bit-extract.
+    // Skips PinPkIndex + sorted-pk binary search on the virtual PK column.
+    if (insert_record_.pk2offset_is_zero_storage()) {
+        return insert_record_.contain(pk);
+    }
     auto pk_index = PinPkIndex(nullptr);
     if (pk_index.get() != nullptr && pk_index.get()->has_pk2offset()) {
         return pk_index.get()->contain(pk);
@@ -1890,6 +1895,16 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
         return;
     }
     BitsetTypeView bitset_view(bitset);
+
+    // See Contain() — same zero-storage pk2offset fast path.
+    if (insert_record_.pk2offset_is_zero_storage()) {
+        for (auto& pk : pks) {
+            insert_record_.search_pk_range(
+                pk, proto::plan::OpType::Equal, bitset_view);
+        }
+        return;
+    }
+
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(nullptr);
         auto* pk_cell = pk_index.get();
@@ -2082,6 +2097,11 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
                                    proto::plan::OpType op,
                                    const PkType& pk,
                                    BitsetTypeView& bitset) const {
+    // See Contain() — same zero-storage pk2offset fast path.
+    if (insert_record_.pk2offset_is_zero_storage()) {
+        insert_record_.search_pk_range(pk, op, bitset);
+        return;
+    }
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(op_ctx);
         auto* pk_cell = pk_index.get();
@@ -2134,6 +2154,12 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                                           const PkType& upper_pk,
                                           bool upper_inclusive,
                                           BitsetTypeView& bitset) const {
+    // See Contain() — same zero-storage pk2offset fast path.
+    if (insert_record_.pk2offset_is_zero_storage()) {
+        insert_record_.search_pk_binary_range(
+            lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
+        return;
+    }
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(op_ctx);
         auto* pk_cell = pk_index.get();
@@ -4596,12 +4622,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        const auto& field_meta = (*schema_)[fid];
-        if (field_meta.is_external_field()) {
-            needed_columns->push_back(field_meta.get_external_field());
-        } else {
-            needed_columns->push_back(std::to_string(fid.get()));
-        }
+        needed_columns->push_back(schema_->get_storage_column_name(fid));
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),
@@ -5301,10 +5322,11 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field()) {
+        if (!field_meta.is_external_field() &&
+            !schema_->is_function_output(field_id)) {
             continue;
         }
-        needed_columns->push_back(field_meta.get_external_field());
+        needed_columns->push_back(schema_->get_storage_column_name(field_id));
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
     }
@@ -5340,17 +5362,17 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         ext_field_idx[take_field_ids[fi].get()] = fi;
     }
 
-    // Pre-combine Arrow chunks for each external column
+    // Pre-combine Arrow chunks for each external / function-output column
     std::vector<std::shared_ptr<arrow::Array>> combined_arrays(
         take_field_ids.size());
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
-        auto ext_name = take_field_metas[fi]->get_external_field();
-        auto col = table->GetColumnByName(ext_name);
+        auto col_name = schema_->get_storage_column_name(take_field_ids[fi]);
+        auto col = table->GetColumnByName(col_name);
         if (!col || col->num_chunks() == 0) {
             LOG_WARN(
                 "[TakeAPI] column '{}' not found in take result for "
                 "segment {}",
-                ext_name,
+                col_name,
                 id_);
             return false;
         }
@@ -5392,8 +5414,9 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         auto& field_meta = schema_->operator[](field_id);
 
-        // Virtual PK field (not external, computed on-the-fly)
-        if (!field_meta.is_external_field()) {
+        // Virtual PK field (not external, not function-output, computed on-the-fly)
+        if (!field_meta.is_external_field() &&
+            !schema_->is_function_output(field_id)) {
             if (is_pk_field(field_id) &&
                 field_meta.get_data_type() == DataType::INT64) {
                 auto data_array = std::make_unique<DataArray>();
@@ -5416,7 +5439,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             continue;
         }
 
-        // External field — convert from take() result
+        // External or function-output field — convert from take() result
         auto it = ext_field_idx.find(field_id.get());
         if (it == ext_field_idx.end()) {
             continue;
@@ -5430,11 +5453,12 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         auto data_array =
             ArrowToDataArray(arr, field_meta, ctx.result_mapping, size);
         if (!data_array) {
+            auto fname = schema_->get_storage_column_name(field_id);
             LOG_WARN(
                 "[TakeAPI] unsupported data type {} for field '{}', "
                 "falling back",
                 static_cast<int>(field_meta.get_data_type()),
-                field_meta.get_external_field());
+                fname);
             results->clear_fields_data();
             results->clear_ids();
             return false;
@@ -5468,16 +5492,17 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
         return false;
     }
 
-    // Collect needed external columns
+    // Collect needed external + function-output columns
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     std::vector<FieldId> take_field_ids;
     std::vector<const FieldMeta*> take_field_metas;
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = schema_->operator[](field_id);
-        if (!field_meta.is_external_field()) {
+        if (!field_meta.is_external_field() &&
+            !schema_->is_function_output(field_id)) {
             continue;
         }
-        needed_columns->push_back(field_meta.get_external_field());
+        needed_columns->push_back(schema_->get_storage_column_name(field_id));
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
     }
@@ -5504,11 +5529,11 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
         auto field_id = take_field_ids[fi];
         auto& field_meta = *take_field_metas[fi];
-        auto ext_name = field_meta.get_external_field();
-        auto col = table->GetColumnByName(ext_name);
+        auto col_name = schema_->get_storage_column_name(field_id);
+        auto col = table->GetColumnByName(col_name);
         if (!col || col->num_chunks() == 0) {
             LOG_WARN("[TakeAPI] search column '{}' not found for segment {}",
-                     ext_name,
+                     col_name,
                      id_);
             return false;
         }
@@ -5534,7 +5559,7 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                 "[TakeAPI] search: unsupported type {} for '{}', "
                 "falling back",
                 static_cast<int>(field_meta.get_data_type()),
-                ext_name);
+                col_name);
             results.output_fields_data_.clear();
             return false;
         }

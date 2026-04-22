@@ -133,12 +133,23 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                int64_t needed_columns_size,
                                CFFIPackedReader* c_loon_reader,
                                CStorageConfig c_storage_config,
-                               CPluginContext* c_plugin_context) {
+                               CPluginContext* c_plugin_context,
+                               int64_t collection_id,
+                               const char* external_source,
+                               const char* external_spec) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
+        if (external_source != nullptr && external_source[0] != '\0') {
+            InjectExtfsProperties(*properties,
+                                  collection_id,
+                                  std::string(external_source),
+                                  external_spec != nullptr
+                                      ? std::string(external_spec)
+                                      : std::string());
+        }
         auto column_groups =
             std::make_shared<milvus_storage::api::ColumnGroups>();
         auto status = milvus_storage::column_groups_import(
