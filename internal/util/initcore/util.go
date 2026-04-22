@@ -92,7 +92,7 @@ func UpdateArrowIOThreadPoolCapacity(threads int) {
 // when the coefficient is unset, which signals the C++ side to keep arrow's
 // built-in default (8).
 func ResolveArrowIOThreadPoolCapacity() int {
-	cfg := paramtable.Get().CommonCfg
+	cfg := &paramtable.Get().CommonCfg
 	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
 	if coef <= 0 {
 		return 0
