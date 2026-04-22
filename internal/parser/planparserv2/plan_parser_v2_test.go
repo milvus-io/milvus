@@ -137,6 +137,41 @@ func TestExpr_Term(t *testing.T) {
 	}
 }
 
+// TestExpr_Term_JSONMixedNumeric covers issue #48442: mixing int64 and float
+// literals in a JSON 'in' list used to coerce every int64 to float64, causing
+// distinct large integers to collapse to the same IEEE-754 double and produce
+// incorrect matches. The parser now rejects the query when any integer would
+// lose precision under float64.
+func TestExpr_Term_JSONMixedNumeric(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Safe cases: ints fit in float64 exactly (|v| <= 2^53) — coercion keeps
+	// full precision, so the parser still accepts the query.
+	validExprs := []string{
+		`JSONField["A"] in [1, 1.5]`,
+		`JSONField["A"] in [9007199254740992, 1.5]`,  // exactly 2^53
+		`JSONField["A"] in [-9007199254740992, 1.5]`, // exactly -2^53
+		`JSONField["A"] not in [2, 3.14]`,
+	}
+	for _, exprStr := range validExprs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// Unsafe cases: an integer outside the safe range is mixed with a float.
+	// Coercion would lose precision, so the parser must reject the query.
+	invalidExprs := []string{
+		`JSONField["A"] in [9223372036854775807, 1.5]`,
+		`JSONField["A"] in [9007199254740993, 1.5]`,   // 2^53 + 1
+		`JSONField["A"] in [1.5, -9007199254740993]`,  // -(2^53 + 1)
+		`JSONField["A"] not in [9223372036854775800, 0.0]`,
+	}
+	for _, exprStr := range invalidExprs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_Call(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

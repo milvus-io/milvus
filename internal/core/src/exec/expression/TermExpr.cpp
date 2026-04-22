@@ -918,8 +918,21 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         for (auto& val : expr_->vals_) {
             if constexpr (std::is_same_v<T, double>) {
                 if (val.has_int64_val()) {
-                    // only json field will cast int to double because other fields are casted in proxy
-                    vals.emplace_back(static_cast<double>(val.int64_val()));
+                    // only json field will cast int to double because other fields are casted in proxy.
+                    // Reject values outside the safe float64 range (|v| > 2^53) to
+                    // avoid distinct int64 values collapsing to the same double and
+                    // producing incorrect matches via the numeric scalar index.
+                    auto iv = val.int64_val();
+                    constexpr int64_t kMaxSafeDouble = int64_t{1} << 53;
+                    if (iv > kMaxSafeDouble || iv < -kMaxSafeDouble) {
+                        ThrowInfo(DataTypeInvalid,
+                                  "cannot compare JSON numeric field against "
+                                  "integer {} via the numeric scalar index: "
+                                  "value exceeds the safe float64 range "
+                                  "(|v| <= 2^53) and would lose precision",
+                                  iv);
+                    }
+                    vals.emplace_back(static_cast<double>(iv));
                     continue;
                 }
             }

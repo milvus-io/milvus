@@ -70,6 +70,15 @@ func IsNumber(n *planpb.GenericValue) bool {
 	return IsInteger(n) || IsFloating(n)
 }
 
+// fitsInFloat64Exactly reports whether v can be round-tripped through float64
+// without precision loss. Any int64 with |v| > 2^53 collapses with its
+// neighbours under IEEE-754 double, so distinct values become indistinguishable
+// after coercion.
+func fitsInFloat64Exactly(v int64) bool {
+	const maxSafe = int64(1) << 53 // 9007199254740992
+	return v >= -maxSafe && v <= maxSafe
+}
+
 func IsString(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_StringVal:

@@ -759,8 +759,16 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 					hasFloat = true
 				}
 			}
-			// If we have both int and float, convert all ints to floats
+			// If we have both int and float, convert all ints to floats.
+			// Reject the query when any integer would lose precision under
+			// float64 (|v| > 2^53), otherwise distinct int64 values collapse
+			// to the same double and produce incorrect matches.
 			if hasInt && hasFloat {
+				for _, val := range values {
+					if IsInteger(val) && !fitsInFloat64Exactly(val.GetInt64Val()) {
+						return merr.WrapErrParameterInvalidMsg("cannot mix integer %d with float in JSON 'in' list: value exceeds the safe float64 range (|v| <= 2^53) and would lose precision", val.GetInt64Val())
+					}
+				}
 				for i, val := range values {
 					if IsInteger(val) {
 						values[i] = NewFloat(float64(val.GetInt64Val()))
