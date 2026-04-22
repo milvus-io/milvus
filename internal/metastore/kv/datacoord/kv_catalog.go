@@ -290,11 +290,12 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	if len(segments) == 0 {
 		return nil
 	}
+
 	kvs := make(map[string]string)
 	for _, segment := range segments {
 		// we don't persist binlog fields, but instead store binlogs as independent kvs
 		cloned := proto.Clone(segment).(*datapb.SegmentInfo)
-		resetBinlogFields(cloned)
+		ResetBinlogFields(cloned)
 
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
 		if rowCount > 0 && cloned.GetNumOfRows() != rowCount {
@@ -320,7 +321,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 	for _, b := range binlogs {
 		segment := b.Segment
 
-		binlogKvs, err := buildBinlogKvsWithLogID(
+		binlogKvs, err := BuildBinlogKvsWithLogID(
 			segment.GetCollectionID(),
 			segment.GetPartitionID(),
 			segment.GetID(),
@@ -369,7 +370,7 @@ func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.Seg
 	}
 	// To be compatible with previous implementation, we have to write binlogs on etcd for correct gc.
 	if !has {
-		kvs, err = buildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), cloneLogs(segment.GetBinlogs()), cloneLogs(segment.GetDeltalogs()), cloneLogs(segment.GetStatslogs()), cloneLogs(segment.GetBm25Statslogs()))
+		kvs, err = BuildBinlogKvsWithLogID(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), CloneLogs(segment.GetBinlogs()), CloneLogs(segment.GetDeltalogs()), CloneLogs(segment.GetStatslogs()), CloneLogs(segment.GetBm25Statslogs()))
 		if err != nil {
 			return
 		}

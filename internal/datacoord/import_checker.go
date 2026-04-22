@@ -498,8 +498,38 @@ func (c *importChecker) checkCommittingJob(job ImportJob) {
 	}
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
-	log.Info("import job Committing done, all vchannels committed",
-		zap.Duration("jobTimeCost/total", totalDuration))
+
+	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
+	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
+}
+
+// unsetSegmentImporting unsets the isImporting flag for segments.
+func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs []int64) bool {
+	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
+	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
+		segment := c.meta.GetSegment(c.ctx, segmentID)
+		if segment == nil {
+			log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+			return false
+		}
+		return segment.GetIsImporting()
+	})
+
+	for _, segmentID := range isImportingSegments {
+		segID := segmentID
+		mutations := map[int64][]SegmentOperator{
+			segID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				seg.IsImporting = false
+				return BinlogIncrement{}, true
+			}},
+		}
+		err := c.meta.UpdateSegmentsInfo(c.ctx, mutations)
+		if err != nil {
+			log.Warn("update import segment failed", zap.Error(err))
+			return true
+		}
+	}
+	return false
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {

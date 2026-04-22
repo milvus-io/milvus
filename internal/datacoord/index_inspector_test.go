@@ -53,7 +53,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
 
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
@@ -77,7 +77,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 				},
 			},
 		}
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 		meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 			5: {
@@ -128,7 +128,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -150,7 +150,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			State:        commonpb.SegmentState_Flushed,
 		},
 	}
-	meta.segments.SetSegment(seg1.ID, seg1)
+	meta.segments.SetSegment(seg1.ID, seg1, 0)
 
 	segIndex1 := &model.SegmentIndex{
 		SegmentID:  seg1.ID,
@@ -183,7 +183,7 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -243,7 +243,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -283,7 +283,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 				IsSorted:     false,
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -312,7 +312,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
@@ -334,7 +334,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -356,7 +356,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 			Level:        datapb.SegmentLevel_L1,
 		},
 	}
-	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 		5: {
@@ -470,7 +470,7 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -502,18 +502,57 @@ func TestIndexInspector_FunctionOutputBinlogGate(t *testing.T) {
 		m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
 			5: {CollectionID: collID, FieldID: 102, IndexID: 5, IndexName: "bm25_idx"},
 		}
+		m.segments.SetSegment(segment.GetID(), segment, 0)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		// Index should NOT have been created — field 102 data is missing
+		assert.True(t, m.indexMeta.IsUnIndexedSegment(collID, segment.GetID()))
+	})
+
+	t.Run("return error when field binlogs present but segment schema version still behind", func(t *testing.T) {
+		// Segment with SchemaVersion=1 (behind index.MinSchemaVersion=2) BUT field 102
+		// already exists in binlogs. This is a transient inconsistency window: backfill
+		// has written the field data but the metadata-update tick has not yet bumped
+		// segment.SchemaVersion. The inspector must NOT proceed to build the index in
+		// this window — it returns an error and retries on the next tick by which time
+		// the metadata is expected to have caught up.
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: collID,
-				State:        commonpb.SegmentState_Flushed,
-				IsSorted:     true,
+				ID:            2,
+				CollectionID:  collID,
+				State:         commonpb.SegmentState_Flushed,
+				IsSorted:      true,
+				SchemaVersion: 1,
 				Binlogs: []*datapb.FieldBinlog{
 					{FieldID: 0, ChildFields: []int64{100, 101, 102}},
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "segment schema version")
+		// Index should NOT have been created
+		assert.True(t, m.indexMeta.IsUnIndexedSegment(collID, segment.GetID()))
+	})
+
+	t.Run("create index normally when MinSchemaVersion matches", func(t *testing.T) {
+		// Segment with SchemaVersion=2, matches MinSchemaVersion — should proceed normally
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  collID,
+				State:         commonpb.SegmentState_Flushed,
+				IsSorted:      true,
+				SchemaVersion: 2,
+				Binlogs: []*datapb.FieldBinlog{
+					{FieldID: 0, ChildFields: []int64{100, 101, 102}},
+				},
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12346), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()

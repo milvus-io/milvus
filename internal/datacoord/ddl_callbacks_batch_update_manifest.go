@@ -27,11 +27,8 @@ import (
 
 func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
 	body := result.Message.MustBody()
-	var (
-		operators []UpdateOperator
-		v2Count   int
-		v3Count   int
-	)
+	mutations := make(map[int64][]SegmentOperator, len(body.GetItems()))
+	var v2Count, v3Count int
 	for _, item := range body.GetItems() {
 		segID := item.GetSegmentId()
 		cg := item.GetV2ColumnGroups()
@@ -43,18 +40,18 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 				zap.Int64("segmentID", segID))
 			continue
 		case hasV2:
-			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
+			mutations[segID] = append(mutations[segID], UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
-			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
+			mutations[segID] = append(mutations[segID], UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
 			log.Ctx(ctx).Warn("batch update manifest item has no payload; skipping",
 				zap.Int64("segmentID", segID))
 		}
 	}
-	if len(operators) > 0 {
-		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	if len(mutations) > 0 {
+		if err := c.meta.UpdateSegmentsInfo(ctx, mutations); err != nil {
 			log.Ctx(ctx).Warn("batch update manifest failed", zap.Error(err))
 			return err
 		}

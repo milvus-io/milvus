@@ -93,7 +93,10 @@ func hasSpecialStatslog(segment *datapb.SegmentInfo) bool {
 	return false
 }
 
-func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
+// BuildBinlogKvsWithLogID builds the legacy side-prefix KVs for a segment's binlog
+// families (Insert/Delete/Stats/BM25). Exported so callers persisting segments
+// through the optimistic-txn layer can attach these KVs to the same atomic txn.
+func BuildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
 	binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog,
 ) (map[string]string, error) {
 	// all the FieldBinlog will only have logid
@@ -105,13 +108,32 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	return kvs, nil
 }
 
+// ResetBinlogFields nils out the binlog-family fields on a SegmentInfo so the
+// proto can be persisted without them (binlogs travel as separate KVs).
+func ResetBinlogFields(segment *datapb.SegmentInfo) {
+	segment.Binlogs = nil
+	segment.Deltalogs = nil
+	segment.Statslogs = nil
+	segment.Bm25Statslogs = nil
+}
+
+// CloneLogs deep-clones a FieldBinlog slice. Used before writing a segment so
+// the original's binlog references aren't mutated by marshaling.
+func CloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	var res []*datapb.FieldBinlog
+	for _, log := range binlogs {
+		res = append(res, proto.Clone(log).(*datapb.FieldBinlog))
+	}
+	return res
+}
+
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
 	noBinlogsSegment, binlogs, deltalogs, statslogs, bm25logs := CloneSegmentWithExcludeBinlogs(segment)
 	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
 	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
 	// save binlogs separately
-	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
+	kvs, err := BuildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs, bm25logs)
 	if err != nil {
 		return nil, err
 	}
@@ -124,21 +146,6 @@ func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, 
 	kvs[k] = v
 
 	return kvs, nil
-}
-
-func resetBinlogFields(segment *datapb.SegmentInfo) {
-	segment.Binlogs = nil
-	segment.Deltalogs = nil
-	segment.Statslogs = nil
-	segment.Bm25Statslogs = nil
-}
-
-func cloneLogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
-	var res []*datapb.FieldBinlog
-	for _, log := range binlogs {
-		res = append(res, proto.Clone(log).(*datapb.FieldBinlog))
-	}
-	return res
 }
 
 func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binlogs, deltalogs, statslogs, bm25logs []*datapb.FieldBinlog) (map[string]string, error) {
