@@ -4,8 +4,9 @@ package predicates
 type PredicateTarget int32
 
 const (
-	// PredTargetValue is predicate target for key-value perid
-	PredTargetValue PredicateTarget = iota + 1
+	PredTargetValue          PredicateTarget = iota + 1
+	PredTargetCreateRevision                 // etcd key CreateRevision (0 = key does not exist)
+	PredTargetModRevision                    // etcd key ModRevision
 )
 
 type PredicateType int32
@@ -70,4 +71,35 @@ func ValueEqual(k, v string) Predicate {
 		v:  v,
 		pt: PredTypeEqual,
 	}
+}
+
+type revisionPredicate struct {
+	k        string
+	revision int64
+	target   PredicateTarget
+	pt       PredicateType
+}
+
+func (p *revisionPredicate) Target() PredicateTarget { return p.target }
+func (p *revisionPredicate) Type() PredicateType     { return p.pt }
+func (p *revisionPredicate) Key() string             { return p.k }
+func (p *revisionPredicate) TargetValue() any        { return p.revision }
+
+func (p *revisionPredicate) IsTrue(target any) bool {
+	switch v := target.(type) {
+	case int64:
+		return predicateValue(p.pt, v, p.revision)
+	default:
+		return false
+	}
+}
+
+// KeyNotExists returns a predicate that asserts the key does not exist (CreateRevision == 0).
+func KeyNotExists(key string) Predicate {
+	return &revisionPredicate{k: key, revision: 0, target: PredTargetCreateRevision, pt: PredTypeEqual}
+}
+
+// ModRevisionEqual returns a predicate that asserts the key's ModRevision matches the expected value.
+func ModRevisionEqual(key string, revision int64) Predicate {
+	return &revisionPredicate{k: key, revision: revision, target: PredTargetModRevision, pt: PredTypeEqual}
 }

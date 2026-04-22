@@ -17,8 +17,8 @@
 package meta
 
 import (
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
 )
 
 type Meta struct {

@@ -33,15 +33,16 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	catalogclient "github.com/milvus-io/milvus-catalog/client"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/catalog_service"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -58,6 +59,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -390,19 +393,45 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
+		useCatalogService := Params.MetaStoreCfg.UseCatalogService.GetAsBool()
+
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
-			log.Ctx(initCtx).Info("Using etcd as meta storage.")
+			log.Ctx(initCtx).Info("Using etcd as meta storage.", zap.Bool("useCatalogService", useCatalogService))
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
+			local := kvmetastore.NewCatalog(metaKV)
+			if useCatalogService {
+				addr := Params.MetaStoreCfg.CatalogServiceAddr.GetValue()
+				rootPath := Params.EtcdCfg.MetaRootPath.GetValue()
+				catalogSvc, grpcErr := catalogclient.NewCatalogServiceClient(addr, rootPath)
+				if grpcErr != nil {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
+				}
+				catalog = catalog_service.NewRootCoordAdapter(catalogSvc, local)
+				log.Ctx(initCtx).Info("RootCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr))
+			} else {
+				catalog = local
+			}
 		case util.MetaStoreTypeTiKV:
-			log.Ctx(initCtx).Info("Using tikv as meta storage.")
+			log.Ctx(initCtx).Info("Using tikv as meta storage.", zap.Bool("useCatalogService", useCatalogService))
 			metaKV := c.metaKVCreator()
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
-			catalog = kvmetastore.NewCatalog(metaKV)
+			local := kvmetastore.NewCatalog(metaKV)
+			if useCatalogService {
+				addr := Params.MetaStoreCfg.CatalogServiceAddr.GetValue()
+				rootPath := Params.TiKVCfg.MetaRootPath.GetValue()
+				catalogSvc, grpcErr := catalogclient.NewCatalogServiceClient(addr, rootPath)
+				if grpcErr != nil {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
+				}
+				catalog = catalog_service.NewRootCoordAdapter(catalogSvc, local)
+				log.Ctx(initCtx).Info("RootCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr))
+			} else {
+				catalog = local
+			}
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}

@@ -33,6 +33,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	catalogclient "github.com/milvus-io/milvus-catalog/client"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
@@ -43,6 +44,7 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metastore/catalog_service"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -50,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	metastore "github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -621,7 +624,21 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+		var catalog metastore.DataCoordCatalog
+		useCatalogService := paramtable.Get().MetaStoreCfg.UseCatalogService.GetAsBool()
+		local := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+		if useCatalogService {
+			addr := paramtable.Get().MetaStoreCfg.CatalogServiceAddr.GetValue()
+			catalogSvc, grpcErr := catalogclient.NewCatalogServiceClient(addr, s.metaRootPath)
+			if grpcErr != nil {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("failed to connect catalog service at %s", addr), grpcErr.Error())
+			}
+			catalog = catalog_service.NewDataCoordAdapter(catalogSvc, local)
+			log.Info("DataCoord using hybrid embed-and-override CatalogService", zap.String("addr", addr), zap.String("rootPath", s.metaRootPath))
+		} else {
+			log.Info("DataCoord using legacy DataCoordCatalog")
+			catalog = local
+		}
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
 		if err != nil {
 			return err

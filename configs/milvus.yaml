@@ -66,6 +66,10 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
+  useCatalogService: true # When true, use remote CatalogService via gRPC
+  catalogServiceAddr: "localhost:19510" # CatalogService gRPC address, e.g. "localhost:19510"
+  useAtomicCompaction: false # When true, DataCoord commits compaction via atomic CommitCompaction RPC
+  useAtomicFlush: false # When true, DataCoord commits segment flush via atomic CommitFlushSegment RPC
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.

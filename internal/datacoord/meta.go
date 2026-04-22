@@ -20,9 +20,12 @@ package datacoord
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"path"
+	"sort"
 	"strconv"
 	"time"
 
@@ -33,16 +36,18 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-catalog/catalogpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/catalog_service"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -774,6 +779,76 @@ func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, err
 }
 
 // SetState setting segment with provided ID state
+// SetStatesBatch transitions multiple segments to the target state in a single
+// catalog call, holding segMu for the whole batch. This avoids N independent
+// AlterSegments RPC calls when sealing or dropping many segments in one shot
+// (e.g. SealAllSegments on a channel with N growing segments). N+1 independent
+// catalog writes collapse into 1 batched AlterSegments call, eliminating the
+// partial-sealed middle state and reducing gRPC overhead to a single round-trip
+// against catalog-server.
+func (m *meta) SetStatesBatch(ctx context.Context, segmentIDs []UniqueID, targetState commonpb.SegmentState) error {
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	log := log.Ctx(ctx)
+	log.Debug("meta update: setting segment states batch",
+		zap.Int("count", len(segmentIDs)),
+		zap.Any("target state", targetState))
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]map[string]int),
+	}
+	clonedSegments := make([]*SegmentInfo, 0, len(segmentIDs))
+
+	for _, segmentID := range segmentIDs {
+		curSegInfo := m.segments.GetSegment(segmentID)
+		if curSegInfo == nil {
+			log.Warn("meta update: setting segment state batch - segment not found",
+				zap.Int64("segmentID", segmentID),
+				zap.Any("target state", targetState))
+			// idempotent drop — skip missing segments when target is Dropped
+			if targetState == commonpb.SegmentState_Dropped {
+				continue
+			}
+			return fmt.Errorf("segment is not exist with ID = %d", segmentID)
+		}
+		clonedSegment := curSegInfo.Clone()
+		if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
+			updateSegStateAndPrepareMetrics(clonedSegment, targetState, metricMutation)
+			clonedSegments = append(clonedSegments, clonedSegment)
+		}
+	}
+
+	if len(clonedSegments) == 0 {
+		return nil
+	}
+
+	segInfos := make([]*datapb.SegmentInfo, 0, len(clonedSegments))
+	for _, cs := range clonedSegments {
+		segInfos = append(segInfos, cs.SegmentInfo)
+	}
+
+	if err := m.catalog.AlterSegments(ctx, segInfos); err != nil {
+		log.Warn("meta update: setting states batch - failed to alter segments",
+			zap.Int("count", len(segInfos)),
+			zap.String("target state", targetState.String()),
+			zap.Error(err))
+		return err
+	}
+
+	metricMutation.commit()
+	for _, cs := range clonedSegments {
+		m.segments.SetSegment(cs.SegmentInfo.GetID(), cs)
+	}
+
+	log.Info("meta update: setting states batch - complete",
+		zap.Int("count", len(segInfos)),
+		zap.String("target state", targetState.String()))
+	return nil
+}
+
 func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState commonpb.SegmentState) error {
 	log := log.Ctx(context.TODO())
 	log.Debug("meta update: setting segment state",
@@ -1490,6 +1565,21 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
 	increments := lo.Values(updatePack.increments)
 
+	// Atomic flush fast-path: when exactly one segment ends up in Flushed
+	// state AND UseAtomicFlush is on AND catalog is AtomicCapable, collapse
+	// this write into a single CommitFlushSegment RPC with a deterministic
+	// idempotency key. This avoids the "AddSegment + AlterSegments(Flushed)"
+	// two-step window. All other update shapes fall through to the legacy
+	// AlterSegments path.
+	if m.tryAtomicCommitFlush(ctx, segments, increments) {
+		updatePack.metricMutation.commit()
+		for id, s := range updatePack.segments {
+			m.segments.SetSegment(id, s)
+		}
+		log.Ctx(ctx).Info("meta update: flush committed atomically via CommitFlushSegment")
+		return nil
+	}
+
 	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
 		log.Ctx(ctx).Error("meta update: update flush segments info - failed to store flush segment info into Etcd",
 			zap.Error(err))
@@ -2133,13 +2223,15 @@ func (m *meta) completeMixCompactionMutation(
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
 
-	// alter compactTo before compactFrom segments to avoid data lost if service crash during AlterSegments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		log.Warn("fail to alter compactTo segments", zap.Error(err))
-		return nil, nil, err
-	}
-	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
-		log.Warn("fail to alter compactFrom segments", zap.Error(err))
+	// alter compactTo before compactFrom segments to avoid data lost if service
+	// crash during AlterSegments. When metastore.useAtomicCompaction=true AND
+	// the catalog implements AtomicCapableCatalog (i.e. we're running on the
+	// hybrid adapter with useCatalogService=true), collapse the two AlterSegments
+	// calls into a single CommitCompaction RPC for true atomicity. Otherwise
+	// fall back to the legacy two-step path — this is also the behavior when
+	// UseCatalogService=false, since the raw local catalog does not satisfy
+	// AtomicCapableCatalog.
+	if err := m.commitCompactionMetaMutation(t, compactToInfos, compactFromInfos, binlogs); err != nil {
 		return nil, nil, err
 	}
 	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
@@ -3078,4 +3170,187 @@ func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targ
 			return err
 		}
 	}
+}
+
+// ----------------------------------------------------------------------------
+// Atomic commit helpers for compaction / flush
+// ----------------------------------------------------------------------------
+
+// commitCompactionMetaMutation commits the compaction state-change — writing
+// the new compact_to segments and flipping compact_from segments to Dropped —
+// in one operation. When UseAtomicCompaction=true AND the catalog implements
+// AtomicCapableCatalog (i.e. running on the hybrid adapter with
+// UseCatalogService=true), it goes through a single CommitCompaction RPC with
+// a deterministic idempotency key. Otherwise it falls back to the legacy
+// two-step AlterSegments path which is not crash-atomic but has been the
+// default forever.
+func (m *meta) commitCompactionMetaMutation(
+	t *datapb.CompactionTask,
+	compactToInfos []*datapb.SegmentInfo,
+	compactFromInfos []*datapb.SegmentInfo,
+	binlogs []metastore.BinlogsIncrement,
+) error {
+	log := log.Ctx(m.ctx).With(
+		zap.Int64("taskID", t.GetPlanID()),
+		zap.Int64("collectionID", t.GetCollectionID()),
+	)
+
+	if paramtable.Get().MetaStoreCfg.UseAtomicCompaction.GetAsBool() {
+		if atomicCatalog, ok := m.catalog.(catalog_service.AtomicCapableCatalog); ok {
+			idempotencyKey := deterministicCompactionKey(t.GetPlanID(), compactToInfos, compactFromInfos)
+			log.Info("committing compaction atomically via CatalogAtomicService",
+				zap.String("idempotencyKey", idempotencyKey),
+				zap.Int("compactTo", len(compactToInfos)),
+				zap.Int("compactFrom", len(compactFromInfos)),
+			)
+
+			compactFromIDs := lo.Map(compactFromInfos, func(s *datapb.SegmentInfo, _ int) int64 { return s.GetID() })
+			// Align compact_to_binlogs length with compact_to. The BinlogsIncrement
+			// values are optional — an empty entry means "no binlog update" which
+			// the server understands as writing the segment with its embedded
+			// binlog fields intact.
+			compactToBinlogs := make([]*catalogpb.BinlogsIncrement, len(compactToInfos))
+			for i := range compactToBinlogs {
+				compactToBinlogs[i] = &catalogpb.BinlogsIncrement{
+					Segment:    compactToInfos[i],
+					UpdateMask: &catalogpb.BinlogsUpdateMask{},
+				}
+			}
+			// Overlay any caller-supplied increments onto matching segments.
+			for _, b := range binlogs {
+				for i, seg := range compactToInfos {
+					if b.Segment != nil && seg.GetID() == b.Segment.GetID() {
+						compactToBinlogs[i] = &catalogpb.BinlogsIncrement{
+							Segment: b.Segment,
+							UpdateMask: &catalogpb.BinlogsUpdateMask{
+								WithoutBinlogs:       b.UpdateMask.WithoutBinlogs,
+								WithoutDeltalogs:     b.UpdateMask.WithoutDeltalogs,
+								WithoutStatslogs:     b.UpdateMask.WithoutStatslogs,
+								WithoutBm25Statslogs: b.UpdateMask.WithoutBm25Statslogs,
+							},
+						}
+					}
+				}
+			}
+
+			req := &catalogpb.CommitCompactionRequest{
+				TaskId:           t.GetPlanID(),
+				CollectionId:     t.GetCollectionID(),
+				CompactTo:        compactToInfos,
+				CompactToBinlogs: compactToBinlogs,
+				CompactFrom:      compactFromIDs,
+				CompactionType:   catalogpb.AtomicCompactionType(t.GetType()),
+				IdempotencyKey:   idempotencyKey,
+			}
+			if _, err := atomicCatalog.CommitCompaction(m.ctx, req); err != nil {
+				log.Warn("atomic CommitCompaction failed", zap.Error(err))
+				return err
+			}
+			return nil
+		}
+		log.Warn("UseAtomicCompaction=true but catalog is not AtomicCapable; falling back to legacy path")
+	}
+
+	// Legacy two-step path (backwards compatible / UseCatalogService=false).
+	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
+		log.Warn("fail to alter compactTo segments", zap.Error(err))
+		return err
+	}
+	if err := m.catalog.AlterSegments(m.ctx, compactFromInfos); err != nil {
+		log.Warn("fail to alter compactFrom segments", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// tryAtomicCommitFlush fires the CommitFlushSegment RPC when all of the
+// following hold: (1) the update pack is exactly one segment; (2) that
+// segment ends up in SegmentState_Flushed; (3) metastore.useAtomicFlush is
+// true; (4) the catalog implements AtomicCapableCatalog. Returns true if the
+// atomic path succeeded (caller should skip the legacy path), false
+// otherwise.
+//
+// A return of false DOES NOT indicate an error — it means "not applicable,
+// fall through to the legacy AlterSegments call". Actual RPC errors from
+// CommitFlushSegment are logged and also returned via false so the caller
+// retries via the legacy path; this matches the existing AlterSegments
+// error-handling shape, which returns an error and lets upper layers retry.
+func (m *meta) tryAtomicCommitFlush(ctx context.Context, segments []*datapb.SegmentInfo, increments []metastore.BinlogsIncrement) bool {
+	if !paramtable.Get().MetaStoreCfg.UseAtomicFlush.GetAsBool() {
+		return false
+	}
+	if len(segments) != 1 {
+		return false
+	}
+	seg := segments[0]
+	if seg.GetState() != commonpb.SegmentState_Flushed {
+		return false
+	}
+	atomicCatalog, ok := m.catalog.(catalog_service.AtomicCapableCatalog)
+	if !ok {
+		return false
+	}
+
+	// Find the matching BinlogsIncrement (if any) for this segment.
+	var inc *catalogpb.BinlogsIncrement
+	for _, b := range increments {
+		if b.Segment != nil && b.Segment.GetID() == seg.GetID() {
+			inc = &catalogpb.BinlogsIncrement{
+				Segment: b.Segment,
+				UpdateMask: &catalogpb.BinlogsUpdateMask{
+					WithoutBinlogs:       b.UpdateMask.WithoutBinlogs,
+					WithoutDeltalogs:     b.UpdateMask.WithoutDeltalogs,
+					WithoutStatslogs:     b.UpdateMask.WithoutStatslogs,
+					WithoutBm25Statslogs: b.UpdateMask.WithoutBm25Statslogs,
+				},
+			}
+			break
+		}
+	}
+
+	req := &catalogpb.CommitFlushSegmentRequest{
+		Segment:        seg,
+		Binlogs:        inc,
+		IdempotencyKey: deterministicFlushKey(seg),
+	}
+	if _, err := atomicCatalog.CommitFlushSegment(ctx, req); err != nil {
+		log.Ctx(ctx).Warn("atomic CommitFlushSegment failed; the caller will observe no state change and may retry",
+			zap.Int64("segmentID", seg.GetID()),
+			zap.Error(err),
+		)
+		return false
+	}
+	return true
+}
+
+// deterministicFlushKey produces a stable idempotency key from the segment's
+// immutable identity. Same segment_id always produces the same key. Flush is
+// monotonic, so a retry with the same key is always safe.
+func deterministicFlushKey(seg *datapb.SegmentInfo) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "flush|coll=%d|part=%d|seg=%d", seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// deterministicCompactionKey produces a stable idempotency key from the
+// task-id + sorted compact_to/compact_from segment IDs. Same inputs always
+// produce the same key, so callers don't need to persist it — a crashed
+// DataCoord can recompute the key on restart and re-issue CommitCompaction
+// safely against the server's idempotency check.
+func deterministicCompactionKey(taskID int64, compactTo, compactFrom []*datapb.SegmentInfo) string {
+	toIDs := lo.Map(compactTo, func(s *datapb.SegmentInfo, _ int) int64 { return s.GetID() })
+	fromIDs := lo.Map(compactFrom, func(s *datapb.SegmentInfo, _ int) int64 { return s.GetID() })
+	sort.Slice(toIDs, func(i, j int) bool { return toIDs[i] < toIDs[j] })
+	sort.Slice(fromIDs, func(i, j int) bool { return fromIDs[i] < fromIDs[j] })
+	h := sha256.New()
+	fmt.Fprintf(h, "task=%d|", taskID)
+	h.Write([]byte("to="))
+	for _, id := range toIDs {
+		fmt.Fprintf(h, "%d,", id)
+	}
+	h.Write([]byte("|from="))
+	for _, id := range fromIDs {
+		fmt.Fprintf(h, "%d,", id)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

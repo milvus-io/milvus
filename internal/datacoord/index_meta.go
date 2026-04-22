@@ -35,12 +35,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -553,6 +554,55 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 
 	m.keyLock.Lock(buildID)
 	defer m.keyLock.Unlock(buildID)
+
+	// Read-your-write validation against the authoritative segment view:
+	// before persisting a segment-index record, verify the target segment
+	// still exists and is in a Flushed/Indexed state. Without this check, a
+	// compaction running concurrently (via the CommitCompaction composite
+	// API) can mark the segment Dropped between the time the index scheduler
+	// picks it and the time indexnode writes the segment-index record,
+	// producing an orphan segment-index pointing at a dead segment.
+	//
+	// Cost: one extra ListSegments round-trip per index build — acceptable
+	// because index build is not a µs-level hot path (a single build already
+	// takes seconds to minutes of CPU work).
+	segments, err := m.catalog.ListSegments(ctx, segIndex.CollectionID)
+	if err != nil {
+		log.Ctx(ctx).Warn("meta update: adding segment index - failed to list segments for validation",
+			zap.Int64("collectionID", segIndex.CollectionID),
+			zap.Int64("segmentID", segIndex.SegmentID),
+			zap.Int64("buildID", buildID),
+			zap.Error(err))
+		return err
+	}
+	var targetState commonpb.SegmentState = commonpb.SegmentState_SegmentStateNone
+	var targetFound bool
+	for _, seg := range segments {
+		if seg.GetID() == segIndex.SegmentID {
+			targetFound = true
+			targetState = seg.GetState()
+			break
+		}
+	}
+	if !targetFound {
+		log.Ctx(ctx).Warn("meta update: adding segment index - target segment no longer exists; skipping",
+			zap.Int64("collectionID", segIndex.CollectionID),
+			zap.Int64("segmentID", segIndex.SegmentID),
+			zap.Int64("buildID", buildID))
+		return merr.WrapErrSegmentNotFound(segIndex.SegmentID, "segment was removed before index build could persist (race with compaction/drop)")
+	}
+	// Flushed is the normal build target; Indexed is allowed for idempotent
+	// re-writes (e.g. Copy segment path sets Finished because files are
+	// already copied). Any other state (Growing / Sealed / Flushing /
+	// Dropped) means we are racing with a lifecycle transition and must back
+	// off so the scheduler can pick a different segment on retry.
+	if targetState != commonpb.SegmentState_Flushed {
+		log.Ctx(ctx).Warn("meta update: adding segment index - target segment not in a buildable state; skipping",
+			zap.Int64("segmentID", segIndex.SegmentID),
+			zap.Int64("buildID", buildID),
+			zap.String("actualState", targetState.String()))
+		return merr.WrapErrSegmentNotFound(segIndex.SegmentID, fmt.Sprintf("segment state is %s, not Flushed; racing with lifecycle transition", targetState))
+	}
 
 	log.Ctx(ctx).Info("meta update: adding segment index", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),

@@ -72,6 +72,7 @@ type MetaKv interface {
 	LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error)
 	CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error)
 	WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error
+	LoadWithModRevision(ctx context.Context, key string) (string, int64, error)
 }
 
 // WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.

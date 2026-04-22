@@ -435,6 +435,47 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// evaluatePredicates checks predicates within a TiKV transaction.
+// For PredTargetValue: reads value and checks equality (original behavior).
+// For PredTargetCreateRevision (KeyNotExists): checks key existence within the transaction.
+// For PredTargetModRevision: reads key to register it in TiKV's conflict detection set;
+// actual OCC is enforced by TiKV's Snapshot Isolation at commit time.
+func (kv *txnTiKV) evaluatePredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
+	for _, pred := range preds {
+		key := kv.GetPath(pred.Key())
+		switch pred.Target() {
+		case predicates.PredTargetValue:
+			val, err := txn.Get(ctx, []byte(key))
+			if err != nil {
+				return errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v)", pred.Key(), pred.TargetValue()))
+			}
+			if !pred.IsTrue(val) {
+				return merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
+			}
+		case predicates.PredTargetCreateRevision:
+			_, err := txn.Get(ctx, []byte(key))
+			wantNotExist := pred.TargetValue().(int64) == 0
+			if err == nil && wantNotExist {
+				return merr.WrapErrIoFailedReason("key already exists", fmt.Sprintf("key=%s", pred.Key()))
+			}
+			if err != nil && !wantNotExist {
+				return merr.WrapErrIoFailedReason("key not found", fmt.Sprintf("key=%s", pred.Key()))
+			}
+			if err != nil && err != tikverr.ErrNotExist {
+				return errors.Wrap(err, fmt.Sprintf("failed to check key existence (%s)", pred.Key()))
+			}
+		case predicates.PredTargetModRevision:
+			// Read key within transaction to register it for TiKV's write conflict detection.
+			// If another transaction modifies this key, our commit will fail.
+			_, err := txn.Get(ctx, []byte(key))
+			if err != nil && err != tikverr.ErrNotExist {
+				return errors.Wrap(err, fmt.Sprintf("failed to read key for conflict detection (%s)", pred.Key()))
+			}
+		}
+	}
+	return nil
+}
+
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
@@ -453,17 +494,9 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	for _, pred := range preds {
-		key := kv.GetPath(pred.Key())
-		val, err := txn.Get(ctx, []byte(key))
-		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
-		if !pred.IsTrue(val) {
-			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
+	if err := kv.evaluatePredicates(ctx, txn, preds); err != nil {
+		loggingErr = err
+		return loggingErr
 	}
 
 	// use complement to remove keys that are not in saves
@@ -521,17 +554,9 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	// Defer a rollback only if the transaction hasn't been committed
 	defer rollbackOnFailure(&loggingErr, txn)
 
-	for _, pred := range preds {
-		key := kv.GetPath(pred.Key())
-		val, err := txn.Get(ctx, []byte(key))
-		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
-		if !pred.IsTrue(val) {
-			loggingErr = merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue()))
-			return loggingErr
-		}
+	if err := kv.evaluatePredicates(ctx, txn, preds); err != nil {
+		loggingErr = err
+		return loggingErr
 	}
 
 	// Remove keys with prefix
@@ -552,7 +577,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		for iter.Valid() {
 			key := iter.Key()
 			err = txn.Delete(key)
-			if loggingErr != nil {
+			if err != nil {
 				loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemoveWithPrefix", string(key)))
 				return loggingErr
 			}
@@ -757,6 +782,22 @@ func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, versio
 	err := errors.New("Unimplemented! CompareVersionAndSwap is under deprecation")
 	logWarnOnFailure(&err, "Unimplemented")
 	return false, err
+}
+
+// LoadWithModRevision loads a key's value along with a revision indicator.
+// TiKV has no etcd ModRevision concept. Returns a sentinel revision (1 for existing keys,
+// 0 for missing keys). OCC guarantees are provided by TiKV's Snapshot Isolation at
+// transaction commit time, not by explicit revision comparison.
+func (kv *txnTiKV) LoadWithModRevision(ctx context.Context, key string) (string, int64, error) {
+	key = kv.GetPath(key)
+	val, err := kv.getTiKVMeta(ctx, key)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return "", 0, nil
+		}
+		return "", 0, err
+	}
+	return val, 1, nil
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.

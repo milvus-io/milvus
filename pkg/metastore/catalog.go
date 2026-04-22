@@ -130,12 +130,6 @@ func (t AlterType) String() string {
 type BinlogsIncrement struct {
 	Segment    *datapb.SegmentInfo
 	UpdateMask BinlogsUpdateMask
-	// DroppedBinlogFieldIDs lists FieldBinlog.FieldID values whose insert-binlog
-	// KV entries must be removed from etcd. AlterSegments only upserts; without
-	// explicit removal, a prefix scan in listBinlogs will resurrect the zombie
-	// entry on restart. Used by operators (e.g. V2 column-group backfill commit)
-	// that structurally drop a FieldBinlog from segment.Binlogs.
-	DroppedBinlogFieldIDs []int64
 }
 
 type BinlogsUpdateMask struct {
