@@ -1712,6 +1712,46 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 	return nil
 }
 
+// UpdateArrayFieldByColumnWithOp merges an Array field's update rows into
+// the base rows while applying a FieldPartialUpdateOp. Non-Array field
+// types or a REPLACE op fall back to UpdateFieldDataByColumn's behavior.
+//
+// maxCapacity caps ARRAY_APPEND's post-merge length; pass -1 to skip the
+// check (proxy should pass the schema-declared max_capacity).
+func UpdateArrayFieldByColumnWithOp(
+	base, update *schemapb.FieldData,
+	baseIndices, updateIndices []int64,
+	op schemapb.FieldPartialUpdateOp_OpType,
+	maxCapacity int,
+) error {
+	if op == schemapb.FieldPartialUpdateOp_REPLACE {
+		return UpdateFieldDataByColumn(base, update, baseIndices, updateIndices)
+	}
+	if base == nil || update == nil || len(baseIndices) == 0 {
+		return nil
+	}
+	if len(baseIndices) != len(updateIndices) {
+		return fmt.Errorf("baseIndices and updateIndices length mismatch: %d vs %d", len(baseIndices), len(updateIndices))
+	}
+	if base.GetType() != schemapb.DataType_Array {
+		return fmt.Errorf("op %s requires Array field, got %s", op.String(), base.GetType().String())
+	}
+	baseScalar := base.GetScalars()
+	updateScalar := update.GetScalars()
+	baseData := baseScalar.GetArrayData().Data
+	updateData := updateScalar.GetArrayData().Data
+	elementType := baseScalar.GetArrayData().GetElementType()
+	for i, baseIdx := range baseIndices {
+		updateIdx := updateIndices[i]
+		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
+		if err != nil {
+			return err
+		}
+		baseData[baseIdx] = merged
+	}
+	return nil
+}
+
 func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
 	if base == nil || update == nil || len(baseIndices) == 0 {
 		return nil
@@ -3213,4 +3253,234 @@ func ExtractStructFieldName(fieldName string) (string, error) {
 	} else {
 		return "", fmt.Errorf("invalid struct field name: %s, more than one [ found", fieldName)
 	}
+}
+
+// ApplyArrayRowOp applies a FieldPartialUpdateOp to a single Array-field row.
+//
+// base and update are per-row ScalarField values (as stored in
+// ArrayArray.Data[i]). elementType is the Array field's declared element type,
+// used to dispatch the concrete typed-array handling. maxCapacity caps the
+// resulting array length for ARRAY_APPEND; pass -1 to skip the check (the
+// proxy is expected to enforce the schema-declared max_capacity).
+//
+// Returned ScalarField is a newly constructed value; base/update are not
+// mutated. Nil base or update is treated as an empty row for that side.
+func ApplyArrayRowOp(
+	base, update *schemapb.ScalarField,
+	op schemapb.FieldPartialUpdateOp_OpType,
+	elementType schemapb.DataType,
+	maxCapacity int,
+) (*schemapb.ScalarField, error) {
+	switch op {
+	case schemapb.FieldPartialUpdateOp_REPLACE:
+		return update, nil
+	case schemapb.FieldPartialUpdateOp_ARRAY_APPEND:
+		return appendArrayRow(base, update, elementType, maxCapacity)
+	case schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+		return removeArrayRow(base, update, elementType)
+	default:
+		return nil, fmt.Errorf("unsupported FieldPartialUpdateOp: %s", op.String())
+	}
+}
+
+func appendArrayRow(
+	base, update *schemapb.ScalarField,
+	elementType schemapb.DataType,
+	maxCapacity int,
+) (*schemapb.ScalarField, error) {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		b := base.GetBoolData().GetData()
+		u := update.GetBoolData().GetData()
+		merged := make([]bool, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: merged}}}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		b := base.GetIntData().GetData()
+		u := update.GetIntData().GetData()
+		merged := make([]int32, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: merged}}}, nil
+	case schemapb.DataType_Int64:
+		b := base.GetLongData().GetData()
+		u := update.GetLongData().GetData()
+		merged := make([]int64, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: merged}}}, nil
+	case schemapb.DataType_Float:
+		b := base.GetFloatData().GetData()
+		u := update.GetFloatData().GetData()
+		merged := make([]float32, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: merged}}}, nil
+	case schemapb.DataType_Double:
+		b := base.GetDoubleData().GetData()
+		u := update.GetDoubleData().GetData()
+		merged := make([]float64, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: merged}}}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		b := base.GetStringData().GetData()
+		u := update.GetStringData().GetData()
+		merged := make([]string, 0, len(b)+len(u))
+		merged = append(merged, b...)
+		merged = append(merged, u...)
+		if maxCapacity >= 0 && len(merged) > maxCapacity {
+			return nil, newArrayCapacityError(len(merged), maxCapacity)
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: merged}}}, nil
+	default:
+		return nil, fmt.Errorf("ARRAY_APPEND does not support element type: %s", elementType.String())
+	}
+}
+
+func removeArrayRow(
+	base, update *schemapb.ScalarField,
+	elementType schemapb.DataType,
+) (*schemapb.ScalarField, error) {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		b := base.GetBoolData().GetData()
+		u := update.GetBoolData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[bool]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]bool, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: out}}}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		b := base.GetIntData().GetData()
+		u := update.GetIntData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[int32]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]int32, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: out}}}, nil
+	case schemapb.DataType_Int64:
+		b := base.GetLongData().GetData()
+		u := update.GetLongData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[int64]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]int64, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: out}}}, nil
+	case schemapb.DataType_Float:
+		// Linear scan: float32 equality is position-wise exact; hashing is
+		// valid but yields no speedup in typical cardinalities.
+		b := base.GetFloatData().GetData()
+		u := update.GetFloatData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		out := make([]float32, 0, len(b))
+		for _, v := range b {
+			if !containsFloat32(u, v) {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: out}}}, nil
+	case schemapb.DataType_Double:
+		b := base.GetDoubleData().GetData()
+		u := update.GetDoubleData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		out := make([]float64, 0, len(b))
+		for _, v := range b {
+			if !containsFloat64(u, v) {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: out}}}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		b := base.GetStringData().GetData()
+		u := update.GetStringData().GetData()
+		if len(b) == 0 || len(u) == 0 {
+			return base, nil
+		}
+		remove := make(map[string]struct{}, len(u))
+		for _, v := range u {
+			remove[v] = struct{}{}
+		}
+		out := make([]string, 0, len(b))
+		for _, v := range b {
+			if _, skip := remove[v]; !skip {
+				out = append(out, v)
+			}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: out}}}, nil
+	default:
+		return nil, fmt.Errorf("ARRAY_REMOVE does not support element type: %s", elementType.String())
+	}
+}
+
+func containsFloat32(haystack []float32, needle float32) bool {
+	// NaN is intentionally treated as never equal to any value, matching
+	// IEEE-754 semantics — an ARRAY_REMOVE request targeting NaN cannot
+	// delete NaN elements from the base.
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFloat64(haystack []float64, needle float64) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func newArrayCapacityError(got, max int) error {
+	return fmt.Errorf("array length %d exceeds max_capacity %d", got, max)
 }
