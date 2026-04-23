@@ -800,6 +800,7 @@ func generateTargetIndexPath(
 
 	// Set offsets based on index type
 	// collectionOffset = -1 means collectionID is not present in the path
+	buildIDOffset := 1
 	switch indexType {
 	case IndexTypeVectorScalar:
 		// Detect path format by counting segments after "index_files"
@@ -811,22 +812,26 @@ func generateTargetIndexPath(
 			collectionOffset = 1
 			partitionOffset = 2
 			segmentOffset = 3
+			buildIDOffset = 4
 		} else {
 			// Legacy format (v0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
 			collectionOffset = -1
 			partitionOffset = 3
 			segmentOffset = 4
+			buildIDOffset = 1
 		}
 	case IndexTypeText, IndexTypeJSONKey:
 		// Text/JSON index: text_log|json_key_index_log/build/ver/coll/part/seg/field
 		collectionOffset = 3
 		partitionOffset = 4
 		segmentOffset = 5
+		buildIDOffset = 1
 	case IndexTypeJSONStats:
 		// JSON Stats: json_stats/data_format_ver/build/ver/coll/part/seg/field/(shared_key_index|shredding_data)/...
 		collectionOffset = 4 // One more level than legacy (data_format_version)
 		partitionOffset = 5
 		segmentOffset = 6
+		buildIDOffset = 2
 	default:
 		return "", fmt.Errorf("unsupported index type: %s (expected '%s', '%s', '%s', or '%s')",
 			indexType, IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats)
@@ -839,11 +844,6 @@ func generateTargetIndexPath(
 	}
 
 	// Replace buildID if a mapping exists in target.NewBuildIds
-	// All index types have buildID at offset 1, except JSONStats which has it at offset 2
-	buildIDOffset := 1
-	if indexType == IndexTypeJSONStats {
-		buildIDOffset = 2
-	}
 	if keywordIdx+buildIDOffset < len(parts) {
 		oldBuildIDStr := parts[keywordIdx+buildIDOffset]
 		oldBuildID, parseErr := strconv.ParseInt(oldBuildIDStr, 10, 64)

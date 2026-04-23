@@ -183,13 +183,6 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 			wantPath:   "files/index_files/444/555/666/1001/1/scalar_index",
 			wantErr:    false,
 		},
-		{
-			name:       "vector scalar index path v1 format with buildID mapping",
-			sourcePath: "files/index_files/111/222/333/1001/1/scalar_index",
-			indexType:  IndexTypeVectorScalar,
-			wantPath:   "files/index_files/444/555/666/1001/1/scalar_index",
-			wantErr:    false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -201,6 +194,63 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantPath, gotPath)
 			}
+		})
+	}
+}
+
+// TestGenerateTargetIndexPath_BuildIDMapping verifies that NewBuildIds mapping
+// is applied at the correct offset for each index path format.
+// Regression test: v1 VectorScalar places buildID at offset 4 (not 1).
+func TestGenerateTargetIndexPath_BuildIDMapping(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001},
+	}
+
+	tests := []struct {
+		name       string
+		sourcePath string
+		indexType  string
+		wantPath   string
+	}{
+		{
+			name:       "v0 vector scalar maps buildID at offset 1",
+			sourcePath: "files/index_files/1001/1/222/333/scalar_index",
+			indexType:  IndexTypeVectorScalar,
+			wantPath:   "files/index_files/2001/1/555/666/scalar_index",
+		},
+		{
+			name:       "v1 vector scalar maps buildID at offset 4",
+			sourcePath: "files/index_files/111/222/333/1001/1/scalar_index",
+			indexType:  IndexTypeVectorScalar,
+			wantPath:   "files/index_files/444/555/666/2001/1/scalar_index",
+		},
+		{
+			name:       "text index maps buildID at offset 1",
+			sourcePath: "files/text_log/1001/1/111/222/333/100/idx",
+			indexType:  IndexTypeText,
+			wantPath:   "files/text_log/2001/1/444/555/666/100/idx",
+		},
+		{
+			name:       "json stats maps buildID at offset 2",
+			sourcePath: "files/json_stats/2/1001/1/111/222/333/100/shared_key_index/idx",
+			indexType:  IndexTypeJSONStats,
+			wantPath:   "files/json_stats/2/2001/1/444/555/666/100/shared_key_index/idx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := generateTargetIndexPath(tt.sourcePath, source, target, tt.indexType)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantPath, got)
 		})
 	}
 }
