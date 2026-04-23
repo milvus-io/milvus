@@ -543,7 +543,7 @@ func (m *Manager) ProcessImmutableConfigs() error {
 
 	if len(savedConfigs) > 0 {
 		log.Info("triggering etcd source refresh after saving immutable configs", zap.Strings("savedConfigs", savedConfigs))
-		if refreshErr := etcdSourceImpl.refreshConfigurations(); refreshErr != nil {
+		if refreshErr := etcdSourceImpl.RefreshConfigurationsLinearizable(); refreshErr != nil {
 			log.Warn("failed to refresh etcd configurations after saving immutable configs", zap.Error(refreshErr))
 		} else {
 			log.Info("successfully refreshed etcd configurations after saving immutable configs")
@@ -619,6 +619,14 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 		Commit()
 	if err != nil {
 		return fmt.Errorf("failed to atomically alter configs in etcd: %w", err)
+	}
+
+	// Proactively refresh local EtcdSource so the write is immediately visible in this process,
+	// rather than waiting for the async etcd-watch refresher. Linearizable read (no
+	// WithSerializable) ensures the follower we read from has applied the txn we just
+	// committed — the async refresher's serializable path would not provide that guarantee.
+	if err := etcdSource.RefreshConfigurationsLinearizable(); err != nil {
+		return err
 	}
 
 	log.Info("configs atomically altered in etcd",
