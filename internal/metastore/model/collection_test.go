@@ -20,11 +20,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var (
@@ -613,4 +616,55 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, clone1, collection)
 	clone2 := collection.ShallowClone()
 	assert.Equal(t, clone2, collection)
+}
+
+func TestApplyUpdates_ExternalSpecMaskOnlyOverwriteNonEmpty(t *testing.T) {
+	mkBody := func(src, spec string) (*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody) {
+		hdr := &message.AlterCollectionMessageHeader{
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionExternalSpec},
+			},
+		}
+		body := &message.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{
+					ExternalSource: src,
+					ExternalSpec:   spec,
+				},
+			},
+		}
+		return hdr, body
+	}
+
+	t.Run("both empty preserves existing", func(t *testing.T) {
+		c := &Collection{ExternalSource: "s3://orig", ExternalSpec: `{"format":"parquet"}`}
+		hdr, body := mkBody("", "")
+		c.ApplyUpdates(hdr, body)
+		assert.Equal(t, "s3://orig", c.ExternalSource)
+		assert.Equal(t, `{"format":"parquet"}`, c.ExternalSpec)
+	})
+
+	t.Run("source only overwrites source preserves spec", func(t *testing.T) {
+		c := &Collection{ExternalSource: "s3://orig", ExternalSpec: `{"format":"parquet"}`}
+		hdr, body := mkBody("s3://new", "")
+		c.ApplyUpdates(hdr, body)
+		assert.Equal(t, "s3://new", c.ExternalSource)
+		assert.Equal(t, `{"format":"parquet"}`, c.ExternalSpec)
+	})
+
+	t.Run("spec only overwrites spec preserves source", func(t *testing.T) {
+		c := &Collection{ExternalSource: "s3://orig", ExternalSpec: `{"format":"parquet"}`}
+		hdr, body := mkBody("", `{"format":"lance"}`)
+		c.ApplyUpdates(hdr, body)
+		assert.Equal(t, "s3://orig", c.ExternalSource)
+		assert.Equal(t, `{"format":"lance"}`, c.ExternalSpec)
+	})
+
+	t.Run("both overwrite both", func(t *testing.T) {
+		c := &Collection{ExternalSource: "s3://orig", ExternalSpec: `{"format":"parquet"}`}
+		hdr, body := mkBody("s3://new", `{"format":"lance"}`)
+		c.ApplyUpdates(hdr, body)
+		assert.Equal(t, "s3://new", c.ExternalSource)
+		assert.Equal(t, `{"format":"lance"}`, c.ExternalSpec)
+	})
 }

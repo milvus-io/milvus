@@ -2199,6 +2199,17 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return nil
 	}
 
+	// External source and spec form an atomic tuple. They must be both
+	// empty (deferred to a later refresh) or both non-empty (ready to
+	// load). One-without-the-other leaves the collection in a half-
+	// initialized state that no refresh path can recover from cleanly.
+	srcSet := schema.GetExternalSource() != ""
+	specSet := schema.GetExternalSpec() != ""
+	if srcSet != specSet {
+		return fmt.Errorf("external collection %s requires external_source and external_spec to be both set or both empty (got source=%q, spec=%q)",
+			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
+	}
+
 	if len(schema.GetFunctions()) > 0 {
 		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
 	}

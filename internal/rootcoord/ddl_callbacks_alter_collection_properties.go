@@ -49,6 +49,27 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
 
+	// External source/spec form an atomic tuple bound to the physical data
+	// layout. Mutating them via alter has historically allowed partial
+	// updates (only one of the pair set), which silently clears the other
+	// because both share a single update mask. The canonical and only
+	// supported way to change them is RefreshExternalCollection, which
+	// applies them atomically and re-runs the data load pipeline.
+	for _, prop := range req.GetProperties() {
+		if prop.GetKey() == common.CollectionExternalSource || prop.GetKey() == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot alter %s via alter_collection_properties; use RefreshExternalCollection instead",
+				prop.GetKey())
+		}
+	}
+	for _, key := range req.GetDeleteKeys() {
+		if key == common.CollectionExternalSource || key == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot delete %s; external source/spec are immutable post-create except via RefreshExternalCollection",
+				key)
+		}
+	}
+
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, req.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
@@ -106,22 +127,6 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				udpates.ConsistencyLevel = lv
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
-		case common.CollectionExternalSource:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSource = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
-			}
-		case common.CollectionExternalSpec:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSpec = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
-			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
 		}
@@ -174,11 +179,12 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			Properties:         newPropsKeyValuePairs,
 			Version:            coll.SchemaVersion,
 		}
-		// Preserve ExternalSource/ExternalSpec if they were set earlier in this request.
-		if udpates.Schema != nil {
-			schema.ExternalSource = udpates.Schema.ExternalSource
-			schema.ExternalSpec = udpates.Schema.ExternalSpec
-		}
+		// Preserve ExternalSource/ExternalSpec from current collection state.
+		// Alter never mutates them (rejected at request entry above), but the
+		// TTL-driven schema snapshot must still carry them so downstream
+		// consumers see a complete schema.
+		schema.ExternalSource = coll.ExternalSource
+		schema.ExternalSpec = coll.ExternalSpec
 		udpates.Schema = schema
 	}
 
