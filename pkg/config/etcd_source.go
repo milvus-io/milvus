@@ -143,7 +143,26 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 	}
 }
 
+// refreshConfigurations is the serializable-read variant used by the periodic async
+// refresher. Registered as a func() error callback via newRefresher(...), so the
+// signature must stay no-arg. WithSerializable lets the locally-connected etcd member
+// answer from its own applied state without a ReadIndex round-trip to the leader —
+// acceptable for an async poll where sub-ms staleness is harmless (see #23907).
 func (es *EtcdSource) refreshConfigurations() error {
+	return es.refreshConfigurationsWithOpts(clientv3.WithSerializable())
+}
+
+// RefreshConfigurationsLinearizable is the linearizable-read variant for
+// post-write "read-your-own-write" paths (e.g., AlterConfigsInEtcd). Issues one
+// extra ReadIndex round-trip to the etcd leader per call, guaranteeing that the
+// read reflects every committed entry — including the one the caller just wrote.
+// Without this, the follower the client is connected to can legitimately return
+// the pre-write value because apply is not synchronized with commit.
+func (es *EtcdSource) RefreshConfigurationsLinearizable() error {
+	return es.refreshConfigurationsWithOpts()
+}
+
+func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOption) error {
 	log := log.Ctx(es.ctx).WithRateGroup("config.etcdSource", 1, 60)
 	es.RLock()
 	prefix := path.Join(es.keyPrefix, "config")
@@ -152,7 +171,8 @@ func (es *EtcdSource) refreshConfigurations() error {
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
 	log.RatedDebug(10, "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
-	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
+	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
+	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
 		return err
 	}
