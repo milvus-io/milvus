@@ -2213,6 +2213,7 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
+	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
 		if isExternalSystemOrVirtualField(field.GetName()) {
 			continue
@@ -2244,6 +2245,24 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			return fmt.Errorf("external collection %s does not support field type %s on field %s",
 				schema.GetName(), field.GetDataType().String(), field.GetName())
 		}
+
+		ext := field.GetExternalField()
+		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
+	}
+
+	// Each external_field column must back at most one user field. A single
+	// physical column cannot satisfy two distinct type bindings, and even
+	// same-type aliasing has no semantic value here.
+	for ext, owners := range externalFieldOwners {
+		if len(owners) <= 1 {
+			continue
+		}
+		parts := make([]string, 0, len(owners))
+		for _, f := range owners {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
+		}
+		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
+			ext, strings.Join(parts, ", "))
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
