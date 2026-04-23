@@ -89,11 +89,11 @@ insert_helper(milvus::SearchResult& search_result,
               int& topk,
               const bool large_is_better,
               const FixedVector<float>& distances,
-              const FixedVector<int32_t>& offsets,
               const int64_t nq_index,
               const int64_t unity_topk,
               const int i,
-              const IArrayOffsets* array_offsets = nullptr) {
+              int64_t doc_id,
+              std::optional<int32_t> elem_idx) {
     auto pos = large_is_better
                    ? find_binsert_position<true>(search_result.distances_,
                                                  nq_index * unity_topk,
@@ -104,17 +104,6 @@ insert_helper(milvus::SearchResult& search_result,
                                                   nq_index * unity_topk + topk,
                                                   distances[i]);
 
-    // For element-level: convert element_id to (doc_id, element_index)
-    int64_t doc_id;
-    int32_t elem_idx = -1;
-    if (array_offsets != nullptr) {
-        auto [doc, idx] = array_offsets->ElementIDToRowID(offsets[i]);
-        doc_id = doc;
-        elem_idx = idx;
-    } else {
-        doc_id = offsets[i];
-    }
-
     if (topk > pos) {
         std::memmove(&search_result.distances_[pos + 1],
                      &search_result.distances_[pos],
@@ -122,15 +111,15 @@ insert_helper(milvus::SearchResult& search_result,
         std::memmove(&search_result.seg_offsets_[pos + 1],
                      &search_result.seg_offsets_[pos],
                      (topk - pos) * sizeof(int64_t));
-        if (array_offsets != nullptr) {
+        if (elem_idx.has_value()) {
             std::memmove(&search_result.element_indices_[pos + 1],
                          &search_result.element_indices_[pos],
                          (topk - pos) * sizeof(int32_t));
         }
     }
     search_result.seg_offsets_[pos] = doc_id;
-    if (array_offsets != nullptr) {
-        search_result.element_indices_[pos] = elem_idx;
+    if (elem_idx.has_value()) {
+        search_result.element_indices_[pos] = elem_idx.value();
     }
     search_result.distances_[pos] = distances[i];
     ++topk;
@@ -226,7 +215,8 @@ PhyIterativeFilterNode::GetOutput() {
         FixedVector<int32_t> offsets;
         FixedVector<float> distances;
         FixedVector<int32_t> doc_offsets;
-        std::vector<int64_t> element_to_doc_mapping;
+        // For element-level: cache (doc_id, elem_idx) to avoid duplicate ElementIDToRowID calls
+        std::vector<std::pair<int32_t, int32_t>> element_to_doc_mapping;
         std::unordered_map<int64_t, bool> doc_eval_cache;
         std::unordered_set<int64_t> unique_doc_ids;
 
@@ -270,12 +260,13 @@ PhyIterativeFilterNode::GetOutput() {
                 if (element_level) {
                     // 1. Convert element_ids to doc_ids and do filter on those doc_ids
                     // 2. element_ids with doc_ids that pass the filter are what we interested in
+                    // Cache both doc_id and elem_idx to avoid duplicate ElementIDToRowID calls
                     element_to_doc_mapping.reserve(offsets.size());
 
                     for (auto element_id : offsets) {
-                        auto [doc_id, elem_index] =
+                        auto [doc_id, elem_idx] =
                             array_offsets->ElementIDToRowID(element_id);
-                        element_to_doc_mapping.push_back(doc_id);
+                        element_to_doc_mapping.push_back({doc_id, elem_idx});
                         unique_doc_ids.insert(doc_id);
                     }
 
@@ -312,17 +303,17 @@ PhyIterativeFilterNode::GetOutput() {
                         }
 
                         for (size_t i = 0; i < offsets.size(); ++i) {
-                            int64_t doc_id = element_to_doc_mapping[i];
+                            auto [doc_id, elem_idx] = element_to_doc_mapping[i];
                             if (doc_eval_cache[doc_id]) {
                                 insert_helper(search_result,
                                               topk,
                                               large_is_better,
                                               distances,
-                                              offsets,
                                               nq_index,
                                               unity_topk,
                                               i,
-                                              array_offsets.get());
+                                              doc_id,
+                                              elem_idx);
                                 if (topk == unity_topk) {
                                     break;
                                 }
@@ -337,10 +328,11 @@ PhyIterativeFilterNode::GetOutput() {
                                               topk,
                                               large_is_better,
                                               distances,
-                                              offsets,
                                               nq_index,
                                               unity_topk,
-                                              i);
+                                              i,
+                                              offsets[i],
+                                              std::nullopt);
                                 if (topk == unity_topk) {
                                     break;
                                 }
@@ -355,10 +347,11 @@ PhyIterativeFilterNode::GetOutput() {
                                           topk,
                                           large_is_better,
                                           distances,
-                                          offsets,
                                           nq_index,
                                           unity_topk,
-                                          i);
+                                          i,
+                                          offsets[i],
+                                          std::nullopt);
                             if (topk == unity_topk) {
                                 break;
                             }
