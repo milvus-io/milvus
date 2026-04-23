@@ -553,9 +553,12 @@ class TestCDCSyncBase:
                 binary_vec = np.random.randint(0, 256, size=bytes_per_vector, dtype=np.uint8).tobytes()
                 vectors.append(binary_vec)
         elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-            # Generate sparse vectors
+            # Sparse vectors have no fixed dim in schema; dim=0 is passed through
+            # from parametrized callers. Use a fixed pool so we always have a
+            # valid range for randint(5, ...).
+            pool = dim if dim >= 20 else 1000
             for _ in range(nb):
-                sparse_indices = random.sample(range(dim), random.randint(5, min(20, dim)))
+                sparse_indices = random.sample(range(pool), random.randint(5, 20))
                 sparse_values = [random.random() for _ in sparse_indices]
                 sparse_vector = {idx: val for idx, val in zip(sparse_indices, sparse_values)}
                 vectors.append(sparse_vector)
@@ -996,11 +999,12 @@ class TestCDCSyncBase:
         Returns:
             (match_count, mismatch_count, mismatch_details)
         """
-        # Retrieve all PKs from upstream
+        # Retrieve PKs from upstream. Milvus requires a limit when filter is empty.
         all_up_results = upstream_client.query(
             collection_name=collection_name,
             filter="",
             output_fields=["id"],
+            limit=16384,
         )
         all_pks = [r["id"] for r in all_up_results]
         if not all_pks:

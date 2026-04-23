@@ -165,12 +165,12 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
             # Count nulls and not-nulls for nullable_int64 on upstream
             null_result = upstream_client.query(
                 collection_name=collection_name,
-                filter="nullable_int64 == null",
+                filter="nullable_int64 is null",
                 output_fields=["count(*)"],
             )
             not_null_result = upstream_client.query(
                 collection_name=collection_name,
-                filter="nullable_int64 != null",
+                filter="nullable_int64 is not null",
                 output_fields=["count(*)"],
             )
             upstream_null_count = null_result[0]["count(*)"] if null_result else 0
@@ -184,12 +184,12 @@ class TestCDCSyncSchemaFeatures(TestCDCSyncBase):
                 try:
                     d_null = downstream_client.query(
                         collection_name=collection_name,
-                        filter="nullable_int64 == null",
+                        filter="nullable_int64 is null",
                         output_fields=["count(*)"],
                     )
                     d_not_null = downstream_client.query(
                         collection_name=collection_name,
-                        filter="nullable_int64 != null",
+                        filter="nullable_int64 is not null",
                         output_fields=["count(*)"],
                     )
                     d_null_count = d_null[0]["count(*)"] if d_null else 0
