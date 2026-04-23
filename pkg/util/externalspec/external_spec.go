@@ -70,6 +70,7 @@ const (
 	SchemeOSS   = "oss"
 	SchemeCOS   = "cos"
 	SchemeOBS   = "obs"
+	SchemeAzure = "azure"
 )
 
 // CloudProvider* are values accepted for extfs.cloud_provider.
@@ -79,6 +80,7 @@ const (
 	CloudProviderAliyun  = "aliyun"
 	CloudProviderTencent = "tencent"
 	CloudProviderHuawei  = "huawei"
+	CloudProviderAzure   = "azure"
 )
 
 // ExternalSpec represents the parsed external collection specification
@@ -146,6 +148,7 @@ var allowedExternalSourceSchemes = map[string]bool{
 	SchemeOSS:   true,
 	SchemeGS:    true,
 	SchemeGCS:   true,
+	SchemeAzure: true,
 }
 
 // secretExtfsKeys lists extfs keys whose values are sensitive credentials
@@ -297,6 +300,17 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 
 	if awsFamilyScheme[scheme] && extfs[ExtfsKeyRegion] == "" {
 		return fmt.Errorf("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
+	}
+
+	// Azure consistency: scheme=azure requires cloud_provider=azure (or unset),
+	// and cloud_provider=azure requires scheme=azure. Pairing guards against
+	// misconfigured dispatch to a non-Azure storage backend.
+	cpLower := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	if scheme == SchemeAzure && cpLower != "" && cpLower != CloudProviderAzure {
+		return fmt.Errorf("scheme=azure requires extfs.cloud_provider to be %q or unset, got %q", CloudProviderAzure, cpLower)
+	}
+	if cpLower == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
+		return fmt.Errorf("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
 	}
 	return nil
 }

@@ -111,6 +111,7 @@ func TestValidateExternalSource(t *testing.T) {
 			"oss://bucket/prefix",
 			"gs://bucket/prefix",
 			"gcs://bucket/prefix",
+			"azure://container/prefix",
 		} {
 			assert.NoError(t, ValidateExternalSource(src), "should accept %s", src)
 		}
@@ -333,5 +334,61 @@ func TestParseExternalSpec_ArnKeys(t *testing.T) {
 		}
 		assert.Equal(t, "arn:aws:iam::123456789012:role/test", spec.Extfs["role_arn"])
 		assert.Equal(t, "3600", spec.Extfs["load_frequency"])
+	})
+}
+
+func TestValidateExtfsComplete_Azure(t *testing.T) {
+	t.Run("azure_shared_key", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "mystorageacct",
+			"access_key_value": "base64key",
+			"cloud_provider":   "azure",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_workload_identity", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"use_iam":        "true",
+			"cloud_provider": "azure",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_no_region_required", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "mystorageacct",
+			"access_key_value": "base64key",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_scheme_with_gcp_provider_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "AK",
+			"access_key_value": "SK",
+			"cloud_provider":   "gcp",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scheme=azure requires extfs.cloud_provider")
+	})
+
+	t.Run("azure_provider_with_s3_scheme_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("s3://bucket/path", map[string]string{
+			"access_key_id":    "AK",
+			"access_key_value": "SK",
+			"region":           "us-east-1",
+			"cloud_provider":   "azure",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cloud_provider=azure requires scheme=azure")
+	})
+
+	t.Run("azure_with_gcp_target_service_account_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only valid for GCP")
 	})
 }
