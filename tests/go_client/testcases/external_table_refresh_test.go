@@ -167,6 +167,7 @@ func generateMultiTypeParquetBytes(numRows int64, startID int64) ([]byte, error)
 			{Name: "varchar_val", Type: arrow.BinaryTypes.String},
 			{Name: "json_val", Type: arrow.BinaryTypes.String},
 			{Name: "array_int", Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)},
+			{Name: "array_str", Type: arrow.ListOf(arrow.BinaryTypes.String)},
 			{Name: "ts_val", Type: tsType},
 			{Name: "geo_val", Type: arrow.BinaryTypes.String},
 			{Name: "embedding", Type: arrow.FixedSizeListOf(testVecDim, arrow.PrimitiveTypes.Float32)},
@@ -199,14 +200,16 @@ func generateMultiTypeParquetBytes(numRows int64, startID int64) ([]byte, error)
 	jsonBuilder := builder.Field(8).(*array.StringBuilder)
 	arrayIntBuilder := builder.Field(9).(*array.ListBuilder)
 	arrayIntValueBuilder := arrayIntBuilder.ValueBuilder().(*array.Int32Builder)
-	tsBuilder := builder.Field(10).(*array.TimestampBuilder)
-	geoBuilder := builder.Field(11).(*array.StringBuilder)
-	embeddingBuilder := builder.Field(12).(*array.FixedSizeListBuilder)
+	arrayStrBuilder := builder.Field(10).(*array.ListBuilder)
+	arrayStrValueBuilder := arrayStrBuilder.ValueBuilder().(*array.StringBuilder)
+	tsBuilder := builder.Field(11).(*array.TimestampBuilder)
+	geoBuilder := builder.Field(12).(*array.StringBuilder)
+	embeddingBuilder := builder.Field(13).(*array.FixedSizeListBuilder)
 	vecValueBuilder := embeddingBuilder.ValueBuilder().(*array.Float32Builder)
-	binVecBuilder := builder.Field(13).(*array.FixedSizeBinaryBuilder)
-	fp16VecBuilder := builder.Field(14).(*array.FixedSizeBinaryBuilder)
-	bf16VecBuilder := builder.Field(15).(*array.FixedSizeBinaryBuilder)
-	int8VecBuilder := builder.Field(16).(*array.FixedSizeBinaryBuilder)
+	binVecBuilder := builder.Field(14).(*array.FixedSizeBinaryBuilder)
+	fp16VecBuilder := builder.Field(15).(*array.FixedSizeBinaryBuilder)
+	bf16VecBuilder := builder.Field(16).(*array.FixedSizeBinaryBuilder)
+	int8VecBuilder := builder.Field(17).(*array.FixedSizeBinaryBuilder)
 
 	for i := int64(0); i < numRows; i++ {
 		idx := startID + i
@@ -227,6 +230,12 @@ func generateMultiTypeParquetBytes(numRows int64, startID int64) ([]byte, error)
 		arrayIntValueBuilder.Append(int32(idx * 1))
 		arrayIntValueBuilder.Append(int32(idx * 2))
 		arrayIntValueBuilder.Append(int32(idx * 3))
+
+		// Array[VarChar]: ["tag_<idx>_a", "tag_<idx>_b"] — exact shape from
+		// issue #48619 reproduction (List<String> from Parquet).
+		arrayStrBuilder.Append(true)
+		arrayStrValueBuilder.Append(fmt.Sprintf("tag_%d_a", idx))
+		arrayStrValueBuilder.Append(fmt.Sprintf("tag_%d_b", idx))
 
 		// Timestamptz: base time + idx hours (microseconds since epoch)
 		// 2025-01-01T00:00:00Z = 1735689600 seconds = 1735689600000000 microseconds
@@ -1179,6 +1188,7 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 		WithField(entity.NewField().WithName("varchar_val").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64).WithExternalField("varchar_val")).
 		WithField(entity.NewField().WithName("json_val").WithDataType(entity.FieldTypeJSON).WithExternalField("json_val")).
 		WithField(entity.NewField().WithName("array_int").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt32).WithMaxCapacity(16).WithExternalField("array_int")).
+		WithField(entity.NewField().WithName("array_str").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(64).WithMaxCapacity(16).WithExternalField("array_str")).
 		WithField(entity.NewField().WithName("ts_val").WithDataType(entity.FieldTypeTimestamptz).WithExternalField("ts_val")).
 		WithField(entity.NewField().WithName("geo_val").WithDataType(entity.FieldTypeGeometry).WithExternalField("geo_val")).
 		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding")).
@@ -1427,6 +1437,45 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	arrayMatchID, _ := arrayRes.GetColumn("id").GetAsInt64(0)
 	require.Equal(t, int64(99), arrayMatchID)
 	t.Logf("Array filter: matched id=%d", arrayMatchID)
+
+	// ---------------------------------------------------------------
+	// Step 12f: Array as OUTPUT field — regression for issue #48619
+	// Querying with array_int / array_str in output_fields used to crash
+	// segcore (SIGSEGV in ArrayChunkWriter::calculate_size) because the
+	// external chunk loader passed an arrow::ListArray where Milvus
+	// expected a BinaryArray of serialized ScalarFieldProto bytes.
+	// ---------------------------------------------------------------
+	arrayIntOut, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id == 42").
+		WithOutputFields("id", "array_int"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, arrayIntOut.GetColumn("id").Len(), "should find id==42")
+	t.Logf("Array(Int32) as output field returned %d row(s) without crash",
+		arrayIntOut.GetColumn("id").Len())
+
+	arrayStrOut, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id == 42").
+		WithOutputFields("id", "array_str"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, arrayStrOut.GetColumn("id").Len(), "should find id==42")
+	t.Logf("Array(VarChar) as output field returned %d row(s) without crash",
+		arrayStrOut.GetColumn("id").Len())
+
+	// ---------------------------------------------------------------
+	// Step 12g: Geometry as OUTPUT field across many rows — exercise
+	// chunked-load path (single-row check at step 12c only loads one
+	// chunk; querying many rows pulls more cells through the translator).
+	// ---------------------------------------------------------------
+	geoBulkRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 50").
+		WithOutputFields("id", "geo_val"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 50, geoBulkRes.GetColumn("id").Len(), "id<50 should be 50 rows")
+	t.Logf("Geometry as output field across %d rows without crash",
+		geoBulkRes.GetColumn("id").Len())
 
 	// ---------------------------------------------------------------
 	// Step 13: Compound filter across types — bool AND int range AND varchar
