@@ -49,9 +49,7 @@ class FileResourceTestBase(TestMilvusClientV2Base):
         try:
             from pymilvus import MilvusClient
 
-            sweeper = MilvusClient(
-                uri=f"http://{host}:{port}", user=user, password=password, timeout=10
-            )
+            sweeper = MilvusClient(uri=f"http://{host}:{port}", user=user, password=password, timeout=10)
             for _ in range(5):
                 leftovers = sweeper.list_file_resources()
                 if not leftovers:
@@ -1805,9 +1803,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
                     return False
                 raise
 
-        assert self.wait_until(_ok, timeout=30, interval=1), (
-            f"{res_name} still in use after all 3 collections dropped"
-        )
+        assert self.wait_until(_ok, timeout=30, interval=1), f"{res_name} still in use after all 3 collections dropped"
 
     @pytest.mark.xfail(
         reason="Known server bug: deleting a MinIO object that an active file "
@@ -2114,3 +2110,124 @@ class TestMilvusClientFileResourceRestart(FileResourceTestBase):
         assert self.wait_until(_analyze_matches, timeout=90, interval=3), (
             "analyzer output diverged or unavailable after restart"
         )
+
+
+# ---------------------------------------------------------------------------
+# E. RBAC — privilege gating for Add/Remove/List
+# ---------------------------------------------------------------------------
+class TestMilvusClientFileResourceRBAC(FileResourceTestBase):
+    """Privilege matrix for file resource operations.
+
+    Server defines:
+      PrivilegeAddFileResource    — cluster-level, in ClusterReadWritePrivileges
+      PrivilegeRemoveFileResource — cluster-level, in ClusterReadWritePrivileges
+      PrivilegeListFileResources  — cluster-level, in ClusterReadOnlyPrivileges
+    """
+
+    # grants take a short while to propagate through privilege cache
+    GRANT_PROPAGATION_SECONDS = 20
+
+    @pytest.fixture()
+    def rbac_actors(self, request):
+        """Create a fresh user+role with NO privileges for the test.
+
+        Yields (root_client, user_client, user_name, role_name, password).
+        Teardown: revoke role, drop user, drop role via root_client.
+        """
+        host = request.config.getoption("--host")
+        port = request.config.getoption("--port")
+        root_client = self._client()
+        user_name = cf.gen_unique_str(prefix + "_u")
+        role_name = cf.gen_unique_str(prefix + "_r")
+        password = cf.gen_str_by_length(contain_numbers=True)
+        self.create_user(root_client, user_name=user_name, password=password)
+        self.create_role(root_client, role_name=role_name)
+        self.grant_role(root_client, user_name=user_name, role_name=role_name)
+        user_client, _ = self.init_milvus_client(uri=f"http://{host}:{port}", user=user_name, password=password)
+        yield root_client, user_client, user_name, role_name, password
+        # teardown
+        try:
+            root_client.drop_role(role_name, force_drop=True)
+        except Exception:
+            pass
+        try:
+            root_client.drop_user(user_name)
+        except Exception:
+            pass
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rbac_unprivileged_user_cannot_add(self, rbac_actors, file_resource_env):
+        """
+        target: without PrivilegeAddFileResource, add_file_resource is denied
+        method: no grant -> user attempts add
+        expected: permission deny
+        """
+        _, user_client, *_ = rbac_actors
+        self.add_file_resource(
+            user_client,
+            cf.gen_unique_str(prefix),
+            JIEBA_DICT_PATH,
+            check_task=CheckTasks.check_permission_deny,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rbac_unprivileged_user_cannot_remove(self, rbac_actors, file_resource_env):
+        """
+        target: without PrivilegeRemoveFileResource, remove is denied even for an
+                existing resource the user did not create
+        method: root adds -> non-privileged user attempts remove
+        expected: permission deny
+        """
+        root_client, user_client, *_ = rbac_actors
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(root_client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(user_client, res_name, check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rbac_granted_add_privilege_succeeds(self, rbac_actors, file_resource_env):
+        """
+        target: after granting PrivilegeAddFileResource, add succeeds
+        method: grant AddFileResource -> wait -> user adds
+        expected: no permission denied, resource visible via list (root view)
+        """
+        root_client, user_client, _, role_name, _ = rbac_actors
+        self.grant_privilege_v2(root_client, role_name, "AddFileResource", collection_name="*", db_name="*")
+        time.sleep(self.GRANT_PROPAGATION_SECONDS)
+
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(user_client, res_name, JIEBA_DICT_PATH)
+        listed = {r.name for r in self.list_file_resources(root_client)[0]}
+        assert res_name in listed
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rbac_add_granted_but_remove_not(self, rbac_actors, file_resource_env):
+        """
+        target: AddFileResource and RemoveFileResource are separate privileges
+        method: grant only AddFileResource -> user adds OK -> remove denied
+        expected: add succeeds, remove denied
+        """
+        root_client, user_client, _, role_name, _ = rbac_actors
+        self.grant_privilege_v2(root_client, role_name, "AddFileResource", collection_name="*", db_name="*")
+        time.sleep(self.GRANT_PROPAGATION_SECONDS)
+
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(user_client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(user_client, res_name, check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rbac_list_requires_list_privilege(self, rbac_actors, file_resource_env):
+        """
+        target: list_file_resources is gated by PrivilegeListFileResources
+        method: (1) without grant, expect denied OR empty depending on server
+                (2) grant ListFileResources, expect previously added resource visible
+        expected: after grant, user sees the root-added resource
+        """
+        root_client, user_client, _, role_name, _ = rbac_actors
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(root_client, res_name, JIEBA_DICT_PATH)
+
+        self.grant_privilege_v2(root_client, role_name, "ListFileResources", collection_name="*", db_name="*")
+        time.sleep(self.GRANT_PROPAGATION_SECONDS)
+
+        res, _ = self.list_file_resources(user_client)
+        assert res_name in {r.name for r in res}, f"{res_name} missing from user's list after ListFileResources granted"
