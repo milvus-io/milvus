@@ -73,9 +73,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 		},
 	}
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams())
-	var err error
-	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
-	s.Require().NoError(err)
+	s.task.compactionParams = compaction.GenParams()
 
 	s.dData = storage.NewDeleteData([]storage.PrimaryKey{
 		storage.NewInt64PrimaryKey(1),
@@ -478,7 +476,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 			s.NotEmpty(path, "binlog path should not be empty")
 
 			// Download the deltalog data
-			blobs, err := s.task.BinlogIO.Download(context.TODO(), []string{path})
+			blobs, err := s.task.Download(context.TODO(), []string{path})
 			s.NoError(err, "should be able to download deltalog for segment %d", segmentID)
 			s.NotEmpty(blobs, "downloaded blobs should not be empty")
 

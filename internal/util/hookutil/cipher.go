@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"plugin"
 	"strconv"
 	"strings"
 	"sync"
@@ -283,7 +282,7 @@ func getCollEzPropsByDBProps(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 }
 
 func IsDBEncrypted(dbProperties []*commonpb.KeyValuePair) bool {
-	var hasEzID, hasKey bool = false, false
+	hasEzID, hasKey := false, false
 	for _, property := range dbProperties {
 		if property.Key == common.EncryptionEzIDKey && property.Value != "" {
 			hasEzID = true
@@ -427,21 +426,9 @@ func initCipher() error {
 		return nil
 	}
 
-	log.Info("start to load cipher go plugin", zap.String("path", pathGo))
-	p, err := plugin.Open(pathGo)
+	cipherVal, err := LoadPlugin[hook.Cipher](pathGo, "CipherPlugin")
 	if err != nil {
-		return fmt.Errorf("fail to open the cipher plugin, error: %s", err.Error())
-	}
-	log.Info("cipher plugin opened", zap.String("path", pathGo))
-
-	h, err := p.Lookup("CipherPlugin")
-	if err != nil {
-		return fmt.Errorf("fail to the 'CipherPlugin' object in the plugin, error: %s", err.Error())
-	}
-
-	cipherVal, ok := h.(hook.Cipher)
-	if !ok {
-		return fmt.Errorf("fail to convert the `CipherPlugin` interface")
+		return err
 	}
 
 	initConfigs := buildCipherInitConfig()
@@ -458,10 +445,10 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			log.Panic("fail to init cipher plugin",
-				zap.String("Go so path", paramtable.GetCipherParams().SoPathGo.GetValue()),
-				zap.String("Cpp so path", paramtable.GetCipherParams().SoPathCpp.GetValue()),
-				zap.Error(err))
+			log.Panic(fmt.Sprintf("fail to init cipher plugin, go_so_path=%s, cpp_so_path=%s, error=%v",
+				paramtable.GetCipherParams().SoPathGo.GetValue(),
+				paramtable.GetCipherParams().SoPathCpp.GetValue(),
+				err))
 		}
 	})
 }
@@ -469,7 +456,7 @@ func InitOnceCipher() {
 func buildCipherInitConfig() map[string]string {
 	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
 	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
-	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
+	initConfigs[paramtable.Get().LocalStorageCfg.Path.Key] = paramtable.Get().LocalStorageCfg.Path.GetValue()
 	return initConfigs
 }
 

@@ -80,6 +80,7 @@ type AllocNewGrowingSegmentRequest struct {
 	ChannelName          string
 	StorageVersion       int64
 	IsCreatedByStreaming bool
+	SchemaVersion        int32
 }
 
 // Manager manages segment related operations.
@@ -425,7 +426,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	if req.StorageVersion == storage.StorageV3 {
 		k := metautil.JoinIDPath(req.CollectionID, req.PartitionID, req.SegmentID)
 		basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-		manifestPath = packed.MarshalManifestPath(basePath, -1)
+		manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
 	segmentInfo := &datapb.SegmentInfo{
@@ -441,6 +442,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		StorageVersion:       req.StorageVersion,
 		IsCreatedByStreaming: req.IsCreatedByStreaming,
 		ManifestPath:         manifestPath,
+		SchemaVersion:        req.SchemaVersion,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
@@ -454,6 +456,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.String("Channel", segmentInfo.InsertChannel),
 		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
+		zap.Int32("SchemaVersion", segmentInfo.SchemaVersion),
 	)
 
 	return segment, s.helper.afterCreateSegment(segmentInfo)
@@ -518,12 +521,8 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, channel string, se
 			return isSegmentHealthy(segment) && segment.State == commonpb.SegmentState_Growing
 		})
 	} else {
-		sealedSegments = s.meta.GetSegments(sealed.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
-		growingSegments = s.meta.GetSegments(growing.Collect(), func(segment *SegmentInfo) bool {
-			return isSegmentHealthy(segment)
-		})
+		sealedSegments = s.meta.GetSegments(sealed.Collect(), isSegmentHealthy)
+		growingSegments = s.meta.GetSegments(growing.Collect(), isSegmentHealthy)
 	}
 
 	var ret []UniqueID

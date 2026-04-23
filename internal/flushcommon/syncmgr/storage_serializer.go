@@ -180,6 +180,85 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 	return blobs, nil
 }
 
+// serializeMergedPkStatsWith is like serializeMergedPkStats but includes an
+// explicitly provided current-batch PrimaryKeyStats in the merged result,
+// without requiring the metaCache to have been updated via RollStats.
+//
+// This is used by BulkPackWriterV3 so that the metaCache.RollStats action can
+// be deferred until after a successful Write, while still emitting a correct
+// merged stats blob on flush. See ccmd/pack_writer_v3_retry_plan.md.
+func (s *storageV1Serializer) serializeMergedPkStatsWith(
+	pack *SyncPack, extra *storage.PrimaryKeyStats,
+) (*storage.Blob, error) {
+	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+
+	stats := lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
+		return &storage.PrimaryKeyStats{
+			FieldID: s.pkField.GetFieldID(),
+			MaxPk:   pks.MaxPK,
+			MinPk:   pks.MinPK,
+			BFType:  pks.PkFilter.Type(),
+			BF:      pks.PkFilter,
+			PkType:  int64(s.pkField.GetDataType()),
+		}
+	})
+	if extra != nil {
+		stats = append(stats, extra)
+	}
+	if len(stats) == 0 {
+		return nil, nil
+	}
+	// segment.NumOfRows() already includes flushed + syncing + buffered rows,
+	// independent of whether RollStats has been applied for this batch.
+	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
+}
+
+// serializeMergedBM25StatsWith is like serializeMergedBM25Stats but includes
+// an explicitly provided current-batch bm25 stats map in the merged result,
+// without mutating the metaCache copy. See serializeMergedPkStatsWith for
+// rationale.
+func (s *storageV1Serializer) serializeMergedBM25StatsWith(
+	pack *SyncPack, extra map[int64]*storage.BM25Stats,
+) (map[int64]*storage.Blob, error) {
+	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+
+	historyStats := segment.GetBM25Stats()
+	var combined *metacache.SegmentBM25Stats
+	if historyStats == nil {
+		combined = metacache.NewEmptySegmentBM25Stats()
+	} else {
+		// Clone so we do not mutate the metaCache copy when merging extras.
+		combined = historyStats.Clone()
+	}
+	if len(extra) > 0 {
+		combined.Merge(extra)
+	}
+
+	fieldBytes, numRow, err := combined.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	if len(fieldBytes) == 0 {
+		return nil, nil
+	}
+
+	blobs := make(map[int64]*storage.Blob)
+	for fieldID, bytes := range fieldBytes {
+		blobs[fieldID] = &storage.Blob{
+			Value:      bytes,
+			MemorySize: int64(len(bytes)),
+			RowNum:     numRow[fieldID],
+		}
+	}
+	return blobs, nil
+}
+
 func hasBM25Function(schema *schemapb.CollectionSchema) bool {
 	for _, function := range schema.GetFunctions() {
 		if function.GetType() == schemapb.FunctionType_BM25 {

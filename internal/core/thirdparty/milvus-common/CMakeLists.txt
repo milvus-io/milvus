@@ -13,7 +13,7 @@
 
 milvus_add_pkg_config("milvus-common")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( MILVUS-COMMON-VERSION e16257c )
+set( MILVUS-COMMON-VERSION 2eb54ae )
 set( GIT_REPOSITORY "https://github.com/zilliztech/milvus-common.git")
 
 message(STATUS "milvus-common repo: ${GIT_REPOSITORY}")
@@ -23,8 +23,6 @@ message(STATUS "Building milvus-common-${MILVUS-COMMON-VERSION} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
 set(WITH_JAEGER ON CACHE BOOL "" FORCE )
-
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 
 FetchContent_Declare(
         milvus-common

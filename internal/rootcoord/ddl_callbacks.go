@@ -127,7 +127,7 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 	switch cacheExpiration.Cache.(type) {
 	case *messagespb.CacheExpiration_LegacyProxyCollectionMetaCache:
 		legacyProxyCollectionMetaCache := cacheExpiration.GetLegacyProxyCollectionMetaCache()
-		return c.Core.ExpireMetaCache(
+		return c.ExpireMetaCache(
 			ctx,
 			legacyProxyCollectionMetaCache.DbName,
 			[]string{legacyProxyCollectionMetaCache.CollectionName},

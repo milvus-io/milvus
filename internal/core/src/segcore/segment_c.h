@@ -106,25 +106,27 @@ SegmentLoad(CTraceContext c_trace,
             CLoadCancellationSource source);
 
 /**
- * @brief Reopen an existing segment with updated load information
- *
- * This function reopens a segment with new load configuration, typically used
- * when the segment needs to be reconfigured due to schema changes or updated
- * load parameters. The segment will be reinitialized with the provided load info
- * while preserving its identity (segment_id).
- *
- * @param c_trace Tracing context for distributed tracing and debugging
- * @param c_segment The segment handle to be reopened
- * @param load_info_blob Serialized SegmentLoadInfo protobuf message containing
- *                       the new load configuration (field data info, index info, etc.)
- * @param load_info_length Length of the load_info_blob in bytes
- * @return CStatus indicating success or failure with error details
+ * @brief Async load segment using Future mechanism with built-in cancellation
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle indicate which segment to load
+ * @return CFuture* that resolves when load completes (result pointer is nullptr)
  */
-CStatus
-ReopenSegment(CTraceContext c_trace,
-              CSegmentInterface c_segment,
-              const uint8_t* load_info_blob,
-              const int64_t load_info_length);
+CFuture*
+AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
+
+/**
+ * @brief Async reopen segment using Future mechanism with built-in cancellation
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle to reopen
+ * @param load_info_blob: serialized SegmentLoadInfo protobuf message
+ * @param load_info_length: length of load_info_blob in bytes
+ * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
+ */
+CFuture*
+AsyncReopenSegment(CTraceContext c_trace,
+                   CSegmentInterface c_segment,
+                   const uint8_t* load_info_blob,
+                   const int64_t load_info_length);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -135,6 +137,27 @@ ClearSegmentData(CSegmentInterface c_segment);
 void
 DeleteSearchResult(CSearchResult search_result);
 
+/**
+ * @brief Get the valid_count from a search result (used for two-stage search)
+ * @param search_result: The search result to extract valid_count from
+ * @return valid_count (-1 if not set, i.e., normal search mode)
+ */
+int64_t
+GetSearchResultValidCount(CSearchResult search_result);
+
+/**
+ * @brief Execute search on a segment
+ *
+ * @param c_trace: Tracing context for distributed tracing
+ * @param c_segment: Segment to search
+ * @param c_plan: Search plan containing filter predicates and vector query
+ * @param c_placeholder_group: Placeholder group with query vectors (can be NULL if filter_only=true)
+ * @param timestamp: MVCC timestamp for consistency
+ * @param consistency_level: Consistency level for the query
+ * @param collection_ttl: Collection TTL for query context
+ * @param filter_only: If true, only execute filter and return valid_count in result (Stage 1 of two-stage search)
+ * @return CFuture* Future that resolves to SearchResult (with valid_count set if filter_only=true)
+ */
 CFuture*  // Future<CSearchResultBody>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
@@ -143,7 +166,8 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t timestamp,
             int32_t consistency_level,
             uint64_t collection_ttl,
-            uint64_t entity_ttl_physical_time_us);
+            uint64_t entity_ttl_physical_time_us,
+            bool filter_only);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);

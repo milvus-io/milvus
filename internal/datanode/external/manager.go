@@ -18,7 +18,6 @@ package external
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -215,8 +214,8 @@ func (m *ExternalCollectionManager) CancelTask(clusterID string, taskID int64) b
 // SubmitTask registers and runs a task asynchronously in the manager pool.
 func (m *ExternalCollectionManager) SubmitTask(
 	clusterID string,
-	req *datapb.UpdateExternalCollectionRequest,
-	taskFunc func(context.Context) (*datapb.UpdateExternalCollectionResponse, error),
+	req *datapb.RefreshExternalCollectionTaskRequest,
+	taskFunc func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error),
 ) error {
 	taskID := req.GetTaskID()
 
@@ -233,7 +232,13 @@ func (m *ExternalCollectionManager) SubmitTask(
 	}
 
 	if oldInfo := m.LoadOrStore(clusterID, taskID, info); oldInfo != nil {
-		return fmt.Errorf("task already exists: taskID=%d", taskID)
+		// Task already exists — this is a duplicate dispatch (e.g. from
+		// scheduler TOCTOU race between Enqueue dedup check and Push).
+		// Treat as idempotent success since the task is already running.
+		log.Info("task already exists, treating as idempotent success",
+			zap.Int64("taskID", taskID),
+			zap.Int64("collectionID", req.GetCollectionID()))
+		return nil
 	}
 
 	// Submit to pool
@@ -259,9 +264,6 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		if len(kept) == 0 {
-			kept = info.KeptSegments
-		}
 		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
 		log.Info("external collection task completed",
 			zap.Int64("taskID", taskID))

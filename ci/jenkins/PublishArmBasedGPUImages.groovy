@@ -45,7 +45,7 @@ pipeline {
                         . .env
                         set +a  # stop automatically
 
-                        docker run --net=host -v \$(pwd):/root/milvus -v /root/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION}  sh -c "make clean && make gpu-install"
+                        docker run --net=host -v \$(pwd):/root/milvus -v /root/.conan2:/root/.conan2 -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION}  sh -c "make clean && make gpu-install"
                         """
 
                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {

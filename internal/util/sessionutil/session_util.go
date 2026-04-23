@@ -113,6 +113,7 @@ const (
 type IndexEngineVersion struct {
 	MinimalIndexVersion int32 `json:"MinimalIndexVersion,omitempty"`
 	CurrentIndexVersion int32 `json:"CurrentIndexVersion,omitempty"`
+	MaximumIndexVersion int32 `json:"MaximumIndexVersion,omitempty"`
 }
 
 // SessionRaw the persistent part of Session.
@@ -142,6 +143,14 @@ func (s *SessionRaw) GetServerID() int64 {
 
 func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
+}
+
+// GetResourceGroupName returns the resource group name of the session.
+func (s *SessionRaw) GetResourceGroupName() string {
+	if s.ServerLabels == nil {
+		return ""
+	}
+	return s.ServerLabels[LabelResourceGroup]
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -197,18 +206,20 @@ func WithResueNodeID(b bool) SessionOption {
 }
 
 // WithIndexEngineVersion should be only used by querynode.
-func WithIndexEngineVersion(minimal, current int32) SessionOption {
+func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.IndexEngineVersion.MinimalIndexVersion = minimal
 		session.IndexEngineVersion.CurrentIndexVersion = current
+		session.IndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 
 // WithScalarIndexEngineVersion should be only used by querynode.
-func WithScalarIndexEngineVersion(minimal, current int32) SessionOption {
+func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
+		session.ScalarIndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 

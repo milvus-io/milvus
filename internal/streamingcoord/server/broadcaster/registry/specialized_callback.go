@@ -10,16 +10,8 @@ import (
 func init() {
 	resetMessageAckOnceCallbacks()
 	resetMessageAckCallbacks()
-	resetMessageCheckCallbacks()
-}
-
-var RegisterImportV1CheckCallback = registerMessageCheckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
-
-// resetMessageCheckCallbacks resets the message check callbacks.
-func resetMessageCheckCallbacks() {
-	messageCheckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerCheckCallback]{
-		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerCheckCallback](),
-	}
+	// CheckCallback mechanism has been removed as part of import refactoring
+	// All validation is now done before broadcasting in the respective coordinators
 }
 
 var (
@@ -75,9 +67,10 @@ var (
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
 	// Snapshot
-	RegisterCreateSnapshotV2AckCallback  = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
-	RegisterDropSnapshotV2AckCallback    = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
-	RegisterRestoreSnapshotV2AckCallback = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
+	RegisterDropSnapshotV2AckCallback              = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
+	RegisterRestoreSnapshotV2AckCallback           = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+	RegisterDropSnapshotsByCollectionV2AckCallback = registerMessageAckCallback[*message.DropSnapshotsByCollectionMessageHeader, *message.DropSnapshotsByCollectionMessageBody]
 
 	// External Collection
 	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
@@ -85,6 +78,8 @@ var (
 
 // resetMessageAckCallbacks resets the message ack callbacks.
 func resetMessageAckCallbacks() {
+	messageAckCallbacksMu.Lock()
+	defer messageAckCallbacksMu.Unlock()
 	messageAckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckCallback]{
 		message.MessageTypeImportV1:              syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeBatchUpdateManifestV2: syncutil.NewFuture[messageInnerAckCallback](),
@@ -138,9 +133,10 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
-		message.MessageTypeCreateSnapshotV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropSnapshotV2:    syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeRestoreSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotV2:              syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRestoreSnapshotV2:           syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotsByCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// External Collection
 		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),

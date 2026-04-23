@@ -58,7 +58,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -323,7 +323,7 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 		State:        datapb.ImportTaskStateV2_Pending,
 	})
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	err = s.importMeta.AddTask(context.TODO(), pendingImportTask)
+	_ = s.importMeta.AddTask(context.TODO(), pendingImportTask)
 
 	// Mock scheduler expectations
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)

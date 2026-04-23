@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -74,7 +73,7 @@ func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID
 
 func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err := merr.CheckRPCCall(resp.Status, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
 	return resp.GetSchema(), nil
@@ -96,7 +95,7 @@ func FieldExists(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
-func isJsonField(schema *schemapb.CollectionSchema, fieldID int64) bool {
+func isJSONField(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	for _, f := range schema.Fields {
 		if f.FieldID == fieldID {
 			return typeutil.IsJSONType(f.DataType)
@@ -151,7 +150,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	defer broadcaster.Close()
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
-	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
+	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return merr.Status(err), nil
 	}
 	schema := coll.GetSchema()
@@ -160,8 +159,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
-	isJson := isJsonField(schema, req.GetFieldID())
-	if isJson {
+	isJSON := isJSONField(schema, req.GetFieldID())
+	if isJSON {
 		// check json_path and json_cast_type exist
 		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 		if err != nil {
@@ -191,7 +190,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 		defaultIndexName := fieldName
-		if isJson {
+		if isJSON {
 			// ignore error, because it's already checked in getIndexParam before
 			jsonPath, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 			// filter indexes by json path, the length of indexes should not be larger than 1
@@ -226,14 +225,14 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	} else {
 		// Normal path: allocate new index ID
 		var err error
-		indexID, err = s.allocator.AllocID(ctx)
+		_, err = s.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn("failed to alloc indexID", zap.Error(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
 
-		indexID, err = s.meta.indexMeta.CanCreateIndex(req, isJson)
+		indexID, err = s.meta.indexMeta.CanCreateIndex(req, isJSON)
 		if err != nil {
 			if errors.Is(err, errIndexOperationIgnored) {
 				log.Info("index already exists",
@@ -270,12 +269,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
 		UserIndexParams: req.GetUserIndexParams(),
+		// MinSchemaVersion prevents building an index on a function-output column (e.g. BM25 sparse
+		// vector) before backfill has written that column into old segments.  The inspector skips any
+		// segment whose SchemaVersion is still below this value.
+		MinSchemaVersion: schema.GetVersion(),
 	}
 	// Validate the index params.
 	if err := ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
+	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -287,7 +293,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	); err != nil {
 		log.Error("CreateIndex fail", zap.Error(err))
@@ -296,7 +302,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	log.Info("CreateIndex successfully",
 		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
-		zap.Int64("IndexID", index.IndexID))
+		zap.Int64("IndexID", index.IndexID), zap.Int32("MinSchemaVersion", index.MinSchemaVersion),
+		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
@@ -433,7 +440,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				return merr.Status(err), nil
 			}
 			isVecIndex := typeutil.IsVectorType(fieldSchema.DataType)
-			err = pkgcommon.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
+			err = common.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVecIndex, reqIndexParamMap)
 			if err != nil {
 				log.Warn("failed to validate auto index mmap config", zap.Error(err))
 				return merr.Status(err), nil
@@ -1112,8 +1119,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			}
 		}
 	}
-
-	log.Debug("GetIndexInfos successfully", zap.String("indexName", req.GetIndexName()))
 
 	return ret, nil
 }

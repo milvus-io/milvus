@@ -216,6 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			QueryLabel:       metrics.UpsertQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,
@@ -308,10 +309,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
-		// Ensure dynamic field has ValidData before merge logic.
-		// SDK doesn't set ValidData on $meta; without it, AppendFieldDataByColumn
-		// won't propagate ValidData for insert rows, causing length mismatch.
-		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 {
+		// Ensure dynamic field has ValidData before merge logic, but only when
+		// the field schema actually requires it (nullable or has default value).
+		// For 2.5 collections where $meta is non-nullable with no default,
+		// ValidData must remain empty — CheckValidData expects len==0 for
+		// non-nullable fields.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
 			nRows := int(it.upsertMsg.InsertMsg.NRows())
 			validData := make([]bool, nRows)
 			for i := range validData {
@@ -490,7 +494,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (string, *schemapb.FieldData) {
 			return field.GetFieldName(), field
 		})
-		for _, fieldSchema := range it.schema.CollectionSchema.Fields {
+		for _, fieldSchema := range it.schema.Fields {
 			if fieldData, ok := upsertFieldMap[fieldSchema.Name]; !ok {
 				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
 					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
@@ -1062,7 +1066,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if allocateErr != nil {
 		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
 			zap.String("collectionName", collectionName),

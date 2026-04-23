@@ -329,6 +329,10 @@ func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) s
 	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }
 
+func buildSegmentIndexCollectionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/", util.SegmentIndexPrefix, collectionID)
+}
+
 func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/", SegmentPrefix, collectionID)
 }
@@ -363,10 +367,6 @@ func buildAnalyzeTaskKey(taskID int64) string {
 
 func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
-}
-
-func buildUpdateExternalCollectionTaskKey(taskID int64) string {
-	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
 }
 
 func buildExternalCollectionRefreshJobKey(jobID int64) string {

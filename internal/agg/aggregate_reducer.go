@@ -349,13 +349,8 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	// 2. compute hash values for all rows in the result retrieved
 	var totalGroupCount int64 = 0
 	maxGroupByGroups := paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64()
-processResults:
+	limitReached := false
 	for _, result := range results {
-		// Check limit before processing each shard to avoid unnecessary work
-		if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
-			break processResults
-		}
-
 		if result == nil {
 			return nil, fmt.Errorf("input result from any sources cannot be nil")
 		}
@@ -389,10 +384,6 @@ processResults:
 		}
 
 		for row := 0; row < rowCount; row++ {
-			// Check limit before processing each row to avoid unnecessary hashing and copying
-			if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
-				break processResults
-			}
 			rowFieldValues := make([]*FieldValue, outputColumnCount)
 			var hashVal uint64
 			for col := 0; col < outputColumnCount; col++ {
@@ -417,14 +408,34 @@ processResults:
 			}
 			newRow := NewRow(rowFieldValues)
 			if bucket := reducer.hashValsMap[hashVal]; bucket == nil {
+				// New group: check groupLimit before adding.
+				// When limitReached, new groups/sub-groups are skipped, but
+				// accumulation into existing groups continues (line 434).
+				// This is intentional: groupLimit controls the number of output
+				// groups, not the amount of input data processed. Existing groups
+				// should accumulate all matching rows for correct aggregation
+				// (e.g., count/sum must reflect all data, not just early rows).
+				if limitReached {
+					continue
+				}
 				newBucket := NewBucket()
 				newBucket.AddRow(newRow)
 				totalGroupCount++
 				reducer.hashValsMap[hashVal] = newBucket
+				if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
+					limitReached = true
+				}
 			} else {
 				if rowIdx := bucket.Find(newRow, numGroupingKeys); rowIdx == NONE {
+					// New sub-group in existing bucket: check groupLimit
+					if limitReached {
+						continue
+					}
 					bucket.AddRow(newRow)
 					totalGroupCount++
+					if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
+						limitReached = true
+					}
 				} else {
 					if err := bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs); err != nil {
 						return nil, err

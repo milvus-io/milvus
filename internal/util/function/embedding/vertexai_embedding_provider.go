@@ -55,9 +55,9 @@ func getVertexAIJsonKey() ([]byte, error) {
 		return vtxKey.jsonKey, nil
 	}
 
-	jsonKey, err := os.ReadFile(jsonKeyPath)
+	jsonKey, err := os.ReadFile(jsonKeyPath) //nolint:gosec // path is from trusted environment variable
 	if err != nil {
-		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err)
+		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err) //nolint:staticcheck // starts with proper noun
 	}
 
 	vtxKey.jsonKey = jsonKey
@@ -287,11 +287,11 @@ func (provider *VertexAIEmbeddingProvider) callVertexAIEmbedding(texts []string,
 			return nil, err
 		}
 		if end-i != len(resp.Predictions) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
+			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Predictions))
 		}
 		for _, item := range resp.Predictions {
 			if len(item.Embeddings.Values) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embeddings.Values))
 			}
 			data = append(data, item.Embeddings.Values)
@@ -311,7 +311,7 @@ func (provider *VertexAIEmbeddingProvider) callGeminiEmbedding(texts []string, m
 			return nil, err
 		}
 		if len(resp.Embedding.Values) != int(provider.fieldDim) {
-			return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+			return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 				provider.fieldDim, len(resp.Embedding.Values))
 		}
 		data = append(data, resp.Embedding.Values)

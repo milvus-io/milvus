@@ -55,7 +55,7 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 	params := paramtable.Get()
 	key := fmt.Sprintf("%s/config/proxy/minpasswordlength", params.EtcdCfg.RootPath.GetValue())
 	log.Debug("etcd key", zap.String("key", key), zap.Any("endpoints", c.EtcdCli.Endpoints()))
-	r, e := c.EtcdCli.KV.Put(ctx, key, "3")
+	r, e := c.EtcdCli.Put(ctx, key, "3")
 	log.Debug("etcd put result", zap.Any("resp", r), zap.Error(e))
 
 	s.Eventually(func() bool {

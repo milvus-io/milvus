@@ -310,7 +310,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
 		Export:       true,
@@ -318,24 +318,35 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		panic("embedded etcd can not enable auth")
+		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
 	p.EtcdAuthUserName = ParamItem{
-		Key:     "etcd.auth.userName",
-		Version: "2.3.7",
-		Doc:     "username for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.userName",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "username for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
 	p.EtcdAuthPassword = ParamItem{
-		Key:     "etcd.auth.password",
-		Version: "2.3.7",
-		Doc:     "password for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.password",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "password for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
+
+	if p.EtcdEnableAuth.GetAsBool() && !p.UseEmbedEtcd.GetAsBool() {
+		if p.EtcdAuthUserName.GetValue() == "" || p.EtcdAuthPassword.GetValue() == "" {
+			panic("etcd auth is enabled but userName or password is empty. " +
+				"Set etcd.auth.userName and etcd.auth.password in milvus.yaml, " +
+				"or via environment variables etcd_auth_userName and etcd_auth_password")
+		}
+	}
 }
 
 func (p *EtcdConfig) GetAll() map[string]string {
@@ -510,12 +521,10 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType              ParamItem `refreshable:"false"`
-	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
-	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
-	PaginationSize             ParamItem `refreshable:"true"`
-	ReadConcurrency            ParamItem `refreshable:"true"`
-	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
+	MetaStoreType   ParamItem `refreshable:"false"`
+	PaginationSize  ParamItem `refreshable:"true"`
+	ReadConcurrency ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum   ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -527,24 +536,6 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
-
-	p.SnapshotTTLSeconds = ParamItem{
-		Key:          "metastore.snapshot.ttl",
-		Version:      "2.4.14",
-		DefaultValue: "86400",
-		Doc:          `snapshot ttl in seconds`,
-		Export:       true,
-	}
-	p.SnapshotTTLSeconds.Init(base.mgr)
-
-	p.SnapshotReserveTimeSeconds = ParamItem{
-		Key:          "metastore.snapshot.reserveTime",
-		Version:      "2.4.14",
-		DefaultValue: "3600",
-		Doc:          `snapshot reserve time in seconds`,
-		Export:       true,
-	}
-	p.SnapshotReserveTimeSeconds.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
@@ -753,8 +744,9 @@ type WoodpeckerConfig struct {
 	FencePolicyConditionWrite      ParamItem `refreshable:"true"`
 
 	// storage
-	StorageType ParamItem `refreshable:"false"`
-	RootPath    ParamItem `refreshable:"false"`
+	StorageType       ParamItem `refreshable:"false"`
+	ForceLocalStorage ParamItem `refreshable:"false"`
+	RootPath          ParamItem `refreshable:"false"`
 }
 
 func (p *WoodpeckerConfig) Init(base *BaseTable) {
@@ -1049,6 +1041,15 @@ Valid values: [auto, enable, disable]`,
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
+
+	p.ForceLocalStorage = ParamItem{
+		Key:          "woodpecker.storage.forceLocalStorage",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "Force using local storage in cluster mode. Not recommended unless you know what you are doing.",
+		Export:       false,
+	}
+	p.ForceLocalStorage.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
@@ -1481,6 +1482,7 @@ type MinioConfig struct {
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
+	UseCRC32C          ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1708,10 +1710,19 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "2.4.1",
 		DefaultValue: "0",
 		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
-0 means using oss client by default, decrease these configration if ListObjects timeout`,
+0 means using oss client by default, decrease these configuration if ListObjects timeout`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+
+	p.UseCRC32C = ParamItem{
+		Key:          "minio.ssl.useCRC32C",
+		Version:      "2.6.11",
+		DefaultValue: "false",
+		Doc:          "Whether to use CRC32C checksum for data integrity validation on MinIO/S3 PutObject requests.",
+		Export:       true,
+	}
+	p.UseCRC32C.Init(base.mgr)
 }
 
 // profile config

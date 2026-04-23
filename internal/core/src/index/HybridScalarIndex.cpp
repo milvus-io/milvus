@@ -162,7 +162,6 @@ template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T> distinct_vals;
     if (IsPrimitiveType(field_type_)) {
         return SelectBuildTypeForPrimitiveType(field_datas);
     } else if (IsArrayType(field_type_)) {
@@ -319,9 +318,6 @@ HybridScalarIndex<T>::SerializeIndexType() {
 template <typename T>
 IndexStatsPtr
 HybridScalarIndex<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     auto internal_index = GetInternalIndex();
     auto index_ret = internal_index->Upload(config);
 
@@ -352,6 +348,7 @@ HybridScalarIndex<T>::GetRemoteIndexTypeFile(
         auto file_name = file.substr(file.find_last_of('/') + 1);
         if (file_name == index::INDEX_TYPE) {
             ret = file;
+            break;
         }
     }
     AssertInfo(!ret.empty(), "index type file not found for hybrid index");
@@ -376,10 +373,6 @@ template <typename T>
 void
 HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
                            const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

@@ -45,7 +45,7 @@ type insertNode struct {
 func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) {
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %d", err)
+		err = fmt.Errorf("failed to get primary keys, err = %v", err)
 		log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 		panic(err)
 	}

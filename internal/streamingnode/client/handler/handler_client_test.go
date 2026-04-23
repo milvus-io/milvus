@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -151,6 +152,46 @@ func TestHandlerClient(t *testing.T) {
 	assert.Nil(t, consumer)
 
 	handler.GetLatestMVCCTimestampIfLocal(ctx, "pchannel")
+}
+
+func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Close().Run(func() {})
+	// Always return the assignment so the create func is invoked.
+	w.EXPECT().Get(mock.Anything, mock.Anything).Return(assignment)
+	// Watch returns context.Canceled to break the backoff retry loop.
+	w.EXPECT().Watch(mock.Anything, mock.Anything, mock.Anything).Return(context.Canceled)
+	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
+
+	handler := &handlerClientImpl{
+		lifetime:         typeutil.NewLifetime(),
+		service:          service,
+		rb:               rb,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
+	}
+	ctx := context.Background()
+
+	// Remote WAL returns "not implemented"; Watch returns Canceled to exit the loop.
+	service.EXPECT().GetService(mock.Anything).Return(nil, errors.New("not implemented"))
+	cps, err := handler.GetSalvageCheckpoint(ctx, "pchannel")
+	assert.Error(t, err)
+	assert.Nil(t, cps)
+
+	// After close, GetSalvageCheckpoint returns ErrClientClosed immediately.
+	service.EXPECT().Close().Return()
+	handler.Close()
+	cps, err = handler.GetSalvageCheckpoint(ctx, "pchannel")
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.Nil(t, cps)
 }
 
 func TestDial(t *testing.T) {

@@ -72,6 +72,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
+		retryableReader.Close()
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
@@ -79,6 +80,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
+		r.Close()
 		return nil, err
 	}
 
@@ -87,11 +89,13 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
+		r.Close()
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
 	if err != nil {
+		r.Close()
 		return nil, err
 	}
 	return &reader{
@@ -109,7 +113,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +141,7 @@ OUTER:
 			return nil, io.EOF
 		}
 	}
+	common.RemoveUnpopulatedFunctionOutputFields(r.schema, insertData)
 	return insertData, nil
 }
 

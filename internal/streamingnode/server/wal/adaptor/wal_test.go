@@ -86,6 +86,8 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)
 	resource.InitForTest(
@@ -187,6 +189,10 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	require.True(f.t, status.AsStreamingError(err).IsReplicateViolation())
 	require.Nil(f.t, cp)
 
+	// No force promote has occurred, so salvage checkpoints should be empty.
+	salvageCPs := rwWAL.GetSalvageCheckpoint()
+	require.Nil(f.t, salvageCPs)
+
 	f.testSendCreateCollection(ctx, rwWAL)
 	defer f.testSendDropCollection(ctx, rwWAL)
 
@@ -197,7 +203,7 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	var newWritten []message.ImmutableMessage
 	var read1, read2, read3 []message.ImmutableMessage
 	appendDone := make(chan struct{})
-	go func() {
+	go func() { //nolint:gosec // context.Background is intentional in test goroutine
 		defer wg.Done()
 		lastMVCC, err := rwWAL.GetLatestMVCCTimestamp(context.Background(), testVChannel)
 		require.NoError(f.t, err)

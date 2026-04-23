@@ -79,23 +79,26 @@ func (s *SnapshotSuite) TestDropSnapshot() {
 
 	s.Run("success", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
 		s.mock.EXPECT().DropSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
 			s.Equal(snapshotName, req.GetName())
+			s.Equal(collectionName, req.GetCollectionName())
 			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 		}).Once()
 
-		opt := NewDropSnapshotOption(snapshotName)
+		opt := NewDropSnapshotOption(snapshotName, collectionName)
 		err := s.client.DropSnapshot(ctx, opt)
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
 		s.mock.EXPECT().DropSnapshot(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error")).Once()
 
-		opt := NewDropSnapshotOption(snapshotName)
+		opt := NewDropSnapshotOption(snapshotName, collectionName)
 		err := s.client.DropSnapshot(ctx, opt)
 		s.Error(err)
 	})
@@ -124,9 +127,8 @@ func (s *SnapshotSuite) TestListSnapshots() {
 			}, nil
 		}).Once()
 
-		opt := NewListSnapshotsOption().
-			WithDbName(dbName).
-			WithCollectionName(collectionName)
+		opt := NewListSnapshotsOption(collectionName).
+			WithDbName(dbName)
 		snapshots, err := s.client.ListSnapshots(ctx, opt)
 		s.NoError(err)
 		s.Equal(expectedSnapshots, snapshots)
@@ -135,7 +137,7 @@ func (s *SnapshotSuite) TestListSnapshots() {
 	s.Run("service error", func() {
 		s.mock.EXPECT().ListSnapshots(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error")).Once()
 
-		opt := NewListSnapshotsOption()
+		opt := NewListSnapshotsOption("test_collection")
 		snapshots, err := s.client.ListSnapshots(ctx, opt)
 		s.Error(err)
 		s.Nil(snapshots)
@@ -149,7 +151,7 @@ func (s *SnapshotSuite) TestListSnapshots() {
 			},
 		}, nil).Once()
 
-		opt := NewListSnapshotsOption()
+		opt := NewListSnapshotsOption("test_collection")
 		snapshots, err := s.client.ListSnapshots(ctx, opt)
 		s.Error(err)
 		s.Nil(snapshots)
@@ -168,11 +170,12 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 
 	s.Run("success", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 		expectedResp := &milvuspb.DescribeSnapshotResponse{
 			Status:         merr.Success(),
 			Name:           snapshotName,
 			Description:    "test description",
-			CollectionName: "test_collection",
+			CollectionName: collectionName,
 			CreateTs:       1234567890,
 			S3Location:     "s3://test-bucket/snapshot",
 			PartitionNames: []string{"partition1", "partition2"},
@@ -180,10 +183,11 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 
 		s.mock.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
 			s.Equal(snapshotName, req.GetName())
+			s.Equal(collectionName, req.GetCollectionName())
 			return expectedResp, nil
 		}).Once()
 
-		opt := NewDescribeSnapshotOption(snapshotName)
+		opt := NewDescribeSnapshotOption(snapshotName, collectionName)
 		resp, err := s.client.DescribeSnapshot(ctx, opt)
 		s.NoError(err)
 		s.Equal(expectedResp.GetName(), resp.GetName())
@@ -196,10 +200,11 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 
 	s.Run("service error", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
 		s.mock.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error")).Once()
 
-		opt := NewDescribeSnapshotOption(snapshotName)
+		opt := NewDescribeSnapshotOption(snapshotName, collectionName)
 		resp, err := s.client.DescribeSnapshot(ctx, opt)
 		s.Error(err)
 		s.Nil(resp)
@@ -207,6 +212,7 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 
 	s.Run("response error", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
+		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
 		s.mock.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.DescribeSnapshotResponse{
 			Status: &commonpb.Status{
@@ -215,7 +221,7 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 			},
 		}, nil).Once()
 
-		opt := NewDescribeSnapshotOption(snapshotName)
+		opt := NewDescribeSnapshotOption(snapshotName, collectionName)
 		resp, err := s.client.DescribeSnapshot(ctx, opt)
 		s.Error(err)
 		// When there's a response error, the response object is still returned but with error status
@@ -237,18 +243,20 @@ func (s *SnapshotSuite) TestRestoreSnapshot() {
 	s.Run("success", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
+		targetCollectionName := fmt.Sprintf("restored_%s", s.randString(6))
 		expectedJobID := int64(12345)
 
 		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
 			s.Equal(snapshotName, req.GetName())
 			s.Equal(collectionName, req.GetCollectionName())
+			s.Equal(targetCollectionName, req.GetTargetCollectionName())
 			return &milvuspb.RestoreSnapshotResponse{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				JobId:  expectedJobID,
 			}, nil
 		}).Once()
 
-		opt := NewRestoreSnapshotOption(snapshotName, collectionName)
+		opt := NewRestoreSnapshotOption(snapshotName, collectionName, targetCollectionName)
 		jobID, err := s.client.RestoreSnapshot(ctx, opt)
 		s.NoError(err)
 		s.Equal(expectedJobID, jobID)
@@ -257,10 +265,11 @@ func (s *SnapshotSuite) TestRestoreSnapshot() {
 	s.Run("failure", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
+		targetCollectionName := fmt.Sprintf("restored_%s", s.randString(6))
 
 		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return((*milvuspb.RestoreSnapshotResponse)(nil), errors.New("mocked error")).Once()
 
-		opt := NewRestoreSnapshotOption(snapshotName, collectionName)
+		opt := NewRestoreSnapshotOption(snapshotName, collectionName, targetCollectionName)
 		jobID, err := s.client.RestoreSnapshot(ctx, opt)
 		s.Error(err)
 		s.Equal(int64(0), jobID)
@@ -293,19 +302,23 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 
 	s.Run("DropSnapshotOption", func() {
 		snapshotName := "test_snapshot"
-		opt := NewDropSnapshotOption(snapshotName)
+		collectionName := "test_collection"
+		dbName := "test_db"
+		opt := NewDropSnapshotOption(snapshotName, collectionName).
+			WithDbName(dbName)
 
 		req := opt.Request()
 		s.Equal(snapshotName, req.GetName())
+		s.Equal(collectionName, req.GetCollectionName())
+		s.Equal(dbName, req.GetDbName())
 	})
 
 	s.Run("ListSnapshotsOption", func() {
 		dbName := "test_db"
 		collectionName := "test_collection"
 
-		opt := NewListSnapshotsOption().
-			WithDbName(dbName).
-			WithCollectionName(collectionName)
+		opt := NewListSnapshotsOption(collectionName).
+			WithDbName(dbName)
 
 		req := opt.Request()
 		s.Equal(dbName, req.GetDbName())
@@ -314,24 +327,47 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 
 	s.Run("DescribeSnapshotOption", func() {
 		snapshotName := "test_snapshot"
-		opt := NewDescribeSnapshotOption(snapshotName)
-
-		req := opt.Request()
-		s.Equal(snapshotName, req.GetName())
-	})
-
-	s.Run("RestoreSnapshotOption", func() {
-		snapshotName := "test_snapshot"
-		collectionName := "restored_collection"
+		collectionName := "test_collection"
 		dbName := "test_db"
-
-		opt := NewRestoreSnapshotOption(snapshotName, collectionName).
+		opt := NewDescribeSnapshotOption(snapshotName, collectionName).
 			WithDbName(dbName)
 
 		req := opt.Request()
 		s.Equal(snapshotName, req.GetName())
 		s.Equal(collectionName, req.GetCollectionName())
 		s.Equal(dbName, req.GetDbName())
+	})
+
+	s.Run("ListRestoreSnapshotJobsOption", func() {
+		dbName := "test_db"
+		collectionName := "test_collection"
+
+		opt := NewListRestoreSnapshotJobsOption().
+			WithDbName(dbName).
+			WithCollectionName(collectionName)
+
+		req := opt.Request()
+		s.Equal(dbName, req.GetDbName())
+		s.Equal(collectionName, req.GetCollectionName())
+	})
+
+	s.Run("RestoreSnapshotOption", func() {
+		snapshotName := "test_snapshot"
+		sourceCollection := "source_collection"
+		sourceDb := "source_db"
+		targetCollection := "restored_collection"
+		targetDb := "target_db"
+
+		opt := NewRestoreSnapshotOption(snapshotName, sourceCollection, targetCollection).
+			WithDbName(sourceDb).
+			WithTargetDbName(targetDb)
+
+		req := opt.Request()
+		s.Equal(snapshotName, req.GetName())
+		s.Equal(sourceCollection, req.GetCollectionName())
+		s.Equal(sourceDb, req.GetDbName())
+		s.Equal(targetCollection, req.GetTargetCollectionName())
+		s.Equal(targetDb, req.GetTargetDbName())
 	})
 }
 

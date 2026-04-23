@@ -14,6 +14,8 @@ import (
 
 // TestCreateExternalCollection tests creating an external collection
 func TestCreateExternalCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -56,8 +58,14 @@ func TestCreateExternalCollection(t *testing.T) {
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
 	require.Equal(t, `{"format": "parquet"}`, coll.Schema.ExternalSpec)
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 2)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 3)
+
+	// Verify virtual PK field
+	vpkField := findFieldByName(coll.Schema.Fields, "__virtual_pk__")
+	require.NotNil(t, vpkField)
+	require.True(t, vpkField.PrimaryKey)
+	require.True(t, vpkField.AutoID)
 
 	// Verify text field
 	textField := findFieldByName(coll.Schema.Fields, "text")
@@ -80,6 +88,8 @@ func TestCreateExternalCollection(t *testing.T) {
 // TestCreateExternalCollectionMissingExternalField tests that creating external collection
 // without external_field mapping fails
 func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -113,6 +123,8 @@ func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
 // TestCreateExternalCollectionWithPrimaryKey tests that creating external collection
 // with primary key field fails
 func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -146,6 +158,8 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 // TestCreateExternalCollectionWithDynamicField tests that creating external collection
 // with dynamic field enabled fails
 func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -180,6 +194,8 @@ func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
 // TestCreateExternalCollectionWithAutoID tests that creating external collection
 // with auto ID field fails
 func TestCreateExternalCollectionWithAutoID(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -213,6 +229,8 @@ func TestCreateExternalCollectionWithAutoID(t *testing.T) {
 // TestCreateExternalCollectionWithPartitionKey tests that creating external collection
 // with partition key field fails
 func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -247,6 +265,8 @@ func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
 // TestCreateExternalCollectionMultipleVectorFields tests creating external collection
 // with multiple vector fields
 func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -290,8 +310,8 @@ func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
 	// Verify external source
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 3)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 4)
 
 	// Verify vector fields
 	denseField := findFieldByName(coll.Schema.Fields, "dense_embedding")

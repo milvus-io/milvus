@@ -81,8 +81,8 @@ func NewSyncTask(ctx context.Context,
 		if useLoonFFI {
 			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-			// -1 for first write
-			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+			// ManifestEarliest for first write
+			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
 		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
@@ -325,7 +325,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			appender := &nullDefaultAppender[int32]{}
 			if defaultVal != nil {
 				v := defaultVal.GetIntData()
-				err = appender.AppendDefault(fieldData, int32(v), rowNum)
+				err = appender.AppendDefault(fieldData, v, rowNum)
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
@@ -393,7 +393,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
+			return fmt.Errorf("unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {
@@ -462,10 +462,12 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
 	log.Info("allowNonBM25Outputs", zap.Any("allowNonBM25Outputs", allowNonBM25Outputs))
-	fieldIDs := lo.Keys(data.Data)
+	fieldIDs := lo.Keys(lo.PickBy(data.Data, func(_ int64, fd storage.FieldData) bool {
+		return fd.RowNum() > 0
+	}))
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
 	if err != nil {
-		return err
+		return errors.Wrap(merr.ErrInvalidInsertData, err.Error())
 	}
 	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
 	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
@@ -631,7 +633,7 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 
 	for fieldID, fd := range data.Data {
 		if fd == nil {
-			// normaly is impossible, just to avoid potential crash here
+			// normally is impossible, just to avoid potential crash here
 			continue
 		}
 		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {

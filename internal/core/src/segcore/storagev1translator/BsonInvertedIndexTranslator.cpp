@@ -66,11 +66,11 @@ BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
-        return {{0, load_info_.index_size},
-                {load_info_.index_size, load_info_.index_size}};
+        // loaded: on disk; overhead: temp memory for download buffer
+        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
     } else {
-        return {{load_info_.index_size, 0},
-                {load_info_.index_size, load_info_.index_size}};
+        // loaded: in memory; overhead: temp disk for local file before loading
+        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
     }
 }
 
@@ -108,7 +108,7 @@ BsonInvertedIndexTranslator::get_cells(
             milvus::ScopedTimer::LogLevel::Info);
 
         // Load the index using the files from load_info_
-        // Cast uint32_t to LoadPriority enum
+        // Files are absolute remote paths (basePath already prepended by caller)
         index->LoadIndex(load_info_.index_files,
                          static_cast<milvus::proto::common::LoadPriority>(
                              load_info_.load_priority),

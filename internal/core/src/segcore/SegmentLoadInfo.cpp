@@ -189,6 +189,11 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         info->set_warmup_policy(field_warmup_policy);
     }
 
+    // Propagate base_path for unified (basePath + relativeFiles) model
+    if (!text_index_stats.base_path().empty()) {
+        info->set_base_path(text_index_stats.base_path());
+    }
+
     return info;
 }
 
@@ -251,6 +256,23 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
     }
 
+    // Two FieldBinlogs at the same group id are equivalent only when their
+    // underlying log files (log_path sequence) match. Compaction/version
+    // bumps can swap files under the same fieldid, and without detecting
+    // that here the loader never evicts the stale column cache.
+    auto same_binlog_files = [](const proto::segcore::FieldBinlog& a,
+                                const proto::segcore::FieldBinlog& b) -> bool {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     std::map<int64_t, int64_t> new_binlog_fields;
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
@@ -263,20 +285,38 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         if (child_fields.empty()) {
             child_fields.emplace_back(new_field_binlog.fieldid());
         }
+
+        auto* cur_field_binlog =
+            GetFieldBinlog(FieldId(new_field_binlog.fieldid()));
+        bool group_files_changed =
+            cur_field_binlog != nullptr &&
+            !same_binlog_files(*cur_field_binlog, new_field_binlog);
+
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
-            auto iter = current_fields.find(new_field_binlog.fieldid());
-            // Find binlogs to load/replace: fields in new_info not matching current
-            if (iter == current_fields.end() ||
-                iter->second != new_field_binlog.fieldid()) {
-                // Check if this child field already exists in current
-                // (either from binlogs or from default value filling)
-                if (current_fields.find(child_id) != current_fields.end() ||
-                    fields_filled_with_default_.count(FieldId(child_id)) > 0) {
-                    ids_to_replace.emplace_back(child_id);
-                } else {
-                    ids_to_load.emplace_back(child_id);
-                }
+            // current_fields is keyed by child field id, so look up the
+            // child — keying by new_field_binlog.fieldid() misses multi-
+            // field groups (whose group id is not itself a map key) and
+            // spuriously classifies unchanged groups as moved.
+            auto iter = current_fields.find(child_id);
+            // A binlog entry needs (re)loading when either
+            //   (a) the group this child belongs to differs between
+            //       current and new, or
+            //   (b) the group maps the same way but the underlying log
+            //       files changed (e.g. compaction rewrote the segment).
+            bool group_mapping_differs =
+                iter == current_fields.end() ||
+                iter->second != new_field_binlog.fieldid();
+            if (!group_mapping_differs && !group_files_changed) {
+                continue;
+            }
+            // Pre-existing children go to replace (to evict stale cached
+            // columns); genuinely new children go to load.
+            if (current_fields.find(child_id) != current_fields.end() ||
+                fields_filled_with_default_.count(FieldId(child_id)) > 0) {
+                ids_to_replace.emplace_back(child_id);
+            } else {
+                ids_to_load.emplace_back(child_id);
             }
         }
         if (!ids_to_load.empty()) {
@@ -305,42 +345,78 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     AssertInfo(cur_column_group, "current column groups shall not be null");
     AssertInfo(new_column_group, "new column groups shall not be null");
 
-    // Build a set of current FieldIds from current column groups
-    std::map<int64_t, int> cur_field_ids;
-    for (int i = 0; i < cur_column_group->size(); i++) {
-        auto cg = cur_column_group->at(i);
+    // The loon manifest gives no ordering guarantee on the column-groups
+    // vector, so we don't try to pair cur/new groups by position or by a
+    // synthesized leader. For each field we only ask: "is it present in
+    // current, and did its backing files change?" — field-level existence
+    // plus per-field file-list comparison is enough to classify
+    // new/replace/unchanged without any group-identity assumption.
+    std::map<int64_t, const std::vector<milvus_storage::api::ColumnGroupFile>*>
+        cur_field_to_files;
+    for (const auto& cg : *cur_column_group) {
+        if (!cg) {
+            continue;
+        }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_ids.emplace(field_id, i);
+            cur_field_to_files[field_id] = &cg->files;
         }
     }
 
-    // Build a set of new FieldIds and find column groups to load/replace
-    std::map<int64_t, int> new_field_ids;
+    // Compare path + row range: storage v2 packed files can share a path
+    // across compactions while the row window (start_index/end_index)
+    // changes, so path-only comparison would leave stale cache in place.
+    auto same_files =
+        [](const std::vector<milvus_storage::api::ColumnGroupFile>& a,
+           const std::vector<milvus_storage::api::ColumnGroupFile>& b) -> bool {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (size_t j = 0; j < a.size(); j++) {
+            if (a[j].path != b[j].path ||
+                a[j].start_index != b[j].start_index ||
+                a[j].end_index != b[j].end_index) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Find column groups to load/replace on the new side
+    std::set<int64_t> new_seen_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->at(i);
+        if (!cg) {
+            continue;
+        }
         std::vector<FieldId> fields;
         std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
         std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            new_field_ids.emplace(field_id, i);
+            new_seen_field_ids.emplace(field_id);
 
-            auto iter = cur_field_ids.find(field_id);
+            auto cur_iter = cur_field_to_files.find(field_id);
             bool was_default_filled =
                 fields_filled_with_default_.count(FieldId(field_id)) > 0;
             bool is_new_field =
-                iter == cur_field_ids.end() && !was_default_filled;
-            bool is_replace_field =
-                was_default_filled ||
-                (iter != cur_field_ids.end() && iter->second != i);
+                cur_iter == cur_field_to_files.end() && !was_default_filled;
+            // A field that was present in current must go to replace when
+            // its backing files changed — whether that's the same group
+            // rewriting its parquet (compaction) or the field landing in
+            // a different group with a different file set. Either way the
+            // cached chunks are stale.
+            bool files_changed = cur_iter != cur_field_to_files.end() &&
+                                 !same_files(*cur_iter->second, cg->files);
+            bool is_replace_field = was_default_filled || files_changed;
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     fields.emplace_back(field_id);
                 } else {
                     lazy_fields.emplace_back(field_id);
@@ -349,10 +425,19 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field was default-filled or moved between groups → replace
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     replace_fields.emplace_back(field_id);
                 } else {
+                    lazy_replace_fields.emplace_back(field_id);
+                }
+            } else {
+                // Field at same position — check if needs lazification
+                // (transitioning from no-raw-data-index to raw-data-index)
+                if (new_info.field_index_has_raw_data_.count(
+                        FieldId(field_id)) > 0 &&
+                    field_index_has_raw_data_.count(FieldId(field_id)) == 0) {
                     lazy_replace_fields.emplace_back(field_id);
                 }
             }
@@ -363,18 +448,25 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         if (!replace_fields.empty()) {
             diff.column_groups_to_replace.emplace_back(i, replace_fields);
         }
-        if (!lazy_fields.empty()) {
-            diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        // Lazy entries are emitted one-per-field on purpose: each entry maps
+        // to a separate single-column projected ChunkReader in
+        // LoadColumnGroup, so touching one lazy field never co-loads chunks
+        // for sibling lazy fields in the same column group. Reader-sharing
+        // policy is therefore encoded in the diff entry shape itself rather
+        // than re-derived inside the loader.
+        for (const auto& fid : lazy_fields) {
+            diff.column_groups_to_lazyload.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
-        if (!lazy_replace_fields.empty()) {
-            diff.column_groups_to_lazyreplace.emplace_back(i,
-                                                           lazy_replace_fields);
+        for (const auto& fid : lazy_replace_fields) {
+            diff.column_groups_to_lazyreplace.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
     }
 
     // Find field data to drop: fields in current but not in new
-    for (const auto& [field_id, cg_index] : cur_field_ids) {
-        if (new_field_ids.find(field_id) == new_field_ids.end()) {
+    for (const auto& [field_id, files_ptr] : cur_field_to_files) {
+        if (new_seen_field_ids.find(field_id) == new_seen_field_ids.end()) {
             diff.field_data_to_drop.emplace(field_id);
         }
     }
@@ -384,13 +476,68 @@ void
 SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
     // Find fields that were previously skipped (index had raw data)
-    // but now need loading (index no longer has raw data or was dropped)
+    // but now need loading (index no longer has raw data or was dropped).
+    // These fields need their raw data restored since the index no longer
+    // provides it. We put them into load paths (binlogs/column_groups) so
+    // that ApplyLoadDiff can rebuild the data from storage.
+    // Collect fields that need reload (index no longer has raw data)
+    std::set<FieldId> fields_to_reload;
     for (const auto& field_id : field_index_has_raw_data_) {
-        // If new_info doesn't have this field in index_has_raw_data_,
-        // we need to reload the field data
         if (new_info.field_index_has_raw_data_.find(field_id) ==
             new_info.field_index_has_raw_data_.end()) {
-            diff.fields_to_reload.emplace_back(field_id);
+            fields_to_reload.emplace(field_id);
+        }
+    }
+
+    if (fields_to_reload.empty()) {
+        return;
+    }
+
+    if (!new_info.HasManifestPath()) {
+        // Binlog mode: find each field's binlog and add to binlogs_to_replace
+        for (const auto& field_id : fields_to_reload) {
+            for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
+                auto& binlog = new_info.GetBinlogPath(i);
+                std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                                  binlog.child_fields().end());
+                if (child_fields.empty()) {
+                    child_fields.emplace_back(binlog.fieldid());
+                }
+                bool found = false;
+                for (auto child_id : child_fields) {
+                    if (FieldId(child_id) == field_id) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    // Use replace since the field may still exist
+                    // (e.g. multi-field group where drop was skipped)
+                    diff.binlogs_to_replace.emplace_back(
+                        std::vector<FieldId>{field_id}, binlog);
+                    break;
+                }
+            }
+        }
+    } else {
+        // Manifest mode: collect fields per column group, emplace each
+        // group index only once
+        auto column_groups = new_info.GetColumnGroups();
+        if (column_groups) {
+            std::map<int, std::vector<FieldId>> cg_fields;
+            for (size_t i = 0; i < column_groups->size(); i++) {
+                auto cg = column_groups->at(i);
+                for (const auto& column : cg->columns) {
+                    FieldId fid(std::stoll(column));
+                    if (fields_to_reload.count(fid) > 0) {
+                        cg_fields[static_cast<int>(i)].emplace_back(fid);
+                    }
+                }
+            }
+            for (auto& [cg_idx, fids] : cg_fields) {
+                diff.column_groups_to_replace.emplace_back(cg_idx,
+                                                           std::move(fids));
+            }
         }
     }
 }
@@ -586,17 +733,30 @@ SegmentLoadInfo::GetLoadDiff() {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        // set mock path for null check
-        empty_info.info_.set_manifest_path("mocked manifest path");
-        empty_info.column_groups_ =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        empty_info.ComputeDiffColumnGroups(diff, *this);
+        if (schema_->is_external_collection()) {
+            // External collections use parquet field names (e.g., "id",
+            // "value") as column group column names, not numeric field IDs.
+            // ComputeDiffColumnGroups calls std::stoll which would crash.
+            // Flag for direct manifest loading in ApplyLoadDiff.
+            diff.load_external_manifest = true;
+        } else {
+            // set mock path for null check
+            empty_info.info_.set_manifest_path("mocked manifest path");
+            empty_info.column_groups_ =
+                std::make_shared<milvus_storage::api::ColumnGroups>();
+            empty_info.ComputeDiffColumnGroups(diff, *this);
+        }
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
     }
 
     // Compute fields that need default value filling (schema evolution)
-    empty_info.ComputeDiffDefaultFields(diff, *this);
+    // Skip for external collections: collect_data_fields() calls std::stoll
+    // on column group names, and external collections don't need default fills
+    // (all fields are either external or virtual PK).
+    if (!schema_->is_external_collection()) {
+        empty_info.ComputeDiffDefaultFields(diff, *this);
+    }
 
     return diff;
 }

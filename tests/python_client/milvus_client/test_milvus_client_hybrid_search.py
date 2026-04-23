@@ -504,3 +504,79 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                                         "pk_name": default_primary_key_field_name,
                                         "limit": default_limit})
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_hybrid_search_weighted_groupby_l2_no_norm_score(self):
+        """
+        target: verify weighted hybrid search with group_by + L2 metric +
+                norm_score=false preserves "smaller distance = better match"
+                semantics throughout the GroupByOp.
+        method: 1. create collection with two FLOAT_VECTOR fields (both L2,
+                   FLAT index) and a category VARCHAR field
+                2. insert rows in 3 categories where vectors progressively
+                   move away from the query
+                3. hybrid search with WeightedRanker(0.5, 0.5) (no norm_score)
+                   + group_by="category", group_size=2, limit=2 groups
+        expected: best L2 group ranks first, within-group best L2 first.
+        Without the fix the entire ordering is reversed: GroupByOp hard-coded
+        DESC sort, so it kept the WORST groupSize rows per group and put the
+        category with the worst best-row first. The category with the best
+        match (cat A) would be dropped entirely from a limit=2 result.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # 1. create collection with two FLOAT_VECTOR fields (both L2 + FLAT)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64,
+                         is_primary=True, auto_id=False)
+        schema.add_field("vec1", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("vec2", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("category", DataType.VARCHAR, max_length=16)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec1", index_type="FLAT", metric_type="L2")
+        index_params.add_index("vec2", index_type="FLAT", metric_type="L2")
+        self.create_collection(client, collection_name, dimension=dim,
+                               schema=schema, index_params=index_params)
+        # 2. insert deterministic data:
+        #    cat A: ids 1,2,3 — best L2 cluster, vector magnitudes 0.1, 0.2, 0.5
+        #    cat B: ids 4,5   — middling cluster, magnitudes 1.0, 2.0
+        #    cat C: id  6     — worst, magnitude 5.0
+        rows = [
+            {default_primary_key_field_name: 1, "vec1": [0.1] * dim, "vec2": [0.1] * dim, "category": "A"},
+            {default_primary_key_field_name: 2, "vec1": [0.2] * dim, "vec2": [0.2] * dim, "category": "A"},
+            {default_primary_key_field_name: 3, "vec1": [0.5] * dim, "vec2": [0.5] * dim, "category": "A"},
+            {default_primary_key_field_name: 4, "vec1": [1.0] * dim, "vec2": [1.0] * dim, "category": "B"},
+            {default_primary_key_field_name: 5, "vec1": [2.0] * dim, "vec2": [2.0] * dim, "category": "B"},
+            {default_primary_key_field_name: 6, "vec1": [5.0] * dim, "vec2": [5.0] * dim, "category": "C"},
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. hybrid search: query vector = [0]*dim → L2 increases monotonically with row id
+        query_vector = [[0.0] * dim]
+        sub1 = AnnSearchRequest(query_vector, "vec1", {"level": 1}, 10)
+        sub2 = AnnSearchRequest(query_vector, "vec2", {"level": 1}, 10)
+        # WeightedRanker with no norm_score → raw weighted L2 distances are
+        # combined; the merged $score column ends up "smaller = better".
+        ranker = WeightedRanker(0.5, 0.5)
+        # group_by category, top 2 rows per group, top 2 groups
+        results = self.hybrid_search(
+            client, collection_name, [sub1, sub2], ranker,
+            limit=2, group_by_field="category", group_size=2,
+            output_fields=[default_primary_key_field_name, "category"],
+        )[0]
+        hits = results[0]
+        ids = [h[default_primary_key_field_name] for h in hits]
+        cats = [h["category"] for h in hits]
+        log.info(f"weighted hybrid + group_by + L2 + no_norm: ids={ids} cats={cats}")
+        # Expected (correct ASC semantics): cat A best 2 [1, 2] then cat B best 2 [4, 5]
+        # Buggy (DESC hardcoded): cat C [6] then cat B worst [5, 4] — id 6 first, total 3 rows
+        assert ids[0] == 1, \
+            f"row 1 (best L2 + cat A best representative) must rank first; got {ids} cats={cats}"
+        # cat C must be excluded entirely (it's the worst category, dropped by limit=2)
+        assert "C" not in cats, \
+            f"cat C (worst representative L2) must be excluded by limit=2 groups; got cats={cats}"
+        # All surviving rows must come from cat A and cat B in that order
+        assert cats == ["A", "A", "B", "B"], \
+            f"expected ordering [A, A, B, B] (best 2 per group, ASC group ordering); got {cats} ids={ids}"
+        self.drop_collection(client, collection_name)

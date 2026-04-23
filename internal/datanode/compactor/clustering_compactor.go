@@ -660,7 +660,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
+		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
 			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
 			return err
 		}
@@ -668,7 +668,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for _, v := range vs {
 			offset++
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
 				return errors.New("unexpected error")
@@ -681,7 +681,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 					}
 				}
 			}
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp), expireTs) {
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
 			}
 
@@ -990,8 +990,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+		remained      int64 = 0
+		analyzeResult       = make(map[interface{}]int64, 0)
 	)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	for {

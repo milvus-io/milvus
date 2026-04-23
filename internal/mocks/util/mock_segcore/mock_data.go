@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -893,27 +894,28 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	indexParams[common.IndexTypeKey] = indexType
 	indexParams[common.MetricTypeKey] = metricType
 	indexParams["index_mode"] = "cpu"
-	if indexType == IndexFaissIDMap { // float vector
-	} else if indexType == IndexFaissIVFFlat {
+	switch indexType {
+	case IndexFaissIDMap: // float vector
+	case IndexFaissIVFFlat:
 		indexParams["nlist"] = strconv.Itoa(nlist)
-	} else if indexType == IndexFaissIVFPQ {
+	case IndexFaissIVFPQ:
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexFaissIVFSQ8 {
+	case IndexFaissIVFSQ8:
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexHNSW {
+	case IndexHNSW:
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		// indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexFaissBinIVFFlat { // binary vector
+	case IndexFaissBinIVFFlat: // binary vector
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-	} else if indexType == IndexFaissBinIDMap {
+	case IndexFaissBinIDMap:
 		// indexParams[common.DimKey] = strconv.Itoa(defaultDim)
-	} else {
+	default:
 		panic("")
 	}
 
@@ -1001,9 +1003,10 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 }
 
 func genDSLByIndexType(schema *schemapb.CollectionSchema, indexType string) (string, error) {
-	if indexType == IndexFaissIDMap { // float vector
+	switch indexType {
+	case IndexFaissIDMap: // float vector
 		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
-	} else if indexType == IndexHNSW {
+	case IndexHNSW:
 		return genHNSWDSL(schema, ef, defaultTopK, defaultRoundDecimal)
 	}
 	return "", errors.New("Invalid indexType")
@@ -1077,7 +1080,7 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
             >`, nil
 }
 
-func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, searchResult *segcore.SearchResult) error {
+func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, placeholderGroup unsafe.Pointer, searchResult *segcore.SearchResult) error {
 	searchResults := make([]*segcore.SearchResult, 0)
 	searchResults = append(searchResults, searchResult)
 
@@ -1086,7 +1089,7 @@ func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, 
 	sliceTopKs := []int64{topK, topK / 2, topK, topK, topK / 2}
 	sInfo := segcore.ParseSliceInfo(sliceNQs, sliceTopKs, nq)
 
-	res, err := segcore.ReduceSearchResultsAndFillData(ctx, plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
+	res, err := segcore.ReduceSearchResultsAndFillData(ctx, plan, placeholderGroup, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
 	if err != nil {
 		return err
 	}

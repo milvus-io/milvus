@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path"
 	"strconv"
@@ -171,7 +170,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 		if s.GetIsImporting() {
@@ -273,8 +272,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		}, ids...)
 	}
 
-	var compactionFromExistWithCache func(segID UniqueID) bool
-	compactionFromExistWithCache = func(segID UniqueID) bool {
+	compactionFromExistWithCache := func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
 
@@ -774,9 +772,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
 		segID := segInfo.GetID()
 		indexesFiles := uncompressIndexFiles(h, collectionID, segID)
-		uncompressedJsonStats := make(map[int64]*datapb.JsonKeyStats)
+		uncompressedJSONStats := make(map[int64]*datapb.JsonKeyStats)
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
-			uncompressedJsonStats[id] = uncompressJsonStats(h, segInfo, jsonStats)
+			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
 		return &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
@@ -793,7 +791,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			Statslogs:         segInfo.GetStatslogs(),
 			Bm25Statslogs:     segInfo.GetBm25Statslogs(),
 			IndexFiles:        indexesFiles,
-			JsonKeyIndexFiles: uncompressedJsonStats,
+			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 		}
@@ -816,7 +814,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
-			NumPartitions:       int64(resp.GetNumPartitions()),
+			NumPartitions:       resp.GetNumPartitions(),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},
@@ -825,16 +823,16 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}, nil
 }
 
-func uncompressJsonStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
-	prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d/%d", h.s.meta.chunkManager.RootPath(), common.JSONStatsPath, jsonStats.GetJsonKeyStatsDataFormat(),
+func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
+	prefix := metautil.BuildJSONKeyStatsPrefix(h.s.meta.chunkManager.RootPath(), jsonStats.GetJsonKeyStatsDataFormat(),
 		jsonStats.GetBuildID(), jsonStats.GetVersion(), segInfo.GetCollectionID(), segInfo.GetPartitionID(), segInfo.GetID(), jsonStats.GetFieldID())
-	uncompressedFiles := make([]string, 0)
+	uncompressedFiles := make([]string, 0, len(jsonStats.GetFiles()))
 	for _, file := range jsonStats.GetFiles() {
 		uncompressedFiles = append(uncompressedFiles, path.Join(prefix, file))
 	}
-	uncompressedJsonStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
-	uncompressedJsonStats.Files = uncompressedFiles
-	return uncompressedJsonStats
+	uncompressedJSONStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
+	uncompressedJSONStats.Files = uncompressedFiles
+	return uncompressedJSONStats
 }
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {

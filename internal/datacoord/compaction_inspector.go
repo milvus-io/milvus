@@ -45,6 +45,7 @@ var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration
 	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
 	datapb.CompactionType_ClusteringCompaction:   60 * time.Minute,
 	datapb.CompactionType_SortCompaction:         20 * time.Minute,
+	datapb.CompactionType_BackfillCompaction:     30 * time.Minute,
 }
 
 type CompactionInspector interface {
@@ -221,7 +222,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BackfillCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -246,7 +247,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)
-	// 2. no avaiable slots
+	// 2. no available slots
 	for {
 		t, err := c.queueTasks.Dequeue()
 		if err != nil {
@@ -262,7 +263,10 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BackfillCompaction:
+			// BackfillCompaction shares the same exclusion rules as Mix/Sort:
+			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
+			// - Label-level exclusion registered for Clustering awareness
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
@@ -409,7 +413,7 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
-				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds()) {
+				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(context.TODO(), task)
 					log.Ctx(context.TODO()).Debug("drop compaction task meta", zap.Int64("planID", task.PlanID))
@@ -587,6 +591,8 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 		task = newL0CompactionTask(t, c.allocator, c.meta)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler)
+	case datapb.CompactionType_BackfillCompaction:
+		task = newBackfillCompactionTask(t, c.allocator, c.meta, c.ievm, t.GetDiffFunctions())
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}

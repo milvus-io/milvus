@@ -11,8 +11,6 @@
 #pragma once
 #include <stdint.h>
 #include <memory>
-#include <optional>
-#include <unordered_set>
 #include <vector>
 
 #include "Reduce.h"
@@ -26,14 +24,17 @@
 namespace milvus::segcore {
 class GroupReduceHelper : public ReduceHelper {
  public:
-    explicit GroupReduceHelper(std::vector<SearchResult*>& search_results,
-                               milvus::query::Plan* plan,
-                               int64_t* slice_nqs,
-                               int64_t* slice_topKs,
-                               int64_t slice_num,
-                               tracer::TraceContext* trace_ctx)
+    explicit GroupReduceHelper(
+        std::vector<SearchResult*>& search_results,
+        milvus::query::Plan* plan,
+        const milvus::query::PlaceholderGroup* placeholder_group,
+        int64_t* slice_nqs,
+        int64_t* slice_topKs,
+        int64_t slice_num,
+        tracer::TraceContext* trace_ctx)
         : ReduceHelper(search_results,
                        plan,
+                       placeholder_group,
                        slice_nqs,
                        slice_topKs,
                        slice_num,
@@ -62,7 +63,6 @@ class GroupReduceHelper : public ReduceHelper {
                       search_res_data) override;
 
  private:
-    std::unordered_set<milvus::GroupByValueType> group_by_val_set_{};
 };
 
 }  // namespace milvus::segcore

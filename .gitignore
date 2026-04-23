@@ -15,6 +15,7 @@
 **/CMakeFiles/*
 **/.cmake/*
 CMakeCache.txt
+CMakeUserPresets.json
 .cache
 coverage_report/
 

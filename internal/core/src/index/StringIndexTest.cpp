@@ -32,8 +32,13 @@
 #include "index/StringIndex.h"
 #include "index/StringIndexMarisa.h"
 #include "knowhere/dataset.h"
+#include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;
@@ -41,6 +46,21 @@ namespace schemapb = milvus::proto::schema;
 
 namespace milvus {
 namespace index {
+
+static storage::FileManagerContext
+CreateStringTestFileManagerContext() {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    return ctx;
+}
+
 class StringIndexBaseTest : public ::testing::Test {
  protected:
     void
@@ -323,7 +343,8 @@ TEST_F(StringIndexMarisaTest, Query) {
 }
 
 TEST_F(StringIndexMarisaTest, Codec) {
-    auto index = milvus::index::CreateStringIndexMarisa();
+    auto file_manager_ctx = CreateStringTestFileManagerContext();
+    auto index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
     std::vector<std::string> strings(nb);
     for (int i = 0; i < nb; ++i) {
         strings[i] = std::to_string(std::rand() % 10);
@@ -332,11 +353,16 @@ TEST_F(StringIndexMarisaTest, Codec) {
     index->Build(nb, strings.data());
 
     std::vector<std::string> invalid_strings = {std::to_string(nb)};
-    auto copy_index = milvus::index::CreateStringIndexMarisa();
+    auto copy_index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
 
     {
-        auto binary_set = index->Serialize(nullptr);
-        copy_index->Load(binary_set);
+        auto create_index_result = index->UploadUnified({});
+        auto index_files = create_index_result->GetIndexFiles();
+        Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadUnified(load_config);
     }
 
     {
@@ -398,8 +424,9 @@ TEST_F(StringIndexMarisaTest, Codec) {
 }
 
 TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
+    auto file_manager_ctx = CreateStringTestFileManagerContext();
     milvus::index::IndexBasePtr index =
-        milvus::index::CreateStringIndexMarisa();
+        milvus::index::CreateStringIndexMarisa(file_manager_ctx);
     std::vector<std::string> strings(nb);
     for (int i = 0; i < nb; ++i) {
         strings[i] = std::to_string(std::rand() % 10);
@@ -410,11 +437,16 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     index->BuildWithRawDataForUT(str_arr.ByteSizeLong(), data.data());
 
     std::vector<std::string> invalid_strings = {std::to_string(nb)};
-    auto copy_index = milvus::index::CreateStringIndexMarisa();
+    auto copy_index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
 
     {
-        auto binary_set = index->Serialize(nullptr);
-        copy_index->Load(binary_set);
+        auto create_index_result = index->UploadUnified({});
+        auto index_files = create_index_result->GetIndexFiles();
+        Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadUnified(load_config);
     }
 
     {

@@ -145,6 +145,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
@@ -175,6 +176,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     const IndexingRecord&
     get_indexing_record() const {
         return indexing_record_;
+    }
+
+    Timestamp
+    get_max_timestamp() const override {
+        return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
     std::shared_mutex&

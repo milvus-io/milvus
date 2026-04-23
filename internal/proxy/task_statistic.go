@@ -120,8 +120,8 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	g.GetStatisticsRequest.DbID = 0 // todo
-	g.GetStatisticsRequest.CollectionID = collID
+	g.DbID = 0 // todo
+	g.CollectionID = collID
 
 	g.TravelTimestamp = g.BeginTs()
 	g.GuaranteeTimestamp = parseGuaranteeTs(g.GuaranteeTimestamp, g.BeginTs())
@@ -132,7 +132,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.mixc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
+	loaded, unloaded, err := checkFullLoaded(ctx, g.mixc, g.request.GetDbName(), g.collectionName, g.CollectionID, partIDs)
 	log := log.Ctx(ctx).With(
 		zap.String("collectionName", g.collectionName),
 		zap.Int64("collectionID", g.CollectionID),
@@ -256,13 +256,13 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 }
 
 func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) error {
-	g.GetStatisticsRequest.PartitionIDs = g.loadedPartitionIDs
+	g.PartitionIDs = g.loadedPartitionIDs
 	if g.resultBuf == nil {
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
 	err := g.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             g.request.GetDbName(),
-		CollectionID:   g.GetStatisticsRequest.CollectionID,
+		CollectionID:   g.CollectionID,
 		CollectionName: g.collectionName,
 		Nq:             1,
 		Exec:           g.getStatisticsShard,

@@ -72,7 +72,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         auto warmup_policy =
             GetStringFromRepeatedKVs(child.type_params(), WARMUP_KEY);
         if (warmup_policy.has_value()) {
-            schema->warmup_fields_[field_id] = warmup_policy.value();
+            schema->warmup_fields_[field_id] = std::move(warmup_policy).value();
         }
     };
 
@@ -122,6 +122,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
+
+    // Parse external collection properties
+    if (!schema_proto.external_source().empty()) {
+        schema->set_external_source(schema_proto.external_source());
+        schema->set_external_spec(schema_proto.external_spec());
+    }
 
     return schema;
 }
@@ -224,6 +230,34 @@ Schema::AbsentFields(Schema& old_schema) const {
     }
 
     return std::make_unique<std::vector<FieldMeta>>(std::move(result));
+}
+
+std::shared_ptr<std::vector<std::string>>
+Schema::GetExternalColumnNames() const {
+    auto columns = std::make_shared<std::vector<std::string>>();
+    for (const auto& field_id : field_ids_) {
+        auto it = fields_.find(field_id);
+        if (it != fields_.end() && it->second.is_external_field()) {
+            columns->push_back(it->second.get_external_field());
+        }
+    }
+    return columns;
+}
+
+FieldId
+Schema::ResolveColumnFieldId(const std::string& column_name) const {
+    if (is_external_collection()) {
+        for (const auto& [fid, meta] : fields_) {
+            if (meta.is_external_field() &&
+                meta.get_external_field() == column_name) {
+                return fid;
+            }
+        }
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "external column '{}' not found in schema",
+                  column_name);
+    }
+    return FieldId(std::stoll(column_name));
 }
 
 std::pair<bool, bool>

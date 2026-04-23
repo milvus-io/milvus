@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -29,6 +30,9 @@ func TestCreateCollection(t *testing.T) {
 		schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+		})
 
 		// has collections and verify
 		has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -44,6 +48,8 @@ func TestCreateCollection(t *testing.T) {
 
 // fast: create -> index -> load
 func TestCreateCollectionFast(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -52,6 +58,9 @@ func TestCreateCollectionFast(t *testing.T) {
 	collName := common.GenRandomString("alter", 6)
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify collection option
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -73,6 +82,8 @@ func TestCreateCollectionFast(t *testing.T) {
 }
 
 func TestCreateCollectionFastOption(t *testing.T) {
+	t.Parallel()
+
 	// test create collection fast with option: ConsistencyLevel, varcharPk, indexOption
 	// Collection AutoID not works !!!, please set it on the field side~
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -85,6 +96,9 @@ func TestCreateCollectionFastOption(t *testing.T) {
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithDynamicSchema(true).
 		WithConsistencyLevel(entity.ClStrong).WithIndexOptions(indexOption).WithVarcharPK(true, 10))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify collection option
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -111,6 +125,8 @@ func TestCreateCollectionFastOption(t *testing.T) {
 }
 
 func TestCreateAutoIdCollectionField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -123,6 +139,9 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -139,6 +158,8 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 
 // create collection and specify shard num
 func TestCreateCollectionShards(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -150,6 +171,9 @@ func TestCreateCollectionShards(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -163,6 +187,8 @@ func TestCreateCollectionShards(t *testing.T) {
 
 // test create auto collection with schema
 func TestCreateAutoIdCollectionSchema(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("waiting for valid AutoId from schema params")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -176,6 +202,9 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -192,6 +221,8 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 
 // test create auto collection with collection option
 func TestCreateAutoIdCollection(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("https://github.com/milvus-io/milvus/issues/39523")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -205,6 +236,9 @@ func TestCreateAutoIdCollection(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithAutoID(true))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -220,6 +254,8 @@ func TestCreateAutoIdCollection(t *testing.T) {
 }
 
 func TestCreateJsonCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -232,6 +268,9 @@ func TestCreateJsonCollection(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(jsonField)
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -240,6 +279,8 @@ func TestCreateJsonCollection(t *testing.T) {
 }
 
 func TestCreateArrayCollections(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -260,6 +301,9 @@ func TestCreateArrayCollections(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -269,6 +313,8 @@ func TestCreateArrayCollections(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -282,6 +328,9 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
@@ -316,6 +365,9 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify partitions num
 		partitions, err := mc.ListPartitions(ctx, client.NewListPartitionOption(collName))
@@ -325,6 +377,8 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 }
 
 func TestCreateCollectionDynamicSchema(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -336,6 +390,9 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -356,6 +413,8 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 }
 
 func TestCreateCollectionDynamic(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("waiting for dynamicField alignment")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -368,6 +427,9 @@ func TestCreateCollectionDynamic(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -389,6 +451,8 @@ func TestCreateCollectionDynamic(t *testing.T) {
 }
 
 func TestCreateCollectionAllFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -404,6 +468,9 @@ func TestCreateCollectionAllFields(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -412,6 +479,8 @@ func TestCreateCollectionAllFields(t *testing.T) {
 }
 
 func TestCreateCollectionSparseVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -423,6 +492,9 @@ func TestCreateCollectionSparseVector(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -446,6 +518,9 @@ func TestCreateCollectionWithValidFieldName(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -535,6 +610,8 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 // create collection missing pk field or vector field
 func TestCreateCollectionInvalidFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -571,6 +648,8 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 
 // create autoID or not collection with non-int64 and non-varchar field
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -591,6 +670,8 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 
 // test create collection with duplicate field name
 func TestCreateCollectionDuplicateField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -613,6 +694,8 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -634,6 +717,8 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 
 // partition key field cannot be primary field, d can only be one partition key field
 func TestCreateCollectionPartitionKeyPk(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -648,6 +733,8 @@ func TestCreateCollectionPartitionKeyPk(t *testing.T) {
 
 // can only be one partition key field
 func TestCreateCollectionPartitionKeyNum(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -664,6 +751,8 @@ func TestCreateCollectionPartitionKeyNum(t *testing.T) {
 }
 
 func TestPartitionKeyInvalidNumPartition(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("Waiting for num partition")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -692,6 +781,8 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 
 // test create collection with multi auto id
 func TestCreateCollectionMultiAutoId(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -707,6 +798,8 @@ func TestCreateCollectionMultiAutoId(t *testing.T) {
 
 // test create collection with different autoId between pk field and schema
 func TestCreateCollectionInconsistentAutoId(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -722,6 +815,9 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 		// create collection
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// describe collection
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -737,6 +833,8 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 
 // create collection with field or schema description
 func TestCreateCollectionDescription(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -751,6 +849,9 @@ func TestCreateCollectionDescription(t *testing.T) {
 
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
@@ -836,6 +937,8 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 }
 
 func TestCreateVectorWithoutDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
@@ -852,6 +955,8 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 
 // specify dim for sparse vector -> error
 func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
@@ -867,6 +972,8 @@ func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
 }
 
 func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -891,6 +998,8 @@ func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
 
 // test create collection varchar array with invalid max length
 func TestCreateVarcharArrayInvalidLength(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -914,6 +1023,8 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 
 // test create collection varchar array with invalid max length
 func TestCreateVarcharInvalidLength(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -935,6 +1046,8 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 }
 
 func TestCreateArrayNotSupportedFieldType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -952,6 +1065,8 @@ func TestCreateArrayNotSupportedFieldType(t *testing.T) {
 
 // the num of vector fields > default limit=4
 func TestCreateMultiVectorExceed(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -968,6 +1083,8 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 
 // func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -983,6 +1100,8 @@ func TestCreateCollectionInvalidShards(t *testing.T) {
 }
 
 func TestCreateCollectionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1007,6 +1126,8 @@ func TestCreateCollectionInvalid(t *testing.T) {
 
 // test rename collection
 func TestRenameCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1043,12 +1164,18 @@ func TestRenameCollection(t *testing.T) {
 
 // There are collections with the same name in different db. Rename one of them.
 func TestRenameCollectionDb(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+	t.Cleanup(func() {
+		mc.UseDatabase(context.Background(), client.NewUseDatabaseOption(common.DefaultDb))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collectionName))
+	})
 
 	// create a database and use database
 	dbName := common.GenRandomString("db", 4)
@@ -1060,6 +1187,10 @@ func TestRenameCollectionDb(t *testing.T) {
 	newName := common.GenRandomString("new", 6)
 	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(collectionName, newName))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		mc.UseDatabase(context.Background(), client.NewUseDatabaseOption(dbName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(newName))
+	})
 
 	collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
 	require.Contains(t, collections, newName)
@@ -1073,6 +1204,8 @@ func TestRenameCollectionDb(t *testing.T) {
 }
 
 func TestRenameCollectionInvalidName(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1080,6 +1213,9 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collectionName))
+	})
 
 	// rename collection with invalid name
 	for _, invalidName := range common.GenInvalidNames() {
@@ -1094,6 +1230,8 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 }
 
 func TestRenameCollectionAdvanced(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1102,7 +1240,13 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 	name1 := common.GenRandomString("name1", 6)
 	name2 := common.GenRandomString("name2", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name1, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name1))
+	})
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name2, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name2))
+	})
 
 	// rename: old name same with new name
 	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name1))
@@ -1119,6 +1263,8 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 
 // alter collection ttl property
 func TestCollectionPropertyTtl(t *testing.T) {
+	t.Parallel()
+
 	// test collection property ttl
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1152,6 +1298,8 @@ func TestCollectionPropertyTtl(t *testing.T) {
 
 // create collection with property -> alter property -> writing and reading
 func TestCollectionWithPropertyAlterMmap(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1181,6 +1329,8 @@ func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 }
 
 func TestCollectionPropertyMmap(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1216,6 +1366,8 @@ func TestCollectionPropertyMmap(t *testing.T) {
 }
 
 func TestCollectionFakeProperties(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1224,6 +1376,9 @@ func TestCollectionFakeProperties(t *testing.T) {
 	collName := common.GenRandomString("alter", 6)
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithProperty("1", "bbb"))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	require.Subset(t, coll.Properties, map[string]string{"1": "bbb"})
 

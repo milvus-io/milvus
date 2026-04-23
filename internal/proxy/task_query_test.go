@@ -122,6 +122,7 @@ func TestQueryTask_all(t *testing.T) {
 		task := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -175,7 +176,7 @@ func TestQueryTask_all(t *testing.T) {
 		assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
 		// check reduce_stop_for_best
-		assert.Equal(t, false, task.RetrieveRequest.GetReduceStopForBest())
+		assert.Equal(t, false, task.GetReduceStopForBest())
 		task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{
 			Key:   ReduceStopForBestKey,
 			Value: "trxxxx",
@@ -219,12 +220,12 @@ func TestQueryTask_all(t *testing.T) {
 		for i := 0; i < len(fieldName2Types); i++ {
 			outputFieldIDs = append(outputFieldIDs, int64(common.StartOfUserFieldID+i))
 		}
-		task.RetrieveRequest.OutputFieldsId = outputFieldIDs
+		task.OutputFieldsId = outputFieldIDs
 		for fieldName, dataType := range fieldName2Types {
 			result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, hitNum))
 		}
 		result1.FieldsData = append(result1.FieldsData, generateFieldData(schemapb.DataType_Int64, common.TimeStampFieldName, hitNum))
-		task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
+		task.OutputFieldsId = append(task.OutputFieldsId, common.TimeStampField)
 		task.ctx = ctx
 		qn.ExpectedCalls = nil
 		qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -268,6 +269,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -319,6 +321,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt = &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -386,6 +389,7 @@ func TestQueryTask_all(t *testing.T) {
 			task := &queryTask{
 				Condition: NewTaskCondition(ctx),
 				RetrieveRequest: &internalpb.RetrieveRequest{
+					QueryLabel: "query",
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Retrieve,
 						SourceID: paramtable.GetNodeID(),
@@ -477,6 +481,92 @@ func TestQueryTask_all(t *testing.T) {
 			assert.Error(t, err, "non-aggregation with empty expr and no limit should fail")
 			assert.Contains(t, err.Error(), "empty expression should be used with limit")
 		}
+	})
+
+	t.Run("test order by without limit", func(t *testing.T) {
+		// ORDER BY without explicit limit should fail with an error
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					// No limit specified
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ORDER BY requires explicit limit")
+	})
+
+	t.Run("test order by with limit succeeds", func(t *testing.T) {
+		// ORDER BY with explicit limit should pass the validation
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					{
+						Key:   LimitKey,
+						Value: "10",
+					},
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

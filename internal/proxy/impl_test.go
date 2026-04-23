@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -1521,16 +1520,23 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
 		// normal case
-		rc := mocks.NewMockRootCoordClient(t)
-		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-			ID:    rand.Int63(),
-			Count: 1,
-		}, nil).Once()
-		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-		assert.NoError(t, err)
-		node.rowIDAllocator = idAllocator
-		err = idAllocator.Start()
-		assert.NoError(t, err)
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID: 1,
+		}, nil)
+		globalMetaCache = mc
+
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			JobID:  "123456789",
+		}, nil)
+		node.mixCoord = mixCoord
 
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: "aaa",
@@ -1541,6 +1547,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+		assert.Equal(t, "123456789", rsp.GetJobID())
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -2385,6 +2392,58 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
 }
 
+func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
+	t.Run("consistency check fails", func(t *testing.T) {
+		mockey.PatchConvey("consistency check blocks AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
+				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+			).Build()
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "consistency check failed")
+		})
+	})
+
+	t.Run("concurrent request rejected", func(t *testing.T) {
+		mockey.PatchConvey("in-flight gate blocks concurrent AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			// Simulate an in-flight schema change on the same collection
+			collKey := "default/test_coll"
+			node.alterSchemaInFlight.Store(collKey, struct{}{})
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "another schema-change request is already in progress")
+
+			node.alterSchemaInFlight.Delete(collKey)
+		})
+	})
+}
+
 func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
@@ -2596,6 +2655,338 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 
 			assert.NoError(t, err)
 			assert.True(t, merr.Ok(resp))
+		})
+	})
+}
+
+func TestProxy_AlterCollectionSchema(t *testing.T) {
+	t.Run("unhealthy node", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		resp, err := proxy.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetAlterStatus()))
+	})
+
+	t.Run("DescribeCollection fails", func(t *testing.T) {
+		mockey.PatchConvey("DescribeCollection fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.ErrCollectionNotFound),
+			}, nil).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("external collection rejected", func(t *testing.T) {
+		mockey.PatchConvey("external collection", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{
+					Name: "ext_col",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+					},
+				},
+			}, nil).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "ext_col",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+			assert.Contains(t, resp.GetAlterStatus().GetReason(), "external collection")
+		})
+	})
+
+	t.Run("schema version consistency check fails", func(t *testing.T) {
+		mockey.PatchConvey("consistency check fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
+				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+			).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("enqueue fails", func(t *testing.T) {
+		mockey.PatchConvey("enqueue fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
+
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, _ task) error {
+				return errors.New("queue full")
+			}).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("WaitToFinish fails", func(t *testing.T) {
+		mockey.PatchConvey("WaitToFinish fails", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
+
+			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(errors.New("timeout")).Build()
+
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+		})
+	})
+
+	t.Run("happy path", func(t *testing.T) {
+		mockey.PatchConvey("happy path", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(nil).Build()
+
+			// Call OnEnqueue so task.Base is initialized (BeginTs/EndTs are logged after Enqueue).
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+
+			_, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+		})
+	})
+}
+
+func TestCheckSchemaVersionConsistency(t *testing.T) {
+	t.Run("GetCollectionStatistics returns error", func(t *testing.T) {
+		mockey.PatchConvey("error from GetCollectionStatistics", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return nil, errors.New("rpc error")
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("GetCollectionStatistics returns RPC error status", func(t *testing.T) {
+		mockey.PatchConvey("rpc status error", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Status(merr.ErrCollectionNotFound),
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("both keys absent returns nil", func(t *testing.T) {
+		mockey.PatchConvey("no keys present", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats:  []*commonpb.KeyValuePair{},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.NoError(t, err)
+		})
+	})
+
+	t.Run("only consistent key present total absent returns error", func(t *testing.T) {
+		mockey.PatchConvey("consistent only", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "incomplete schema version consistency stats")
+		})
+	})
+
+	t.Run("only total key present consistent absent returns error", func(t *testing.T) {
+		mockey.PatchConvey("total only", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "incomplete schema version consistency stats")
+		})
+	})
+
+	t.Run("consistent less than total returns error with counts", func(t *testing.T) {
+		mockey.PatchConvey("consistent < total", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
+							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "5")
+			assert.Contains(t, err.Error(), "10")
+		})
+	})
+
+	t.Run("consistent equals total returns nil", func(t *testing.T) {
+		mockey.PatchConvey("consistent == total", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "10"},
+							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.NoError(t, err)
+		})
+	})
+
+	t.Run("malformed consistent value returns parse error", func(t *testing.T) {
+		mockey.PatchConvey("bad consistent value", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "not-a-number"},
+							{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("malformed total value returns parse error", func(t *testing.T) {
+		mockey.PatchConvey("bad total value", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).GetCollectionStatistics).To(
+				func(_ *Proxy, ctx context.Context, req *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+					return &milvuspb.GetCollectionStatisticsResponse{
+						Status: merr.Success(),
+						Stats: []*commonpb.KeyValuePair{
+							{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
+							{Key: common.SchemaVersionTotalSegmentsKey, Value: "bad-value"},
+						},
+					}, nil
+				}).Build()
+
+			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
 		})
 	})
 }

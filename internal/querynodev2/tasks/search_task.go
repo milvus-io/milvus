@@ -1,7 +1,5 @@
 package tasks
 
-// TODO: rename this file into search_task.go
-
 import "C"
 
 import (
@@ -23,11 +21,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -42,7 +40,6 @@ type SearchTask struct {
 	collection       *segments.Collection
 	segmentManager   *segments.Manager
 	req              *querypb.SearchRequest
-	plan             *planpb.PlanNode
 	result           *internalpb.SearchResults
 	merged           bool
 	groupSize        int64
@@ -71,7 +68,6 @@ func NewSearchTask(ctx context.Context,
 		collection:       collection,
 		segmentManager:   manager,
 		req:              req,
-		plan:             &planpb.PlanNode{},
 		merged:           false,
 		groupSize:        1,
 		topk:             req.GetReq().GetTopk(),
@@ -131,11 +127,6 @@ func (t *SearchTask) PreExecute() error {
 		}
 	}
 
-	// Unmarshal the plan for segment filtering
-	if err := proto.Unmarshal(t.req.GetReq().GetSerializedExprPlan(), t.plan); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -148,6 +139,7 @@ func (t *SearchTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
+
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
 	req := t.req
@@ -173,7 +165,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
@@ -183,7 +174,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	}
 	defer t.segmentManager.Segment.Unpin(searchedSegments)
@@ -192,6 +182,43 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResults(results)
 
+	// In filter-only mode, extract filter results and return early
+	if searchReq.FilterOnly() {
+		if len(results) != len(searchedSegments) {
+			return fmt.Errorf("filter-only search: result count %d != segment count %d", len(results), len(searchedSegments))
+		}
+		segmentIDs := make([]int64, 0, len(searchedSegments))
+		validCounts := make([]int64, 0, len(searchedSegments))
+		for i, result := range results {
+			segmentIDs = append(segmentIDs, searchedSegments[i].ID())
+			validCounts = append(validCounts, result.ValidCount())
+		}
+		relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
+			return acc + segments.GetSegmentRelatedDataSize(seg)
+		}, 0)
+		// Set result for all merged tasks (similar to non-filter-only mode)
+		for i := range t.originNqs {
+			var task *SearchTask
+			if i == 0 {
+				task = t
+			} else {
+				task = t.others[i-1]
+			}
+			task.result = &internalpb.SearchResults{
+				Status:                   merr.Success(),
+				SealedSegmentIDsSearched: segmentIDs,
+				FilterValidCounts:        validCounts,
+				CostAggregation: &internalpb.CostAggregation{
+					ServiceTime:          tr.ElapseSpan().Milliseconds(),
+					TotalRelatedDataSize: relatedDataSize,
+				},
+			}
+		}
+		log.Debug("filter-only search completed", zap.Int("segments", len(segmentIDs)))
+		return nil
+	}
+
+	// Normal search mode: reduce and return results
 	// plan.MetricType is accurate, though req.MetricType may be empty
 	metricType := searchReq.Plan().GetMetricType()
 
@@ -230,6 +257,7 @@ func (t *SearchTask) Execute() error {
 	blobs, err := segcore.ReduceSearchResultsAndFillData(
 		t.ctx,
 		searchReq.Plan(),
+		searchReq.PlaceholderGroup(),
 		results,
 		int64(len(results)),
 		t.originNqs,
@@ -239,31 +267,45 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
-	defer segcore.DeleteSearchResultDataBlobs(blobs)
+	allTasks := append([]*SearchTask{t}, t.others...)
+	refs, err := resource.NewSharedPinnedRefs(
+		blobs,
+		len(allTasks),
+		segcore.DeleteSearchResultDataBlobs,
+		"SearchResultDataBlobs",
+	)
+	if err != nil {
+		segcore.DeleteSearchResultDataBlobs(blobs)
+		return err
+	}
+
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
-		Observe(float64(tr.RecordSpan().Milliseconds()))
+		Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
+
+	zeroCopy := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetAsBool()
+
+	// Phase 1: build all results.
+	var phaseErr error
+
 	for i := range t.originNqs {
 		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
-			return err
+			phaseErr = err
+			break
 		}
-
-		var task *SearchTask
-		if i == 0 {
-			task = t
-		} else {
-			task = t.others[i-1]
+		// When zero-copy is enabled, blob references C memory directly and is
+		// freed after gRPC marshal via MsgPins. Otherwise copy to Go heap so C
+		// memory can be released immediately in Phase 2.
+		slicedBlob := blob
+		if !zeroCopy && len(blob) > 0 {
+			slicedBlob = make([]byte, len(blob))
+			copy(slicedBlob, blob)
 		}
-
-		// Note: blob is unsafe because get from C
-		bs := make([]byte, len(blob))
-		copy(bs, blob)
-
-		task.result = &internalpb.SearchResults{
+		allTasks[i].result = &internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
 				SourceID: t.GetNodeID(),
 			},
@@ -271,7 +313,7 @@ func (t *SearchTask) Execute() error {
 			MetricType:     metricType,
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],
-			SlicedBlob:     bs,
+			SlicedBlob:     slicedBlob,
 			SlicedOffset:   1,
 			SlicedNumCount: 1,
 			CostAggregation: &internalpb.CostAggregation{
@@ -280,6 +322,31 @@ func (t *SearchTask) Execute() error {
 			},
 			ScannedRemoteBytes: cost.ScannedRemoteBytes,
 			ScannedTotalBytes:  cost.ScannedTotalBytes,
+		}
+	}
+
+	// Phase 2: on error, nil out all results and release all refs.
+	// On success, pin or release refs based on zero-copy mode.
+	if phaseErr != nil {
+		for _, task := range allTasks {
+			task.result = nil
+		}
+		for _, ref := range refs {
+			ref.Release()
+		}
+		return phaseErr
+	}
+	if zeroCopy {
+		for i, task := range allTasks {
+			if len(task.result.GetSlicedBlob()) > 0 {
+				resource.MsgPins.Pin(task.result, refs[i].Release)
+			} else {
+				refs[i].Release()
+			}
+		}
+	} else {
+		for _, ref := range refs {
+			ref.Release()
 		}
 	}
 
@@ -301,7 +368,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	ratio := float64(after) / float64(pre)
 
 	// Check mergeable
-	if t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
+	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
+		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||

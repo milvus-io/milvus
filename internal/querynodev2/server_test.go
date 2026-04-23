@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -168,7 +170,7 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	origConfig, err := os.ReadFile(configPath)
 	suite.Require().NoError(err)
 	suite.T().Cleanup(func() {
-		os.WriteFile(configPath, origConfig, 0o600)
+		os.WriteFile(configPath, origConfig, 0o600) //nolint:gosec // configPath is a hardcoded test path
 	})
 
 	yamlWriter := newYamlConfigWriter(configPath)
@@ -249,6 +251,46 @@ func (suite *QueryNodeSuite) TestStop() {
 	err = suite.node.Stop()
 	suite.NoError(err)
 	suite.True(suite.node.manager.Segment.Empty())
+}
+
+func TestResizeThreadPools(t *testing.T) {
+	paramtable.Init()
+
+	// not updated event should be no-op
+	evt := &config.Event{HasUpdated: false}
+	assert.NotPanics(t, func() { ResizeHighPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeMiddlePriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeLowPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeAllPools(evt) })
+
+	// updated event should resize without panic
+	evt = &config.Event{HasUpdated: true}
+	assert.NotPanics(t, func() { ResizeHighPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeMiddlePriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeLowPriorityPool(evt) })
+	assert.NotPanics(t, func() { ResizeAllPools(evt) })
+}
+
+func TestRegisterSegcoreConfigWatcher(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	node := &QueryNode{}
+
+	assert.NotPanics(t, func() { node.RegisterSegcoreConfigWatcher() })
+
+	// verify watchers are triggered by saving config values
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key, "10")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, "5")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "1")
+	})
+	assert.NotPanics(t, func() {
+		pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32")
+	})
 }
 
 func TestQueryNode(t *testing.T) {

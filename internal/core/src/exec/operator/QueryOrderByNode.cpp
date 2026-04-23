@@ -109,7 +109,7 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
     for (size_t i = 0; i < children.size(); ++i) {
         auto col_vec = std::dynamic_pointer_cast<ColumnVector>(children[i]);
         if (col_vec) {
-            columns.push_back(col_vec);
+            columns.push_back(std::move(col_vec));
         } else {
             // Handle case where child is not a ColumnVector
             // This shouldn't happen in normal operation

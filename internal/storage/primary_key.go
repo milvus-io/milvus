@@ -166,7 +166,7 @@ type VarCharPrimaryKey struct {
 
 func NewVarCharPrimaryKey(v string) *VarCharPrimaryKey {
 	return &VarCharPrimaryKey{
-		Value: v,
+		Value: strings.Clone(v),
 	}
 }
 

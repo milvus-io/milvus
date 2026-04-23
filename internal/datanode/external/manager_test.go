@@ -18,11 +18,11 @@ package external
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -90,16 +90,16 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	taskID := int64(2)
 	collID := int64(200)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Track task execution
 	var executed atomic.Bool
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		executed.Store(true)
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State:        indexpb.JobState_JobStateFinished,
 			KeptSegments: []int64{1, 2},
 		}, nil
@@ -109,9 +109,7 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	require.Eventually(t, func() bool {
 		info := manager.Get(clusterID, taskID)
@@ -137,14 +135,14 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	taskID := int64(3)
 	collID := int64(300)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Task function that fails
 	expectedError := errors.New("task execution failed")
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		return nil, expectedError
 	}
 
@@ -173,19 +171,19 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 	taskID := int64(30)
 	collID := int64(3000)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	cancelObserved := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		select {
 		case <-ctx.Done():
 			close(cancelObserved)
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
-			return &datapb.UpdateExternalCollectionResponse{
+			return &datapb.RefreshExternalCollectionTaskResponse{
 				State: indexpb.JobState_JobStateFinished,
 			}, nil
 		}
@@ -200,8 +198,8 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		return info != nil
 	}, time.Second, 10*time.Millisecond)
 
-	cancelled := manager.CancelTask(clusterID, taskID)
-	assert.True(t, cancelled)
+	canceled := manager.CancelTask(clusterID, taskID)
+	assert.True(t, canceled)
 
 	require.Eventually(t, func() bool {
 		select {
@@ -269,16 +267,16 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	taskID := int64(4)
 	collID := int64(400)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
 
 	// Task function that blocks
 	blockChan := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		<-blockChan
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil
 	}
@@ -292,10 +290,9 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	assert.NotNil(t, info)
 	assert.Equal(t, indexpb.JobState_JobStateInProgress, info.State)
 
-	// Try to submit duplicate task
+	// Duplicate submit should be idempotent (no error)
 	err = manager.SubmitTask(clusterID, req, taskFunc)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "task already exists")
+	assert.NoError(t, err)
 
 	// Unblock the task
 	close(blockChan)
@@ -319,13 +316,13 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 		taskID := int64(i + 100)
 		collID := int64(i + 1000)
 
-		req := &datapb.UpdateExternalCollectionRequest{
+		req := &datapb.RefreshExternalCollectionTaskRequest{
 			TaskID:       taskID,
 			CollectionID: collID,
 		}
 
-		taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-			return &datapb.UpdateExternalCollectionResponse{
+		taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+			return &datapb.RefreshExternalCollectionTaskResponse{
 				State: indexpb.JobState_JobStateFinished,
 			}, nil
 		}
@@ -362,7 +359,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	taskID := int64(5)
 	collID := int64(500)
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		TaskID:       taskID,
 		CollectionID: collID,
 	}
@@ -371,7 +368,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	var executed atomic.Bool
 	started := make(chan struct{})
 	unblock := make(chan struct{})
-	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		close(started)
 		select {
 		case <-unblock:
@@ -379,7 +376,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		executed.Store(true)
-		return &datapb.UpdateExternalCollectionResponse{
+		return &datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil
 	}
@@ -401,9 +398,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 
 	close(unblock)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	// Task should have executed before close
 	assert.True(t, executed.Load())

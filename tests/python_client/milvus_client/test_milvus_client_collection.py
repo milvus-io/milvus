@@ -772,8 +772,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         if add_field:
             self.add_collection_field(client, collection_name, field_name="field_new_int64", data_type=DataType.INT64,
                                       nullable=True, is_cluster_key=True)
-            self.add_collection_field(client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
-                                      nullable=True, default_vaule="field_new_var", max_length=64)
+            # Wait for previous schema bump's backfill segment-version propagation tick.
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
+                nullable=True, default_vaule="field_new_var", max_length=64)
             check_items["add_fields"] = ["field_new_int64", "field_new_var"]
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,

@@ -21,7 +21,7 @@ default_float_field_name = "float"
 default_new_field_name = "field_new"
 default_dynamic_field_name = "field_new"
 exp_res = "exp_res"
-default_nb = 2000
+default_nb = ct.default_nb
 default_dim = 128
 default_limit = 10
 
@@ -62,8 +62,10 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                        "vector_name": "embeddings"}
         self.add_collection_field(client, collection_name, field_name="field_new_int64", data_type=DataType.INT64,
                                   nullable=True, is_clustering_key=True, mmap_enabled=True)
-        self.add_collection_field(client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
-                                  nullable=True, default_vaule="field_new_var", max_length=64, mmap_enabled=True)
+        # Wait for previous schema bump's backfill segment-version propagation tick to fire.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
+            nullable=True, default_vaule="field_new_var", max_length=64, mmap_enabled=True)
         check_items["add_fields"] = ["field_new_int64", "field_new_var"]
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
@@ -133,7 +135,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "pk_name": pk_name})
 
         # query output all fields to check the new added nullable vector field is retrieved correctly
-        query_pks = [0, 999, 1000, 1001, 1998, 1999]
+        half_nb = ct.default_nb // 2
+        query_pks = [0, half_nb - 1, half_nb, half_nb + 1, ct.default_nb - 2, ct.default_nb - 1]
         # back fill embeddings_new field value to None for basic rows
         basic_rows_with_null_vector = [row for row in basic_rows if row[pk_name] in query_pks]
         for row in basic_rows_with_null_vector:
@@ -176,13 +179,13 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "limit": ct.default_limit,
                                  "pk_name": pk_name})
         # search by ids on nullable fields
-        # PKs 0-999: basic rows, embeddings_new is null (backfilled)
-        # PKs 1000-1999: embeddings_new is null if pk%2==0, valid vector if pk%2==1
+        # PKs 0 ~ half_nb-1: basic rows, embeddings_new is null (backfilled)
+        # PKs half_nb ~ default_nb-1: embeddings_new is null if pk%2==0, valid vector if pk%2==1
         res = self.search(client, collection_name, ids=query_pks,
                           anns_field=new_vec_field_name, limit=ct.default_limit)[0]
         assert len(res) == len(query_pks)
         for i in range(len(query_pks)):
-            if query_pks[i] >= 1000 and query_pks[i] % 2 == 1:
+            if query_pks[i] >= half_nb and query_pks[i] % 2 == 1:
                 assert len(res[i]) == ct.default_limit
             else:
                 assert len(res[i]) == 0  # search on null vectors return empty results
@@ -270,10 +273,14 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=new_collection_info, start=ct.default_nb)
         self.insert(client, collection_name, rows)
         # 4. add one more vector field and index data
+        # Wait for the previous add_collection_field's backfill segment-version
+        # propagation tick to fire before the second schema change — otherwise
+        # the consistency gate at Proxy / RootCoord rejects this call.
         new_vec_field_name_2 = "embeddings_2"
-        self.add_collection_field(client, collection_name, field_name=new_vec_field_name_2,
-                                  data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                  nullable=True)
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=new_vec_field_name_2,
+            data_type=DataType.FLOAT_VECTOR, dim=dim,
+            nullable=True)
         # 5. build index for new added vector field
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(new_vec_field_name_2, index_type=index_type, metric_type="COSINE")
@@ -792,6 +799,67 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_add_field_used_as_decay_reranker_input(self):
+        """
+        target: verify a nullable field added via add_collection_field can be used
+                as the input field of a decay reranker in search
+        method: create collection without reranker field, add nullable INT64 field
+                via add_collection_field, then search with decay reranker referencing it
+        expected: search succeeds
+        note: PR #47919 removed the "Function input field cannot be nullable" Go-side
+              validation, but segcore still hits an assertion (offset out of range)
+              when the reranker reads the newly added nullable field. Tracked as a
+              separate kernel bug; this test guards the intended behavior.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+
+        self.add_collection_field(client, collection_name, field_name=ct.default_reranker_field_name,
+                                  data_type=DataType.INT64, nullable=True, default_value=0)
+
+        vectors_batch2 = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows_with_reranker = [
+            {default_primary_key_field_name: i, default_vector_field_name: vectors_batch2[i - default_nb],
+             default_string_field_name: str(i), ct.default_reranker_field_name: i}
+            for i in range(default_nb, default_nb * 2)]
+        self.insert(client, collection_name, rows_with_reranker)
+
+        from pymilvus import Function, FunctionType
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+
+        self.search(client, collection_name, [vectors[0]], ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": ct.default_limit,
+                                 "pk_name": default_primary_key_field_name})
+
 
 class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
     """Test invalid cases for add field feature"""
@@ -936,7 +1004,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         field_name = default_new_field_name
-        error = {ct.err_code: 1100, ct.err_msg: f"already has another clutering key field, "
+        error = {ct.err_code: 1100, ct.err_msg: f"already has another clustering key field, "
                                                 f"field name: {field_name}: invalid parameter"}
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -960,7 +1028,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        error = {ct.err_code: 1100, ct.err_msg: f"duplicate field name: {default_string_field_name}: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"duplicated field name {default_string_field_name}: invalid parameter"}
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
@@ -989,11 +1057,17 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
+        # Each loop iteration bumps the schema version; wait for the previous bump's
+        # backfill segment-version propagation tick to fire before the next call.
         for i in range(62):
-            self.add_collection_field(client, collection_name, field_name=f"{field_name}_{i}",
-                                      data_type=DataType.VARCHAR, nullable=True, max_length=64)
-        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
-                                  nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name=f"{field_name}_{i}",
+                data_type=DataType.VARCHAR, nullable=True, max_length=64)
+        # Final err_res call: the gate must be passed BEFORE this call so the error
+        # returned is the intended "max fields exceeded" error, not a consistency error.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
+            nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_add_vector_field_exceed_max_vector_field_number(self):
@@ -1011,79 +1085,18 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
+        # Each loop iteration bumps the schema version; wait for the previous bump's
+        # backfill segment-version propagation tick to fire before the next call.
         for i in range(ct.max_vector_field_num - 1):
-            self.add_collection_field(client, collection_name, field_name=f"{field_name}_{i}",
-                                      data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                      nullable=True)
-        self.add_collection_field(client, collection_name, field_name=field_name,
-                                  data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                  nullable=True,
-                                  check_task=CheckTasks.err_res, check_items=error)
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name=f"{field_name}_{i}",
+                data_type=DataType.FLOAT_VECTOR, dim=dim,
+                nullable=True)
+        # Final err_res call: wait for consistency so the error we assert is the
+        # real "max vector fields exceeded" error, not a spurious consistency error.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=field_name,
+            data_type=DataType.FLOAT_VECTOR, dim=dim,
+            nullable=True,
+            check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_add_field_with_reranker_unsupported(self):
-        """
-        target: test that add_collection_field and decay ranker combination is not supported
-        method: create collection without reranker field, add nullable reranker field via add_collection_field,
-                then try to use it with decay ranker
-        expected: raise exception because decay ranker requires non-nullable fields but add_collection_field
-                 only supports nullable fields, creating a technical limitation
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 8
-
-        # 1. create collection WITHOUT reranker field initially
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
-        # Note: NO reranker field here - we'll try to add it later via add_collection_field
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
-
-        # 2. insert initial data WITHOUT reranker field
-        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i)} for i in range(default_nb)]
-        results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
-
-        # 3. Try to add nullable reranker field via add_collection_field (nullable must be True)
-        # This will succeed in adding the field, but then we'll test if it can work with decay reranker
-        # The conflict: add_collection_field only supports nullable fields, but decay reranker needs non-nullable fields
-        self.add_collection_field(client, collection_name, field_name=ct.default_reranker_field_name,
-                                  data_type=DataType.INT64, nullable=True, default_value=0)
-
-        # 4. Insert data with the newly added reranker field
-        # Generate new vectors for the second batch of data
-        vectors_batch2 = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows_with_reranker = [
-            {default_primary_key_field_name: i, default_vector_field_name: vectors_batch2[i - default_nb],
-             default_string_field_name: str(i), ct.default_reranker_field_name: i}
-            for i in range(default_nb, default_nb * 2)]
-        results = self.insert(client, collection_name, rows_with_reranker)[0]
-        assert results['insert_count'] == default_nb
-
-        # 5. Try to use the nullable reranker field with decay reranker
-        # This should fail because decay reranker requires non-nullable fields for proper functionality
-        from pymilvus import Function, FunctionType
-        my_rerank_fn = Function(
-            name="my_reranker",
-            input_field_names=[ct.default_reranker_field_name],
-            function_type=FunctionType.RERANK,
-            params={
-                "reranker": "decay",
-                "function": "gauss",
-                "origin": 0,
-                "offset": 0,
-                "decay": 0.5,
-                "scale": 100
-            }
-        )
-
-        error = {ct.err_code: 65535, ct.err_msg: "Function input field cannot be nullable: field reranker_field"}
-        self.search(client, collection_name, [vectors[0]], ranker=my_rerank_fn,
-                    check_task=CheckTasks.err_res, check_items=error)

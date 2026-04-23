@@ -78,10 +78,8 @@ func randomString(length int) string {
 }
 
 func writeParquet(w io.Writer, schema *schemapb.CollectionSchema, numRows int, nullPercent int) (*storage.InsertData, error) {
-	useNullType := false
-	if nullPercent == 100 {
-		useNullType = true
-	}
+	useNullType := nullPercent == 100
+
 	pqSchema, err := ConvertToArrowSchemaForUT(schema, useNullType)
 	if err != nil {
 		return nil, err
@@ -827,7 +825,7 @@ func TestParquetReaderError(t *testing.T) {
 	schema.Properties = nil
 
 	// now set the vec to be FunctionOutput
-	// NewReader will return error "the field is output by function, no need to provide"
+	// rejected when allowInsertNonBM25FunctionOutputs is not enabled
 	schema.Fields[0].AutoID = false
 	schema.Fields[1].IsFunctionOutput = true
 	checkFunc(schema, filePath, false)

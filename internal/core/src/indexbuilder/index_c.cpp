@@ -116,7 +116,6 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
     storage_config.storage_type = std::string(config.storage_type());
     storage_config.cloud_provider = std::string(config.cloud_provider());
     storage_config.iam_endpoint = std::string(config.iamendpoint());
-    storage_config.cloud_provider = std::string(config.cloud_provider());
     storage_config.useSSL = config.usessl();
     storage_config.sslCACert = config.sslcacert();
     storage_config.useIAM = config.useiam();
@@ -127,6 +126,7 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
         std::string(config.gcpcredentialjson());
     storage_config.max_connections = config.max_connections();
     storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
+    storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
     return storage_config;
 }
 
@@ -136,15 +136,20 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
     milvus::OptFieldT opt_fields_map;
     for (const auto& field_info : field_infos) {
         auto field_id = field_info.fieldid();
-        if (opt_fields_map.find(field_id) == opt_fields_map.end()) {
-            opt_fields_map[field_id] = {
-                field_info.field_name(),
-                static_cast<milvus::DataType>(field_info.field_type()),
-                static_cast<milvus::DataType>(field_info.element_type()),
-                {}};
+        auto it = opt_fields_map.find(field_id);
+        if (it == opt_fields_map.end()) {
+            it = opt_fields_map
+                     .emplace(field_id,
+                              std::make_tuple(field_info.field_name(),
+                                              static_cast<milvus::DataType>(
+                                                  field_info.field_type()),
+                                              static_cast<milvus::DataType>(
+                                                  field_info.element_type()),
+                                              std::vector<std::string>{}))
+                     .first;
         }
         for (const auto& str : field_info.data_paths()) {
-            std::get<3>(opt_fields_map[field_id]).emplace_back(str);
+            std::get<3>(it->second).emplace_back(str);
         }
     }
 
@@ -198,6 +203,13 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
     config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
+    if (!info->stats_base_path().empty()) {
+        config[STATS_BASE_PATH_KEY] = info->stats_base_path();
+    }
+
+    if (!info->analyzer_extra_info().empty()) {
+        config["analyzer_extra_info"] = info->analyzer_extra_info();
+    }
 
     return config;
 }
@@ -268,9 +280,20 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        if (!build_index_info->stats_base_path().empty()) {
+            fileManagerContext.set_stats_base_path(
+                build_index_info->stats_base_path());
+        }
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
+            // For external collections, inject extfs.{collID}.* from build_index_info
+            if (!build_index_info->external_source().empty()) {
+                InjectExtfsProperties(*loon_properties,
+                                      build_index_info->collectionid(),
+                                      build_index_info->external_source(),
+                                      build_index_info->external_spec());
+            }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
 
@@ -374,10 +397,19 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
+            // For external collections, inject extfs.{collID}.* from build_index_info
+            if (!build_index_info->external_source().empty()) {
+                InjectExtfsProperties(*loon_properties,
+                                      build_index_info->collectionid(),
+                                      build_index_info->external_source(),
+                                      build_index_info->external_spec());
+            }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
 
@@ -472,6 +504,8 @@ BuildTextIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(

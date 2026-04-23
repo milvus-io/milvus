@@ -512,6 +512,82 @@ TEST(TextMatch, GrowingNaive) {
     }
 }
 
+// Regression test for https://github.com/milvus-io/milvus/issues/48388
+// On growing segments, the TextIndex may index rows beyond the query timestamp.
+// ExecTextMatch must truncate the result bitmap to active_count to avoid
+// FilterBitsNode assertion failure: col_vec_size != need_process_rows_.
+TEST(TextMatch, GrowingIndexAheadOfActiveCount) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+
+    // Batch 1: 3 rows with timestamps 0,1,2
+    int64_t N1 = 3;
+    uint64_t seed = 19190504;
+    auto data1 = DataGen(schema, N1, seed);
+    auto str_col1 = data1.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col1->at(0) = "football, basketball";
+    str_col1->at(1) = "swimming, tennis";
+    str_col1->at(2) = "football, swimming";
+    seg->PreInsert(N1);
+    seg->Insert(
+        0, N1, data1.row_ids_.data(), data1.timestamps_.data(), data1.raw_);
+
+    // Batch 2: 2 rows with timestamps 3,4 (later than batch 1)
+    int64_t N2 = 2;
+    auto data2 = DataGen(schema, N2, seed, N1);  // ts_offset=N1 → ts 3,4
+    // Fix row_ids to continue from batch 1
+    for (int i = 0; i < N2; i++) {
+        data2.row_ids_[i] = N1 + i;
+    }
+    auto str_col2 = data2.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col2->at(0) = "football, rugby";
+    str_col2->at(1) = "football, cricket";
+    seg->PreInsert(N2);
+    seg->Insert(
+        N1, N2, data2.row_ids_.data(), data2.timestamps_.data(), data2.raw_);
+
+    // Wait for TextIndex to index all 5 rows
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+
+    // Query with timestamp=2 so only batch 1 (3 rows) is visible,
+    // but TextIndex has indexed all 5 rows.
+    // Before fix: assertion failure (bitset size 5 != need_process_rows 3)
+    // After fix: result is correctly truncated to 3 rows
+    int64_t query_ts = N1 - 1;  // timestamp=2, active_count should be N1
+    for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+        auto expr = GetMatchExpr(schema, "football", op);
+        BitsetType result = ExecuteQueryExpr(expr, seg.get(), N1, query_ts);
+        ASSERT_EQ(result.size(), N1)
+            << "result bitmap size should equal active_count (N1=" << N1
+            << "), not total indexed rows (" << N1 + N2 << ")";
+        // Row 0 ("football, basketball") and row 2 ("football, swimming") match
+        ASSERT_TRUE(result[0]);
+        ASSERT_FALSE(result[1]);
+        ASSERT_TRUE(result[2]);
+    }
+
+    // Also verify full-range query still works correctly
+    for (auto op : {OpType::TextMatch, OpType::PhraseMatch}) {
+        auto expr = GetMatchExpr(schema, "football", op);
+        BitsetType result =
+            ExecuteQueryExpr(expr, seg.get(), N1 + N2, MAX_TIMESTAMP);
+        ASSERT_EQ(result.size(), N1 + N2);
+        ASSERT_TRUE(result[0]);   // "football, basketball"
+        ASSERT_FALSE(result[1]);  // "swimming, tennis"
+        ASSERT_TRUE(result[2]);   // "football, swimming"
+        ASSERT_TRUE(result[3]);   // "football, rugby"
+        ASSERT_TRUE(result[4]);   // "football, cricket"
+    }
+}
+
 TEST(TextMatch, GrowingNaiveNullable) {
     auto schema = GenTestSchema({}, true);
     auto seg = CreateGrowingSegment(schema, empty_index_meta);

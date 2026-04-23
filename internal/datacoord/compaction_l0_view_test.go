@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"math"
 	"testing"
 
 	"github.com/samber/lo"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestLevelZeroSegmentsViewSuite(t *testing.T) {
@@ -107,7 +109,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 		{
 			"Trigger by > maxDeltaCount",
 			1,
-			24,
+			800,
 			30000,
 			[]UniqueID{100},
 		},
@@ -156,7 +158,7 @@ func (s *LevelZeroSegmentsViewSuite) TestMinCountSizeTrigger() {
 		{"donot trigger", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{1, 1, 1}, nil},
 		{"trigger by count=15", []int64{100, 101, 102}, []int{5, 5, 5}, []float64{1, 1, 1}, []int64{100, 101, 102}},
 		{"trigger by count=10", []int64{100, 101, 102}, []int{5, 3, 2}, []float64{1, 1, 1}, []int64{100, 101, 102}},
-		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100}},
+		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100, 101, 102}},
 		{"trigger by size=24MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100, 101, 102}},
 		{"trigger by size=8MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{3 * 1024 * 1024, 3 * 1024 * 1024, 2 * 1024 * 1024}, []int64{100, 101, 102}},
 		{"trigger by size=128MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{100 * 1024 * 1024, 20 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100}},
@@ -200,7 +202,7 @@ func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
 		{"force trigger", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{1, 1, 1}, []int64{100, 101, 102}},
 		{"trigger by count=15", []int64{100, 101, 102}, []int{5, 5, 5}, []float64{1, 1, 1}, []int64{100, 101, 102}},
 		{"trigger by count=10", []int64{100, 101, 102}, []int{5, 3, 2}, []float64{1, 1, 1}, []int64{100, 101, 102}},
-		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100}},
+		{"trigger by count=50", []int64{100, 101, 102}, []int{32, 10, 8}, []float64{1, 1, 1}, []int64{100, 101, 102}},
 		{"trigger by size=24MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{8 * 1024 * 1024, 8 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100, 101, 102}},
 		{"trigger by size=8MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{3 * 1024 * 1024, 3 * 1024 * 1024, 2 * 1024 * 1024}, []int64{100, 101, 102}},
 		{"trigger by size=128MB", []int64{100, 101, 102}, []int{1, 1, 1}, []float64{100 * 1024 * 1024, 20 * 1024 * 1024, 8 * 1024 * 1024}, []int64{100}},
@@ -224,4 +226,101 @@ func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
 			log.Info("test forceTrigger", zap.Any("trigger reason", reason))
 		})
 	}
+
+	// Test that exceeding maxCount from paramtable picks only the first segment.
+	s.Run("trigger by exceeding maxCount from param", func() {
+		maxCount := paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
+		views := []*SegmentView{
+			genTestL0SegmentView(100, label, 10000),
+			genTestL0SegmentView(101, label, 10000),
+		}
+		views[0].DeltaSize = 1
+		views[0].DeltalogCount = maxCount
+		views[1].DeltaSize = 1
+		views[1].DeltalogCount = maxCount
+
+		picked, reason := s.v.forceTrigger(views)
+		s.ElementsMatch(lo.Map(picked, func(view *SegmentView, _ int) int64 {
+			return view.ID
+		}), []int64{100})
+		log.Info("test forceTrigger", zap.Any("trigger reason", reason))
+	})
+}
+
+func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
+	paramtable.Init()
+	dmlPos := &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 12345}
+
+	s.Run("default_returns_dml_pos", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "false")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(dmlPos)
+		s.Equal(dmlPos, got)
+	})
+
+	s.Run("force_select_returns_max_timestamp", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(dmlPos)
+		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
+		s.Equal("ch-1", got.GetChannelName())
+	})
+
+	s.Run("force_select_with_nil_pos", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(nil)
+		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
+		s.Equal("", got.GetChannelName())
+	})
+
+	s.Run("trigger_uses_resolved_pos_when_force_select_enabled", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		label := s.v.GetGroupLabel()
+		views := []*SegmentView{
+			genTestL0SegmentView(100, label, 20000),
+			genTestL0SegmentView(101, label, 10000),
+			genTestL0SegmentView(102, label, 30000),
+		}
+		for _, v := range views {
+			v.DeltalogCount = 100
+			v.DeltaSize = 1
+			v.DeltaRowCount = 1
+		}
+		s.v.l0Segments = views
+
+		gotView, _ := s.v.Trigger()
+		s.Require().NotNil(gotView)
+		levelZeroView, ok := gotView.(*LevelZeroCompactionView)
+		s.Require().True(ok)
+		s.Equal(uint64(math.MaxUint64), levelZeroView.latestDeletePos.GetTimestamp())
+	})
+
+	s.Run("force_trigger_uses_resolved_pos_when_force_select_enabled", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		label := s.v.GetGroupLabel()
+		views := []*SegmentView{
+			genTestL0SegmentView(100, label, 20000),
+			genTestL0SegmentView(101, label, 10000),
+		}
+		for _, v := range views {
+			v.DeltalogCount = 1
+			v.DeltaSize = 1
+			v.DeltaRowCount = 1
+		}
+		s.v.l0Segments = views
+
+		gotView, _ := s.v.ForceTrigger()
+		s.Require().NotNil(gotView)
+		levelZeroView, ok := gotView.(*LevelZeroCompactionView)
+		s.Require().True(ok)
+		s.Equal(uint64(math.MaxUint64), levelZeroView.latestDeletePos.GetTimestamp())
+	})
 }

@@ -33,10 +33,68 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${BSONCXX_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
+
+# Conan dependency targets shared between milvus_conan_deps (for object library
+# include propagation) and LINK_TARGETS (for milvus_core final linking).
+set(CONAN_TARGETS
+    protobuf::libprotobuf
+    glog::glog
+    gflags
+    Folly::folly
+    RocksDB::rocksdb-shared
+    arrow::arrow
+    gRPC::grpc++
+    opentelemetry-cpp::opentelemetry-cpp
+    google-cloud-cpp::google-cloud-cpp
+    prometheus-cpp::prometheus-cpp
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+    fmt::fmt
+    re2::re2
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    CURL::libcurl
+    ZLIB::ZLIB
+    lz4::lz4
+    zstd::libzstd_static
+    Snappy::snappy
+    roaring::roaring
+    marisa::marisa
+    GEOS::geos_c
+    ICU::uc
+    xxHash::xxhash
+    TBB::tbb
+    libsodium::libsodium
+    double-conversion::double-conversion
+    xsimd
+    unordered_dense::unordered_dense
+    abseil::abseil
+    rapidjson
+    simde::simde
+    LibLZMA::LibLZMA
+    RdKafka::rdkafka++
+    googleapis::googleapis
+    boost::boost
+    libavrocpp::libavrocpp
+    aws-sdk-cpp::aws-sdk-cpp
+    Azure::azure-core
+)
+
+# Interface library to propagate Conan include directories to object libraries.
+# In Conan 1, conan_basic_setup() set global include dirs. In Conan 2, includes
+# are per-target, so object libraries need explicit linkage to get include paths.
+add_library(milvus_conan_deps INTERFACE)
+target_link_libraries(milvus_conan_deps INTERFACE ${CONAN_TARGETS})
+# Azure SDK recipe doesn't set includedirs on components in Conan 2.x.
+# Locate azure headers via CMAKE_INCLUDE_PATH (set by conan_toolchain.cmake).
+# NO_CACHE prevents stale NOTFOUND results across cmake reconfigures.
+find_path(_AZURE_INCLUDE_DIR azure/core.hpp NO_CACHE)
+if(_AZURE_INCLUDE_DIR)
+    target_include_directories(milvus_conan_deps INTERFACE "${_AZURE_INCLUDE_DIR}")
+endif()
 
 add_subdirectory( pb )
 add_subdirectory( config )
@@ -56,6 +114,30 @@ add_subdirectory( plan )
 add_subdirectory( minhash )
 
 milvus_add_pkg_config("milvus_core")
+
+# ---- Precompiled Headers (PCH) ----
+# Apply the same STL PCH to all OBJECT libraries. Each target generates its
+# own PCH binary (small per-target overhead) but avoids cross-directory
+# REUSE_FROM issues with CMake < 3.22.
+if (MILVUS_USE_PCH)
+    # Use generator expression to apply PCH only for C++ compilation.
+    # The project enables both C and CXX languages; without this guard
+    # CMake would also generate a C PCH containing C++ headers, which fails.
+    set(MILVUS_PCH_HEADERS
+        # STL headers included in 50+ .cpp files
+        $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/../cmake/milvus_pch.hxx>
+    )
+    # NOTE: milvus_bitset and milvus_minhash are excluded because they contain
+    # source files compiled with special target flags (-mavx512f, -march=armv8-a+sve)
+    # which are incompatible with PCH compiled under default target features.
+    foreach(_target
+        milvus_common milvus_config milvus_monitor milvus_storage milvus_index
+        milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
+        milvus_exec milvus_futures milvus_rescores
+        milvus_plan)
+        target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
+    endforeach()
+endif()
 
 add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
@@ -85,7 +167,7 @@ set(LINK_TARGETS
     milvus-common
     bsoncxx
     ${OpenMP_CXX_FLAGS}
-    ${CONAN_LIBS}
+    ${CONAN_TARGETS}
     )
 
 if(USE_OPENDAL)

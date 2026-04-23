@@ -185,6 +185,14 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
             milvus::proto::common::LoadPriority::HIGH;
         config[milvus::index::ENABLE_MMAP] = true;
         config[milvus::index::MMAP_FILE_PATH] = TestLocalPath + "mmap-file";
+        config[STATS_BASE_PATH_KEY] =
+            storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                  index_build_id,
+                                                  index_version,
+                                                  collection_id,
+                                                  partition_id,
+                                                  segment_id,
+                                                  field_id);
         index_ = std::make_shared<JsonKeyStats>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
@@ -434,6 +442,14 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         config[milvus::index::MMAP_FILE_PATH] = TestLocalPath + "mmap-file";
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
+        config[STATS_BASE_PATH_KEY] =
+            storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                  index_build_id_,
+                                                  index_version_,
+                                                  collection_id_,
+                                                  partition_id_,
+                                                  segment_id_,
+                                                  field_id_);
         load_index_ = std::make_shared<JsonKeyStats>(ctx, true);
         load_index_->Load(milvus::tracer::TraceContext{}, config);
     }

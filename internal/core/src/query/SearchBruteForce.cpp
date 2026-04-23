@@ -180,10 +180,6 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     }
 
     if (search_cfg.contains(RADIUS)) {
-        AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                   "Vector array(embedding list) is not supported for range "
-                   "search");
-
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
@@ -292,7 +288,8 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
             ThrowInfo(KnowhereError,
-                      "Brute force search fail: " + KnowhereStatusString(stat));
+                      "Brute force search fail: {}",
+                      KnowhereStatusString(stat));
         }
     }
     sub_result.round_values();
@@ -362,17 +359,18 @@ PackBruteForceSearchIteratorsIntoSubResult(
     auto iterators_val = GetBruteForceSearchIterators(
         query_ds, raw_ds, search_info, index_info, bitset, data_type);
     if (iterators_val.has_value()) {
+        auto& iterators = iterators_val.value();
         AssertInfo(
-            iterators_val.value().size() == nq,
+            iterators.size() == nq,
             "Wrong state, initialized knowhere_iterators count:{} is not "
             "equal to nq:{} for single chunk",
-            iterators_val.value().size(),
+            iterators.size(),
             nq);
         return SubSearchResult(query_ds.num_queries,
                                query_ds.topk,
                                query_ds.metric_type,
                                query_ds.round_decimal,
-                               iterators_val.value());
+                               iterators);
     } else {
         LOG_ERROR(
             "Failed to get valid knowhere brute-force-iterators from chunk, "

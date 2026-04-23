@@ -1539,7 +1539,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
                                check_items={ct.err_code: 65535,
-                                             ct.err_msg: "Unknown hash function"})
+                                             ct.err_msg: "unknown hash function"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_token_level", ["sentence", "invalid", ""])
@@ -1572,7 +1572,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
                                check_items={ct.err_code: 65535,
-                                             ct.err_msg: "Unknown token_level"})
+                                             ct.err_msg: "unknown token_level"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_seed", ["not_a_number", "abc123"])
@@ -3794,8 +3794,8 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
 
         assert result["state"] == "Failed", \
             f"Import should have failed when providing function output field, but got: {result['state']}"
-        assert "output by function" in result["reason"], \
-            f"Error should mention 'output by function', got: {result['reason']}"
+        assert "not allowed to provide data for function output field" in result["reason"], \
+            f"Error should mention 'not allowed to provide data for function output field', got: {result['reason']}"
         log.info(f"Import correctly failed: {result['reason']}")
 
 class TestMilvusClientMinHashHybridSearch(TestMilvusClientV2Base):

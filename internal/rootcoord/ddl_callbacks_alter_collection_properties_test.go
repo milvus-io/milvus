@@ -19,13 +19,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	imocks "github.com/milvus-io/milvus/internal/mocks"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -34,6 +40,9 @@ import (
 
 func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
+	core.broker.(*mockBroker).ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
+		return []string{"rg1", "rg2"}, nil
+	}
 
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
@@ -160,6 +169,224 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
+func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Status(errors.New("mock error")), nil)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, merr.ErrResourceGroupNotFound))
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
+		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
+		nil,
+	)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg_not_exist"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.NoError(t, err)
+}
+
+func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
+	core := &Core{}
+
+	t.Run("no changes", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("replica changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "2"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(2), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg1"}, cfg.ResourceGroups)
+	})
+
+	t.Run("rg changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg2"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(1), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg2"}, cfg.ResourceGroups)
+	})
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return errors.New("broadcast error")
+			},
+		}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
+}
+
 func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
@@ -254,6 +481,159 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+}
+
+func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionTTLExtSpec" + funcutil.RandomString(10)
+
+	// Create collection with a ttl field.
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	testSchema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "description",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Set ExternalSource + ExternalSpec + TTL field in a single AlterCollection request.
+	// This exercises the code path where TTL schema refresh must preserve ExternalSource/ExternalSpec.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/ttl-path"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"iceberg"}`},
+			{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"iceberg"}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Set TTL field only (no ExternalSource/ExternalSpec) — should NOT carry over stale external values.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+		},
+	})
+	// Idempotent — same TTL value, no schema change expected.
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Set TTL field with invalid field name should fail.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new"},
+			{Key: common.CollectionTTLFieldKey, Value: "nonexistent_field"},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func assertExternalSource(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSource string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Equal(t, expectedSource, coll.ExternalSource)
+}
+
+func assertExternalSpec(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSpec string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Equal(t, expectedSpec, coll.ExternalSpec)
+}
+
+func TestDDLCallbacksAlterCollectionProperties_ExternalSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionExtSpec" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	// Initially external source/spec should be empty.
+	assertExternalSource(t, ctx, core, dbName, collectionName, "")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, "")
+
+	// Alter collection to set external_source and external_spec.
+	resp, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/path"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Update external_source only.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new-path"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new-path")
+	// external_spec should be reset to empty since only source was sent in this request.
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Update external_spec only.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSpec, Value: `{"format":"lance","version":3}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"lance","version":3}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Mix external_source with normal properties.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/mixed"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+			{Key: common.CollectionDescription, Value: "updated description"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/mixed")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertDescription(t, ctx, core, dbName, collectionName, "updated description")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 }
 

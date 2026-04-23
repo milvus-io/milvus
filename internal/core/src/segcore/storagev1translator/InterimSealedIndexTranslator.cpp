@@ -96,8 +96,7 @@ InterimSealedIndexTranslator::estimated_byte_size_of_cell(
     } else if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         // fp16/bf16 all use float32 to build index
         int64_t fp32_size = row_count * sizeof(float) * dim_;
-        return {{fp32_size, 0},
-                {static_cast<int64_t>(fp32_size + fp32_size * 0.5), 0}};
+        return {{fp32_size, 0}, {static_cast<int64_t>(fp32_size * 0.5), 0}};
     } else {
         // SPARSE_WAND_CC and SPARSE_INVERTED_INDEX_CC basically has the same size as the
         // raw data.
@@ -172,6 +171,10 @@ InterimSealedIndexTranslator::get_cells(
     }
 
     auto num_chunk = vec_data_->num_chunks();
+    // Interim index is a scan-the-world consumer: needs full valid_data_.
+    if (vec_data_->IsNullable() && vec_data_->GetValidData().empty()) {
+        vec_data_->BuildValidRowIds(ctx);
+    }
     const auto& offset_mapping = vec_data_->GetOffsetMapping();
     bool nullable = offset_mapping.IsEnabled();
     const auto& valid_count_per_chunk =

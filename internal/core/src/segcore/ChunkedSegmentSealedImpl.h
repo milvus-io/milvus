@@ -17,7 +17,9 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -62,6 +64,7 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -85,6 +88,11 @@ namespace milvus::segcore {
 namespace storagev1translator {
 class InsertRecordTranslator;
 }
+
+namespace storagev2translator {
+class TimestampIndexCell;
+class PkIndexCell;
+}  // namespace storagev2translator
 
 using namespace milvus::cachinglayer;
 
@@ -144,9 +152,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     bool
-    Contain(const PkType& pk) const override {
-        return insert_record_.contain(pk);
-    }
+    Contain(const PkType& pk) const override;
 
     void
     AddFieldDataInfoForSealed(
@@ -159,6 +165,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     HasRawData(int64_t field_id) const override;
+
+    // Returns true only if the index itself contains raw data,
+    // without considering whether field data is loaded.
+    bool
+    IndexHasRawData(FieldId field_id) const;
+
+    bool
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const override;
+
+    bool
+    IsIndexRefineEnabled(FieldId field_id) const override;
 
     DataType
     GetFieldDataType(FieldId fieldId) const override;
@@ -230,14 +252,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
     LazyCheckSchema(SchemaPtr sch) override;
 
     void
-    SetLoadInfo(
-        const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
@@ -259,6 +281,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     int64_t
     get_deleted_count() const override;
+
+    Timestamp
+    get_max_timestamp() const override {
+        return insert_record_.timestamp_index_.get_max_timestamp();
+    }
 
     const Schema&
     get_schema() const override;
@@ -289,6 +316,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                const int64_t* ids,
                int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    get_emb_list(milvus::OpContext* op_ctx,
+                 FieldId field_id,
+                 const FieldMeta& field_meta,
+                 const int64_t* seg_offsets,
+                 int64_t count) const;
+
     bool
     is_nullable(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
@@ -312,6 +346,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             callback) const;
 
  public:
+    // Non-virtual helper called via dynamic_cast from SegmentInterface.
+    // Must be public for cross-class access.
+    bool
+    TryTakeForRetrieve(
+        const query::RetrievePlan* plan,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        const int64_t* offsets,
+        int64_t size,
+        bool ignore_non_pk,
+        bool fill_ids) const;
+
     // count of chunk that has raw data
     int64_t
     num_chunk_data(FieldId field_id) const override;
@@ -439,6 +484,43 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
 
+    // Override to inject take() fast path for Search on external tables.
+    // Uses existing vtable slot — no layout change.
+    void
+    FillTargetEntry(const query::Plan* plan,
+                    SearchResult& results) const override;
+
+    bool
+    TryTakeForSearch(const query::Plan* plan,
+                     const int64_t* seg_offsets,
+                     int64_t size,
+                     SearchResult& results) const;
+
+    // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
+    struct TakeContext {
+        std::vector<int64_t> unique_offsets;
+        std::vector<int64_t> result_mapping;  // orig_pos → unique index
+    };
+
+    static TakeContext
+    BuildTakeContext(const int64_t* offsets, int64_t size);
+
+    // Converts a combined Arrow array into a proto DataArray using
+    // result_mapping for reorder.  Returns nullptr on unsupported type.
+    static std::unique_ptr<DataArray>
+    ArrowToDataArray(const std::shared_ptr<arrow::Array>& arr,
+                     const FieldMeta& field_meta,
+                     const std::vector<int64_t>& result_mapping,
+                     int64_t size);
+
+    // Calls reader_->take() with timing. Returns the table on success,
+    // or nullptr on failure (logs a warning).
+    std::shared_ptr<arrow::Table>
+    ExecuteTake(const std::vector<int64_t>& unique_offsets,
+                const std::shared_ptr<std::vector<std::string>>& needed_columns,
+                const char* caller_tag,
+                double& elapsed_ms) const;
+
     void
     check_search(const query::Plan* plan) const override;
 
@@ -465,16 +547,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldDataInfo& data,
         milvus::proto::common::LoadPriority load_priority);
 
-    // Initialize timestamp index from a column (zero-copy pin mode for single
-    // chunk, owned copy for multi-chunk)
-    void
-    init_timestamp_index_from_column(
-        std::shared_ptr<ChunkedColumnInterface> column, size_t num_rows);
-
     // Initialize timestamp index with owned data (StorageV1 path)
     void
-    init_timestamp_index_owned(std::vector<Timestamp> timestamps,
-                               size_t num_rows);
+    init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
+                                    size_t num_rows);
 
     template <typename PK>
     void
@@ -1003,9 +1079,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      Timestamp timestamp) const override;
 
     bool
-    is_system_field_ready() const {
-        return system_ready_count_ == 1;
-    }
+    is_system_field_ready() const;
 
     void
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
@@ -1076,6 +1150,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
+    // Load column groups from a manifest file path (for external collections)
+    void
+    LoadColumnGroups(const std::string& manifest_path);
+
     /**
      * @brief Load a single column group at the specified index
      *
@@ -1098,6 +1176,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool eager_load,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
+
+    // Synthesize system fields (virtual PK, timestamps, PK index, row count)
+    // for external collections. External collections don't have real PK or
+    // timestamp fields in their parquet data, so these must be generated.
+    void
+    SynthesizeExternalSystemFields();
 
     /**
      * @brief Reloads columns from the specified field IDs
@@ -1129,14 +1213,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * updating the segment's loaded fields and indexes accordingly. It handles
      * incremental updates during segment reopen operations.
      *
+     * @param op_ctx The operation context
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
-     * @param op_ctx The operation context
      */
     void
-    ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
-                  LoadDiff& load_diff,
-                  milvus::OpContext* op_ctx = nullptr);
+    ApplyLoadDiff(milvus::OpContext* op_ctx,
+                  SegmentLoadInfo& segment_load_info,
+                  LoadDiff& load_diff);
 
     void
     load_field_data_common(
@@ -1162,6 +1246,67 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return res;
     }
 
+    PinWrapper<const storagev2translator::TimestampIndexCell*>
+    PinTimestampIndex(milvus::OpContext* op_ctx) const;
+
+    PinWrapper<const storagev2translator::PkIndexCell*>
+    PinPkIndex(milvus::OpContext* op_ctx) const;
+
+    void
+    init_storage_v2_timestamp_index(
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows,
+        const std::string& warmup_policy = "");
+
+    void
+    init_storage_v1_pk_index(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        DataType data_type,
+        bool is_replace);
+
+    void
+    init_storage_v2_pk_index(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        DataType data_type);
+
+#ifdef MILVUS_UNIT_TEST
+ public:
+    // Test-only: inject a mock Reader for unit testing take() paths.
+    void
+    SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {
+        reader_ = std::move(r);
+    }
+
+    // Wrappers for protected methods to enable direct unit testing.
+    void
+    TestFillTargetEntry(const query::Plan* plan, SearchResult& results) const {
+        FillTargetEntry(plan, results);
+    }
+
+    bool
+    TestTryTakeForSearch(const query::Plan* plan,
+                         const int64_t* seg_offsets,
+                         int64_t size,
+                         SearchResult& results) const {
+        return TryTakeForSearch(plan, seg_offsets, size, results);
+    }
+
+    // Test-only: set use_take_for_output flag.
+    void
+    SetUseTakeForOutputForTesting(bool val) {
+        use_take_for_output_ = val;
+    }
+
+    // Test-only: direct access to segment_load_info_ for asserting Reopen
+    // preserves runtime-only state (e.g. created_text_indexes_).
+    SegmentLoadInfo&
+    TestGetSegmentLoadInfo() {
+        return segment_load_info_;
+    }
+#endif
+
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -1172,7 +1317,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
     BitsetType binlog_index_bitset_;
-    std::atomic<int> system_ready_count_ = 0;
 
     // when index is ready (index_ready_bitset_/binlog_index_bitset_ is set to true), must also set index_has_raw_data_
     // to indicate whether the loaded index has raw data.
@@ -1198,6 +1342,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<true> insert_record_;
+    folly::Synchronized<
+        std::shared_ptr<CacheSlot<storagev2translator::TimestampIndexCell>>>
+        timestamp_index_slot_;
+    folly::Synchronized<
+        std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>>>
+        pk_index_slot_;
 
     // deleted pks
     mutable DeletedRecord<true> deleted_record_;
@@ -1225,8 +1375,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
 
-    // milvus storage internal api reader instance
+    // When true, use take() API for output field retrieval from external storage.
+    bool use_take_for_output_{false};
+
+    // milvus storage internal api reader instance (NOT thread-safe).
+    // Load-time access (get_chunk_reader, SetReader) is safe: single-threaded,
+    // completes before the segment is visible to queries.
+    // Query-time access (take) must be serialized via reader_mutex_ — concurrent
+    // retrieve/search workers can hit the same segment at the same time.
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+    mutable std::mutex reader_mutex_;
 
     // ArrayOffsetsSealed for element-level filtering on array fields
     // field_id -> ArrayOffsetsSealed mapping
@@ -1247,4 +1405,18 @@ CreateSealedSegment(
     return std::make_unique<ChunkedSegmentSealedImpl>(
         schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
+
+using ParquetStatisticsByField =
+    std::map<int64_t, ChunkedSegmentSealedImpl::ParquetStatistics>;
+
+struct LoadedGroupChunkMetadata {
+    std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
+    ParquetStatisticsByField parquet_stats_by_field;
+};
+
+LoadedGroupChunkMetadata
+LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
+                       const std::vector<FieldId>& field_ids_for_stats,
+                       const std::string& debug_key);
+
 }  // namespace milvus::segcore

@@ -354,6 +354,7 @@ type StatsTaskInfo struct {
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 	FileResources    []*internalpb.FileResourceInfo
+	Manifest         string
 }
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
@@ -372,6 +373,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 		FileResources:    s.CloneFileResources(),
+		Manifest:         s.Manifest,
 	}
 }
 
@@ -390,6 +392,7 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		Bm25Logs:         s.Bm25Logs,
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		Manifest:         s.Manifest,
 	}
 }
 
@@ -487,6 +490,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 	insertLogs []*datapb.FieldBinlog,
 	statsLogs []*datapb.FieldBinlog,
 	bm25Logs []*datapb.FieldBinlog,
+	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -500,6 +504,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 		info.InsertLogs = insertLogs
 		info.StatsLogs = statsLogs
 		info.Bm25Logs = bm25Logs
+		info.Manifest = manifest
 		return
 	}
 }
@@ -512,6 +517,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	segID typeutil.UniqueID,
 	channel string,
 	texIndexLogs map[int64]*datapb.TextIndexStats,
+	manifest string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -522,6 +528,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.Manifest = manifest
 	}
 }
 
@@ -533,6 +540,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	segID typeutil.UniqueID,
 	channel string,
 	jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats,
+	manifest string,
 ) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
@@ -543,6 +551,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 		info.CollID = collID
 		info.PartID = partID
 		info.InsertChannel = channel
+		info.Manifest = manifest
 	}
 }
 

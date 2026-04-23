@@ -6,10 +6,9 @@
 namespace milvus {
 
 void
-OffsetMapping::Build(const bool* valid_data,
-                     int64_t total_count,
-                     int64_t start_logical,
-                     int64_t start_physical) {
+OffsetMapping::Build(const bool* valid_data, int64_t total_count) {
+    constexpr int64_t start_logical = 0;
+    constexpr int64_t start_physical = 0;
     if (total_count == 0 || valid_data == nullptr) {
         return;
     }
@@ -17,6 +16,12 @@ OffsetMapping::Build(const bool* valid_data,
     std::unique_lock<std::shared_mutex> lck(mutex_);
     enabled_ = true;
     total_count_ = start_logical + total_count;
+    chunk_built_.clear();
+    valid_count_ = 0;
+    l2p_vec_.clear();
+    p2l_vec_.clear();
+    l2p_map_.clear();
+    p2l_map_.clear();
 
     // Count valid elements first
     int64_t valid_count = 0;
@@ -46,13 +51,16 @@ OffsetMapping::Build(const bool* valid_data,
             l2p_vec_.resize(required_size, -1);
         }
 
+        // Pre-size p2l_vec to avoid repeated resizing inside the loop
+        int64_t required_p2l_size = start_physical + valid_count;
+        if (static_cast<int64_t>(p2l_vec_.size()) < required_p2l_size) {
+            p2l_vec_.resize(required_p2l_size, -1);
+        }
+
         int64_t physical_idx = start_physical;
         for (int64_t i = 0; i < total_count; ++i) {
             if (valid_data[i]) {
                 l2p_vec_[start_logical + i] = physical_idx;
-                if (physical_idx >= static_cast<int64_t>(p2l_vec_.size())) {
-                    p2l_vec_.resize(physical_idx + 1, -1);
-                }
                 p2l_vec_[physical_idx] = start_logical + i;
                 physical_idx++;
             } else {
@@ -61,14 +69,14 @@ OffsetMapping::Build(const bool* valid_data,
         }
     }
 
-    valid_count_ += valid_count;
+    valid_count_ = valid_count;
 }
 
 void
-OffsetMapping::BuildIncremental(const bool* valid_data,
-                                int64_t count,
-                                int64_t start_logical,
-                                int64_t start_physical) {
+OffsetMapping::Append(const bool* valid_data,
+                      int64_t count,
+                      int64_t start_logical,
+                      int64_t start_physical) {
     if (count == 0 || valid_data == nullptr) {
         return;
     }
@@ -127,6 +135,76 @@ OffsetMapping::BuildIncremental(const bool* valid_data,
     }
 }
 
+void
+OffsetMapping::Reserve(int64_t total_count,
+                       int64_t valid_count,
+                       size_t num_chunks) {
+    std::unique_lock<std::shared_mutex> lck(mutex_);
+    enabled_ = true;
+    total_count_ = total_count;
+    valid_count_ = valid_count;
+    use_map_ = (valid_count * 10 < total_count);
+    chunk_built_.assign(num_chunks, 0);
+    l2p_map_.clear();
+    p2l_map_.clear();
+    if (use_map_) {
+        l2p_vec_.clear();
+        p2l_vec_.clear();
+    } else {
+        l2p_vec_.assign(total_count, -1);
+        p2l_vec_.assign(valid_count, -1);
+    }
+}
+
+void
+OffsetMapping::SetChunk(int64_t chunk_id,
+                        int64_t start_logical,
+                        int64_t start_physical,
+                        const bool* valid_data,
+                        int64_t count) {
+    if (count == 0 || valid_data == nullptr) {
+        return;
+    }
+    std::unique_lock<std::shared_mutex> lck(mutex_);
+    if (chunk_id >= 0 && chunk_id < static_cast<int64_t>(chunk_built_.size()) &&
+        chunk_built_[chunk_id]) {
+        return;
+    }
+    int64_t physical_idx = start_physical;
+    if (use_map_) {
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data[i]) {
+                l2p_map_[static_cast<int32_t>(start_logical + i)] =
+                    static_cast<int32_t>(physical_idx);
+                p2l_map_[static_cast<int32_t>(physical_idx)] =
+                    static_cast<int32_t>(start_logical + i);
+                physical_idx++;
+            }
+        }
+    } else {
+        for (int64_t i = 0; i < count; ++i) {
+            if (valid_data[i]) {
+                l2p_vec_[start_logical + i] =
+                    static_cast<int32_t>(physical_idx);
+                p2l_vec_[physical_idx] =
+                    static_cast<int32_t>(start_logical + i);
+                physical_idx++;
+            }
+        }
+    }
+    if (chunk_id >= 0 && chunk_id < static_cast<int64_t>(chunk_built_.size())) {
+        chunk_built_[chunk_id] = 1;
+    }
+}
+
+bool
+OffsetMapping::IsChunkSet(int64_t chunk_id) const {
+    std::shared_lock<std::shared_mutex> lck(mutex_);
+    return chunk_id >= 0 &&
+           chunk_id < static_cast<int64_t>(chunk_built_.size()) &&
+           chunk_built_[chunk_id] != 0;
+}
+
 int64_t
 OffsetMapping::GetPhysicalOffset(int64_t logical_offset) const {
     std::shared_lock<std::shared_mutex> lck(mutex_);
@@ -180,12 +258,6 @@ bool
 OffsetMapping::IsEnabled() const {
     std::shared_lock<std::shared_mutex> lck(mutex_);
     return enabled_;
-}
-
-int64_t
-OffsetMapping::GetNextPhysicalOffset() const {
-    std::shared_lock<std::shared_mutex> lck(mutex_);
-    return valid_count_;
 }
 
 int64_t

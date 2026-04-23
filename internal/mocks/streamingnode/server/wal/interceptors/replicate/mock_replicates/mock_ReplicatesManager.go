@@ -144,6 +144,53 @@ func (_c *MockReplicatesManager_GetReplicateCheckpoint_Call) RunAndReturn(run fu
 	return _c
 }
 
+// GetSalvageCheckpoint provides a mock function with no fields
+func (_m *MockReplicatesManager) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSalvageCheckpoint")
+	}
+
+	var r0 []*utility.ReplicateCheckpoint
+	if rf, ok := ret.Get(0).(func() []*utility.ReplicateCheckpoint); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*utility.ReplicateCheckpoint)
+		}
+	}
+
+	return r0
+}
+
+// MockReplicatesManager_GetSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSalvageCheckpoint'
+type MockReplicatesManager_GetSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetSalvageCheckpoint is a helper method to define mock.On call
+func (_e *MockReplicatesManager_Expecter) GetSalvageCheckpoint() *MockReplicatesManager_GetSalvageCheckpoint_Call {
+	return &MockReplicatesManager_GetSalvageCheckpoint_Call{Call: _e.mock.On("GetSalvageCheckpoint")}
+}
+
+func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) Run(run func()) *MockReplicatesManager_GetSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) Return(_a0 []*utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) RunAndReturn(run func() []*utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Role provides a mock function with no fields
 func (_m *MockReplicatesManager) Role() replicateutil.Role {
 	ret := _m.Called()
@@ -241,8 +288,7 @@ func (_c *MockReplicatesManager_SwitchReplicateMode_Call) RunAndReturn(run func(
 func NewMockReplicatesManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockReplicatesManager {
+}) *MockReplicatesManager {
 	mock := &MockReplicatesManager{}
 	mock.Mock.Test(t)
 

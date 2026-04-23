@@ -17,12 +17,14 @@
 #include <cstddef>
 #include <mutex>
 
+#include <arrow/io/interfaces.h>
 #include <openssl/evp.h>
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
 #include "common/init_c.h"
 #include "exec/expression/ExprCache.h"
+#include "log/Log.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -52,6 +54,11 @@ SetMiddlePriorityThreadCoreCoefficient(const float value) {
 void
 SetLowPriorityThreadCoreCoefficient(const float value) {
     milvus::SetLowPriorityThreadCoreCoefficient(value);
+}
+
+void
+SetThreadPoolMaxThreadsSize(const int value) {
+    milvus::SetThreadPoolMaxThreadsSize(value);
 }
 
 void
@@ -103,6 +110,21 @@ void
 SetExprResCacheCapacityBytes(int64_t bytes) {
     milvus::exec::ExprResCacheManager::Instance().SetCapacityBytes(
         static_cast<size_t>(bytes));
+}
+
+void
+SetArrowIOThreadPoolCapacity(int threads) {
+    if (threads <= 0) {
+        return;
+    }
+    auto status = arrow::io::SetIOThreadPoolCapacity(threads);
+    if (!status.ok()) {
+        LOG_WARN("failed to set arrow io thread pool capacity to {}: {}",
+                 threads,
+                 status.ToString());
+        return;
+    }
+    LOG_INFO("arrow io thread pool capacity set to {}", threads);
 }
 
 void

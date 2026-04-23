@@ -39,7 +39,24 @@ const (
 	RestoreSnapshotTaskName         = "RestoreSnapshotTask"
 	GetRestoreSnapshotStateTaskName = "GetRestoreSnapshotStateTask"
 	ListRestoreSnapshotJobsTaskName = "ListRestoreSnapshotJobsTask"
+	PinSnapshotDataTaskName         = "PinSnapshotDataTask"
+	UnpinSnapshotDataTaskName       = "UnpinSnapshotDataTask"
 )
+
+// resolveCollectionNames resolves collection ID to (dbName, collectionName) via MetaCache.
+// Returns empty strings on failure (best-effort for display purposes).
+func resolveCollectionNames(ctx context.Context, collectionID int64) (string, string) {
+	if collectionID == 0 {
+		return "", ""
+	}
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", "", collectionID)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to resolve collection names from ID",
+			zap.Int64("collectionID", collectionID), zap.Error(err))
+		return "", ""
+	}
+	return collInfo.dbName, collInfo.schema.Name
+}
 
 type createSnapshotTask struct {
 	baseTask
@@ -99,6 +116,15 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Validate compaction protection duration
+	maxCompactionProtectionSeconds := paramtable.Get().DataCoordCfg.SnapshotMaxCompactionProtectionSeconds.GetAsInt64()
+	if cst.req.GetCompactionProtectionSeconds() < 0 {
+		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must be non-negative")
+	}
+	if cst.req.GetCompactionProtectionSeconds() > maxCompactionProtectionSeconds {
+		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must not exceed %d", maxCompactionProtectionSeconds)
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
 	if err != nil {
 		return err
@@ -120,9 +146,10 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_CreateSnapshot),
 		),
-		Name:         cst.req.GetName(),
-		Description:  cst.req.GetDescription(),
-		CollectionId: cst.collectionID,
+		Name:                        cst.req.GetName(),
+		Description:                 cst.req.GetDescription(),
+		CollectionId:                cst.collectionID,
+		CompactionProtectionSeconds: cst.req.GetCompactionProtectionSeconds(),
 	})
 	if err = merr.CheckRPCCall(cst.result, err); err != nil {
 		return err
@@ -141,6 +168,8 @@ type dropSnapshotTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (dst *dropSnapshotTask) TraceCtx() context.Context {
@@ -189,12 +218,24 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
 		return err
 	}
+
+	if dst.req.GetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("collection_name is required for drop snapshot")
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	dst.collectionID = collectionID
+
 	return nil
 }
 
 func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
 	log.Ctx(ctx).Info("proxy drop snapshot",
 		zap.String("snapshotName", dst.req.GetName()),
+		zap.String("collectionName", dst.req.GetCollectionName()),
+		zap.Int64("collectionID", dst.collectionID),
 	)
 
 	var err error
@@ -202,7 +243,8 @@ func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropSnapshot),
 		),
-		Name: dst.req.GetName(),
+		Name:         dst.req.GetName(),
+		CollectionId: dst.collectionID,
 	})
 	if err = merr.CheckRPCCall(dst.result, err); err != nil {
 		return err
@@ -221,6 +263,8 @@ type describeSnapshotTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.DescribeSnapshotResponse
+
+	collectionID UniqueID
 }
 
 func (dst *describeSnapshotTask) TraceCtx() context.Context {
@@ -269,6 +313,16 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
 		return err
 	}
+
+	if dst.req.GetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("collection_name is required for describe snapshot")
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	dst.collectionID = collectionID
+
 	return nil
 }
 
@@ -282,6 +336,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeSnapshot),
 		),
 		Name:                  dst.req.GetName(),
+		CollectionId:          dst.collectionID,
 		IncludeCollectionInfo: false,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
@@ -304,6 +359,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 		partitionName, err := globalMetaCache.GetPartitionName(ctx, "", collectionName, partitionID)
 		if err != nil {
 			log.Ctx(ctx).Warn("DescribeSnapshot fail to get partition name",
+				zap.Int64("partitionID", partitionID),
 				zap.Error(err))
 		}
 		partitionNames = append(partitionNames, partitionName)
@@ -335,6 +391,7 @@ type listSnapshotsTask struct {
 	result   *milvuspb.ListSnapshotsResponse
 
 	collectionID UniqueID
+	dbID         UniqueID
 }
 
 func (lst *listSnapshotsTask) TraceCtx() context.Context {
@@ -379,10 +436,17 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 }
 
 func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
-	// If collection_name is empty, set collectionID to 0 to list all snapshots
+	// Resolve database ID for db-level filtering
+	if lst.req.GetDbName() != "" {
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lst.req.GetDbName())
+		if err != nil {
+			return err
+		}
+		lst.dbID = dbInfo.dbID
+	}
+
 	if lst.req.GetCollectionName() == "" {
-		lst.collectionID = 0
-		return nil
+		return merr.WrapErrParameterInvalidMsg("collection_name is required for ListSnapshots")
 	}
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
@@ -405,6 +469,7 @@ func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_ListSnapshots),
 		),
 		CollectionId: lst.collectionID,
+		DbId:         lst.dbID,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		lst.result = &milvuspb.ListSnapshotsResponse{
@@ -432,6 +497,8 @@ type restoreSnapshotTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.RestoreSnapshotResponse
+
+	collectionID UniqueID // source collection ID for per-collection snapshot lookup
 }
 
 func (rst *restoreSnapshotTask) TraceCtx() context.Context {
@@ -480,20 +547,37 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 	if err := ValidateSnapshotName(rst.req.GetName()); err != nil {
 		return err
 	}
-	// Validate target collection_name if provided
-	if rst.req.GetCollectionName() != "" {
-		if err := ValidateCollectionName(rst.req.GetCollectionName()); err != nil {
-			return err
-		}
+
+	// Validate source collection name
+	if rst.req.GetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("collection_name is required for restore snapshot")
 	}
+
+	// Validate target collection name (required, cheap checks before RPC)
+	if rst.req.GetTargetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("target_collection_name is required for restore snapshot")
+	}
+	if err := ValidateCollectionName(rst.req.GetTargetCollectionName()); err != nil {
+		return err
+	}
+
+	// Resolve source collection ID for per-collection snapshot lookup (RPC call)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	rst.collectionID = collectionID
+
 	return nil
 }
 
 func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 	log.Ctx(ctx).Info("proxy restore snapshot",
 		zap.String("snapshotName", rst.req.GetName()),
-		zap.String("collectionName", rst.req.GetCollectionName()),
-		zap.String("dbName", rst.req.GetDbName()),
+		zap.String("sourceCollection", rst.req.GetCollectionName()),
+		zap.String("sourceDb", rst.req.GetDbName()),
+		zap.String("targetCollection", rst.req.GetTargetCollectionName()),
+		zap.String("targetDb", rst.req.GetTargetDbName()),
 	)
 
 	// Delegate directly to DataCoord which handles the entire restore process
@@ -501,18 +585,15 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RestoreSnapshot),
 		),
-		Name:           rst.req.GetName(),
-		DbName:         rst.req.GetDbName(),
-		CollectionName: rst.req.GetCollectionName(),
+		Name:                 rst.req.GetName(),
+		TargetDbName:         rst.req.GetTargetDbName(),
+		TargetCollectionName: rst.req.GetTargetCollectionName(),
+		SourceCollectionId:   rst.collectionID,
 	})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Ctx(ctx).Warn("RestoreSnapshot failed",
 			zap.Error(err))
 		rst.result = &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}
-		return err
-	}
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: resp.GetStatus()}
 		return err
 	}
 	rst.result = &milvuspb.RestoreSnapshotResponse{
@@ -603,17 +684,7 @@ func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 	info := result.GetInfo()
 	var milvusInfo *milvuspb.RestoreSnapshotInfo
 	if info != nil {
-		collectionName := ""
-		dbName := ""
-		if info.GetCollectionId() != 0 {
-			var err error
-			collectionName, err = globalMetaCache.GetCollectionName(ctx, "", info.GetCollectionId())
-			if err != nil {
-				log.Ctx(ctx).Warn("GetRestoreSnapshotState fail to get collection name",
-					zap.Error(err))
-			}
-		}
-
+		dbName, collectionName := resolveCollectionNames(ctx, info.GetCollectionId())
 		milvusInfo = &milvuspb.RestoreSnapshotInfo{
 			JobId:          info.GetJobId(),
 			SnapshotName:   info.GetSnapshotName(),
@@ -648,6 +719,7 @@ type listRestoreSnapshotJobsTask struct {
 	result   *milvuspb.ListRestoreSnapshotJobsResponse
 
 	collectionID UniqueID
+	dbID         UniqueID
 }
 
 func (lrst *listRestoreSnapshotJobsTask) TraceCtx() context.Context {
@@ -692,6 +764,15 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
+	// Resolve database ID for db-level filtering
+	if lrst.req.GetDbName() != "" {
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lrst.req.GetDbName())
+		if err != nil {
+			return err
+		}
+		lrst.dbID = dbInfo.dbID
+	}
+
 	if lrst.req.GetCollectionName() != "" {
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
 		if err != nil {
@@ -713,6 +794,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_Undefined),
 		),
 		CollectionId: lrst.collectionID,
+		DbId:         lrst.dbID,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		lrst.result = &milvuspb.ListRestoreSnapshotJobsResponse{
@@ -725,20 +807,11 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	jobs := result.GetJobs()
 	milvusJobs := make([]*milvuspb.RestoreSnapshotInfo, 0, len(jobs))
 	for _, job := range jobs {
-		collectionName := ""
-		if job.GetCollectionId() != 0 {
-			var err error
-			collectionName, err = globalMetaCache.GetCollectionName(ctx, "", job.GetCollectionId())
-			if err != nil {
-				log.Ctx(ctx).Warn("ListRestoreSnapshotJobs fail to get collection name",
-					zap.Error(err))
-			}
-		}
-
+		dbName, collectionName := resolveCollectionNames(ctx, job.GetCollectionId())
 		milvusJobs = append(milvusJobs, &milvuspb.RestoreSnapshotInfo{
 			JobId:          job.GetJobId(),
 			SnapshotName:   job.GetSnapshotName(),
-			DbName:         lrst.req.GetDbName(),
+			DbName:         dbName,
 			CollectionName: collectionName,
 			State:          milvuspb.RestoreSnapshotState(job.GetState()),
 			Progress:       job.GetProgress(),
@@ -757,5 +830,200 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// pinSnapshotDataTask pins snapshot data to prevent GC from cleaning up segments
+// referenced by a snapshot. Accepts milvuspb request from user, resolves
+// collection_name to collection_id, and forwards to DataCoord.
+type pinSnapshotDataTask struct {
+	baseTask
+	Condition
+	req      *milvuspb.PinSnapshotDataRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.PinSnapshotDataResponse
+
+	collectionID UniqueID
+}
+
+func (pst *pinSnapshotDataTask) TraceCtx() context.Context {
+	return pst.ctx
+}
+
+func (pst *pinSnapshotDataTask) ID() UniqueID {
+	return pst.req.GetBase().GetMsgID()
+}
+
+func (pst *pinSnapshotDataTask) SetID(uid UniqueID) {
+	pst.req.GetBase().MsgID = uid
+}
+
+func (pst *pinSnapshotDataTask) Name() string {
+	return PinSnapshotDataTaskName
+}
+
+func (pst *pinSnapshotDataTask) Type() commonpb.MsgType {
+	return pst.req.GetBase().GetMsgType()
+}
+
+func (pst *pinSnapshotDataTask) BeginTs() Timestamp {
+	return pst.req.GetBase().GetTimestamp()
+}
+
+func (pst *pinSnapshotDataTask) EndTs() Timestamp {
+	return pst.req.GetBase().GetTimestamp()
+}
+
+func (pst *pinSnapshotDataTask) SetTs(ts Timestamp) {
+	pst.req.Base.Timestamp = ts
+}
+
+func (pst *pinSnapshotDataTask) OnEnqueue() error {
+	if pst.req.Base == nil {
+		pst.req.Base = commonpbutil.NewMsgBase()
+	}
+	pst.req.Base.MsgType = commonpb.MsgType_PinSnapshotData
+	pst.req.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+const maxPinTTLSeconds = 30 * 24 * 3600 // 30 days
+
+func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
+	if err := ValidateSnapshotName(pst.req.GetName()); err != nil {
+		return err
+	}
+
+	if pst.req.GetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("collection_name is required for pin snapshot data")
+	}
+
+	if pst.req.GetTtlSeconds() < 0 {
+		return merr.WrapErrParameterInvalidMsg("ttl_seconds must be non-negative")
+	}
+	if pst.req.GetTtlSeconds() > maxPinTTLSeconds {
+		return merr.WrapErrParameterInvalidMsg("ttl_seconds exceeds maximum of %d (30 days)", maxPinTTLSeconds)
+	}
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, pst.req.GetDbName(), pst.req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	pst.collectionID = collectionID
+
+	return nil
+}
+
+func (pst *pinSnapshotDataTask) Execute(ctx context.Context) error {
+	log.Ctx(ctx).Info("proxy pin snapshot data",
+		zap.String("snapshotName", pst.req.GetName()),
+		zap.String("collectionName", pst.req.GetCollectionName()),
+		zap.Int64("collectionID", pst.collectionID),
+	)
+
+	resp, err := pst.mixCoord.PinSnapshotData(ctx, &datapb.PinSnapshotDataRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_PinSnapshotData),
+		),
+		Name:         pst.req.GetName(),
+		CollectionId: pst.collectionID,
+		TtlSeconds:   pst.req.GetTtlSeconds(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		pst.result = &milvuspb.PinSnapshotDataResponse{
+			Status: merr.Status(err),
+		}
+		return err
+	}
+	pst.result = &milvuspb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+		PinId:  resp.GetPinId(),
+	}
+	return nil
+}
+
+func (pst *pinSnapshotDataTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// unpinSnapshotDataTask unpins previously pinned snapshot data, allowing GC
+// to clean up segments if no other pins reference them.
+type unpinSnapshotDataTask struct {
+	baseTask
+	Condition
+	req      *milvuspb.UnpinSnapshotDataRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
+}
+
+func (ust *unpinSnapshotDataTask) TraceCtx() context.Context {
+	return ust.ctx
+}
+
+func (ust *unpinSnapshotDataTask) ID() UniqueID {
+	return ust.req.GetBase().GetMsgID()
+}
+
+func (ust *unpinSnapshotDataTask) SetID(uid UniqueID) {
+	ust.req.GetBase().MsgID = uid
+}
+
+func (ust *unpinSnapshotDataTask) Name() string {
+	return UnpinSnapshotDataTaskName
+}
+
+func (ust *unpinSnapshotDataTask) Type() commonpb.MsgType {
+	return ust.req.GetBase().GetMsgType()
+}
+
+func (ust *unpinSnapshotDataTask) BeginTs() Timestamp {
+	return ust.req.GetBase().GetTimestamp()
+}
+
+func (ust *unpinSnapshotDataTask) EndTs() Timestamp {
+	return ust.req.GetBase().GetTimestamp()
+}
+
+func (ust *unpinSnapshotDataTask) SetTs(ts Timestamp) {
+	ust.req.Base.Timestamp = ts
+}
+
+func (ust *unpinSnapshotDataTask) OnEnqueue() error {
+	if ust.req.Base == nil {
+		ust.req.Base = commonpbutil.NewMsgBase()
+	}
+	ust.req.Base.MsgType = commonpb.MsgType_UnpinSnapshotData
+	ust.req.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (ust *unpinSnapshotDataTask) PreExecute(ctx context.Context) error {
+	if ust.req.GetPinId() == 0 {
+		return merr.WrapErrParameterInvalidMsg("pin_id is required for unpin snapshot data")
+	}
+	return nil
+}
+
+func (ust *unpinSnapshotDataTask) Execute(ctx context.Context) error {
+	log.Ctx(ctx).Info("proxy unpin snapshot data",
+		zap.Int64("pinID", ust.req.GetPinId()),
+	)
+
+	var err error
+	ust.result, err = ust.mixCoord.UnpinSnapshotData(ctx, &datapb.UnpinSnapshotDataRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_UnpinSnapshotData),
+		),
+		PinId: ust.req.GetPinId(),
+	})
+	if err = merr.CheckRPCCall(ust.result, err); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ust *unpinSnapshotDataTask) PostExecute(ctx context.Context) error {
 	return nil
 }

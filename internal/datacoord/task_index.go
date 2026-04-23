@@ -295,22 +295,13 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	if it.indexEngineVersionManager.GetIndexNonEncoding() {
 		indexNonEncoding = "true"
 	}
-	indexParams = append(indexParams, &commonpb.KeyValuePair{
+	params = append(params, &commonpb.KeyValuePair{
 		Key:   common.IndexNonEncoding,
 		Value: indexNonEncoding,
 	})
 
-	currentVecIndexVersion := it.indexEngineVersionManager.GetCurrentIndexEngineVersion()
-	// if specify target vec index version, use it with high priority
-	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
-		// if force rebuild segment index is true, use target vec index version directly
-		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
-			currentVecIndexVersion = Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
-		} else {
-			// if force rebuild segment index is not enabled, use newer index version between current index version and target index version
-			currentVecIndexVersion = max(currentVecIndexVersion, Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32())
-		}
-	}
+	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
+	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
 	// Create the job request
 	req := &workerpb.CreateJobRequest{
@@ -323,7 +314,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		TypeParams:                typeParams,
 		NumRows:                   segIndex.NumRows,
 		CurrentIndexVersion:       currentVecIndexVersion,
-		CurrentScalarIndexVersion: it.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion: currentScalarIndexVersion,
 		CollectionID:              segment.GetCollectionID(),
 		PartitionID:               segment.GetPartitionID(),
 		SegmentID:                 segment.GetID(),
@@ -340,6 +331,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
+		ExternalSource:            schema.GetExternalSource(),
+		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

@@ -123,7 +123,7 @@ func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 //   - Collection: Full collection schema and properties
 //   - Segments: Detailed segment information including binlog paths
 //   - Indexes: Index definitions for the collection
-//   - SegmentIDs/IndexIDs: Pre-computed ID lists for fast reload without reading Avro files
+//   - SegmentIDs/BuildIDs: Pre-computed ID lists for fast reload without reading Avro files
 type SnapshotData struct {
 	// SnapshotInfo contains core snapshot metadata from protobuf definition.
 	SnapshotInfo *datapb.SnapshotInfo
@@ -138,9 +138,6 @@ type SnapshotData struct {
 	// Populated from metadata.json when includeSegments=false to avoid reading heavy Avro files.
 	// This enables quick DataCoord startup by deferring full segment loading.
 	SegmentIDs []int64
-	// IndexIDs is a pre-computed list of index IDs for fast reload.
-	// Similar purpose as SegmentIDs for optimizing startup performance.
-	IndexIDs []int64
 	// BuildIDs is a pre-computed list of index build IDs for precise GC protection.
 	// Each buildID uniquely identifies an index build task, enabling GC to check
 	// if specific index files are referenced by a snapshot without path parsing.
@@ -183,8 +180,8 @@ type ManifestEntry struct {
 	Bm25StatslogFiles []AvroFieldBinlog `avro:"bm25_statslog_files"`
 	// TextIndexFiles contains text index file information for full-text search.
 	TextIndexFiles []AvroTextIndexEntry `avro:"text_index_files"`
-	// JsonKeyIndexFiles contains JSON key index file information.
-	JsonKeyIndexFiles []AvroJsonKeyIndexEntry `avro:"json_key_index_files"`
+	// JSONKeyIndexFiles contains JSON key index file information.
+	JSONKeyIndexFiles []AvroJSONKeyIndexEntry `avro:"json_key_index_files"`
 	// StartPosition is the message queue position when segment was created.
 	StartPosition *AvroMsgPosition `avro:"start_position"`
 	// DmlPosition is the last consumed message queue position.
@@ -289,11 +286,13 @@ type AvroTextIndexStats struct {
 	MemorySize int64 `avro:"memory_size"`
 	// BuildID is the index build task identifier.
 	BuildID int64 `avro:"build_id"`
+	// CurrentScalarIndexVersion is the scalar index version used for this text index.
+	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 }
 
-// AvroJsonKeyStats represents datapb.JsonKeyStats in Avro-compatible format.
+// AvroJSONKeyStats represents datapb.JsonKeyStats in Avro-compatible format.
 // Contains statistics and file paths for JSON key indexes.
-type AvroJsonKeyStats struct {
+type AvroJSONKeyStats struct {
 	// FieldID is the JSON field this index is built on.
 	FieldID int64 `avro:"field_id"`
 	// Version is the index version for tracking updates.
@@ -306,8 +305,8 @@ type AvroJsonKeyStats struct {
 	MemorySize int64 `avro:"memory_size"`
 	// BuildID is the index build task identifier.
 	BuildID int64 `avro:"build_id"`
-	// JsonKeyStatsDataFormat indicates the data format version.
-	JsonKeyStatsDataFormat int64 `avro:"json_key_stats_data_format"`
+	// JSONKeyStatsDataFormat indicates the data format version.
+	JSONKeyStatsDataFormat int64 `avro:"json_key_stats_data_format"`
 }
 
 // AvroTextIndexEntry wraps AvroTextIndexStats with its field ID.
@@ -320,13 +319,13 @@ type AvroTextIndexEntry struct {
 	Stats *AvroTextIndexStats `avro:"stats"`
 }
 
-// AvroJsonKeyIndexEntry wraps AvroJsonKeyStats with its field ID.
+// AvroJSONKeyIndexEntry wraps AvroJSONKeyStats with its field ID.
 // Similar to AvroTextIndexEntry, this converts map[int64]*JsonKeyStats to array format.
-type AvroJsonKeyIndexEntry struct {
+type AvroJSONKeyIndexEntry struct {
 	// FieldID is the map key (duplicated from Stats.FieldID for clarity).
 	FieldID int64 `avro:"field_id"`
 	// Stats contains the JSON key index statistics.
-	Stats *AvroJsonKeyStats `avro:"stats"`
+	Stats *AvroJSONKeyStats `avro:"stats"`
 }
 
 // =============================================================================
@@ -580,7 +579,6 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 		ManifestList:          manifestPaths,
 		Storagev2ManifestList: storagev2Manifests,
 		SegmentIds:            snapshot.SegmentIDs,
-		IndexIds:              snapshot.IndexIDs,
 		BuildIds:              snapshot.BuildIDs,
 	}
 
@@ -777,7 +775,6 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		Indexes:      metadata.GetIndexes(),
 		// Pre-computed ID lists available even without full segment loading
 		SegmentIDs: metadata.GetSegmentIds(),
-		IndexIDs:   metadata.GetIndexIds(),
 		BuildIDs:   metadata.GetBuildIds(),
 	}
 
@@ -906,7 +903,7 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string, 
 	segment.TextIndexFiles = convertAvroToTextIndexMap(record.TextIndexFiles)
 
 	// Convert JSON key index files (array back to map)
-	segment.JsonKeyIndexFiles = convertAvroToJsonKeyIndexMap(record.JsonKeyIndexFiles)
+	segment.JsonKeyIndexFiles = convertAvroToJSONKeyIndexMap(record.JSONKeyIndexFiles)
 
 	return []*datapb.SegmentDescription{segment}, nil
 }
@@ -1024,7 +1021,7 @@ func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestE
 	avroTextIndexFiles := convertTextIndexMapToAvro(segment.GetTextIndexFiles())
 
 	// Convert JSON key index map to Avro array format
-	avroJsonKeyIndexFiles := convertJsonKeyIndexMapToAvro(segment.GetJsonKeyIndexFiles())
+	avroJSONKeyIndexFiles := convertJSONKeyIndexMapToAvro(segment.GetJsonKeyIndexFiles())
 
 	// Assemble the ManifestEntry with all converted fields
 	return ManifestEntry{
@@ -1039,7 +1036,7 @@ func convertSegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestE
 		StatslogFiles:     avroStatslogFiles,
 		Bm25StatslogFiles: avroBm25StatslogFiles,
 		TextIndexFiles:    avroTextIndexFiles,
-		JsonKeyIndexFiles: avroJsonKeyIndexFiles,
+		JSONKeyIndexFiles: avroJSONKeyIndexFiles,
 		StartPosition:     convertMsgPositionToAvro(segment.GetStartPosition()),
 		DmlPosition:       convertMsgPositionToAvro(segment.GetDmlPosition()),
 		StorageVersion:    segment.GetStorageVersion(),
@@ -1197,12 +1194,13 @@ func convertTextIndexStatsToAvro(stats *datapb.TextIndexStats) *AvroTextIndexSta
 		return nil
 	}
 	return &AvroTextIndexStats{
-		FieldID:    stats.GetFieldID(),
-		Version:    stats.GetVersion(),
-		Files:      stats.GetFiles(),
-		LogSize:    stats.GetLogSize(),
-		MemorySize: stats.GetMemorySize(),
-		BuildID:    stats.GetBuildID(),
+		FieldID:                   stats.GetFieldID(),
+		Version:                   stats.GetVersion(),
+		Files:                     stats.GetFiles(),
+		LogSize:                   stats.GetLogSize(),
+		MemorySize:                stats.GetMemorySize(),
+		BuildID:                   stats.GetBuildID(),
+		CurrentScalarIndexVersion: stats.GetCurrentScalarIndexVersion(),
 	}
 }
 
@@ -1212,12 +1210,13 @@ func convertAvroToTextIndexStats(avroStats *AvroTextIndexStats) *datapb.TextInde
 		return nil
 	}
 	return &datapb.TextIndexStats{
-		FieldID:    avroStats.FieldID,
-		Version:    avroStats.Version,
-		Files:      avroStats.Files,
-		LogSize:    avroStats.LogSize,
-		MemorySize: avroStats.MemorySize,
-		BuildID:    avroStats.BuildID,
+		FieldID:                   avroStats.FieldID,
+		Version:                   avroStats.Version,
+		Files:                     avroStats.Files,
+		LogSize:                   avroStats.LogSize,
+		MemorySize:                avroStats.MemorySize,
+		BuildID:                   avroStats.BuildID,
+		CurrentScalarIndexVersion: avroStats.CurrentScalarIndexVersion,
 	}
 }
 
@@ -1245,24 +1244,24 @@ func convertAvroToTextIndexMap(entries []AvroTextIndexEntry) map[int64]*datapb.T
 
 // --- JSON Key Index Conversion ---
 
-// convertJsonKeyStatsToAvro converts protobuf JsonKeyStats to Avro format.
-func convertJsonKeyStatsToAvro(stats *datapb.JsonKeyStats) *AvroJsonKeyStats {
+// convertJSONKeyStatsToAvro converts protobuf JsonKeyStats to Avro format.
+func convertJSONKeyStatsToAvro(stats *datapb.JsonKeyStats) *AvroJSONKeyStats {
 	if stats == nil {
 		return nil
 	}
-	return &AvroJsonKeyStats{
+	return &AvroJSONKeyStats{
 		FieldID:                stats.GetFieldID(),
 		Version:                stats.GetVersion(),
 		Files:                  stats.GetFiles(),
 		LogSize:                stats.GetLogSize(),
 		MemorySize:             stats.GetMemorySize(),
 		BuildID:                stats.GetBuildID(),
-		JsonKeyStatsDataFormat: stats.GetJsonKeyStatsDataFormat(),
+		JSONKeyStatsDataFormat: stats.GetJsonKeyStatsDataFormat(),
 	}
 }
 
-// convertAvroToJsonKeyStats converts Avro JsonKeyStats back to protobuf format.
-func convertAvroToJsonKeyStats(avroStats *AvroJsonKeyStats) *datapb.JsonKeyStats {
+// convertAvroToJSONKeyStats converts Avro JsonKeyStats back to protobuf format.
+func convertAvroToJSONKeyStats(avroStats *AvroJSONKeyStats) *datapb.JsonKeyStats {
 	if avroStats == nil {
 		return nil
 	}
@@ -1273,28 +1272,28 @@ func convertAvroToJsonKeyStats(avroStats *AvroJsonKeyStats) *datapb.JsonKeyStats
 		LogSize:                avroStats.LogSize,
 		MemorySize:             avroStats.MemorySize,
 		BuildID:                avroStats.BuildID,
-		JsonKeyStatsDataFormat: avroStats.JsonKeyStatsDataFormat,
+		JsonKeyStatsDataFormat: avroStats.JSONKeyStatsDataFormat,
 	}
 }
 
-// convertJsonKeyIndexMapToAvro converts protobuf map[int64]*JsonKeyStats to Avro array format.
+// convertJSONKeyIndexMapToAvro converts protobuf map[int64]*JsonKeyStats to Avro array format.
 // Avro doesn't support maps with non-string keys, so we convert to array of entries.
-func convertJsonKeyIndexMapToAvro(indexMap map[int64]*datapb.JsonKeyStats) []AvroJsonKeyIndexEntry {
-	var entries []AvroJsonKeyIndexEntry
+func convertJSONKeyIndexMapToAvro(indexMap map[int64]*datapb.JsonKeyStats) []AvroJSONKeyIndexEntry {
+	var entries []AvroJSONKeyIndexEntry
 	for fieldID, stats := range indexMap {
-		entries = append(entries, AvroJsonKeyIndexEntry{
+		entries = append(entries, AvroJSONKeyIndexEntry{
 			FieldID: fieldID,
-			Stats:   convertJsonKeyStatsToAvro(stats),
+			Stats:   convertJSONKeyStatsToAvro(stats),
 		})
 	}
 	return entries
 }
 
-// convertAvroToJsonKeyIndexMap converts Avro array back to protobuf map format.
-func convertAvroToJsonKeyIndexMap(entries []AvroJsonKeyIndexEntry) map[int64]*datapb.JsonKeyStats {
+// convertAvroToJSONKeyIndexMap converts Avro array back to protobuf map format.
+func convertAvroToJSONKeyIndexMap(entries []AvroJSONKeyIndexEntry) map[int64]*datapb.JsonKeyStats {
 	indexMap := make(map[int64]*datapb.JsonKeyStats)
 	for _, entry := range entries {
-		indexMap[entry.FieldID] = convertAvroToJsonKeyStats(entry.Stats)
+		indexMap[entry.FieldID] = convertAvroToJSONKeyStats(entry.Stats)
 	}
 	return indexMap
 }
@@ -1431,7 +1430,8 @@ func getProperAvroSchema() string {
 								{"name": "index_version", "type": "long"},
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
-								{"name": "mem_size", "type": "long"}
+								{"name": "mem_size", "type": "long"},
+								{"name": "current_scalar_index_version", "type": "int", "default": 0}
 							]
 						}
 					}
@@ -1470,14 +1470,14 @@ func getProperAvroSchema() string {
 						"type": "array",
 						"items": {
 							"type": "record",
-							"name": "AvroJsonKeyIndexEntry",
+							"name": "AvroJSONKeyIndexEntry",
 							"fields": [
 								{"name": "field_id", "type": "long"},
 								{
 									"name": "stats",
 									"type": {
 										"type": "record",
-										"name": "AvroJsonKeyStats",
+										"name": "AvroJSONKeyStats",
 										"fields": [
 											{"name": "field_id", "type": "long"},
 											{"name": "version", "type": "long"},

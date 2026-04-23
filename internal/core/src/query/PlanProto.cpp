@@ -14,9 +14,12 @@
 #include <google/protobuf/text_format.h>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <memory>
+
+#include "segcore/SegcoreConfig.h"
 #include <optional>
 #include <set>
 #include <string>
@@ -125,9 +128,44 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
             query_info_proto.bm25_avgdl();
     }
 
-    if (query_info_proto.group_by_field_id() > 0) {
-        auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());
-        search_info.group_by_field_id_ = group_by_field_id;
+    // Parse group by field IDs (support both new multi-field and old single-field API)
+    if (query_info_proto.group_by_field_ids_size() > 0) {
+        // Defense-in-depth: all of the checks below (field-count upper bound,
+        // positive id, duplicate id) should be enforced by the Go proxy in the
+        // request pre-check phase — this kind of input validation is a proxy
+        // responsibility, not something to push down to segcore. These checks
+        // are kept here only as a safety net and should never trigger in
+        // practice; companion Go PR owns the primary gate.
+        constexpr int MAX_GROUPBY_FIELDS = 10;
+        if (query_info_proto.group_by_field_ids_size() > MAX_GROUPBY_FIELDS) {
+            ThrowInfo(ConfigInvalid,
+                      "too many group_by fields: {} (max allowed: {})",
+                      query_info_proto.group_by_field_ids_size(),
+                      MAX_GROUPBY_FIELDS);
+        }
+        std::set<int64_t> seen_ids;
+        for (int i = 0; i < query_info_proto.group_by_field_ids_size(); i++) {
+            auto id = query_info_proto.group_by_field_ids(i);
+            if (id <= 0) {
+                ThrowInfo(ConfigInvalid,
+                          "invalid group_by field id {} (must be > 0)",
+                          id);
+            }
+            if (!seen_ids.insert(id).second) {
+                ThrowInfo(ConfigInvalid,
+                          "duplicate group_by field id {} in "
+                          "group_by_field_ids",
+                          id);
+            }
+            search_info.group_by_field_ids_.push_back(FieldId(id));
+        }
+    } else if (query_info_proto.group_by_field_id() > 0) {
+        // Backward compatibility: single-field API converts to group_by_field_ids_
+        search_info.group_by_field_ids_.push_back(
+            FieldId(query_info_proto.group_by_field_id()));
+    }
+
+    if (!search_info.group_by_field_ids_.empty()) {
         search_info.group_size_ = query_info_proto.group_size() > 0
                                       ? query_info_proto.group_size()
                                       : 1;
@@ -141,6 +179,31 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
                 static_cast<milvus::DataType>(query_info_proto.json_type());
         }
         search_info.strict_cast_ = query_info_proto.strict_cast();
+    }
+
+    // Read global refine config from proto (set by queryHook in Go side)
+    {
+        auto search_topk_ratio = query_info_proto.search_topk_ratio();
+        auto refine_topk_ratio = query_info_proto.refine_topk_ratio();
+        if (search_topk_ratio > 0 && search_topk_ratio < 1.0f) {
+            ThrowInfo(ConfigInvalid,
+                      "search_topk_ratio for global refine must be >= 1.0, but "
+                      "got {}",
+                      search_topk_ratio);
+        }
+        if (refine_topk_ratio > 0 && refine_topk_ratio < 1.0f) {
+            ThrowInfo(ConfigInvalid,
+                      "refine_topk_ratio for global refine must be >= 1.0, but "
+                      "got {}",
+                      refine_topk_ratio);
+        }
+        bool global_refine_enable =
+            search_topk_ratio > 0 && refine_topk_ratio > 0;
+        search_info.global_refine_enable_ = global_refine_enable;
+        if (global_refine_enable) {
+            search_info.search_topk_ratio_ = search_topk_ratio;
+            search_info.refine_topk_ratio_ = refine_topk_ratio;
+        }
     }
 
     if (query_info_proto.has_search_iterator_v2_info()) {
@@ -246,7 +309,7 @@ ProcessAggregates(const proto::plan::QueryPlanNode& query,
     };
 
     for (int i = 0; i < query.aggregates_size(); i++) {
-        auto aggregate = query.aggregates(i);
+        const auto& aggregate = query.aggregates(i);
         auto agg_name = getAggregateOpName(aggregate.op());
         agg_names.emplace_back(agg_name);
         auto input_agg_field_id = aggregate.field_id();
@@ -496,7 +559,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
         bool is_iterative =
             plan_node->search_info_.iterative_filter_execution &&
-            plan_node->search_info_.group_by_field_id_ == std::nullopt;
+            !plan_node->search_info_.has_group_by();
         if (is_iterative) {
             plannode = std::make_shared<milvus::plan::MvccNode>(
                 milvus::plan::GetNextPlanNodeId());
@@ -509,7 +572,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             // Add element-level filter if needed
             if (is_element_level) {
                 bool has_doc_pred = (doc_expr != nullptr);
-                plannode = std::make_shared<plan::ElementFilterNode>(
+                plannode = std::make_shared<plan::IterativeElementFilterNode>(
                     milvus::plan::GetNextPlanNodeId(),
                     element_expr,
                     struct_name,
@@ -520,7 +583,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
             // Add doc-level filter if present
             if (doc_expr) {
-                plannode = std::make_shared<plan::FilterNode>(
+                plannode = std::make_shared<plan::IterativeFilterNode>(
                     milvus::plan::GetNextPlanNodeId(), doc_expr, sources);
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             }
@@ -570,8 +633,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         }
     } else {
         // No user filter. Force non-iterative: the iterative path requires
-        // a FilterNode for row-by-row post-filtering, which doesn't apply
-        // here (TTL uses bitmap pre-filtering via FilterBitsNode).
+        // an IterativeFilterNode for row-by-row post-filtering, which doesn't
+        // apply here (TTL uses bitmap pre-filtering via FilterBitsNode).
         plan_node->search_info_.iterative_filter_execution = false;
 
         // When entity-level TTL is enabled, add an AlwaysTrueExpr so that
@@ -593,7 +656,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
-    if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
+    if (plan_node->search_info_.has_group_by()) {
         plannode = std::make_shared<milvus::plan::SearchGroupByNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
@@ -949,8 +1012,7 @@ ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
 
     auto function = factory.GetFilterFunction(func_sig);
     if (function == nullptr) {
-        ThrowInfo(ExprInvalid,
-                  "function " + func_sig.ToString() + " not found. ");
+        ThrowInfo(ExprInvalid, "function {} not found.", func_sig.ToString());
     }
     return std::make_shared<expr::CallExpr>(
         expr_pb.function_name(), parameters, function);
@@ -1218,8 +1280,7 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            ThrowInfo(ExprInvalid,
-                      std::string("unsupported expr proto node: ") + s);
+            ThrowInfo(ExprInvalid, "unsupported expr proto node: {}", s);
         }
     }
     if (type_check(result->type())) {
@@ -1246,6 +1307,43 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
         default:
             ThrowInfo(UnexpectedError, "unknown function type");
     }
+}
+
+std::shared_ptr<plan::PlanNode>
+ProtoParser::ExtractFilterOnlyPlan(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+
+    // Find VectorSearchNode and extract its source subtree.
+    // This preserves the original plan node sequence (pre-filter nodes chain).
+    std::function<std::shared_ptr<plan::PlanNode>(
+        const std::shared_ptr<plan::PlanNode>&)>
+        find_prefilter_subtree =
+            [&](const std::shared_ptr<plan::PlanNode>& node)
+        -> std::shared_ptr<plan::PlanNode> {
+        if (!node) {
+            return nullptr;
+        }
+        if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+            auto sources = node->sources();
+            if (sources.empty()) {
+                return nullptr;
+            }
+            // Return the pre-filter subtree directly without modification
+            return sources[0];
+        }
+        for (const auto& source : node->sources()) {
+            auto result = find_prefilter_subtree(source);
+            if (result) {
+                return result;
+            }
+        }
+        return nullptr;
+    };
+
+    return find_prefilter_subtree(root_node);
 }
 
 }  // namespace milvus::query

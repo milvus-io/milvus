@@ -18,6 +18,8 @@ import (
 
 // TestQueryIteratorDefault tests query iterator with default parameters
 func TestQueryIteratorDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -38,6 +40,8 @@ func TestQueryIteratorDefault(t *testing.T) {
 
 // TestQueryIteratorHitEmpty tests query iterator on empty collection
 func TestQueryIteratorHitEmpty(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -58,6 +62,8 @@ func TestQueryIteratorHitEmpty(t *testing.T) {
 
 // TestQueryIteratorBatchSize tests query iterator with different batch sizes
 func TestQueryIteratorBatchSize(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -149,6 +155,8 @@ func TestQueryIteratorSparseVecFields(t *testing.T) {
 
 // TestQueryIteratorInvalid tests query iterator with invalid parameters
 func TestQueryIteratorInvalid(t *testing.T) {
+	t.Parallel()
+
 	nb := 201
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -173,9 +181,11 @@ func TestQueryIteratorInvalid(t *testing.T) {
 	_, errPar = mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithPartitions(common.GenRandomString("p", 5), common.DefaultPartition))
 	common.CheckErr(t, errPar, false, "partition name", "not found")
 
-	// query iterator with count(*)
+	// query iterator with count(*) — SDK appends PK to output_fields,
+	// resulting in ["count(*)", "int64"]. Server rejects because aggregation
+	// queries cannot mix regular columns with aggregate expressions.
 	_, errOutput := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithOutputFields(common.QueryCountFieldName))
-	common.CheckErr(t, errOutput, false, "count entities with pagination is not allowed", "count(*)")
+	common.CheckErr(t, errOutput, false, "is not allowed")
 
 	// query iterator with invalid batch size
 	for _, batch := range []int{-1, 0} {
@@ -186,6 +196,8 @@ func TestQueryIteratorInvalid(t *testing.T) {
 
 // TestQueryIteratorInvalidExpr tests query iterator with invalid expressions
 func TestQueryIteratorInvalidExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -206,6 +218,8 @@ func TestQueryIteratorInvalidExpr(t *testing.T) {
 
 // TestQueryIteratorOutputFieldDynamic tests query iterator with non-existed field when dynamic enabled or not
 func TestQueryIteratorOutputFieldDynamic(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	nb := 201
@@ -233,6 +247,8 @@ func TestQueryIteratorOutputFieldDynamic(t *testing.T) {
 
 // TestQueryIteratorExpr tests query iterator with various expressions
 func TestQueryIteratorExpr(t *testing.T) {
+	t.Parallel()
+
 	type exprCount struct {
 		expr  string
 		count int
@@ -315,6 +331,8 @@ func TestQueryIteratorExpr(t *testing.T) {
 
 // TestQueryIteratorPartitions tests query iterator with partition filtering
 func TestQueryIteratorPartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -353,6 +371,8 @@ func TestQueryIteratorPartitions(t *testing.T) {
 
 // TestQueryIteratorWithLimit tests query iterator with limit
 func TestQueryIteratorWithLimit(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -374,6 +394,8 @@ func TestQueryIteratorWithLimit(t *testing.T) {
 
 // TestQueryIteratorGrowing tests query iterator on growing segments
 func TestQueryIteratorGrowing(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -393,6 +415,8 @@ func TestQueryIteratorGrowing(t *testing.T) {
 
 // TestQueryIteratorConsistencyLevel tests query iterator with different consistency levels
 func TestQueryIteratorConsistencyLevel(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

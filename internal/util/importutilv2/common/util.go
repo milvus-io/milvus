@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -71,7 +72,7 @@ func SafeStringForError(s string) string {
 	for i, r := range s {
 		if r == utf8.RuneError {
 			// Invalid UTF-8 sequence, encode as hex
-			result.WriteString(fmt.Sprintf("\\x%02x", s[i]))
+			fmt.Fprintf(&result, "\\x%02x", s[i])
 		} else {
 			result.WriteRune(r)
 		}
@@ -106,6 +107,19 @@ func CheckValidString(s string, maxLength int64, field *schemapb.FieldSchema) er
 		return err
 	}
 	return nil
+}
+
+// RemoveUnpopulatedFunctionOutputFields removes function output fields that have no data
+// from the InsertData. These fields are computed downstream (e.g., BM25 sparse vectors),
+// not from the data source.
+func RemoveUnpopulatedFunctionOutputFields(schema *schemapb.CollectionSchema, insertData *storage.InsertData) {
+	for _, field := range schema.GetFields() {
+		if field.GetIsFunctionOutput() {
+			if data, ok := insertData.Data[field.GetFieldID()]; ok && data.RowNum() == 0 {
+				delete(insertData.Data, field.GetFieldID())
+			}
+		}
+	}
 }
 
 // GetSchemaTimezone retrieves the timezone string from the CollectionSchema's properties.

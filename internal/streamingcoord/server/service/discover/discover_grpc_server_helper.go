@@ -35,7 +35,7 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 		if assignmentsMap[node.ServerID] == nil {
 			// if current streaming node is not assigned to any channel, add it to the assignments with empty assignments.
 			assignmentsMap[node.ServerID] = &streamingpb.StreamingNodeAssignment{
-				Node:     types.NewProtoFromStreamingNodeInfo(*node),
+				Node:     types.NewProtoFromStreamingNodeInfo(node.StreamingNodeInfo),
 				Channels: make([]*streamingpb.PChannelInfo, 0),
 			}
 		}

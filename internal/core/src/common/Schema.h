@@ -366,6 +366,31 @@ class Schema {
         return ttl_field_id_opt_;
     }
 
+    bool
+    is_external_collection() const {
+        return !external_source_.empty();
+    }
+
+    const std::string&
+    get_external_source() const {
+        return external_source_;
+    }
+
+    const std::string&
+    get_external_spec() const {
+        return external_spec_;
+    }
+
+    void
+    set_external_source(const std::string& source) {
+        external_source_ = source;
+    }
+
+    void
+    set_external_spec(const std::string& spec) {
+        external_spec_ = spec;
+    }
+
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
@@ -373,6 +398,18 @@ class Schema {
     /// used by Loon FFI / milvus-storage Reader.
     const ArrowSchemaPtr
     ConvertToLoonArrowSchema() const;
+
+    // Get the list of external column names (parquet column names) for
+    // external collections. Used as needed_columns for schemaless Reader.
+    std::shared_ptr<std::vector<std::string>>
+    GetExternalColumnNames() const;
+
+    // Resolve a column group column name to a FieldId.
+    // Normal collections: column name is the numeric field ID string.
+    // External collections: column name is the parquet field name mapped
+    // via external_field metadata.
+    FieldId
+    ResolveColumnFieldId(const std::string& column_name) const;
 
     proto::schema::CollectionSchema
     ToProto() const;
@@ -542,6 +579,12 @@ class Schema {
     std::optional<std::string> warmup_vector_field_ = std::nullopt;
     // Per-field warmup policy (key: "warmup" in field type_params)
     std::unordered_map<FieldId, std::string> warmup_fields_;
+
+    // External collection properties
+    std::string
+        external_source_;  // External data source identifier (e.g., S3 path, table name)
+    std::string
+        external_spec_;  // External data source specification (JSON format)
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

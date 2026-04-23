@@ -502,3 +502,60 @@ func (f *StructSchema) WithField(field *Field) *StructSchema {
 	f.Fields = append(f.Fields, field)
 	return f
 }
+
+// Validate checks struct-array sub-field rules aligned with pymilvus StructFieldSchema._check_fields.
+// A sub-field MUST NOT be Array / Struct itself, and MUST NOT carry top-level-only flags such as
+// primary/partition/clustering key, nullable, autoID, default value, or be dynamic.
+// `parentName` is used to contextualize the error message.
+func (f *StructSchema) Validate(parentName string) error {
+	if f == nil {
+		return errors.New("nil struct schema")
+	}
+	if len(f.Fields) == 0 {
+		return errors.Newf("struct array field %q must have at least one sub-field", parentName)
+	}
+	seen := make(map[string]struct{}, len(f.Fields))
+	for _, sub := range f.Fields {
+		if sub == nil {
+			return errors.Newf("struct array field %q contains nil sub-field", parentName)
+		}
+		if sub.Name == "" {
+			return errors.Newf("struct array field %q contains sub-field with empty name", parentName)
+		}
+		if _, dup := seen[sub.Name]; dup {
+			return errors.Newf("struct array field %q contains duplicate sub-field %q", parentName, sub.Name)
+		}
+		seen[sub.Name] = struct{}{}
+		switch sub.DataType {
+		case FieldTypeArray, FieldTypeStruct:
+			return errors.Newf("struct array field %q sub-field %q: nested array/struct sub-field is not allowed", parentName, sub.Name)
+		case FieldTypeSparseVector:
+			return errors.Newf("struct array field %q sub-field %q: sparse vector sub-field is not supported", parentName, sub.Name)
+		}
+		if sub.PrimaryKey {
+			return errors.Newf("struct array field %q sub-field %q must not be primary key", parentName, sub.Name)
+		}
+		if sub.AutoID {
+			return errors.Newf("struct array field %q sub-field %q must not be auto id", parentName, sub.Name)
+		}
+		if sub.IsPartitionKey {
+			return errors.Newf("struct array field %q sub-field %q must not be partition key", parentName, sub.Name)
+		}
+		if sub.IsClusteringKey {
+			return errors.Newf("struct array field %q sub-field %q must not be clustering key", parentName, sub.Name)
+		}
+		if sub.IsDynamic {
+			return errors.Newf("struct array field %q sub-field %q must not be dynamic", parentName, sub.Name)
+		}
+		if sub.Nullable {
+			return errors.Newf("struct array field %q sub-field %q must not be nullable", parentName, sub.Name)
+		}
+		if sub.DefaultValue != nil {
+			return errors.Newf("struct array field %q sub-field %q must not carry default value", parentName, sub.Name)
+		}
+		if sub.StructSchema != nil {
+			return errors.Newf("struct array field %q sub-field %q must not nest a struct schema", parentName, sub.Name)
+		}
+	}
+	return nil
+}

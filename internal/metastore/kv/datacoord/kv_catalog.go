@@ -636,7 +636,7 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 	return nil
 }
 
-func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
+func (kc *Catalog) ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 	segIndexes := make([]*model.SegmentIndex, 0)
 	applyFn := func(key []byte, value []byte) error {
 		segmentIndexInfo := &indexpb.SegmentIndex{}
@@ -650,7 +650,8 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix+"/", kc.paginationSize, applyFn)
+	prefix := buildSegmentIndexCollectionPrefix(collectionID)
+	err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -1062,45 +1063,6 @@ func (kc *Catalog) SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) e
 
 func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error {
 	key := buildStatsTaskKey(taskID)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
-func (kc *Catalog) ListUpdateExternalCollectionTasks(ctx context.Context) ([]*indexpb.UpdateExternalCollectionTask, error) {
-	tasks := make([]*indexpb.UpdateExternalCollectionTask, 0)
-
-	applyFn := func(key []byte, value []byte) error {
-		task := &indexpb.UpdateExternalCollectionTask{}
-		err := proto.Unmarshal(value, task)
-		if err != nil {
-			return err
-		}
-		tasks = append(tasks, task)
-		return nil
-	}
-
-	err := kc.MetaKv.WalkWithPrefix(ctx, UpdateExternalCollectionTaskPrefix+"/", kc.paginationSize, applyFn)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
-func (kc *Catalog) SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error {
-	key := buildUpdateExternalCollectionTaskKey(task.TaskID)
-	value, err := proto.Marshal(task)
-	if err != nil {
-		return err
-	}
-
-	err = kc.MetaKv.Save(ctx, key, string(value))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (kc *Catalog) DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error {
-	key := buildUpdateExternalCollectionTaskKey(taskID)
 	return kc.MetaKv.Remove(ctx, key)
 }
 

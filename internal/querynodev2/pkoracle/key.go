@@ -27,16 +27,15 @@ type candidateKey struct {
 	typ         commonpb.SegmentState
 }
 
-// MayPkExist checks whether primary key could exists in this candidate.
+// MayPkExist always returns true for candidateKey since it has no bloom filter.
 func (k candidateKey) MayPkExist(lc *storage.LocationsCache) bool {
-	// always return true to prevent miuse
 	return true
 }
 
 func (k candidateKey) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
-	ret := make([]bool, 0)
-	for i := 0; i < lc.Size(); i++ {
-		ret = append(ret, true)
+	ret := make([]bool, lc.Size())
+	for i := range ret {
+		ret[i] = true
 	}
 	return ret
 }
@@ -55,6 +54,14 @@ func (k candidateKey) Partition() int64 {
 func (k candidateKey) Type() commonpb.SegmentState {
 	return k.typ
 }
+
+func (k candidateKey) PkCandidateExist() bool                   { return true }
+func (k candidateKey) UpdatePkCandidate(_ []storage.PrimaryKey) {}
+func (k candidateKey) Stats() *storage.PkStatistics             { return nil }
+func (k candidateKey) GetMinPk() *storage.PrimaryKey            { return nil }
+func (k candidateKey) GetMaxPk() *storage.PrimaryKey            { return nil }
+func (k candidateKey) Charge()                                  {}
+func (k candidateKey) Refund()                                  {}
 
 // NewCandidateKey creates a candidateKey and returns as Candidate.
 func NewCandidateKey(id int64, partitionID int64, typ commonpb.SegmentState) Candidate {

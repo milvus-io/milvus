@@ -2095,6 +2095,8 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
+			case nil:
+				// nullable vector field where all rows are null — no vector data to merge
 			default:
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
@@ -2180,8 +2182,19 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
-// ValidateExternalCollectionSchema ensures unsupported features are disabled for external collections.
-func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
+// NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
+// disabled for external collections AND mutates each user field to set
+// nullable=true. The mutation is intentional: external Parquet sources may
+// contain nulls in any column, and a non-nullable field would silently produce
+// incorrect results when reading those nulls. The function is named
+// "NormalizeAndValidate" so callers know it has a write-back side effect.
+//
+// Validation runs in two passes: pass 1 checks every field; pass 2 mutates
+// only after all checks succeed. Without this split, a failing check on a
+// later field would leave earlier fields with their Nullable bit silently
+// flipped — the caller receives an error but the schema pointer it owns is
+// already partially mutated.
+func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 	if !IsExternalCollection(schema) {
 		return nil
 	}
@@ -2198,9 +2211,10 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 		return fmt.Errorf("external collection %s does not support struct fields", schema.GetName())
 	}
 
+	// Pass 1: validate all user fields. No mutation here so a failure at any
+	// field leaves the input schema untouched.
 	for _, field := range schema.GetFields() {
-		// Skip system fields (RowID and Timestamp)
-		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName {
+		if isExternalSystemOrVirtualField(field.GetName()) {
 			continue
 		}
 
@@ -2222,13 +2236,67 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 			return fmt.Errorf("external collection %s does not support text match on field %s", schema.GetName(), field.GetName())
 		}
 
-		// Validate external_field mapping is set for all user fields
 		if field.GetExternalField() == "" {
 			return fmt.Errorf("field '%s' in external collection %s must have external_field mapping", field.GetName(), schema.GetName())
+		}
+
+		if !isExternalFieldTypeSupported(field.GetDataType()) {
+			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+				schema.GetName(), field.GetDataType().String(), field.GetName())
+		}
+	}
+
+	// Pass 2: normalize. All fields passed validation; safe to mutate.
+	// Force nullable for external fields: Parquet columns can contain nulls,
+	// and a non-nullable field would silently produce incorrect results.
+	for _, field := range schema.GetFields() {
+		if isExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		if !field.GetNullable() {
+			field.Nullable = true
 		}
 	}
 
 	return nil
+}
+
+func isExternalSystemOrVirtualField(name string) bool {
+	return name == common.RowIDFieldName ||
+		name == common.TimeStampFieldName ||
+		name == common.VirtualPKFieldName
+}
+
+// isExternalFieldTypeSupported returns true if the given data type can be
+// reliably used in external collections (both load and take modes).
+//
+// Blocked types and reasons:
+//   - SparseFloatVector: Custom binary encoding incompatible with external files
+func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
+	switch dt {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_Text,
+		schemapb.DataType_JSON,
+		schemapb.DataType_Array,
+		schemapb.DataType_Timestamptz,
+		schemapb.DataType_Geometry,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_Int8Vector,
+		schemapb.DataType_ArrayOfVector:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
@@ -2342,6 +2410,13 @@ func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.Fi
 	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == fieldID {
 			return field
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				return field
+			}
 		}
 	}
 	return nil
@@ -2499,13 +2574,27 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	if field.GetValidData() != nil {
-		// unpack valid data
-		idxs := make([]int, len(field.ValidData))
-		validCnt := 0
-		for i, valid := range field.ValidData {
+		validData := field.GetValidData()
+		dataLen := getScalarDataLen(field)
+		if dataLen == len(validData) {
+			// Full-size format: data array has the same length as ValidData,
+			// values at invalid positions are zero-filled. Use direct indexing.
+			return func(idx int) any {
+				if !validData[idx] {
+					return nil
+				}
+				return getData(field, idx)
+			}
+		}
+
+		// Compact format: data array only contains valid entries.
+		// Build a mapping from logical index to physical index.
+		idxs := make([]int, len(validData))
+		cnt := 0
+		for i, valid := range validData {
 			if valid {
-				idxs[i] = validCnt
-				validCnt++
+				idxs[i] = cnt
+				cnt++
 			} else {
 				idxs[i] = -1
 			}
@@ -2520,6 +2609,28 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	return func(idx int) any {
 		return getData(field, idx)
 	}
+}
+
+// getScalarDataLen returns the length of the scalar data array in a FieldData.
+// For vector types or unrecognized types, returns -1.
+func getScalarDataLen(field *schemapb.FieldData) int {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return len(field.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return len(field.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return len(field.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return len(field.GetScalars().GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return len(field.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_Timestamptz:
+		return len(field.GetScalars().GetTimestamptzData().GetData())
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return len(field.GetScalars().GetStringData().GetData())
+	}
+	return -1
 }
 
 func getData(field *schemapb.FieldData, idx int) any {
@@ -3006,7 +3117,7 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 	for _, fieldID := range fieldIDs {
 		if f, exists := fieldIDFuncMapping[fieldID]; exists {
 			if f.Type == schemapb.FunctionType_BM25 {
-				return nil, fmt.Errorf("Attempt to insert bm25 function output field")
+				return nil, fmt.Errorf("attempt to insert bm25 function output field")
 			}
 			if !allowNonBM25Outputs {
 				return nil, fmt.Errorf("Insert data has function output field, but collection's property `collection.function.allowInsertNonBM25FunctionOutputs` is not enable")
@@ -3037,7 +3148,7 @@ func GetNeedProcessFunctions(fieldIDs []int64, functions []*schemapb.FunctionSch
 }
 
 func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_SparseFloatVector {
 		return false
 	}
 
@@ -3064,7 +3175,7 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 }
 
 func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_BinaryVector) {
+	if !field.GetIsFunctionOutput() || field.GetDataType() != schemapb.DataType_BinaryVector {
 		return false
 	}
 

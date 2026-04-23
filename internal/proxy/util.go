@@ -178,7 +178,7 @@ func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
 	return nil
 }
 
-func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool) error {
+func validateMaxQueryResultWindow(offset int64, limit int64, largeTopKEnabled bool) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
 	}
@@ -188,8 +188,8 @@ func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool
 
 	depth := offset + limit
 	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
-	if bigTopKEnabled {
-		maxQueryResultWindow = Params.QuotaConfig.BigMaxQueryResultWindow.GetAsInt64()
+	if largeTopKEnabled {
+		maxQueryResultWindow = Params.QuotaConfig.LargeMaxQueryResultWindow.GetAsInt64()
 	}
 	if depth <= 0 || depth > maxQueryResultWindow {
 		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
@@ -197,10 +197,10 @@ func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool
 	return nil
 }
 
-func validateLimit(limit int64, bigTopKEnabled bool) error {
+func validateLimit(limit int64, largeTopKEnabled bool) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
-	if bigTopKEnabled {
-		topKLimit = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+	if largeTopKEnabled {
+		topKLimit = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
 	}
 	if limit <= 0 || limit > topKLimit {
 		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
@@ -655,12 +655,12 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	}
 
 	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
-		return fmt.Errorf("Fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
+		return fmt.Errorf("fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
 	}
 
 	if field.ElementType == schemapb.DataType_ArrayOfStruct || field.ElementType == schemapb.DataType_ArrayOfVector ||
 		field.ElementType == schemapb.DataType_Array {
-		return fmt.Errorf("Nested array is not supported %s", field.Name)
+		return fmt.Errorf("nested array is not supported %s", field.Name)
 	}
 
 	if field.DataType == schemapb.DataType_Array {
@@ -670,7 +670,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	} else {
 		// ArrayOfVector: support FloatVector, Float16Vector, BFloat16Vector, Int8Vector, BinaryVector
 		if !typeutil.IsFixDimVectorType(field.GetElementType()) {
-			return fmt.Errorf("Unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
+			return fmt.Errorf("unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
 		}
 
 		err = validateDimension(field)
@@ -761,6 +761,34 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			}
 		}
 	}
+
+	return nil
+}
+
+// injectVirtualPKForExternalCollection adds a virtual PK field for external collections
+// if no primary key field exists. External collections use virtual PKs in the format:
+// (segmentID << 32) | offset
+func injectVirtualPKForExternalCollection(schema *schemapb.CollectionSchema) error {
+	// Check if a primary key already exists
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			// PK already exists, nothing to inject
+			return nil
+		}
+	}
+
+	// Create virtual PK field with FieldID=0; RootCoord's assignFieldAndFunctionID
+	// will assign the actual field ID during collection creation.
+	virtualPKField := &schemapb.FieldSchema{
+		Name:         common.VirtualPKFieldName,
+		Description:  "Virtual primary key for external collection: (segmentID << 32) | offset",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true, // Virtual PKs are auto-generated
+	}
+
+	// Prepend virtual PK field to the schema fields
+	schema.Fields = append([]*schemapb.FieldSchema{virtualPKField}, schema.Fields...)
 
 	return nil
 }
@@ -1189,12 +1217,8 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 	return &fieldData, nil
 }
 
-func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
-	validData := make([]bool, len(data))
-	for i := range validData {
-		validData[i] = true
-	}
-	return &schemapb.FieldData{
+func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *schemapb.FieldData {
+	fd := &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
 		Field: &schemapb.FieldData_Scalars{
@@ -1207,8 +1231,23 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
-		ValidData: validData,
 	}
+
+	// Only set ValidData when the $meta field is nullable or has a default value.
+	// For 2.5 collections (non-nullable, no default), CheckValidData expects
+	// len(ValidData)==0, so we must NOT set it.
+	for _, f := range schema.Fields {
+		if f.GetIsDynamic() && (f.GetNullable() || f.GetDefaultValue() != nil) {
+			validData := make([]bool, len(data))
+			for i := range validData {
+				validData[i] = true
+			}
+			fd.ValidData = validData
+			break
+		}
+	}
+
+	return fd
 }
 
 // validateFieldDataColumns validates that all required fields are present and no unknown fields exist.
@@ -1220,12 +1259,12 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 	expectColumnNum := 0
 
 	// Count expected columns
-	for _, field := range schema.CollectionSchema.GetFields() {
-		if !(typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema)) {
+	for _, field := range schema.GetFields() {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) && !typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-	for _, structField := range schema.CollectionSchema.GetStructArrayFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		expectColumnNum += len(structField.GetFields())
 	}
 
@@ -1261,14 +1300,15 @@ func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) 
 		fieldData.Type = fieldSchema.DataType
 
 		// Set the ElementType because it may not be set in the insert request.
-		if fieldData.Type == schemapb.DataType_Array {
+		switch fieldData.Type {
+		case schemapb.DataType_Array:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
 			if !ok || fd.Scalars.GetArrayData() == nil {
 				return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
 					fieldData.FieldName, schema.Name)
 			}
 			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-		} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+		case schemapb.DataType_ArrayOfVector:
 			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
 			if !ok || fd.Vectors.GetVectorArray() == nil {
 				return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
@@ -1564,6 +1604,13 @@ func recallCal[T string | int64](results []T, gts []T) float32 {
 func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResultData) error {
 	if results.GetNumQueries() != gts.GetNumQueries() {
 		return fmt.Errorf("num of queries is inconsistent between search results(%d) and ground truth(%d)", results.GetNumQueries(), gts.GetNumQueries())
+	}
+
+	// When search returns no results, IDs field is nil. Set recalls to 0 for all queries.
+	if results.GetIds() == nil || results.GetIds().GetIdField() == nil ||
+		gts.GetIds() == nil || gts.GetIds().GetIdField() == nil {
+		results.Recalls = make([]float32, results.GetNumQueries())
+		return nil
 	}
 
 	switch results.GetIds().GetIdField().(type) {
@@ -2474,7 +2521,7 @@ func doCheckDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgst
 	for i := range defaultData {
 		defaultData[i] = []byte("{}")
 	}
-	dynamicData := autoGenDynamicFieldData(defaultData)
+	dynamicData := autoGenDynamicFieldData(schema, defaultData)
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
 	return nil
 }
@@ -2494,7 +2541,7 @@ func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, in
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	err := common.CheckNamespace(schema, insertMsg.InsertRequest.Namespace)
+	err := common.CheckNamespace(schema, insertMsg.Namespace)
 	if err != nil {
 		return err
 	}
@@ -2512,8 +2559,8 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	for _, fieldData := range insertMsg.FieldsData {
 		if fieldData.FieldId == namespaceField.FieldID {
 			ns := ""
-			if insertMsg.InsertRequest.Namespace != nil {
-				ns = *insertMsg.InsertRequest.Namespace
+			if insertMsg.Namespace != nil {
+				ns = *insertMsg.Namespace
 			}
 			scalars := fieldData.GetScalars()
 			if scalars == nil {
@@ -2535,7 +2582,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 
 	// set namespace field data
 	namespaceData := make([]string, insertMsg.NRows())
-	namespace := *insertMsg.InsertRequest.Namespace
+	namespace := *insertMsg.Namespace
 	for i := range namespaceData {
 		namespaceData[i] = namespace
 	}
@@ -2827,9 +2874,10 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	return uint64(ttl)
 }
 
-// reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
-// It works with both QueryResults and SearchResults by operating on the common data structures
-func reconstructStructFieldDataCommon(
+// reconstructStructFieldData regroups flattened sub-fields (named "structName[fieldName]")
+// back into StructArrayField entries, restoring original field names for the user-facing response.
+// It modifies sub-field FieldName in place; callers must not reuse the input slice afterwards.
+func reconstructStructFieldData(
 	fieldsData []*schemapb.FieldData,
 	outputFields []string,
 	schema *schemapb.CollectionSchema,
@@ -2874,40 +2922,33 @@ func reconstructStructFieldDataCommon(
 	}
 
 	for structFieldID, fields := range groupedStructFields {
-		// Create deep copies of fields to avoid modifying original data
-		// and restore original field names for user-facing response
-		copiedFields := make([]*schemapb.FieldData, len(fields))
-		for i, field := range fields {
-			copiedFields[i] = proto.Clone(field).(*schemapb.FieldData)
-			// Extract original field name from structName[fieldName] format
-			originalName, err := extractOriginalFieldName(copiedFields[i].FieldName)
+		// Restore original field names (from "structName[fieldName]" to "fieldName")
+		// for the user-facing response.
+		for _, field := range fields {
+			originalName, err := extractOriginalFieldName(field.FieldName)
 			if err != nil {
-				// This should not happen in normal operation - indicates a bug
 				log.Error("failed to extract original field name from struct field",
-					zap.String("fieldName", copiedFields[i].FieldName),
+					zap.String("fieldName", field.FieldName),
 					zap.Error(err))
-				// Keep the transformed name to avoid data corruption
 			} else {
-				copiedFields[i].FieldName = originalName
+				field.FieldName = originalName
 			}
 		}
 
-		fieldData := &schemapb.FieldData{
+		newFieldsData = append(newFieldsData, &schemapb.FieldData{
 			FieldName: structFieldNames[structFieldID],
 			FieldId:   structFieldID,
 			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: copiedFields}},
-		}
-		newFieldsData = append(newFieldsData, fieldData)
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		})
 		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
 	}
 
 	return newFieldsData, reconstructedOutputFields
 }
 
-// Wrapper for QueryResults
 func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
-	fieldsData, outputFields := reconstructStructFieldDataCommon(
+	fieldsData, outputFields := reconstructStructFieldData(
 		results.FieldsData,
 		results.OutputFields,
 		schema,
@@ -2916,12 +2957,11 @@ func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *
 	results.OutputFields = outputFields
 }
 
-// New wrapper for SearchResults
 func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
 	if results.Results == nil {
 		return
 	}
-	fieldsData, outputFields := reconstructStructFieldDataCommon(
+	fieldsData, outputFields := reconstructStructFieldData(
 		results.Results.FieldsData,
 		results.Results.OutputFields,
 		schema,
@@ -3086,7 +3126,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

@@ -82,7 +82,8 @@ struct ChunkManagerWrapper {
             cm_->Remove(file);
         }
 
-        boost::filesystem::remove_all(cm_->GetRootPath());
+        boost::system::error_code ec;
+        boost::filesystem::remove_all(cm_->GetRootPath(), ec);
     }
 
     void
@@ -165,7 +166,7 @@ class JsonFlatIndexTest : public ::testing::Test {
             auto index = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
             index->Build(config);
 
-            auto create_index_result = index->Upload();
+            auto create_index_result = index->UploadUnified({});
             auto memSize = create_index_result->GetMemSize();
             auto serializedSize = create_index_result->GetSerializedSize();
             ASSERT_GT(memSize, 0);
@@ -185,7 +186,7 @@ class JsonFlatIndexTest : public ::testing::Test {
 
         ctx_->set_for_loading_index(true);
         json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
-        json_index_->Load(milvus::tracer::TraceContext{}, load_config);
+        json_index_->LoadUnified(load_config);
 
         auto cnt = json_index_->Count();
         ASSERT_EQ(cnt, json_data_.size());
@@ -294,25 +295,25 @@ TEST_F(JsonFlatIndexTest, TestPrefixMatchQuery) {
     ASSERT_FALSE(result[2]);  // Charlie doesn't start with A
 }
 
-TEST_F(JsonFlatIndexTest, TestRegexQuery) {
+TEST_F(JsonFlatIndexTest, TestPatternQuery) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
     ASSERT_NE(json_flat_index, nullptr);
 
     std::string json_path = "/profile/name/first";
     auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->RegexQuery("[AB].*ice");
+    auto result = executor->PatternQuery("A%ice");
     ASSERT_EQ(result.size(), json_data_.size());
-    ASSERT_TRUE(result[0]);   // Alice matches [AB].*ice
-    ASSERT_FALSE(result[1]);  // Bob doesn't match [AB].*ice
-    ASSERT_FALSE(result[2]);  // Charlie doesn't match [AB].*ice
+    ASSERT_TRUE(result[0]);   // Alice matches A%ice
+    ASSERT_FALSE(result[1]);  // Bob doesn't match A%ice
+    ASSERT_FALSE(result[2]);  // Charlie doesn't match A%ice
 
-    // Test another regex pattern
-    auto result2 = executor->RegexQuery("B.b");
+    // Test another LIKE pattern
+    auto result2 = executor->PatternQuery("B_b");
     ASSERT_EQ(result2.size(), json_data_.size());
-    ASSERT_FALSE(result2[0]);  // Alice doesn't match B.b
-    ASSERT_TRUE(result2[1]);   // Bob matches B.b
-    ASSERT_FALSE(result2[2]);  // Charlie doesn't match B.b
+    ASSERT_FALSE(result2[0]);  // Alice doesn't match B_b
+    ASSERT_TRUE(result2[1]);   // Bob matches B_b
+    ASSERT_FALSE(result2[2]);  // Charlie doesn't match B_b
 }
 
 TEST_F(JsonFlatIndexTest, TestPatternMatchQuery) {

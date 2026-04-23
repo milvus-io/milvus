@@ -98,7 +98,7 @@ func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition,
 }
 
 func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
-	var result *checkpointCandidate = def
+	result := def
 	c.candidates.Range(func(_ string, candidate *checkpointCandidate) bool {
 		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
 			result = candidate
@@ -532,9 +532,9 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			storageVersion = storage.StorageV3
 			// set manifest path when creating segment
 			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
-			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-			// -1 for first write
-			manifestPath = packed.MarshalManifestPath(basePath, -1)
+			basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+			// ManifestEarliest for first write
+			manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,

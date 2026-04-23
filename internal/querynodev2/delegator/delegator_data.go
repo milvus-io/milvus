@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -133,7 +134,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			// panic here, insert failure
 			panic(err)
 		}
-		growing.UpdateBloomFilter(insertData.PrimaryKeys)
+		growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
@@ -320,6 +321,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						// cancel other request
 						cancel()
 						return false, err
+					} else if grpcclient.IsServerIDMismatchErr(err) {
+						log.Warn("try to delete data on mismatched node, node has been replaced", zap.Error(err))
+						cancel()
+						return false, err
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 						log.Warn("try to delete data of released segment")
 						return false, nil
@@ -404,7 +409,8 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	return nil
 }
 
-// load bm25 stats for sealed segments
+// load bm25 stats for sealed segments.
+// idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	if sd.idfOracle == nil {
 		return nil
@@ -412,36 +418,23 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 
 	pool := segments.GetBM25LoadPool()
 
-	future := pool.Submit(func() (any, error) {
-		bm25Stats, err := sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
-		if err != nil {
-			log.Warn("failed to load bm25 stats for segment", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-			return nil, err
-		}
-
-		if bm25Stats != nil {
-			bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
-				log.Info("register sealed segment bm25 stats into idforacle",
-					zap.Int64("segmentID", segmentID),
-				)
-				err = sd.idfOracle.RegisterSealed(segmentID, stats)
-				if err != nil {
-					log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
-					return false
-				}
-				return true
-			})
-
-			if err != nil {
-				log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
+	cm := sd.loader.GetChunkManager()
+	futures := make([]*conc.Future[any], 0, len(infos))
+	for _, info := range infos {
+		info := info
+		futures = append(futures, pool.Submit(func() (any, error) {
+			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
+				log.Warn("failed to load bm25 stats for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Error(err))
 				return nil, err
 			}
-		}
+			return nil, nil
+		}))
+	}
 
-		return nil, nil
-	})
-
-	err := conc.BlockOnAll(future)
+	err := conc.BlockOnAll(futures...)
 	if err != nil {
 		log.Warn("failed to load bm25 stats", zap.Error(err))
 		return err
@@ -577,23 +570,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		entries, req.GetLoadMeta().GetSchemaVersion())
 	if err != nil {
 		log.Warn("load stream delete failed", zap.Error(err))
-		// Rollback BM25 stats registered by loadBM25Stats above,
-		// since segment will not be added to distribution.
-		if sd.idfOracle != nil {
-			segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
-				return info.GetSegmentID()
-			})
-			sd.idfOracle.UnregisterSealed(segmentIDs...)
-		}
+		// BM25 stats already loaded into idf oracle will be cleaned up
+		// automatically by SyncDistribution when the segment is not in target.
 		return err
 	}
+	log.Debug("load stream delete done")
 
 	return nil
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
 	if version < sd.schemaVersion {
 		return merr.WrapErrServiceInternal("schema version changed")
 	}
@@ -647,7 +635,7 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log := sd.getLogger(context.Background())
 	start := time.Now()
 	totalL0Rows := 0
-	totalBfHitRows := int64(0)
+	totalForwardRows := int64(0)
 	processedL0Count := 0
 
 	for _, segment := range level0Segments {
@@ -664,14 +652,25 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 					endIdx = len(segmentPks)
 				}
 
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						totalForwardRows += 1
+						if err := fn(segmentPks[i], segmentTss[i]); err != nil {
+							return err
+						}
+					}
+					continue
+				}
+
 				lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
-					if hit {
-						totalBfHitRows += 1
-						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
-							return err
-						}
+					if !hit {
+						continue
+					}
+					totalForwardRows += 1
+					if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
+						return err
 					}
 				}
 			}
@@ -681,9 +680,10 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 	log.Info("forward delete from L0 segments to worker",
 		zap.Int64("targetSegmentID", candidate.ID()),
 		zap.String("channel", sd.vchannelName),
+		zap.Bool("broadcast", !candidate.PkCandidateExist()),
 		zap.Int("l0SegmentCount", processedL0Count),
 		zap.Int("totalDeleteRowsInL0", totalL0Rows),
-		zap.Int64("totalBfHitRows", totalBfHitRows),
+		zap.Int64("totalForwardRows", totalForwardRows),
 		zap.Int64("totalCost", time.Since(start).Milliseconds()),
 	)
 
@@ -736,6 +736,7 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 
 // processDeleteRecords performs BF checks on delete buffer records and forwards matching deletes
 // via the buffered forwarder. Does NOT require any lock to be held.
+// When candidate has no stats (PkCandidateExist() == false), all deletes are forwarded (broadcast mode).
 // Returns the number of timestamp-hit and bloom-filter-hit rows.
 func (sd *shardDelegator) processDeleteRecords(
 	candidate *pkoracle.BloomFilterSet,
@@ -754,6 +755,17 @@ func (sd *shardDelegator) processDeleteRecords(
 				endIdx := idx + batchSize
 				if endIdx > len(pks) {
 					endIdx = len(pks)
+				}
+
+				// When BF not initialized (bloom filter disabled), forward all deletes
+				if !candidate.PkCandidateExist() {
+					for i := idx; i < endIdx; i++ {
+						bfHit++
+						if err = forwarder.Buffer(pks[i], record.DeleteData.Tss[i]); err != nil {
+							return tsHit, bfHit, err
+						}
+					}
+					continue
 				}
 
 				lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
@@ -1055,7 +1067,9 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return 0, merr.WrapErrServiceInternal("failed to unmarshal BM25 IDF placeholder group", err.Error())
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -1122,7 +1136,9 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return merr.WrapErrServiceInternal("failed to unmarshal MinHash placeholder group", err.Error())
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")

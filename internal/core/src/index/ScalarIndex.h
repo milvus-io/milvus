@@ -166,6 +166,10 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
+    // Execute a pattern match operation on the index.
+    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
+    //   NOT a regex. Implementations must convert internally if needed.
+    // @param op: Match (LIKE), PrefixMatch, PostfixMatch, or InnerMatch.
     virtual const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) {
         ThrowInfo(Unsupported, "pattern match is not supported");
@@ -189,19 +193,32 @@ class ScalarIndex : public IndexBase {
     virtual int64_t
     Size() = 0;
 
+    // Whether this index can execute a LIKE-pattern query internally.
+    // When true, the framework calls PatternQuery() directly instead of
+    // falling back to brute-force scan.
+    // NOTE: PatternQuery() always accepts a raw SQL LIKE pattern (e.g. "%hello%").
+    // Each index implementation is responsible for converting it to whatever
+    // internal format it needs (e.g., regex for tantivy).
     virtual bool
-    SupportRegexQuery() const {
+    SupportPatternQuery() const {
         return false;
     }
 
+    // Whether the framework should *attempt* to use PatternQuery() for
+    // Match operations. Inverted indexes return false here because they
+    // handle Match via PatternMatch() dispatch instead.
     virtual bool
-    TryUseRegexQuery() const {
+    TryUsePatternQuery() const {
         return true;
     }
 
+    // Execute a LIKE-pattern query on the index.
+    // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
+    //   NOT a regex. Implementations must convert internally if needed
+    //   (e.g., tantivy converts to regex via PatternMatchTranslator).
     virtual const TargetBitmap
-    RegexQuery(const std::string& pattern) {
-        ThrowInfo(Unsupported, "regex query is not supported");
+    PatternQuery(const std::string& pattern) {
+        ThrowInfo(Unsupported, "pattern query is not supported");
     }
 
     virtual void
@@ -214,14 +231,20 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
 
-    // V3 streaming upload - subclasses must implement WriteEntries() instead
+    // Packed single-file streaming upload — subclasses must implement
+    // WriteEntries() instead. The current on-disk file format is V3
+    // (see MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h, and the ".v3"
+    // filename suffix produced by the implementation); the method name is
+    // kept format-agnostic so future format versions can reuse this entry
+    // point and dispatch by reading the file header.
     IndexStatsPtr
-    UploadV3(const Config& config) override;
+    UploadUnified(const Config& config) override;
 
-    // V3 streaming load - loads index from a packed V3 format file
-    // Opens the file and calls LoadEntries() for subclass-specific loading
+    // Packed single-file streaming load — opens the file and calls
+    // LoadEntries() for subclass-specific loading. Currently handles the V3
+    // file format (see UploadUnified above for naming rationale).
     void
-    LoadV3(const Config& config) override;
+    LoadUnified(const Config& config) override;
 
     virtual void
     WriteEntries(storage::IndexEntryWriter* writer) {

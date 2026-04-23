@@ -15,7 +15,7 @@ import (
 const interceptorName = "replicate"
 
 type replicateInterceptor struct {
-	replicateManager replicates.ReplicateManager
+	replicateManager replicates.ReplicatesManager
 	txnManager       *txn.TxnManager
 }
 

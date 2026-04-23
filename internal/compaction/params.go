@@ -63,10 +63,6 @@ func GenerateJSONParams() (string, error) {
 func ParseParamsFromJSON(jsonStr string) (Params, error) {
 	var compactionParams Params
 	err := json.Unmarshal([]byte(jsonStr), &compactionParams)
-	if err != nil && jsonStr == "" {
-		// Ensure the compatibility with the legacy requests sent by the old datacoord.
-		return GenParams(), nil
-	}
 	return compactionParams, err
 }
 
@@ -96,6 +92,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
+			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 		}
 	}
 

@@ -663,7 +663,7 @@ class TestPartitionApiForbidden(TestMilvusClientV2Base):
                     output_fields=[ct.default_int64_field_name, ct.default_string_field_name],
                     partition_names=[partitions[0]],
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": nq, "err_msg": err_msg})
+                    check_items={"err_code": 2, "err_msg": err_msg})
 
         # get_load_state with partition → allowed (v1: loading_progress/wait_for_loading_complete)
         load_state = self.get_load_state(client, c_name, partition_name=partitions[0])[0]

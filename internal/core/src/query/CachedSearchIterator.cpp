@@ -20,6 +20,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "index/Utils.h"
 #include "index/VectorIndex.h"
 #include "knowhere/expected.h"
@@ -113,6 +114,17 @@ CachedSearchIterator::CachedSearchIterator(
     nq_ = query_ds.num_queries;
     Init(search_info);
 
+    // VECTOR_ARRAY element-level search: growing stores each row as a
+    // separate VectorArray with its own backing allocation, so we must
+    // flatten per-chunk into a contiguous buffer that knowhere can read.
+    // array_offsets_ != nullptr is the element-level signal (multi-search-
+    // multi emb-list iterator is rejected upstream, so we don't branch on
+    // it here).
+    const bool is_element_level = search_info.array_offsets_ != nullptr;
+    if (is_element_level) {
+        chunk_buffers_.reserve(num_chunks_);
+    }
+
     iterators_.reserve(nq_ * num_chunks_);
     InitializeChunkedIterators(
         query_ds,
@@ -120,12 +132,32 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [&vec_data, vec_size_per_chunk, row_count](int64_t chunk_id) {
+        [this, &vec_data, vec_size_per_chunk, row_count, is_element_level](
+            int64_t chunk_id) {
             const void* chunk_data = vec_data->get_chunk_data(chunk_id);
             // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
-            return std::make_pair(chunk_data, chunk_size);
+            if (!is_element_level) {
+                return std::make_pair(chunk_data, chunk_size);
+            }
+
+            auto va_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
+            int64_t total_bytes = 0;
+            int64_t total_elements = 0;
+            for (int64_t i = 0; i < chunk_size; ++i) {
+                total_bytes += va_ptr[i].byte_size();
+                total_elements += va_ptr[i].length();
+            }
+            auto buf = std::make_unique<uint8_t[]>(total_bytes);
+            auto* ptr = buf.get();
+            for (int64_t i = 0; i < chunk_size; ++i) {
+                memcpy(ptr, va_ptr[i].data(), va_ptr[i].byte_size());
+                ptr += va_ptr[i].byte_size();
+            }
+            const void* flat_data = buf.get();
+            chunk_buffers_.emplace_back(std::move(buf));
+            return std::make_pair(flat_data, total_elements);
         });
 }
 
@@ -155,7 +187,7 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column](int64_t chunk_id) {
+        [this, column, &search_info](int64_t chunk_id) {
             auto pw = column->DataOfChunk(nullptr, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
@@ -165,6 +197,13 @@ CachedSearchIterator::CachedSearchIterator(
             const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
             if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {
                 chunk_size = valid_count_per_chunk[chunk_id];
+            }
+            // For element-level search on vector array field, chunk_size
+            // must be the element count in this chunk, not the row count.
+            if (search_info.array_offsets_ != nullptr) {
+                auto elem_offsets_pw =
+                    column->VectorArrayOffsets(nullptr, chunk_id);
+                chunk_size = elem_offsets_pw.get()[chunk_size];
             }
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
@@ -208,7 +247,7 @@ CachedSearchIterator::ValidateSearchInfo(const SearchInfo& search_info) {
                   "Iterator v2 SearchInfo is not set");
     }
 
-    auto iterator_v2_info = search_info.iterator_v2_info_.value();
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size != batch_size_) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size mismatch, expect %d, but got %d",
@@ -341,7 +380,7 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
                   "Iterator v2 info is not set, cannot initialize iterator");
     }
 
-    auto iterator_v2_info = search_info.iterator_v2_info_.value();
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size == 0) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size is 0, cannot initialize iterator");

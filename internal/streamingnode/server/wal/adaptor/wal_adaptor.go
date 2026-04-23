@@ -40,7 +40,7 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored in availableCancel and called in Close()
 	roWAL := &roWALAdaptorImpl{
 		WALRateLimitComponent: rate.NewWALRateLimitComponent(basicWAL.Channel()),
 
@@ -84,10 +84,10 @@ func adaptImplsToRWWAL(
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	wal.writeMetrics.SetLogger(wal.roWALAdaptorImpl.Logger())
+	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
-	wal.WALRateLimitComponent.RegisterMemoryObserver()
-	wal.WALRateLimitComponent.RegisterAppendRateObserver(wal.appendRateCounter)
+	wal.RegisterMemoryObserver()
+	wal.RegisterAppendRateObserver(wal.appendRateCounter)
 	return wal
 }
 
@@ -140,6 +140,16 @@ func (w *walAdaptorImpl) GetReplicateCheckpoint() (*utility.ReplicateCheckpoint,
 	return w.param.ReplicateManager.GetReplicateCheckpoint()
 }
 
+// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+func (w *walAdaptorImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil
+	}
+	defer w.lifetime.Done()
+
+	return w.param.ReplicateManager.GetSalvageCheckpoint()
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -152,7 +162,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		return nil, status.NewChannelFenced(w.Channel().String())
 	}
 
-	if msg.MessageType().IsDMLMessageType() && w.WALRateLimitComponent.IsRejected() {
+	if msg.MessageType().IsDMLMessageType() && w.IsRejected() {
 		// if the wal is rate limit rejected, we reject all the DML operation to protect the wal from being overloaded.
 		return nil, status.NewRateLimitRejected("")
 	}

@@ -104,14 +104,15 @@ TextMatchIndex::Upload(const Config& config) {
 
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
+        auto path_str = iter->path().string();
         if (boost::filesystem::is_directory(*iter)) {
-            LOG_WARN("{} is a directory", iter->path().string());
+            LOG_WARN("{} is a directory", path_str);
         } else {
-            LOG_INFO("trying to add text log: {}", iter->path().string());
-            AssertInfo(disk_file_manager_->AddTextLog(iter->path().string()),
+            LOG_INFO("trying to add text log: {}", path_str);
+            AssertInfo(disk_file_manager_->AddTextLog(path_str),
                        "failed to add text log: {}",
-                       iter->path().string());
-            LOG_INFO("text log: {} added", iter->path().string());
+                       path_str);
+            LOG_INFO("text log: {} added", path_str);
         }
     }
 
@@ -122,14 +123,26 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
+    // Strip the remote basePath prefix to return relative file paths.
+    // This makes the returned paths consistent with JsonKeyStats::Upload()
+    // which also returns relative paths.
+    auto base_prefix = disk_file_manager_->GetRemoteTextLogPrefix() + "/";
+    auto strip_prefix = [&base_prefix](const std::string& path) -> std::string {
+        if (path.size() > base_prefix.size() &&
+            path.compare(0, base_prefix.size(), base_prefix) == 0) {
+            return path.substr(base_prefix.size());
+        }
+        return path;
+    };
+
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(strip_prefix(file.first), file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(strip_prefix(file.first), file.second);
     }
     return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
@@ -142,17 +155,42 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load text log index");
+
+    // Detect V3 format: single file ending with ".v3"
+    auto& files_value = index_files.value();
+    if (files_value.size() == 1) {
+        const auto& file = files_value[0];
+        auto filename = file.substr(file.find_last_of('/') + 1);
+        if (filename.size() > 3 &&
+            filename.substr(filename.size() - 3) == ".v3") {
+            LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
+            InvertedIndexTantivy<std::string>::LoadUnified(config);
+            return;
+        }
+    }
+
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    // V2: existing multi-file load path
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    auto files_value = index_files.value();
+    // Files are relative paths; prepend base_path to construct absolute remote paths.
+    // This must happen before extracting index_null_offset so all files have full paths.
+    auto base_path =
+        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
+            .value_or("");
+    AssertInfo(!base_path.empty(),
+               "stats_base_path is required for loading text index");
+    for (auto& f : files_value) {
+        f = base_path + "/" + f;
+    }
+
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             return file.substr(file.find_last_of('/') + 1) ==
                    "index_null_offset";
         });
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
     if (it != files_value.end()) {
         std::vector<std::string> file;
         file.push_back(*it);
@@ -202,7 +240,7 @@ void
 TextMatchIndex::AddNullSealed(int64_t offset) {
     null_offset_.push_back(offset);
     // still need to add null to make offset is correct
-    std::string empty = "";
+    static const std::string empty;
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
@@ -249,7 +287,7 @@ TextMatchIndex::BuildIndexFromFieldData(
                     null_offset_.push_back(offset);
                     // add empty array doc to register offset in tantivy,
                     // same as AddNullSealed
-                    std::string empty = "";
+                    static const std::string empty;
                     wrapper_->add_array_data(&empty, 0, offset);
                 } else {
                     wrapper_->add_data(

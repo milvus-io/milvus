@@ -34,173 +34,126 @@ type StructArraySuite struct {
 func (s *StructArraySuite) TestBasic() {
 	name := fmt.Sprintf("struct_array_%d", rand.Intn(100))
 
-	// Create sub-fields for the struct
-	int32Data := []int32{1, 2, 3, 4, 5}
-	floatData := []float32{1.1, 2.2, 3.3, 4.4, 5.5}
-	varcharData := []string{"a", "b", "c", "d", "e"}
+	// Each row holds a variable-length array of struct elements; sub-columns are *Array types.
+	intRows := [][]int32{{1, 2}, {3}, {4, 5, 6}}
+	floatRows := [][]float32{{1.1, 2.2}, {3.3}, {4.4, 5.5, 6.6}}
+	strRows := [][]string{{"a", "b"}, {"c"}, {"d", "e", "f"}}
 
-	int32Col := NewColumnInt32("int_field", int32Data)
-	floatCol := NewColumnFloat("float_field", floatData)
-	varcharCol := NewColumnVarChar("varchar_field", varcharData)
+	int32Col := NewColumnInt32Array("int_field", intRows)
+	floatCol := NewColumnFloatArray("float_field", floatRows)
+	varcharCol := NewColumnVarCharArray("varchar_field", strRows)
 
-	fields := []Column{int32Col, floatCol, varcharCol}
-	column := NewColumnStructArray(name, fields)
+	column := NewColumnStructArray(name, []Column{int32Col, floatCol, varcharCol})
 
-	// Test Name()
 	s.Equal(name, column.Name())
-
-	// Test Type()
 	s.Equal(entity.FieldTypeArray, column.Type())
+	s.EqualValues(3, column.Len())
 
-	// Test Len()
-	s.EqualValues(5, column.Len())
-
-	// Test FieldData()
 	fd := column.FieldData()
-	s.Equal(schemapb.DataType_Array, fd.GetType())
+	s.Equal(schemapb.DataType_ArrayOfStruct, fd.GetType())
 	s.Equal(name, fd.GetFieldName())
 
 	structArrays := fd.GetStructArrays()
 	s.NotNil(structArrays)
 	s.Equal(3, len(structArrays.GetFields()))
 
-	// Verify each field in the struct array
-	fieldNames := []string{"int_field", "float_field", "varchar_field"}
-	for i, field := range structArrays.GetFields() {
-		s.Equal(fieldNames[i], field.GetFieldName())
+	// Sub-fields must be Array (not flat scalars) to match server-side schema for struct sub-fields.
+	for _, sub := range structArrays.GetFields() {
+		s.Equal(schemapb.DataType_Array, sub.GetType())
 	}
 
-	// Test Get() - retrieve values as map
 	val, err := column.Get(0)
 	s.NoError(err)
 	m, ok := val.(map[string]any)
 	s.True(ok)
-	s.Equal(int32(1), m["int_field"])
-	s.Equal(float32(1.1), m["float_field"])
-	s.Equal("a", m["varchar_field"])
+	s.Equal([]int32{1, 2}, m["int_field"])
+	s.Equal([]float32{1.1, 2.2}, m["float_field"])
+	s.Equal([]string{"a", "b"}, m["varchar_field"])
 
 	val, err = column.Get(2)
 	s.NoError(err)
-	m, ok = val.(map[string]any)
-	s.True(ok)
-	s.Equal(int32(3), m["int_field"])
-	s.Equal(float32(3.3), m["float_field"])
-	s.Equal("c", m["varchar_field"])
+	m = val.(map[string]any)
+	s.Equal([]int32{4, 5, 6}, m["int_field"])
+}
+
+func (s *StructArraySuite) TestVectorSubField() {
+	dim := 4
+	rows := [][][]float32{
+		{{0.1, 0.2, 0.3, 0.4}, {0.5, 0.6, 0.7, 0.8}},
+		{{1.1, 1.2, 1.3, 1.4}},
+	}
+	idRows := [][]int64{{10, 20}, {30}}
+
+	idCol := NewColumnInt64Array("id", idRows)
+	embCol := NewColumnFloatVectorArray("emb", dim, rows)
+	column := NewColumnStructArray("clips", []Column{idCol, embCol})
+
+	fd := column.FieldData()
+	s.Equal(schemapb.DataType_ArrayOfStruct, fd.GetType())
+	s.Equal(2, len(fd.GetStructArrays().GetFields()))
+
+	embFD := fd.GetStructArrays().GetFields()[1]
+	s.Equal(schemapb.DataType_ArrayOfVector, embFD.GetType())
+	va := embFD.GetVectors().GetVectorArray()
+	s.NotNil(va)
+	s.EqualValues(dim, va.GetDim())
+	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
+	s.Equal(2, len(va.GetData()))
+	s.EqualValues(2*dim, len(va.GetData()[0].GetFloatVector().GetData()))
+	s.EqualValues(1*dim, len(va.GetData()[1].GetFloatVector().GetData()))
 }
 
 func (s *StructArraySuite) TestSlice() {
-	name := "struct_array_slice"
+	intRows := [][]int64{{10}, {20, 21}, {30, 31, 32}, {40}, {50, 51}}
+	boolRows := [][]bool{{true}, {false, true}, {true, false, true}, {false}, {true, false}}
 
-	// Create sub-fields
-	int64Data := []int64{10, 20, 30, 40, 50}
-	boolData := []bool{true, false, true, false, true}
+	int64Col := NewColumnInt64Array("id", intRows)
+	boolCol := NewColumnBoolArray("flag", boolRows)
+	column := NewColumnStructArray("struct_array_slice", []Column{int64Col, boolCol})
 
-	int64Col := NewColumnInt64("id", int64Data)
-	boolCol := NewColumnBool("flag", boolData)
-
-	fields := []Column{int64Col, boolCol}
-	column := NewColumnStructArray(name, fields)
-
-	// Test Slice(1, 4) - should slice all sub-fields
 	sliced := column.Slice(1, 4)
 	s.NotNil(sliced)
+	s.EqualValues(3, sliced.Len())
 
-	// Verify sliced data
 	val, err := sliced.Get(0)
 	s.NoError(err)
-	m, ok := val.(map[string]any)
-	s.True(ok)
-	s.Equal(int64(20), m["id"])
-	s.Equal(false, m["flag"])
-
-	val, err = sliced.Get(2)
-	s.NoError(err)
-	m, ok = val.(map[string]any)
-	s.True(ok)
-	s.Equal(int64(40), m["id"])
-	s.Equal(false, m["flag"])
+	m := val.(map[string]any)
+	s.Equal([]int64{20, 21}, m["id"])
+	s.Equal([]bool{false, true}, m["flag"])
 }
 
-func (s *StructArraySuite) TestNullable() {
-	name := "struct_array_nullable"
+func (s *StructArraySuite) TestAppendValue() {
+	intCol := NewColumnInt32Array("a", nil)
+	strCol := NewColumnVarCharArray("b", nil)
+	column := NewColumnStructArray("rows", []Column{intCol, strCol})
 
-	// Create sub-fields
-	int32Data := []int32{1, 2, 3}
-	int32Col := NewColumnInt32("field1", int32Data)
+	s.NoError(column.AppendValue(map[string]any{"a": []int32{1, 2}, "b": []string{"x", "y"}}))
+	s.NoError(column.AppendValue(map[string]any{"a": []int32{3}, "b": []string{"z"}}))
+	s.EqualValues(2, column.Len())
 
-	varcharData := []string{"x", "y", "z"}
-	varcharCol := NewColumnVarChar("field2", varcharData)
-
-	fields := []Column{int32Col, varcharCol}
-	column := NewColumnStructArray(name, fields)
-
-	// Test Nullable() - should return false by default
-	s.False(column.Nullable())
-
-	// Test ValidateNullable() - should validate all sub-fields
-	err := column.ValidateNullable()
-	s.NoError(err)
-
-	// Test CompactNullableValues() - should not panic
-	s.NotPanics(func() {
-		column.CompactNullableValues()
-	})
-}
-
-func (s *StructArraySuite) TestNotImplementedMethods() {
-	name := "struct_array_not_impl"
-
-	int32Data := []int32{1, 2, 3}
-	int32Col := NewColumnInt32("field1", int32Data)
-	fields := []Column{int32Col}
-	column := NewColumnStructArray(name, fields)
-
-	// Test AppendValue - should return error
-	err := column.AppendValue(map[string]any{"field1": int32(4)})
+	// missing sub-field
+	err := column.AppendValue(map[string]any{"a": []int32{4}})
 	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
 
-	// Test GetAsInt64 - should return error
-	_, err = column.GetAsInt64(0)
+	// wrong shape (scalar instead of array)
+	err = column.AppendValue(map[string]any{"a": int32(1), "b": []string{"q"}})
 	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
-
-	// Test GetAsString - should return error
-	_, err = column.GetAsString(0)
-	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
-
-	// Test GetAsDouble - should return error
-	_, err = column.GetAsDouble(0)
-	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
-
-	// Test GetAsBool - should return error
-	_, err = column.GetAsBool(0)
-	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
-
-	// Test IsNull - should return error
-	_, err = column.IsNull(0)
-	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
-
-	// Test AppendNull - should return error
-	err = column.AppendNull()
-	s.Error(err)
-	s.Contains(err.Error(), "not implemented")
 }
 
 func (s *StructArraySuite) TestParseStructArrayData() {
-	// Create a FieldData with struct array
 	int32FieldData := &schemapb.FieldData{
-		Type:      schemapb.DataType_Int32,
+		Type:      schemapb.DataType_Array,
 		FieldName: "age",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: []int32{10, 20, 30},
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Int32,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 11}}}},
+							{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{20}}}},
+							{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{30, 31, 32}}}},
+						},
 					},
 				},
 			},
@@ -208,13 +161,18 @@ func (s *StructArraySuite) TestParseStructArrayData() {
 	}
 
 	varcharFieldData := &schemapb.FieldData{
-		Type:      schemapb.DataType_VarChar,
+		Type:      schemapb.DataType_Array,
 		FieldName: "name",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: []string{"alice", "bob", "charlie"},
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_VarChar,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"alice", "ann"}}}},
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"bob"}}}},
+							{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"c1", "c2", "c3"}}}},
+						},
 					},
 				},
 			},
@@ -225,66 +183,135 @@ func (s *StructArraySuite) TestParseStructArrayData() {
 		Fields: []*schemapb.FieldData{int32FieldData, varcharFieldData},
 	}
 
-	// Test parseStructArrayData
-	column, err := parseStructArrayData("person", structArrayField, 0, -1)
+	col, err := parseStructArrayData("person", structArrayField, 0, -1)
 	s.NoError(err)
-	s.NotNil(column)
-	s.Equal("person", column.Name())
-	s.Equal(entity.FieldTypeArray, column.Type())
+	s.NotNil(col)
+	s.Equal("person", col.Name())
+	s.Equal(entity.FieldTypeArray, col.Type())
 
-	// Verify we can get values
-	val, err := column.Get(0)
+	val, err := col.Get(0)
 	s.NoError(err)
-	m, ok := val.(map[string]any)
-	s.True(ok)
-	s.Equal(int32(10), m["age"])
-	s.Equal("alice", m["name"])
+	m := val.(map[string]any)
+	s.Equal([]int32{10, 11}, m["age"])
+	s.Equal([]string{"alice", "ann"}, m["name"])
 
-	val, err = column.Get(1)
+	val, err = col.Get(1)
 	s.NoError(err)
-	m, ok = val.(map[string]any)
-	s.True(ok)
-	s.Equal(int32(20), m["age"])
-	s.Equal("bob", m["name"])
+	m = val.(map[string]any)
+	s.Equal([]int32{20}, m["age"])
+	s.Equal([]string{"bob"}, m["name"])
 }
 
-func (s *StructArraySuite) TestParseStructArrayDataWithRange() {
-	// Create a FieldData with struct array
-	int64FieldData := &schemapb.FieldData{
-		Type:      schemapb.DataType_Int64,
-		FieldName: "id",
+func (s *StructArraySuite) TestParseTopLevelArrayOfStruct() {
+	// Verify FieldDataColumn dispatches DataType_ArrayOfStruct to parseStructArrayData.
+	int32Sub := &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: "x",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: []int64{100, 200, 300, 400, 500},
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Int32,
+						Data: []*schemapb.ScalarField{
+							{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}},
+						},
 					},
 				},
 			},
 		},
 	}
+	top := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "wrap",
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{int32Sub}},
+		},
+	}
+	col, err := FieldDataColumn(top, 0, -1)
+	s.NoError(err)
+	s.Equal("wrap", col.Name())
+	val, err := col.Get(0)
+	s.NoError(err)
+	s.Equal([]int32{1, 2}, val.(map[string]any)["x"])
+}
 
-	structArrayField := &schemapb.StructArrayField{
-		Fields: []*schemapb.FieldData{int64FieldData},
+func (s *StructArraySuite) TestParseVectorArrayDataErrors() {
+	mkFD := func(elemType schemapb.DataType, dim int64, rows []*schemapb.VectorField) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_ArrayOfVector,
+			FieldName: "emb",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Dim: dim, ElementType: elemType, Data: rows,
+						},
+					},
+				},
+			},
+		}
 	}
 
-	// Test parseStructArrayData with range [1, 4)
-	column, err := parseStructArrayData("data", structArrayField, 1, 4)
-	s.NoError(err)
-	s.NotNil(column)
+	s.Run("unknown dim rejected", func() {
+		fd := mkFD(schemapb.DataType_FloatVector, 0, nil)
+		_, err := FieldDataColumn(fd, 0, -1)
+		s.Error(err)
+	})
 
-	// Verify sliced data (should contain indices 1, 2, 3)
-	val, err := column.Get(0)
-	s.NoError(err)
-	m, ok := val.(map[string]any)
-	s.True(ok)
-	s.Equal(int64(200), m["id"])
+	s.Run("payload not a multiple of dim", func() {
+		// dim=4 but row has 5 floats -> must error, not silently truncate.
+		row := &schemapb.VectorField{
+			Dim:  4,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5}}},
+		}
+		fd := mkFD(schemapb.DataType_FloatVector, 4, []*schemapb.VectorField{row})
+		_, err := FieldDataColumn(fd, 0, -1)
+		s.Error(err)
+	})
 
-	val, err = column.Get(2)
-	s.NoError(err)
-	m, ok = val.(map[string]any)
-	s.True(ok)
-	s.Equal(int64(400), m["id"])
+	s.Run("binary dim not multiple of 8", func() {
+		row := &schemapb.VectorField{
+			Dim:  4,
+			Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0}},
+		}
+		fd := mkFD(schemapb.DataType_BinaryVector, 4, []*schemapb.VectorField{row})
+		_, err := FieldDataColumn(fd, 0, -1)
+		s.Error(err)
+	})
+
+	s.Run("nil row rejected", func() {
+		fd := mkFD(schemapb.DataType_FloatVector, 4, []*schemapb.VectorField{nil})
+		_, err := FieldDataColumn(fd, 0, -1)
+		s.Error(err)
+	})
+}
+
+func (s *StructArraySuite) TestAppendValueRollback() {
+	intCol := NewColumnInt32Array("a", nil)
+	strCol := NewColumnVarCharArray("b", nil)
+	col := NewColumnStructArray("rows", []Column{intCol, strCol}).(*columnStructArray)
+
+	// Seed with one good row so both sub-columns are at length 1.
+	s.NoError(col.AppendValue(map[string]any{"a": []int32{1}, "b": []string{"x"}}))
+	s.EqualValues(1, col.Len())
+
+	// Second row: sub-field "a" accepts the []int32, but "b" gets wrong type —
+	// rollback must restore sub-column "a" to length 1 so the struct stays in lock-step.
+	err := col.AppendValue(map[string]any{"a": []int32{2}, "b": 42})
+	s.Error(err)
+	s.EqualValues(1, col.fields[0].Len(), "sub-field 'a' must be rolled back")
+	s.EqualValues(1, col.fields[1].Len(), "sub-field 'b' must not have been appended")
+	s.EqualValues(1, col.Len(), "struct array length stays consistent after rollback")
+}
+
+func (s *StructArraySuite) TestLenMismatchPanics() {
+	// Manually drift sub-column lengths to simulate a prior corruption and verify Len reports it.
+	intCol := NewColumnInt32Array("a", [][]int32{{1}, {2}})
+	strCol := NewColumnVarCharArray("b", [][]string{{"x"}})
+	col := NewColumnStructArray("rows", []Column{intCol, strCol})
+
+	s.Panics(func() { _ = col.Len() })
 }
 
 func TestStructArray(t *testing.T) {

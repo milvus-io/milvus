@@ -35,7 +35,6 @@ const (
 	PartitionStatsInfoPrefix            = MetaPrefix + "/partition-stats"
 	PartitionStatsCurrentVersionPrefix  = MetaPrefix + "/current-partition-stats-version"
 	StatsTaskPrefix                     = MetaPrefix + "/stats-task"
-	UpdateExternalCollectionTaskPrefix  = MetaPrefix + "/update-external-collection-task"
 	ExternalCollectionRefreshJobPrefix  = MetaPrefix + "/external-collection-refresh-job"
 	ExternalCollectionRefreshTaskPrefix = MetaPrefix + "/external-collection-refresh-task"
 	FileResourceMetaPrefix              = MetaPrefix + "/file_resource_info"

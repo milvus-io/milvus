@@ -24,9 +24,9 @@ import (
 func TestBalancer(t *testing.T) {
 	paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
 	sbalancer := mock_balancer.NewMockBalancer(t)
-	sbalancer.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
-		1: {ServerID: 1},
-		2: {ServerID: 2},
+	sbalancer.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1}, ResourceGroup: "rg1"},
+		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2}, ResourceGroup: "rg2"},
 	}, nil)
 	sbalancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		if err := cb(balancer.WatchChannelAssignmentsCallbackParam{

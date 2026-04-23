@@ -106,6 +106,22 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				udpates.ConsistencyLevel = lv
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
+		case common.CollectionExternalSource:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSource = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
+		case common.CollectionExternalSpec:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSpec = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
 		}
@@ -157,6 +173,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			EnableDynamicField: coll.EnableDynamicField,
 			Properties:         newPropsKeyValuePairs,
 			Version:            coll.SchemaVersion,
+		}
+		// Preserve ExternalSource/ExternalSpec if they were set earlier in this request.
+		if udpates.Schema != nil {
+			schema.ExternalSource = udpates.Schema.ExternalSource
+			schema.ExternalSpec = udpates.Schema.ExternalSpec
 		}
 		udpates.Schema = schema
 	}
@@ -334,7 +355,14 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
 		})
+		if err != nil {
+			return errors.Wrap(err, "failed to update load config")
+		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
+			if errors.Is(err, merr.ErrResourceGroupNotFound) {
+				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				return nil
+			}
 			return errors.Wrap(err, "failed to update load config")
 		}
 	}

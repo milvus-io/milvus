@@ -1371,6 +1371,39 @@ func (_c *IMetaTable_CreateRole_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// DecFileResourceRefCnt provides a mock function with given fields: ids
+func (_m *IMetaTable) DecFileResourceRefCnt(ids []int64) {
+	_m.Called(ids)
+}
+
+// IMetaTable_DecFileResourceRefCnt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DecFileResourceRefCnt'
+type IMetaTable_DecFileResourceRefCnt_Call struct {
+	*mock.Call
+}
+
+// DecFileResourceRefCnt is a helper method to define mock.On call
+//   - ids []int64
+func (_e *IMetaTable_Expecter) DecFileResourceRefCnt(ids interface{}) *IMetaTable_DecFileResourceRefCnt_Call {
+	return &IMetaTable_DecFileResourceRefCnt_Call{Call: _e.mock.On("DecFileResourceRefCnt", ids)}
+}
+
+func (_c *IMetaTable_DecFileResourceRefCnt_Call) Run(run func(ids []int64)) *IMetaTable_DecFileResourceRefCnt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DecFileResourceRefCnt_Call) Return() *IMetaTable_DecFileResourceRefCnt_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *IMetaTable_DecFileResourceRefCnt_Call) RunAndReturn(run func([]int64)) *IMetaTable_DecFileResourceRefCnt_Call {
+	_c.Run(run)
+	return _c
+}
+
 // DeleteCredential provides a mock function with given fields: ctx, result
 func (_m *IMetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResult[*messagespb.DropUserMessageHeader, *messagespb.DropUserMessageBody]) error {
 	ret := _m.Called(ctx, result)
@@ -2424,6 +2457,52 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// IncFileResourceRefCnt provides a mock function with given fields: ids
+func (_m *IMetaTable) IncFileResourceRefCnt(ids []int64) error {
+	ret := _m.Called(ids)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IncFileResourceRefCnt")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]int64) error); ok {
+		r0 = rf(ids)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_IncFileResourceRefCnt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IncFileResourceRefCnt'
+type IMetaTable_IncFileResourceRefCnt_Call struct {
+	*mock.Call
+}
+
+// IncFileResourceRefCnt is a helper method to define mock.On call
+//   - ids []int64
+func (_e *IMetaTable_Expecter) IncFileResourceRefCnt(ids interface{}) *IMetaTable_IncFileResourceRefCnt_Call {
+	return &IMetaTable_IncFileResourceRefCnt_Call{Call: _e.mock.On("IncFileResourceRefCnt", ids)}
+}
+
+func (_c *IMetaTable_IncFileResourceRefCnt_Call) Run(run func(ids []int64)) *IMetaTable_IncFileResourceRefCnt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_IncFileResourceRefCnt_Call) Return(_a0 error) *IMetaTable_IncFileResourceRefCnt_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_IncFileResourceRefCnt_Call) RunAndReturn(run func([]int64) error) *IMetaTable_IncFileResourceRefCnt_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // InitCredential provides a mock function with given fields: ctx
 func (_m *IMetaTable) InitCredential(ctx context.Context) error {
 	ret := _m.Called(ctx)
@@ -3386,6 +3465,39 @@ func (_c *IMetaTable_OperateUserRole_Call) Return(_a0 error) *IMetaTable_Operate
 
 func (_c *IMetaTable_OperateUserRole_Call) RunAndReturn(run func(context.Context, string, *milvuspb.UserEntity, *milvuspb.RoleEntity, milvuspb.OperateUserRoleType) error) *IMetaTable_OperateUserRole_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RecoverFileResourceRefCnt provides a mock function with given fields: pendingCollections
+func (_m *IMetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
+	_m.Called(pendingCollections)
+}
+
+// IMetaTable_RecoverFileResourceRefCnt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RecoverFileResourceRefCnt'
+type IMetaTable_RecoverFileResourceRefCnt_Call struct {
+	*mock.Call
+}
+
+// RecoverFileResourceRefCnt is a helper method to define mock.On call
+//   - pendingCollections map[int64][]int64
+func (_e *IMetaTable_Expecter) RecoverFileResourceRefCnt(pendingCollections interface{}) *IMetaTable_RecoverFileResourceRefCnt_Call {
+	return &IMetaTable_RecoverFileResourceRefCnt_Call{Call: _e.mock.On("RecoverFileResourceRefCnt", pendingCollections)}
+}
+
+func (_c *IMetaTable_RecoverFileResourceRefCnt_Call) Run(run func(pendingCollections map[int64][]int64)) *IMetaTable_RecoverFileResourceRefCnt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[int64][]int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RecoverFileResourceRefCnt_Call) Return() *IMetaTable_RecoverFileResourceRefCnt_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *IMetaTable_RecoverFileResourceRefCnt_Call) RunAndReturn(run func(map[int64][]int64)) *IMetaTable_RecoverFileResourceRefCnt_Call {
+	_c.Run(run)
 	return _c
 }
 

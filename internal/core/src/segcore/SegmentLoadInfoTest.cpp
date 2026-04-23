@@ -1198,7 +1198,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesFromStats) {
     text_stats.set_version(1);
     text_stats.set_buildid(5001);
     text_stats.set_memory_size(1024);
-    text_stats.set_current_scalar_index_version(2);
+    text_stats.set_current_scalar_index_version(3);
     text_stats.add_files("/path/to/text_index_file1");
     text_stats.add_files("/path/to/text_index_file2");
 
@@ -1221,7 +1221,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesFromStats) {
     EXPECT_EQ(load_info->collectionid(), 200);
     EXPECT_EQ(load_info->partitionid(), 300);
     EXPECT_EQ(load_info->index_size(), 1024);
-    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 3);
 }
 
 TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesToCreate) {
@@ -1417,7 +1417,7 @@ TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
     text_stats.set_version(3);
     text_stats.set_buildid(5001);
     text_stats.set_memory_size(2048);
-    text_stats.set_current_scalar_index_version(2);
+    text_stats.set_current_scalar_index_version(3);
     text_stats.add_files("/path/to/file1");
     text_stats.add_files("/path/to/file2");
     text_stats.add_files("/path/to/file3");
@@ -1431,7 +1431,7 @@ TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
     EXPECT_EQ(load_info->version(), 3);
     EXPECT_EQ(load_info->buildid(), 5001);
     EXPECT_EQ(load_info->index_size(), 2048);
-    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 3);
     EXPECT_EQ(load_info->files_size(), 3);
     EXPECT_EQ(load_info->files(0), "/path/to/file1");
     EXPECT_EQ(load_info->files(1), "/path/to/file2");
@@ -1887,4 +1887,755 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
     for (const auto& fid : diff.fields_to_fill_default) {
         EXPECT_NE(fid.get(), 101);
     }
+}
+
+// ==================== Raw Data Lifecycle Tests ====================
+// Tests for field_data_to_drop generation and ComputeDiffReloadFields behavior
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataNoFieldDrop) {
+    // Test 1.1: When a new index has raw data (ASCENDING_SORT for scalar),
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop; field data is kept
+    // (binlog mode) or lazified (column groups mode).
+    // Scenario: current has no index -> new has ASCENDING_SORT index (raw=true)
+
+    // Current: only binlog for field 108 (INT64, extra_field1)
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+
+    // New: same binlog + ASCENDING_SORT index for field 108 (has raw data)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    // Initialize default fields
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "New index with raw data diff: " << diff.ToString() << "\n";
+
+    // Index should be in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReplaceIndexWithRawDataNoFieldDrop) {
+    // Test 1.2: When replacing an index and the new one has raw data,
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop.
+    // Scenario: current has INVERTED index -> new has ASCENDING_SORT index
+
+    // Current: field 108 has INVERTED index (no raw data)
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/inverted_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    // New: field 108 has ASCENDING_SORT index (has raw data), different index_id
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(108);
+    new_index->set_indexid(5002);
+    new_index->add_index_file_paths("/path/to/sort_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Replace index with raw data diff: " << diff.ToString()
+              << "\n";
+
+    // Index should be in indexes_to_replace
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexNoRawDataNoFieldDrop) {
+    // Test 1.3: When a new index has no raw data (INVERTED_INDEX_TYPE),
+    // field_data_to_drop should NOT include that field.
+
+    // Current: only binlog for field 108
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+
+    // New: same binlog + INVERTED index for field 108 (no raw data)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/inverted_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "New index no raw data diff: " << diff.ToString() << "\n";
+
+    // Index should be in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108 (no raw data)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffUnchangedIndexNoFieldDrop) {
+    // Test 1.4: When the index is unchanged (same index_id),
+    // field_data_to_drop should be empty.
+
+    // Both current and new: field 108 has ASCENDING_SORT index with same id
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(108);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog_108");
+    log->set_entries_num(1000);
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    // field_data_to_drop should be empty (no change)
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReloadFieldRawToNoRaw) {
+    // Test 1.5: When index changes from raw=true to raw=false,
+    // binlogs_to_replace should include the field's binlog.
+    // Scenario: current has ASCENDING_SORT (raw=true) -> new has INVERTED (raw=false)
+
+    // Current: field 108 with ASCENDING_SORT index + binlog
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/sort_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::ASCENDING_SORT);
+
+    // New: field 108 with INVERTED index (no raw) + same binlog
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(108);
+    new_index->set_indexid(5002);
+    new_index->add_index_file_paths("/path/to/inverted_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Raw->NoRaw reload diff: " << diff.ToString() << "\n";
+
+    // Index should be replaced
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(108)) > 0);
+
+    // binlogs_to_replace should include field 108 (need to reload raw data)
+    bool found_108_in_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 108) {
+                found_108_in_replace = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found_108_in_replace);
+
+    // fields_to_reload should be empty (new path uses binlogs_to_replace)
+    EXPECT_TRUE(diff.fields_to_reload.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReloadFieldIndexDropped) {
+    // Test 1.6: When an index is dropped and it had raw data,
+    // binlogs_to_replace should include the field's binlog.
+    // Scenario: current has ASCENDING_SORT (raw=true) -> new has no index
+
+    // Current: field 108 with ASCENDING_SORT index + binlog
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/sort_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::ASCENDING_SORT);
+
+    // New: field 108 with binlog only (no index)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Index dropped reload diff: " << diff.ToString() << "\n";
+
+    // Index should be dropped
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(108)) > 0);
+
+    // binlogs_to_replace should include field 108
+    bool found_108_in_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 108) {
+                found_108_in_replace = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found_108_in_replace);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNoReloadWhenIndexStaysRaw) {
+    // Test 1.7: When index stays raw=true (same index_id),
+    // no reload should happen.
+
+    // Both: field 108 with same ASCENDING_SORT index
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(108);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog_108");
+    log->set_entries_num(1000);
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // No changes at all
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.fields_to_reload.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+// -----------------------------------------------------------------------------
+// Tests for same-group file-change detection in ComputeDiffBinlogs and
+// ComputeDiffColumnGroups.
+// When compaction rewrites the data under the same group id / column group
+// index, the files list changes but the field layout does not. These tests
+// verify that the diff emits replace entries so the loader can evict stale
+// cached columns.
+// -----------------------------------------------------------------------------
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupDifferentFilesTriggersReplace) {
+    // Current: legacy field 105 pointing at binlog A
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_A");
+    cur_log->set_entries_num(1000);
+
+    // New: same group id, same child field, but a different log_path
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    new_proto.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/binlog_B");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.HasChanges());
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupDifferentFileCountTriggersReplace) {
+    // Current: legacy field 105 with one binlog file
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_A");
+    cur_log->set_entries_num(500);
+
+    // New: same group id, same child, but an additional binlog file (post
+    // compaction merging more files into the same group).
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    auto* extra_log = new_proto.mutable_binlog_paths(0)->add_binlogs();
+    extra_log->set_log_path("/path/to/binlog_B");
+    extra_log->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogSameGroupIdenticalFilesNoDiff) {
+    // Current and new have identical binlog contents under group 105.
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(105);
+    auto* log1 = binlog->add_binlogs();
+    log1->set_log_path("/path/to/binlog_A");
+    log1->set_entries_num(500);
+    auto* log2 = binlog->add_binlogs();
+    log2->set_log_path("/path/to/binlog_B");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogMultiFieldGroupIdenticalFilesNoDiff) {
+    // Multi-field (storage v2) binlog group: group id 200 carries children
+    // 105 and 106 under the same log file. Cur and new are identical, so
+    // the diff must be empty. Regression for a bug where the mapping
+    // lookup used the group id (which is not a map key) and spuriously
+    // routed both children into binlogs_to_replace.
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(200);
+    binlog->add_child_fields(105);
+    binlog->add_child_fields(106);
+    auto* log1 = binlog->add_binlogs();
+    log1->set_log_path("/path/to/group_binlog_A");
+    log1->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogMultiFieldGroupDifferentFilesReplacesAllChildren) {
+    // Same multi-field group shape on both sides but the underlying
+    // binlog file path changes — every child must land in
+    // binlogs_to_replace so the loader evicts the stale cached columns.
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(200);
+    cur_binlog->add_child_fields(105);
+    cur_binlog->add_child_fields(106);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/group_binlog_A");
+    cur_log->set_entries_num(1000);
+
+    proto::segcore::SegmentLoadInfo new_proto = current_proto;
+    new_proto.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/group_binlog_B");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    std::set<int64_t> replaced;
+    for (const auto& fid : diff.binlogs_to_replace[0].first) {
+        replaced.insert(fid.get());
+    }
+    EXPECT_EQ(replaced, (std::set<int64_t>{105, 106}));
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffBinlogSameGroupFilesChangedWithNewChildSplitsReplaceAndLoad) {
+    // Current: multi-field group 200 contains only child 105
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(200);
+    cur_binlog->add_child_fields(105);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/group_binlog_A");
+    cur_log->set_entries_num(1000);
+
+    // New: same group id 200 but files changed AND child 106 is newly added.
+    // Expect: 105 -> replace (already loaded, cache stale), 106 -> load (new).
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(200);
+    new_binlog->add_child_fields(105);
+    new_binlog->add_child_fields(106);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/group_binlog_B");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 105);
+
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1);
+    ASSERT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 106);
+
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+// ---- Column group same-index file-change detection ----
+
+namespace {
+
+// Build a ColumnGroups payload from a list of (fields, files) pairs so
+// tests can exercise ComputeDiffColumnGroups without a real manifest.
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+MakeColumnGroups(
+    std::initializer_list<
+        std::pair<std::vector<int64_t>, std::vector<std::string>>> groups) {
+    auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto& [field_ids, paths] : groups) {
+        auto cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        cg->format = "parquet";
+        for (auto fid : field_ids) {
+            cg->columns.push_back(std::to_string(fid));
+        }
+        for (const auto& p : paths) {
+            milvus_storage::api::ColumnGroupFile f;
+            f.path = p;
+            f.start_index = 0;
+            f.end_index = 0;
+            cg->files.push_back(std::move(f));
+        }
+        cgs->push_back(std::move(cg));
+    }
+    return cgs;
+}
+
+proto::segcore::SegmentLoadInfo
+MakeManifestProto(const std::string& manifest_path) {
+    proto::segcore::SegmentLoadInfo p;
+    p.set_segmentid(100);
+    p.set_num_of_rows(1000);
+    p.set_manifest_path(manifest_path);
+    return p;
+}
+
+}  // namespace
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexDifferentFilesTriggersReplace) {
+    // Two column groups with identical shape {105,106} at index 0, but the
+    // new manifest points at different parquet files. The pk (100) is in
+    // its own group at index 1 so it stays untouched.
+    auto current_cgs =
+        MakeColumnGroups({{{100}, {"/pk/file_A.parquet"}},
+                          {{105, 106}, {"/user/file_A.parquet"}}});
+    auto new_cgs = MakeColumnGroups({{{100}, {"/pk/file_A.parquet"}},
+                                     {{105, 106}, {"/user/file_B.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.manifest_updated);
+    // User fields (105, 106) at the unchanged index 1 must be replaced
+    // since the underlying parquet file changed.
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        if (idx == 1) {
+            saw_user_group = true;
+            std::set<int64_t> ids;
+            for (auto f : fields) {
+                ids.insert(f.get());
+            }
+            EXPECT_EQ(ids, (std::set<int64_t>{105, 106}));
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+    // PK group (index 0) had identical files; no replace entry for it.
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        EXPECT_NE(idx, 0);
+    }
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexIdenticalFilesNoReplace) {
+    auto cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}}, {{105, 106}, {"/user/file.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
+    current_info.SetColumnGroupsForTesting(cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v1"), schema_);
+    new_info.SetColumnGroupsForTesting(cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_FALSE(diff.manifest_updated);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_replace.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSameIndexDifferentFileCountTriggersReplace) {
+    auto current_cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}}, {{105, 106}, {"/user/a.parquet"}}});
+    auto new_cgs = MakeColumnGroups(
+        {{{100}, {"/pk/file.parquet"}},
+         {{105, 106}, {"/user/a.parquet", "/user/b.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        if (idx == 1) {
+            saw_user_group = true;
+            std::set<int64_t> ids;
+            for (auto f : fields) {
+                ids.insert(f.get());
+            }
+            EXPECT_EQ(ids, (std::set<int64_t>{105, 106}));
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupMovedFieldNotDoubleEmittedWithFilesChanged) {
+    // Current: field 106 lives at column-group index 0 (alongside 105).
+    // New: field 106 moves to a new column-group index 2, and the files
+    //      at index 0 also differ. 106 must appear exactly once in the
+    //      diff — as a "moved" entry under group 2, not also under 0.
+    auto current_cgs =
+        MakeColumnGroups({{{100}, {"/pk/file.parquet"}},
+                          {{105, 106}, {"/user/file_A.parquet"}}});
+    auto new_cgs = MakeColumnGroups({{{100}, {"/pk/file.parquet"}},
+                                     {{105}, {"/user/file_B.parquet"}},
+                                     {{106}, {"/moved/file.parquet"}}});
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    int emissions_for_106 = 0;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    for (const auto& [idx, fields] : diff.column_groups_to_lazyreplace) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    for (const auto& [idx, fields] : diff.column_groups_to_load) {
+        for (auto f : fields) {
+            if (f.get() == 106) {
+                emissions_for_106++;
+            }
+        }
+    }
+    EXPECT_EQ(emissions_for_106, 1);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       ComputeDiffColumnGroupSamePathDifferentRowRangeTriggersReplace) {
+    // Same file path on both sides, but the row range (start_index /
+    // end_index) differs — e.g. compaction re-slices a packed file.
+    // path-only comparison would miss this and leave stale cache.
+    auto make_cgs = [](int64_t start, int64_t end) {
+        auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
+        auto pk_cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        pk_cg->format = "parquet";
+        pk_cg->columns.push_back("100");
+        milvus_storage::api::ColumnGroupFile pk_file;
+        pk_file.path = "/pk/file.parquet";
+        pk_file.start_index = 0;
+        pk_file.end_index = 0;
+        pk_cg->files.push_back(std::move(pk_file));
+        cgs->push_back(std::move(pk_cg));
+
+        auto user_cg = std::make_shared<milvus_storage::api::ColumnGroup>();
+        user_cg->format = "parquet";
+        user_cg->columns.push_back("105");
+        user_cg->columns.push_back("106");
+        milvus_storage::api::ColumnGroupFile user_file;
+        user_file.path = "/user/packed.parquet";
+        user_file.start_index = start;
+        user_file.end_index = end;
+        user_cg->files.push_back(std::move(user_file));
+        cgs->push_back(std::move(user_cg));
+        return cgs;
+    };
+
+    auto current_cgs = make_cgs(0, 500);
+    auto new_cgs = make_cgs(500, 1000);
+
+    SegmentLoadInfo current_info(MakeManifestProto("/manifest/old"), schema_);
+    current_info.SetColumnGroupsForTesting(current_cgs);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/new"), schema_);
+    new_info.SetColumnGroupsForTesting(new_cgs);
+
+    auto diff = current_info.ComputeDiff(new_info);
+
+    bool saw_user_group = false;
+    for (const auto& [idx, fields] : diff.column_groups_to_replace) {
+        std::set<int64_t> ids;
+        for (auto f : fields) {
+            ids.insert(f.get());
+        }
+        if (ids == std::set<int64_t>{105, 106}) {
+            saw_user_group = true;
+        }
+    }
+    EXPECT_TRUE(saw_user_group);
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
 }

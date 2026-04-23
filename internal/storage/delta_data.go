@@ -225,6 +225,8 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 		dl.Pk = &Int64PrimaryKey{}
 	case schemapb.DataType_VarChar:
 		dl.Pk = &VarCharPrimaryKey{}
+	default:
+		return fmt.Errorf("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
 	}
 
 	if err = json.Unmarshal(*messageMap["pk"], dl.Pk); err != nil {

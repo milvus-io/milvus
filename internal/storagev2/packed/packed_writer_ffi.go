@@ -69,6 +69,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
+			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 		}
 	}
 
@@ -150,6 +151,15 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 	}, nil
 }
 
+// AsNewColumnGroups marks this writer so that Close() calls loon_transaction_add_column_group
+// for each written column group instead of loon_transaction_append_files.
+// Call this when the written columns are brand-new additions to an existing manifest
+// (e.g. function-field backfill), not when appending more files to the same column structure.
+func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
+	pw.addNewColumnGroups = true
+	return pw
+}
+
 func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	var caa cdata.CArrowArray
 	var cas cdata.CArrowSchema
@@ -178,15 +188,30 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transationHandle C.LoonTransactionHandle
 
-	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), 1, &transationHandle)
+	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transationHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
 	defer C.loon_transaction_destroy(transationHandle)
 
-	result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return "", err
+	if pw.addNewColumnGroups {
+		// Each written group is a brand-new column group: add them one-by-one.
+		// loon_transaction_append_files requires the count to match existing groups,
+		// which would fail when extending the schema (e.g. backfill adds sparse vector
+		// to a manifest that already has 2 groups of different columns).
+		numGroups := int(cColumnGroups.num_of_column_groups)
+		colGroupSlice := (*[1 << 20]C.LoonColumnGroup)(unsafe.Pointer(cColumnGroups.column_group_array))[:numGroups:numGroups]
+		for i := range colGroupSlice {
+			result = C.loon_transaction_add_column_group(transationHandle, &colGroupSlice[i])
+			if err := HandleLoonFFIResult(result); err != nil {
+				return "", err
+			}
+		}
+	} else {
+		result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
+		if err := HandleLoonFFIResult(result); err != nil {
+			return "", err
+		}
 	}
 
 	var cCommitVersion C.int64_t

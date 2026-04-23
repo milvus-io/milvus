@@ -227,7 +227,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             auto index =
                 std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
             index->Build(config);
-            auto create_index_result = index->Upload();
+            auto create_index_result = index->UploadUnified({});
             auto index_files = create_index_result->GetIndexFiles();
 
             std::map<std::string, std::string> index_params{
@@ -235,6 +235,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
                 {milvus::index::MIN_GRAM, "2"},
                 {milvus::index::MAX_GRAM, "4"},
                 {milvus::LOAD_PRIORITY, "HIGH"},
+                {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
             };
             LoadIndexInfo load_index_info;
             load_index_info.collection_id = collection_id;

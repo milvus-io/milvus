@@ -1,9 +1,11 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,6 +373,8 @@ func VerifyNullableVectorDataWithFieldName(t *testing.T, vt NullableVectorType, 
 
 // create collection with nullable fields and insert with column / nullableColumn
 func TestNullableDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -396,6 +400,9 @@ func TestNullableDefault(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 
 	// describe collection and check nullable fields
 	descCollection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
@@ -442,6 +449,8 @@ func TestNullableDefault(t *testing.T) {
 
 // create collection with default value and insert with column / nullableColumn
 func TestDefaultValueDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -464,6 +473,9 @@ func TestDefaultValueDefault(t *testing.T) {
 	// create collection with strong consistency to ensure inserted data is immediately visible
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	common.CheckFieldsDefaultValue(t, map[string]interface{}{
 		defaultBoolField.Name:    true,
@@ -535,6 +547,8 @@ func TestDefaultValueDefault(t *testing.T) {
 }
 
 func TestNullableInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -567,6 +581,8 @@ func TestNullableInvalid(t *testing.T) {
 }
 
 func TestDefaultValueInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -601,6 +617,8 @@ func TestDefaultValueInvalid(t *testing.T) {
 }
 
 func TestDefaultValueInvalidValue(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -697,6 +715,8 @@ func TestDefaultValueInvalidValue(t *testing.T) {
 }
 
 func TestDefaultValueOutOfRange(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	pkField := entity.NewField().WithName(common.GenRandomString("pk", 3)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -742,6 +762,8 @@ func TestDefaultValueOutOfRange(t *testing.T) {
 
 // test default value "" and insert ""
 func TestDefaultValueVarcharEmpty(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -783,6 +805,8 @@ func TestDefaultValueVarcharEmpty(t *testing.T) {
 
 // test insert with nullableColumn into normal collection
 func TestNullableDefaultInsertInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -803,6 +827,8 @@ func TestNullableDefaultInsertInvalid(t *testing.T) {
 
 // test insert with part/all/not null -> query check
 func TestNullableQuery(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -855,6 +881,8 @@ func TestNullableQuery(t *testing.T) {
 
 // test insert with part/all/not default value -> query check
 func TestDefaultValueQuery(t *testing.T) {
+	t.Parallel()
+
 	for _, nullable := range [2]bool{false, true} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -912,6 +940,8 @@ func TestDefaultValueQuery(t *testing.T) {
 
 // clustering-key nullable
 func TestNullableClusteringKey(t *testing.T) {
+	t.Parallel()
+
 	// test clustering key nullable
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -943,6 +973,8 @@ func TestNullableClusteringKey(t *testing.T) {
 
 // partition-key nullable
 func TestDefaultValuePartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -973,6 +1005,8 @@ func TestDefaultValuePartitionKey(t *testing.T) {
 }
 
 func TestNullableGroubBy(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1005,6 +1039,8 @@ func TestNullableGroubBy(t *testing.T) {
 }
 
 func TestNullableSearch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1042,6 +1078,8 @@ func TestNullableSearch(t *testing.T) {
 }
 
 func TestDefaultValueSearch(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithDefaultValue("test").TWithNullable(true))
@@ -1079,6 +1117,8 @@ func TestDefaultValueSearch(t *testing.T) {
 
 // test nullable fields in all scalar index
 func TestNullableAutoScalarIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1104,6 +1144,9 @@ func TestNullableAutoScalarIndex(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 
 	// describe collection and check nullable fields
 	descCollection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
@@ -1143,6 +1186,8 @@ func TestNullableAutoScalarIndex(t *testing.T) {
 }
 
 func TestNullableUpsert(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1195,6 +1240,8 @@ func TestNullableUpsert(t *testing.T) {
 }
 
 func TestNullableDelete(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1224,6 +1271,8 @@ func TestNullableDelete(t *testing.T) {
 
 // TestNullableRows tests row-based insert with nullable varchar using pointer fields.
 func TestNullableRows(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1250,6 +1299,8 @@ func TestNullableRows(t *testing.T) {
 
 // TestNullableRowsAllScalarTypes tests row-based insert with all nullable scalar types using pointer fields.
 func TestNullableRowsAllScalarTypes(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1270,6 +1321,9 @@ func TestNullableRowsAllScalarTypes(t *testing.T) {
 
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// Create index and load
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.L2)))
@@ -1309,6 +1363,8 @@ func TestNullableRowsAllScalarTypes(t *testing.T) {
 
 // TestNullableRowsAllNullAndAllValid tests edge cases: all null and all valid rows.
 func TestNullableRowsAllNullAndAllValid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1354,6 +1410,8 @@ func TestNullableRowsAllNullAndAllValid(t *testing.T) {
 
 // TestNullableRowsUpsert tests upserting with nullable pointer rows.
 func TestNullableRowsUpsert(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1392,6 +1450,8 @@ func TestNullableRowsUpsert(t *testing.T) {
 }
 
 func TestNullableVectorAllTypes(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 	nullPercents := GetNullPercents()
 
@@ -1413,6 +1473,9 @@ func TestNullableVectorAllTypes(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 500
 				validData := make([]bool, nb)
@@ -1689,6 +1752,8 @@ func TestNullableVectorAllTypes(t *testing.T) {
 }
 
 func TestNullableVectorWithScalarFilter(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 	nullPercents := GetNullPercents()
 
@@ -1776,6 +1841,8 @@ func TestNullableVectorWithScalarFilter(t *testing.T) {
 }
 
 func TestNullableVectorDelete(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 	nullPercents := GetNullPercents()
 
@@ -1796,6 +1863,9 @@ func TestNullableVectorDelete(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 100
 				testData := GenerateNullableVectorTestData(t, vt, nb, nullPercent, "vector")
@@ -1872,6 +1942,8 @@ func TestNullableVectorDelete(t *testing.T) {
 }
 
 func TestNullableVectorUpsert(t *testing.T) {
+	t.Parallel()
+
 	autoIDOptions := []bool{false, true}
 
 	for _, autoID := range autoIDOptions {
@@ -1892,6 +1964,9 @@ func TestNullableVectorUpsert(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// Insert initial data: 100 rows
 			// Rows 0 to nullPercent-1: valid vector, scalar = i*10
@@ -2180,6 +2255,8 @@ func TestNullableVectorUpsert(t *testing.T) {
 }
 
 func TestNullableVectorAllNull(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -2198,6 +2275,9 @@ func TestNullableVectorAllNull(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// Generate test data with 100% null (nullPercent = 100)
 			nb := 10000
@@ -2298,6 +2378,8 @@ func TestNullableVectorAllNull(t *testing.T) {
 }
 
 func TestNullableVectorMultiFields(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -2318,6 +2400,9 @@ func TestNullableVectorMultiFields(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// generate data: vec1 has 70% valid (first 30 per 100 are invalid), vec2 has 30% valid (first 70 per 100 are invalid)
 			nb := 100
@@ -2411,6 +2496,8 @@ func TestNullableVectorMultiFields(t *testing.T) {
 }
 
 func TestNullableVectorPaginatedQuery(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 	nullPercents := GetNullPercents()
 
@@ -2503,6 +2590,8 @@ func TestNullableVectorPaginatedQuery(t *testing.T) {
 }
 
 func TestNullableVectorMultiPartitions(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -2521,6 +2610,9 @@ func TestNullableVectorMultiPartitions(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// create partitions
 			partitions := []string{"partition_a", "partition_b", "partition_c"}
@@ -2699,6 +2791,8 @@ func TestNullableVectorMultiPartitions(t *testing.T) {
 }
 
 func TestNullableVectorCompaction(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -2717,6 +2811,9 @@ func TestNullableVectorCompaction(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// insert data in multiple batches to create multiple segments
 			nb := 200
@@ -2885,6 +2982,8 @@ func TestNullableVectorCompaction(t *testing.T) {
 }
 
 func TestNullableVectorAddField(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -2899,6 +2998,9 @@ func TestNullableVectorAddField(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			nb := 100
 			pkData1 := make([]int64, nb)
@@ -3043,6 +3145,8 @@ func TestNullableVectorAddField(t *testing.T) {
 }
 
 func TestNullableVectorRangeSearch(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 
 	for _, vt := range vectorTypes {
@@ -3061,6 +3165,9 @@ func TestNullableVectorRangeSearch(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// generate data with 30% null
 			nb := 500
@@ -3184,10 +3291,206 @@ func TestNullableVectorRangeSearch(t *testing.T) {
 
 // index building on both SegmentGrowingImpl and ChunkedSegmentSealedImpl
 func TestNullableVectorDifferentIndexTypes(t *testing.T) {
+	t.Parallel()
+
 	vectorTypes := GetVectorTypes()
 	nullPercents := GetNullPercents()
-
 	segmentTypes := []string{"growing", "sealed"}
+
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	wg := sync.WaitGroup{}
+
+	testFunc := func(vt NullableVectorType, nullPercent int, segmentType string, idxCfg IndexConfig, testName string) {
+		defer func() {
+			wg.Done()
+			<-ch
+		}()
+		t.Run(testName, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*10)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+			// Create collection with nullable vector
+			collName := common.GenRandomString("nullable_vec_large", 5)
+			pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+			vecField := entity.NewField().WithName("vector").WithDataType(vt.FieldType).WithNullable(true)
+			if vt.FieldType != entity.FieldTypeSparseVector {
+				vecField = vecField.WithDim(common.DefaultDim)
+			}
+			schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
+
+			nb := 5000
+			validData := make([]bool, nb)
+			validCount := 0
+			for i := range nb {
+				validData[i] = (i % 100) >= nullPercent
+				if validData[i] {
+					validCount++
+				}
+			}
+
+			pkToVecIdx := make(map[int64]int)
+			vecIdx := 0
+			for i := range nb {
+				if validData[i] {
+					pkToVecIdx[int64(i)] = vecIdx
+					vecIdx++
+				}
+			}
+
+			// Generate pk column
+			pkData := make([]int64, nb)
+			for i := range nb {
+				pkData[i] = int64(i)
+			}
+			pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, pkData)
+
+			// Generate vector column based on type
+			var vecColumn column.Column
+			var searchVec entity.Vector
+			var originalVectors interface{}
+
+			switch vt.FieldType {
+			case entity.FieldTypeFloatVector:
+				vectors := make([][]float32, validCount)
+				for i := range validCount {
+					vec := make([]float32, common.DefaultDim)
+					for j := range common.DefaultDim {
+						vec[j] = float32(i*common.DefaultDim+j) / float32(validCount*common.DefaultDim)
+					}
+					vectors[i] = vec
+				}
+				vecColumn, err = column.NewNullableColumnFloatVector("vector", common.DefaultDim, vectors, validData)
+				searchVec = entity.FloatVector(vectors[0])
+				originalVectors = vectors
+
+			case entity.FieldTypeBinaryVector:
+				vectors := make([][]byte, validCount)
+				byteDim := common.DefaultDim / 8
+				for i := range validCount {
+					vec := make([]byte, byteDim)
+					for j := range byteDim {
+						vec[j] = byte((i + j) % 256)
+					}
+					vectors[i] = vec
+				}
+				vecColumn, err = column.NewNullableColumnBinaryVector("vector", common.DefaultDim, vectors, validData)
+				searchVec = entity.BinaryVector(vectors[0])
+				originalVectors = vectors
+
+			case entity.FieldTypeFloat16Vector:
+				vectors := make([][]byte, validCount)
+				for i := range validCount {
+					vectors[i] = common.GenFloat16Vector(common.DefaultDim)
+				}
+				vecColumn, err = column.NewNullableColumnFloat16Vector("vector", common.DefaultDim, vectors, validData)
+				searchVec = entity.Float16Vector(vectors[0])
+				originalVectors = vectors
+
+			case entity.FieldTypeBFloat16Vector:
+				vectors := make([][]byte, validCount)
+				for i := range validCount {
+					vectors[i] = common.GenBFloat16Vector(common.DefaultDim)
+				}
+				vecColumn, err = column.NewNullableColumnBFloat16Vector("vector", common.DefaultDim, vectors, validData)
+				searchVec = entity.BFloat16Vector(vectors[0])
+				originalVectors = vectors
+
+			case entity.FieldTypeInt8Vector:
+				vectors := make([][]int8, validCount)
+				for i := range validCount {
+					vec := make([]int8, common.DefaultDim)
+					for j := range common.DefaultDim {
+						vec[j] = int8((i + j) % 127)
+					}
+					vectors[i] = vec
+				}
+				vecColumn, err = column.NewNullableColumnInt8Vector("vector", common.DefaultDim, vectors, validData)
+				searchVec = entity.Int8Vector(vectors[0])
+				originalVectors = vectors
+
+			case entity.FieldTypeSparseVector:
+				vectors := make([]entity.SparseEmbedding, validCount)
+				for i := range validCount {
+					positions := []uint32{0, uint32(i%1000 + 1), uint32(i%10000 + 1000)}
+					values := []float32{1.0, float32(i+1) / 1000.0, 0.1}
+					vectors[i], err = entity.NewSliceSparseEmbedding(positions, values)
+					common.CheckErr(t, err, true)
+				}
+				vecColumn, err = column.NewNullableColumnSparseFloatVector("vector", vectors, validData)
+				searchVec = vectors[0]
+				originalVectors = vectors
+			}
+			common.CheckErr(t, err, true)
+
+			// Insert data
+			insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, pkColumn, vecColumn))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, nb, insertRes.InsertCount)
+
+			// For sealed segment, flush before creating index to convert growing to sealed
+			if segmentType == "sealed" {
+				flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+				common.CheckErr(t, err, true)
+				err = flushTask.Await(ctx)
+				common.CheckErr(t, err, true)
+			}
+
+			// Create index using the config for this test iteration
+			vecIndex := CreateIndexFromConfig("vector", idxCfg)
+			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "vector", vecIndex))
+			common.CheckErr(t, err, true)
+			err = indexTask.Await(ctx)
+			common.CheckErr(t, err, true)
+
+			// Load collection - specify load fields to potentially skip loading vector raw data
+			// When vector has index and is specified in LoadFields, system may use index instead of field data
+			loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName).
+				WithLoadFields(common.DefaultInt64FieldName, "vector")) // Load pk and vector (via index)
+			common.CheckErr(t, err, true)
+			err = loadTask.Await(ctx)
+			common.CheckErr(t, err, true)
+
+			// Search
+			searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 10, []entity.Vector{searchVec}).
+				WithOutputFields("*").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, 1, len(searchRes))
+			require.GreaterOrEqual(t, searchRes[0].ResultCount, 1)
+
+			// Verify search results
+			VerifyNullableVectorData(t, vt, searchRes[0], pkToVecIdx, originalVectors, "search")
+
+			// Query to count rows
+			queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithFilter(fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)).
+				WithOutputFields("count(*)"))
+			common.CheckErr(t, err, true)
+			countCol := queryRes.GetColumn("count(*)")
+			count, _ := countCol.GetAsInt64(0)
+			require.EqualValues(t, nb, count)
+
+			// Query with vector output to verify data
+			queryVecRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithFilter(fmt.Sprintf("%s < 100", common.DefaultInt64FieldName)).
+				WithOutputFields("*"))
+			common.CheckErr(t, err, true)
+
+			// Verify query results
+			VerifyNullableVectorData(t, vt, queryVecRes, pkToVecIdx, originalVectors, "query")
+
+			// Clean up
+			err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+			common.CheckErr(t, err, true)
+		})
+	}
 
 	for _, vt := range vectorTypes {
 		indexConfigs := GetIndexesForVectorType(vt.FieldType)
@@ -3206,195 +3509,19 @@ func TestNullableVectorDifferentIndexTypes(t *testing.T) {
 
 				for _, idxCfg := range testIndexConfigs {
 					testName := fmt.Sprintf("%s_%s_%d%%null_%s", vt.Name, idxCfg.Name, nullPercent, segmentType)
-					idxCfgCopy := idxCfg // capture loop variable
-					t.Run(testName, func(t *testing.T) {
-						ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*10)
-						mc := hp.CreateDefaultMilvusClient(ctx, t)
-
-						// Create collection with nullable vector
-						collName := common.GenRandomString("nullable_vec_large", 5)
-						pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-						vecField := entity.NewField().WithName("vector").WithDataType(vt.FieldType).WithNullable(true)
-						if vt.FieldType != entity.FieldTypeSparseVector {
-							vecField = vecField.WithDim(common.DefaultDim)
-						}
-						schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
-
-						err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
-						common.CheckErr(t, err, true)
-
-						nb := 10000
-						validData := make([]bool, nb)
-						validCount := 0
-						for i := range nb {
-							validData[i] = (i % 100) >= nullPercent
-							if validData[i] {
-								validCount++
-							}
-						}
-
-						pkToVecIdx := make(map[int64]int)
-						vecIdx := 0
-						for i := range nb {
-							if validData[i] {
-								pkToVecIdx[int64(i)] = vecIdx
-								vecIdx++
-							}
-						}
-
-						// Generate pk column
-						pkData := make([]int64, nb)
-						for i := range nb {
-							pkData[i] = int64(i)
-						}
-						pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, pkData)
-
-						// Generate vector column based on type
-						var vecColumn column.Column
-						var searchVec entity.Vector
-						var originalVectors interface{}
-
-						switch vt.FieldType {
-						case entity.FieldTypeFloatVector:
-							vectors := make([][]float32, validCount)
-							for i := range validCount {
-								vec := make([]float32, common.DefaultDim)
-								for j := range common.DefaultDim {
-									vec[j] = float32(i*common.DefaultDim+j) / float32(validCount*common.DefaultDim)
-								}
-								vectors[i] = vec
-							}
-							vecColumn, err = column.NewNullableColumnFloatVector("vector", common.DefaultDim, vectors, validData)
-							searchVec = entity.FloatVector(vectors[0])
-							originalVectors = vectors
-
-						case entity.FieldTypeBinaryVector:
-							vectors := make([][]byte, validCount)
-							byteDim := common.DefaultDim / 8
-							for i := range validCount {
-								vec := make([]byte, byteDim)
-								for j := range byteDim {
-									vec[j] = byte((i + j) % 256)
-								}
-								vectors[i] = vec
-							}
-							vecColumn, err = column.NewNullableColumnBinaryVector("vector", common.DefaultDim, vectors, validData)
-							searchVec = entity.BinaryVector(vectors[0])
-							originalVectors = vectors
-
-						case entity.FieldTypeFloat16Vector:
-							vectors := make([][]byte, validCount)
-							for i := range validCount {
-								vectors[i] = common.GenFloat16Vector(common.DefaultDim)
-							}
-							vecColumn, err = column.NewNullableColumnFloat16Vector("vector", common.DefaultDim, vectors, validData)
-							searchVec = entity.Float16Vector(vectors[0])
-							originalVectors = vectors
-
-						case entity.FieldTypeBFloat16Vector:
-							vectors := make([][]byte, validCount)
-							for i := range validCount {
-								vectors[i] = common.GenBFloat16Vector(common.DefaultDim)
-							}
-							vecColumn, err = column.NewNullableColumnBFloat16Vector("vector", common.DefaultDim, vectors, validData)
-							searchVec = entity.BFloat16Vector(vectors[0])
-							originalVectors = vectors
-
-						case entity.FieldTypeInt8Vector:
-							vectors := make([][]int8, validCount)
-							for i := range validCount {
-								vec := make([]int8, common.DefaultDim)
-								for j := range common.DefaultDim {
-									vec[j] = int8((i + j) % 127)
-								}
-								vectors[i] = vec
-							}
-							vecColumn, err = column.NewNullableColumnInt8Vector("vector", common.DefaultDim, vectors, validData)
-							searchVec = entity.Int8Vector(vectors[0])
-							originalVectors = vectors
-
-						case entity.FieldTypeSparseVector:
-							vectors := make([]entity.SparseEmbedding, validCount)
-							for i := range validCount {
-								positions := []uint32{0, uint32(i%1000 + 1), uint32(i%10000 + 1000)}
-								values := []float32{1.0, float32(i+1) / 1000.0, 0.1}
-								vectors[i], err = entity.NewSliceSparseEmbedding(positions, values)
-								common.CheckErr(t, err, true)
-							}
-							vecColumn, err = column.NewNullableColumnSparseFloatVector("vector", vectors, validData)
-							searchVec = vectors[0]
-							originalVectors = vectors
-						}
-						common.CheckErr(t, err, true)
-
-						// Insert data
-						insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, pkColumn, vecColumn))
-						common.CheckErr(t, err, true)
-						require.EqualValues(t, nb, insertRes.InsertCount)
-
-						// For sealed segment, flush before creating index to convert growing to sealed
-						if segmentType == "sealed" {
-							flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
-							common.CheckErr(t, err, true)
-							err = flushTask.Await(ctx)
-							common.CheckErr(t, err, true)
-						}
-
-						// Create index using the config for this test iteration
-						vecIndex := CreateIndexFromConfig("vector", idxCfgCopy)
-						indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "vector", vecIndex))
-						common.CheckErr(t, err, true)
-						err = indexTask.Await(ctx)
-						common.CheckErr(t, err, true)
-
-						// Load collection - specify load fields to potentially skip loading vector raw data
-						// When vector has index and is specified in LoadFields, system may use index instead of field data
-						loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName).
-							WithLoadFields(common.DefaultInt64FieldName, "vector")) // Load pk and vector (via index)
-						common.CheckErr(t, err, true)
-						err = loadTask.Await(ctx)
-						common.CheckErr(t, err, true)
-
-						// Search
-						searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 10, []entity.Vector{searchVec}).
-							WithOutputFields("*").
-							WithConsistencyLevel(entity.ClStrong))
-						common.CheckErr(t, err, true)
-						require.EqualValues(t, 1, len(searchRes))
-						require.GreaterOrEqual(t, searchRes[0].ResultCount, 1)
-
-						// Verify search results
-						VerifyNullableVectorData(t, vt, searchRes[0], pkToVecIdx, originalVectors, "search")
-
-						// Query to count rows
-						queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
-							WithFilter(fmt.Sprintf("%s >= 0", common.DefaultInt64FieldName)).
-							WithOutputFields("count(*)"))
-						common.CheckErr(t, err, true)
-						countCol := queryRes.GetColumn("count(*)")
-						count, _ := countCol.GetAsInt64(0)
-						require.EqualValues(t, nb, count)
-
-						// Query with vector output to verify data
-						queryVecRes, err := mc.Query(ctx, client.NewQueryOption(collName).
-							WithFilter(fmt.Sprintf("%s < 100", common.DefaultInt64FieldName)).
-							WithOutputFields("*"))
-						common.CheckErr(t, err, true)
-
-						// Verify query results
-						VerifyNullableVectorData(t, vt, queryVecRes, pkToVecIdx, originalVectors, "query")
-
-						// Clean up
-						err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
-						common.CheckErr(t, err, true)
-					})
+					ch <- struct{}{}
+					wg.Add(1)
+					go testFunc(vt, nullPercent, segmentType, idxCfg, testName)
 				}
 			}
 		}
 	}
+	wg.Wait()
 }
 
 func TestNullableVectorGroupBy(t *testing.T) {
+	t.Parallel()
+
 	groupByVectorTypes := []NullableVectorType{
 		{"FloatVector", entity.FieldTypeFloatVector},
 		{"Float16Vector", entity.FieldTypeFloat16Vector},
@@ -3417,6 +3544,9 @@ func TestNullableVectorGroupBy(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 500
 				numGroups := 50

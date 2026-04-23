@@ -54,10 +54,11 @@ func InitExecExpressionFunctionFactory() {
 	C.InitExecExpressionFunctionFactory()
 }
 
-func InitLocalChunkManager(path string) {
+func InitLocalChunkManager(path string) error {
 	CLocalRootPath := C.CString(path)
 	defer C.free(unsafe.Pointer(CLocalRootPath))
-	C.InitLocalChunkManagerSingleton(CLocalRootPath)
+	status := C.InitLocalChunkManagerSingleton(CLocalRootPath)
+	return HandleCStatus(&status, "InitLocalChunkManagerSingleton failed")
 }
 
 func InitTraceConfig(params *paramtable.ComponentParam) {
@@ -207,6 +208,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		use_custom_part_upload: true,
 		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:        cTLSMinVersion,
+		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
 	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
@@ -264,6 +266,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		gcp_credential_json: cGcpCredentialJSON,
 		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:     cTLSMinVersion,
+		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -319,12 +322,13 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		return err
 	}
 	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
-	if deprecatedCacheWarmupPolicy == "sync" {
+	switch deprecatedCacheWarmupPolicy {
+	case "sync":
 		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
 		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
-	} else if deprecatedCacheWarmupPolicy == "async" {
+	case "async":
 		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
@@ -381,6 +385,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	cacheCellUnaccessedSurvivalTime := C.int64_t(params.QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
+	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
@@ -397,8 +402,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs,
-		prefetchPoolThreads)
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
+		loadingTimeoutMs, warmupLoadingTimeoutMs, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -407,6 +412,50 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
 		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
 	)
+
+	return nil
+}
+
+func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
+	scalarFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorFieldCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	if err != nil {
+		return err
+	}
+	deprecatedCacheWarmupPolicy := params.QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
+	switch deprecatedCacheWarmupPolicy {
+	case "sync":
+		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
+	case "async":
+		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+	}
+	scalarIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorIndexCacheWarmupPolicy, err := ConvertCacheWarmupPolicy(params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	if err != nil {
+		return err
+	}
+
+	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
+	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+
+	C.UpdateTieredStorageConfig(
+		loadingTimeoutMs,
+		warmupLoadingTimeoutMs,
+		storageUsageTrackingEnabled,
+		scalarFieldCacheWarmupPolicy,
+		vectorFieldCacheWarmupPolicy,
+		scalarIndexCacheWarmupPolicy,
+		vectorIndexCacheWarmupPolicy)
 
 	return nil
 }
@@ -515,6 +564,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateThreadPoolMaxThreadsSize(size)
+			return nil
+		})
+
 		paramtable.Get().CommonCfg.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -590,6 +648,17 @@ func SetupCoreConfigChangelCallback() {
 			UpdateExprResCacheCapacityBytes(capacity)
 			return nil
 		})
+
+		updateTieredStorageConfigCallback := func(ctx context.Context, key, oldValue, newValue string) error {
+			return UpdateTieredStorageConfig(paramtable.Get())
+		}
+		paramtable.Get().QueryNodeCfg.TieredLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredWarmupLoadingTimeoutMs.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.StorageUsageTrackingEnabled.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 

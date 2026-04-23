@@ -169,6 +169,7 @@ DefaultValueChunkTranslator::value_size() const {
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
+        case milvus::DataType::GEOMETRY:
             if (field_meta_.default_value().has_value()) {
                 auto default_value = field_meta_.default_value().value();
                 value_size = default_value.string_data().size() +
@@ -213,9 +214,9 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     auto rows = rows_end - rows_begin;
     auto cell_bytes = value_size * rows;
     if (use_mmap_) {
-        return {{0, cell_bytes}, {0, cell_bytes}};
+        return {{0, cell_bytes}, {0, 0}};
     } else {
-        return {{cell_bytes, 0}, {cell_bytes, 0}};
+        return {{cell_bytes, 0}, {0, 0}};
     }
 }
 

@@ -3265,6 +3265,53 @@ func (_c *MockProxy_Dummy_Call) RunAndReturn(run func(context.Context, *milvuspb
 	return _c
 }
 
+// DumpMessages provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DumpMessages(_a0 *milvuspb.DumpMessagesRequest, _a1 milvuspb.MilvusService_DumpMessagesServer) error {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DumpMessages")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockProxy_DumpMessages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DumpMessages'
+type MockProxy_DumpMessages_Call struct {
+	*mock.Call
+}
+
+// DumpMessages is a helper method to define mock.On call
+//   - _a0 *milvuspb.DumpMessagesRequest
+//   - _a1 milvuspb.MilvusService_DumpMessagesServer
+func (_e *MockProxy_Expecter) DumpMessages(_a0 interface{}, _a1 interface{}) *MockProxy_DumpMessages_Call {
+	return &MockProxy_DumpMessages_Call{Call: _e.mock.On("DumpMessages", _a0, _a1)}
+}
+
+func (_c *MockProxy_DumpMessages_Call) Run(run func(_a0 *milvuspb.DumpMessagesRequest, _a1 milvuspb.MilvusService_DumpMessagesServer)) *MockProxy_DumpMessages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*milvuspb.DumpMessagesRequest), args[1].(milvuspb.MilvusService_DumpMessagesServer))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DumpMessages_Call) Return(_a0 error) *MockProxy_DumpMessages_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockProxy_DumpMessages_Call) RunAndReturn(run func(*milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error) *MockProxy_DumpMessages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Flush provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) Flush(_a0 context.Context, _a1 *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7188,6 +7235,65 @@ func (_c *MockProxy_OperateUserRole_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// PinSnapshotData provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) PinSnapshotData(_a0 context.Context, _a1 *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PinSnapshotData")
+	}
+
+	var r0 *milvuspb.PinSnapshotDataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PinSnapshotDataRequest) *milvuspb.PinSnapshotDataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.PinSnapshotDataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.PinSnapshotDataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_PinSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PinSnapshotData'
+type MockProxy_PinSnapshotData_Call struct {
+	*mock.Call
+}
+
+// PinSnapshotData is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.PinSnapshotDataRequest
+func (_e *MockProxy_Expecter) PinSnapshotData(_a0 interface{}, _a1 interface{}) *MockProxy_PinSnapshotData_Call {
+	return &MockProxy_PinSnapshotData_Call{Call: _e.mock.On("PinSnapshotData", _a0, _a1)}
+}
+
+func (_c *MockProxy_PinSnapshotData_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.PinSnapshotDataRequest)) *MockProxy_PinSnapshotData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.PinSnapshotDataRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_PinSnapshotData_Call) Return(_a0 *milvuspb.PinSnapshotDataResponse, _a1 error) *MockProxy_PinSnapshotData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_PinSnapshotData_Call) RunAndReturn(run func(context.Context, *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error)) *MockProxy_PinSnapshotData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PushClientCommand provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8779,6 +8885,65 @@ func (_c *MockProxy_TruncateCollection_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// UnpinSnapshotData provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) UnpinSnapshotData(_a0 context.Context, _a1 *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnpinSnapshotData")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UnpinSnapshotDataRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UnpinSnapshotDataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_UnpinSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnpinSnapshotData'
+type MockProxy_UnpinSnapshotData_Call struct {
+	*mock.Call
+}
+
+// UnpinSnapshotData is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UnpinSnapshotDataRequest
+func (_e *MockProxy_Expecter) UnpinSnapshotData(_a0 interface{}, _a1 interface{}) *MockProxy_UnpinSnapshotData_Call {
+	return &MockProxy_UnpinSnapshotData_Call{Call: _e.mock.On("UnpinSnapshotData", _a0, _a1)}
+}
+
+func (_c *MockProxy_UnpinSnapshotData_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UnpinSnapshotDataRequest)) *MockProxy_UnpinSnapshotData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UnpinSnapshotDataRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_UnpinSnapshotData_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_UnpinSnapshotData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_UnpinSnapshotData_Call) RunAndReturn(run func(context.Context, *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error)) *MockProxy_UnpinSnapshotData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateCredential provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) UpdateCredential(_a0 context.Context, _a1 *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -9112,8 +9277,7 @@ func (_c *MockProxy_Upsert_Call) RunAndReturn(run func(context.Context, *milvusp
 func NewMockProxy(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockProxy {
+}) *MockProxy {
 	mock := &MockProxy{}
 	mock.Mock.Test(t)
 

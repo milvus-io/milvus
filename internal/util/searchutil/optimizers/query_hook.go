@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -22,9 +23,14 @@ type QueryHook interface {
 	Init(string) error
 	InitTuningConfig(map[string]string) error
 	DeleteTuningConfig(string) error
+	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
 }
 
-func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
+// OptimizeSearchParams optimizes search parameters using the query hook.
+// numSegments is the effective segment number, pre-computed by the caller via CalculateEffectiveSegmentNum.
+// isSecondStageSearch is true for the vector search stage of two-stage search, refer to delegator_twostage.go.
+// At this time, we need to set WithFilterKey to false to allow some aggressive optimizations.
+func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, isSecondStageSearch bool, dimFunc func(fieldID int64) int64) (*querypb.SearchRequest, error) {
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		req.Req.IsTopkReduce = false
@@ -67,7 +73,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.TopKKey:         queryInfo.GetTopk(),
 			common.SearchParamKey:  queryInfo.GetSearchParams(),
 			common.SegmentNumKey:   estSegmentNum,
-			common.WithFilterKey:   withFilter,
+			common.WithFilterKey:   withFilter && !isSecondStageSearch,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
@@ -76,15 +82,35 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		if withFilter && channelNum > 1 {
 			params[common.ChannelNumKey] = channelNum
 		}
+		globalRefineEnable := paramtable.Get().AutoIndexConfig.GlobalRefineEnable.GetAsBool()
+		// Only check dim threshold and other conditions when global refine is enabled to reduce overhead
+		if globalRefineEnable && (req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER || req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER) {
+			isFloatVector := plan.GetVectorAnns().GetVectorType() <= planpb.VectorType_BFloat16Vector && plan.GetVectorAnns().GetVectorType() >= planpb.VectorType_FloatVector
+			minDimThreshold := paramtable.Get().AutoIndexConfig.GlobalRefineMinDimThreshold.GetAsInt64()
+			// Disable global refine for group_by, non-float vector queries, and low-dimension vectors
+			if queryInfo.GetGroupByFieldId() < 0 && isFloatVector && dimFunc(plan.GetVectorAnns().GetFieldId()) >= minDimThreshold {
+				params[common.SearchTopkRatioKey] = float32(paramtable.Get().AutoIndexConfig.GlobalRefineSearchTopkRatio.GetAsFloat())
+				params[common.RefineTopkRatioKey] = float32(paramtable.Get().AutoIndexConfig.GlobalRefineRefineTopkRatio.GetAsFloat())
+			}
+		}
 		err := queryHook.Run(params)
 		if err != nil {
 			log.Warn("failed to execute queryHook", zap.Error(err))
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
 		finalTopk := params[common.TopKKey].(int64)
-		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk())
+		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 		queryInfo.Topk = finalTopk
 		queryInfo.SearchParams = params[common.SearchParamKey].(string)
+		// Pass global refine decision to C++ via proto after hook validation
+		if globalRefineVal, ok := params[common.GlobalRefineKey]; ok && globalRefineVal.(bool) {
+			queryInfo.SearchTopkRatio = params[common.SearchTopkRatioKey].(float32)
+			queryInfo.RefineTopkRatio = params[common.RefineTopkRatioKey].(float32)
+			metrics.QueryNodeGlobalRefineCount.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(collectionId)).Inc()
+		} else {
+			queryInfo.SearchTopkRatio = 0
+			queryInfo.RefineTopkRatio = 0
+		}
 		serializedExprPlan, err := proto.Marshal(&plan)
 		if err != nil {
 			log.Warn("failed to marshal optimized plan", zap.Error(err))
@@ -97,9 +123,31 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		} else {
 			req.Req.IsRecallEvaluation = false
 		}
+
 		log.Debug("optimized search params done", zap.Any("queryInfo", queryInfo))
 	default:
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
 	return req, nil
+}
+
+// CalculateEffectiveSegmentNum delegates to queryHook.CalculateEffectiveSegmentNum when
+// a hook is available; otherwise returns len(rowCounts) (the raw sealed segment count).
+func CalculateEffectiveSegmentNum(queryHook QueryHook, rowCounts []int64, topk int64) int {
+	if queryHook != nil && paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+		return queryHook.CalculateEffectiveSegmentNum(rowCounts, topk)
+	}
+	return len(rowCounts)
+}
+
+// ShouldUseTwoStageSearch determines if two-stage search should be used for this request
+// based on paramtable config, segment count, topk, and search type.
+func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int) bool {
+	if !paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.GetAsBool() {
+		return false
+	}
+	if effectiveSegmentNum < paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt() && req.GetReq().GetTopk() < paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64() {
+		return false
+	}
+	return req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
 }

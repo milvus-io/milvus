@@ -134,10 +134,10 @@ func (writer *baseBinlogWriter) Finish() error {
 		return err
 	}
 	offset += int32(binary.Size(MagicNumber))
-	if err := writer.descriptorEvent.Write(writer.buffer); err != nil {
+	if err := writer.Write(writer.buffer); err != nil {
 		return err
 	}
-	offset += writer.descriptorEvent.GetMemoryUsageInBytes()
+	offset += writer.GetMemoryUsageInBytes()
 
 	eventBuffer := writer.buffer
 	if writer.encryptor != nil {

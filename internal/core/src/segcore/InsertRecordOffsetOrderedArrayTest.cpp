@@ -342,3 +342,137 @@ REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedArrayTest,
                             find_first_n_element,
                             find_first_n_element_has_more);
 INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedArrayTest, TypeOfPks);
+
+// =====================================================================
+// VirtualPKOffsetMap tests
+// =====================================================================
+
+class VirtualPKOffsetMapTest : public testing::Test {
+ protected:
+    static constexpr int64_t kSegmentID = 0x123456789ABCDEF0LL;
+    static constexpr int64_t kTruncatedSegID = kSegmentID & 0xFFFFFFFF;
+    static constexpr int64_t kNumRows = 100;
+
+    VirtualPKOffsetMap map_{kSegmentID, kNumRows};
+
+    // Build a virtual PK from offset
+    int64_t
+    vpk(int64_t offset) const {
+        return (kTruncatedSegID << 32) | (offset & 0xFFFFFFFF);
+    }
+};
+
+TEST_F(VirtualPKOffsetMapTest, ContainAndFind) {
+    // Valid PKs
+    EXPECT_TRUE(map_.contain(PkType(vpk(0))));
+    EXPECT_TRUE(map_.contain(PkType(vpk(50))));
+    EXPECT_TRUE(map_.contain(PkType(vpk(99))));
+
+    // Out of range
+    EXPECT_FALSE(map_.contain(PkType(vpk(100))));
+    EXPECT_FALSE(map_.contain(PkType(vpk(1000))));
+
+    // Wrong segment ID
+    int64_t wrong_seg = ((kTruncatedSegID + 1) << 32) | 0;
+    EXPECT_FALSE(map_.contain(PkType(wrong_seg)));
+
+    // Find returns correct offset
+    auto result = map_.find(PkType(vpk(42)));
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result[0], 42);
+
+    // Find out-of-range returns empty
+    result = map_.find(PkType(vpk(100)));
+    EXPECT_TRUE(result.empty());
+}
+
+TEST_F(VirtualPKOffsetMapTest, FindRange) {
+    int64_t num = kNumRows;
+    // Equal
+    {
+        BitsetType bitset(num);
+        BitsetTypeView view(bitset.data(), num);
+        map_.find_range(
+            PkType(vpk(50)), proto::plan::OpType::Equal, view, [](int64_t) {
+                return true;
+            });
+        EXPECT_TRUE(view[50]);
+        // Only offset 50 should be set
+        int count = 0;
+        for (int64_t i = 0; i < num; i++) {
+            if (view[i])
+                count++;
+        }
+        EXPECT_EQ(count, 1);
+    }
+    // GreaterEqual
+    {
+        BitsetType bitset(num);
+        BitsetTypeView view(bitset.data(), num);
+        map_.find_range(PkType(vpk(95)),
+                        proto::plan::OpType::GreaterEqual,
+                        view,
+                        [](int64_t) { return true; });
+        for (int64_t i = 95; i < num; i++) {
+            EXPECT_TRUE(view[i]) << "offset " << i;
+        }
+        for (int64_t i = 0; i < 95; i++) {
+            EXPECT_FALSE(view[i]) << "offset " << i;
+        }
+    }
+    // LessThan
+    {
+        BitsetType bitset(num);
+        BitsetTypeView view(bitset.data(), num);
+        map_.find_range(
+            PkType(vpk(5)), proto::plan::OpType::LessThan, view, [](int64_t) {
+                return true;
+            });
+        for (int64_t i = 0; i < 5; i++) {
+            EXPECT_TRUE(view[i]) << "offset " << i;
+        }
+        for (int64_t i = 5; i < num; i++) {
+            EXPECT_FALSE(view[i]) << "offset " << i;
+        }
+    }
+}
+
+TEST_F(VirtualPKOffsetMapTest, FindFirstN) {
+    int64_t num = kNumRows;
+    // All pass
+    {
+        BitsetType bitset(num);
+        bitset.reset();  // 0 = pass
+        BitsetTypeView view(bitset.data(), num);
+        auto [offsets, has_more] = map_.find_first_n(10, view);
+        ASSERT_EQ(offsets.size(), 10);
+        // Should be sorted by PK order = offset order for virtual PKs
+        for (int64_t i = 0; i < 10; i++) {
+            EXPECT_EQ(offsets[i], i);
+        }
+        EXPECT_TRUE(has_more);
+    }
+    // None pass
+    {
+        BitsetType bitset(num);
+        bitset.set();  // 1 = filtered out
+        BitsetTypeView view(bitset.data(), num);
+        auto [offsets, has_more] = map_.find_first_n(10, view);
+        EXPECT_EQ(offsets.size(), 0);
+        EXPECT_FALSE(has_more);
+    }
+}
+
+TEST_F(VirtualPKOffsetMapTest, EmptyAndSeal) {
+    EXPECT_FALSE(map_.empty());
+    EXPECT_EQ(map_.memory_size(), sizeof(VirtualPKOffsetMap));
+
+    // seal and insert are no-ops
+    map_.seal();
+    map_.insert(PkType(vpk(0)), 0);
+    EXPECT_FALSE(map_.empty());
+
+    // zero-row map
+    VirtualPKOffsetMap empty_map(kSegmentID, 0);
+    EXPECT_TRUE(empty_map.empty());
+}

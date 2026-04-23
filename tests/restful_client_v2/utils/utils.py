@@ -217,7 +217,7 @@ def get_random_json_data(uid=None):
     return data
 
 
-def get_data_by_payload(payload, nb=100):
+def get_data_by_payload(payload, nb=3000):
     dim = payload.get("dimension", 128)
     vector_field = payload.get("vectorField", "vector")
     pk_field = payload.get("primaryField", "id")

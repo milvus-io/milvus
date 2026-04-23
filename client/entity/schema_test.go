@@ -200,6 +200,51 @@ func (s *SchemaSuite) TestMultipleStructArrayFields() {
 	s.Equal(2, len(p.GetStructArrayFields()[1].GetFields()))
 }
 
+func (s *SchemaSuite) TestStructArrayFieldRoundTrip() {
+	structSchema := NewStructSchema().
+		WithField(NewField().WithName("clip_str").WithDataType(FieldTypeVarChar).WithMaxLength(256)).
+		WithField(NewField().WithName("clip_emb").WithDataType(FieldTypeFloatVector).WithDim(8))
+
+	schema := NewSchema().
+		WithName("rt").
+		WithField(NewField().WithName("id").WithDataType(FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(NewField().WithName("vec").WithDataType(FieldTypeFloatVector).WithDim(8)).
+		WithField(NewField().
+			WithName("clips").
+			WithDataType(FieldTypeArray).
+			WithElementType(FieldTypeStruct).
+			WithMaxCapacity(16).
+			WithStructSchema(structSchema))
+
+	p := schema.ProtoMessage()
+	s.Equal(2, len(p.GetFields()))
+	s.Equal(1, len(p.GetStructArrayFields()))
+
+	got := (&Schema{}).ReadProto(p)
+	// 3 logical fields including the struct array
+	s.Equal(3, len(got.Fields))
+
+	var clips *Field
+	for _, f := range got.Fields {
+		if f.Name == "clips" {
+			clips = f
+			break
+		}
+	}
+	s.Require().NotNil(clips)
+	s.Equal(FieldTypeArray, clips.DataType)
+	s.Equal(FieldTypeStruct, clips.ElementType)
+	s.Require().NotNil(clips.StructSchema)
+	s.Equal(2, len(clips.StructSchema.Fields))
+
+	// Sub-fields should be restored to their original types, not Array/ArrayOfVector
+	s.Equal(FieldTypeVarChar, clips.StructSchema.Fields[0].DataType)
+	s.Equal(FieldTypeFloatVector, clips.StructSchema.Fields[1].DataType)
+	dim, err := clips.StructSchema.Fields[1].GetDim()
+	s.NoError(err)
+	s.EqualValues(8, dim)
+}
+
 func TestSchema(t *testing.T) {
 	suite.Run(t, new(SchemaSuite))
 }

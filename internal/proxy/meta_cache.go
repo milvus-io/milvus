@@ -103,13 +103,14 @@ type Cache interface {
 
 type collectionInfo struct {
 	collID                typeutil.UniqueID
+	dbName                string
 	schema                *schemaInfo
 	partInfo              *partitionInfos
 	createdTimestamp      uint64
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
-	bigTopKOptimization   bool
+	queryMode             string
 	updateTimestamp       uint64
 	collectionTTL         uint64
 	numPartitions         int64
@@ -480,10 +481,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if err != nil {
 		return nil, err
 	}
-	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collection.Properties...)
-	if err != nil {
-		return nil, err
-	}
+	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
 
@@ -497,15 +495,16 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
 			collID:                collection.CollectionID,
+			dbName:                collection.GetDbName(),
 			schema:                schemaInfo,
 			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
 			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
-			bigTopKOptimization:   bigTopKOptimizationEnabled,
+			queryMode:             queryMode,
 			updateTimestamp:       collection.UpdateTimestamp,
-			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
 			pChannels:             collection.PhysicalChannelNames,
 			numPartitions:         collection.NumPartitions,
@@ -529,15 +528,16 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
+		dbName:                collection.GetDbName(),
 		schema:                schemaInfo,
 		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:      collection.CreatedTimestamp,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
-		bigTopKOptimization:   bigTopKOptimizationEnabled,
+		queryMode:             queryMode,
 		updateTimestamp:       collection.UpdateTimestamp,
-		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+		collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 		vChannels:             collection.VirtualChannelNames,
 		pChannels:             collection.PhysicalChannelNames,
 		numPartitions:         collection.NumPartitions,

@@ -1263,7 +1263,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                          "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_dense_float_index_types)
+    @pytest.mark.parametrize("index", [i for i in ct.all_dense_float_index_types if i != "DISKANN"])  # DISKANN is disk-based, does not support mmap
     def test_each_index_with_mmap_enabled_search(self, index):
         """
         target: test each index with mmap enabled search

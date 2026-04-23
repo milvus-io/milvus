@@ -40,7 +40,7 @@ type AutoIndexConfig struct {
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
-	BigTopKIndexParams     ParamItem  `refreshable:"true"`
+	LargeTopKIndexParams   ParamItem  `refreshable:"true"`
 	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
 	PrepareParams          ParamItem  `refreshable:"true"`
 	LoadAdaptParams        ParamItem  `refreshable:"true"`
@@ -62,6 +62,16 @@ type AutoIndexConfig struct {
 	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
+
+	// two-stage search
+	TwoStageSearchEnabled        ParamItem `refreshable:"true"`
+	TwoStageSearchMinTopk        ParamItem `refreshable:"true"`
+	TwoStageSearchMinNumSegments ParamItem `refreshable:"true"`
+	// global refine
+	GlobalRefineEnable          ParamItem `refreshable:"true"`
+	GlobalRefineMinDimThreshold ParamItem `refreshable:"true"`
+	GlobalRefineSearchTopkRatio ParamItem `refreshable:"true"`
+	GlobalRefineRefineTopkRatio ParamItem `refreshable:"true"`
 }
 
 const (
@@ -140,14 +150,14 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	}
 	p.EnableDeduplicateIndex.Init(base.mgr)
 
-	p.BigTopKIndexParams = ParamItem{
-		Key:          "autoIndex.params.bigTopK.build",
-		Version:      "2.6.13",
+	p.LargeTopKIndexParams = ParamItem{
+		Key:          "autoIndex.params.largeTopK.build",
+		Version:      "2.6.14",
 		DefaultValue: `{"nlist": 128, "index_type": "IVF_SQ8", "metric_type": "COSINE"}`,
-		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.bigTopK.build"),
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.largeTopK.build"),
 		Export:       true,
 	}
-	p.BigTopKIndexParams.Init(base.mgr)
+	p.LargeTopKIndexParams.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
@@ -293,6 +303,42 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	}
 	p.BitmapCardinalityLimit.Init(base.mgr)
 
+	p.GlobalRefineEnable = ParamItem{
+		Key:          "autoIndex.globalRefine.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable global refine for autoIndex",
+		Export:       true,
+	}
+	p.GlobalRefineEnable.Init(base.mgr)
+
+	p.GlobalRefineMinDimThreshold = ParamItem{
+		Key:          "autoIndex.globalRefine.minDimThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "256",
+		Doc:          "minimum dimension threshold for global refine, if dim < minDimThreshold, disable global refine",
+		Export:       true,
+	}
+	p.GlobalRefineMinDimThreshold.Init(base.mgr)
+
+	p.GlobalRefineSearchTopkRatio = ParamItem{
+		Key:          "autoIndex.globalRefine.searchTopkRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "search topk ratio for global refine, search search_topk_ratio * topk results per segment, should be >= 1.0, 0 means disabled",
+		Export:       true,
+	}
+	p.GlobalRefineSearchTopkRatio.Init(base.mgr)
+
+	p.GlobalRefineRefineTopkRatio = ParamItem{
+		Key:          "autoIndex.globalRefine.refineTopkRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "refine topk ratio for global refine, truncate to refine_topk_ratio * topk per segment and recompute exact distances, should be >= 1.0, 0 means disabled",
+		Export:       true,
+	}
+	p.GlobalRefineRefineTopkRatio.Init(base.mgr)
+
 	p.ScalarVarcharIndexType = ParamItem{
 		Version: "2.4.0",
 		Formatter: func(v string) string {
@@ -316,6 +362,33 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarBoolIndexType.Init(base.mgr)
+
+	p.TwoStageSearchEnabled = ParamItem{
+		Key:          "autoIndex.twoStageSearch.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          `Enable two-stage search optimization. When enabled, search first executes filter-only to get actual filter selectivity, then uses this info to optimize search parameters before executing vector search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchEnabled.Init(base.mgr)
+
+	p.TwoStageSearchMinTopk = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minTopk",
+		Version:      "3.0.0",
+		DefaultValue: "2000",
+		Doc:          `Minimum topk for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinTopk.Init(base.mgr)
+
+	p.TwoStageSearchMinNumSegments = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minNumSegments",
+		Version:      "3.0.0",
+		DefaultValue: "5",
+		Doc:          `Minimum number of segments for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinNumSegments.Init(base.mgr)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

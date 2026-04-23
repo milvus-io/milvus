@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -73,12 +74,18 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
-		// function output field must not provided
+		// validate function output field
 		if field.GetIsFunctionOutput() {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
+			if typeutil.IsBM25FunctionOutputField(field, schema) {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
+			}
+			if !pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for function output field '%s', "+
+						"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs))
+			}
 		}
-
 		// report an error if user provided the files for unsupported fields
 		err := checkUnsupportedDataType(field.GetDataType())
 		if err != nil {

@@ -105,6 +105,51 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	return cp.(*wal.ReplicateCheckpoint), nil
 }
 
+// GetSalvageCheckpoint gets all salvage checkpoints of the wal.
+func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel string) ([]*wal.ReplicateCheckpoint, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "salvage checkpoint"))
+	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			return nil, errors.New("salvage checkpoint can only be read for RW channel")
+		}
+		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
+		if err == nil {
+			// Local WAL - get salvage checkpoints directly
+			return localWAL.GetSalvageCheckpoint(), nil
+		}
+		if !shouldUseRemoteWAL(err) {
+			return nil, err
+		}
+		handlerService, err := hc.service.GetService(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := handlerService.GetSalvageCheckpoint(ctx, &streamingpb.GetSalvageCheckpointRequest{
+			Pchannel: types.NewProtoFromPChannelInfo(assign.Channel),
+		})
+		if err != nil {
+			return nil, err
+		}
+		result := make([]*wal.ReplicateCheckpoint, 0, len(resp.GetCheckpoints()))
+		for _, cp := range resp.GetCheckpoints() {
+			result = append(result, utility.NewReplicateCheckpointFromProto(cp))
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if cps == nil {
+		return nil, nil
+	}
+	return cps.([]*wal.ReplicateCheckpoint), nil
+}
+
 // GetWALMetricsIfLocal gets the metrics of the local wal.
 func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {

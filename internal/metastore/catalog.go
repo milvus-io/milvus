@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -201,7 +202,7 @@ type DataCoordCatalog interface {
 	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
 
 	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
-	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
+	ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error)
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 
@@ -246,10 +247,6 @@ type DataCoordCatalog interface {
 	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
 	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
 
-	ListUpdateExternalCollectionTasks(ctx context.Context) ([]*indexpb.UpdateExternalCollectionTask, error)
-	SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error
-	DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error
-
 	// External Collection Refresh - Separated Job/Task storage
 	ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error)
 	SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
@@ -285,6 +282,7 @@ type QueryCoordCatalog interface {
 
 	SaveCollectionTargets(ctx context.Context, target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(ctx context.Context, collectionID int64) error
+	RemoveCollectionTargets(ctx context.Context) error
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
@@ -356,4 +354,12 @@ type StreamingNodeCataLog interface {
 
 	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
 	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
+
+	// SaveSalvageCheckpoint saves the salvage checkpoint.
+	// The checkpoint is captured during force promote.
+	SaveSalvageCheckpoint(ctx context.Context, pChannelName string, checkpoint *commonpb.ReplicateCheckpoint) error
+
+	// GetSalvageCheckpoint gets all salvage checkpoints for a channel.
+	// Returns an empty slice if none exist. One checkpoint per source cluster.
+	GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error)
 }

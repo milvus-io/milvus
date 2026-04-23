@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestBaseTaskQueue(t *testing.T) {
@@ -102,7 +104,7 @@ func TestBaseTaskQueue(t *testing.T) {
 	assert.NotNil(t, activeTask)
 
 	// test utFull
-	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	queue.setMaxTaskNum(10) // utBufChan is an edge-triggered notifier; capacity is tracked by utFull
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockTask())
 		assert.NoError(t, err)
@@ -178,7 +180,7 @@ func TestDdTaskQueue(t *testing.T) {
 	assert.NotNil(t, activeTask)
 
 	// test utFull
-	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	queue.setMaxTaskNum(10) // utBufChan is an edge-triggered notifier; capacity is tracked by utFull
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDdlTask())
 		assert.NoError(t, err)
@@ -254,7 +256,7 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	assert.NotNil(t, activeTask)
 
 	// test utFull
-	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	queue.setMaxTaskNum(10) // utBufChan is an edge-triggered notifier; capacity is tracked by utFull
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDmlTask())
 		assert.NoError(t, err)
@@ -477,7 +479,7 @@ func TestDqTaskQueue(t *testing.T) {
 	assert.NotNil(t, activeTask)
 
 	// test utFull
-	queue.setMaxTaskNum(10) // not accurate, full also means utBufChan block
+	queue.setMaxTaskNum(10) // utBufChan is an edge-triggered notifier; capacity is tracked by utFull
 	for i := 0; i < int(queue.getMaxTaskNum()); i++ {
 		err = queue.Enqueue(newDefaultMockDqlTask())
 		assert.NoError(t, err)
@@ -629,7 +631,8 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	t.Run("query", func(t *testing.T) {
 		qt := &queryTask{
 			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: &commonpb.MsgBase{},
+				QueryLabel: "query",
+				Base:       &commonpb.MsgBase{},
 			},
 			request: &milvuspb.QueryRequest{
 				DbName:                dbName,
@@ -674,4 +677,86 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 		err := queue.Enqueue(st)
 		assert.Error(t, err)
 	})
+}
+
+// blockingTsoAllocator blocks AllocOne on the caller's context so that a test
+// can distinguish "we reached the TSO allocator" from "we fast-failed".
+type blockingTsoAllocator struct {
+	calls atomic.Int64
+}
+
+func (b *blockingTsoAllocator) AllocOne(ctx context.Context) (Timestamp, error) {
+	b.calls.Add(1)
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// TestBaseTaskQueue_EnqueueFastFailBeforeAlloc verifies that Enqueue rejects
+// a task immediately with ErrServiceTooManyRequests when the queue is already
+// full, without invoking the TSO allocator. Regression test for #49223.
+func TestBaseTaskQueue_EnqueueFastFailBeforeAlloc(t *testing.T) {
+	tsoAllocatorIns := newMockTsoAllocator()
+	queue := newBaseTaskQueue(tsoAllocatorIns)
+	queue.setMaxTaskNum(2)
+
+	// Fill queue to capacity with the non-blocking mock allocator.
+	for i := 0; i < 2; i++ {
+		assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	}
+	assert.True(t, queue.utFull())
+
+	// Swap in an allocator that would hang forever if reached.
+	blocking := &blockingTsoAllocator{}
+	queue.tsoAllocatorIns = blocking
+
+	done := make(chan error, 1)
+	go func() {
+		done <- queue.Enqueue(newDefaultMockTask())
+	}()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Enqueue did not fast-fail; reached blocking TSO allocator")
+	}
+	assert.Equal(t, int64(0), blocking.calls.Load(),
+		"Enqueue must not reach the TSO allocator when the queue is already full")
+}
+
+// TestBaseTaskQueue_NotifierCoalesces verifies that utBufChan is an edge-
+// triggered notifier: many enqueues produce at most one pending token.
+func TestBaseTaskQueue_NotifierCoalesces(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+	queue.setMaxTaskNum(100)
+
+	for i := 0; i < 10; i++ {
+		assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+	}
+
+	assert.Equal(t, 1, cap(queue.utBufChan), "utBufChan must be a capacity-1 notifier")
+	assert.Equal(t, 1, len(queue.utChan()), "concurrent enqueues must coalesce to a single pending token")
+}
+
+// TestBaseTaskQueue_EnqueueNotifierNonBlocking verifies that a flood of
+// enqueues completes without a consumer draining utBufChan — i.e. the
+// notifier send must not block Enqueue.
+func TestBaseTaskQueue_EnqueueNotifierNonBlocking(t *testing.T) {
+	queue := newBaseTaskQueue(newMockTsoAllocator())
+	queue.setMaxTaskNum(1024)
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 64; i++ {
+			assert.NoError(t, queue.Enqueue(newDefaultMockTask()))
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Enqueue blocked on utBufChan send")
+	}
+	assert.Equal(t, 1, len(queue.utChan()))
 }

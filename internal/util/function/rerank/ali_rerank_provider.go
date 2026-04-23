@@ -37,7 +37,7 @@ type aliProvider struct {
 	params    map[string]any
 }
 
-func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
 	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.DashscopeAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 	return &provider, nil
 }
 
-func (provider *aliProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, 30)
 	if err != nil {
 		return nil, err

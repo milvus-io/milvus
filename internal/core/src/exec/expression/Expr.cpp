@@ -506,7 +506,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     bool and_conjunction = expr->IsAnd();
     std::optional<size_t> namespace_expr_idx;
     for (int i = 0; i < inputs.size(); i++) {
-        auto input = inputs[i];
+        const auto& input = inputs[i];
 
         if (namespace_field_id.has_value() &&
             input->name() == "PhyUnaryRangeFilterExpr") {

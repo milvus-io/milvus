@@ -36,6 +36,7 @@
 #include "common/File.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
+#include "common/RegexQuery.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
@@ -239,9 +240,6 @@ StringIndexMarisa::Serialize(const Config& config) {
 
 IndexStatsPtr
 StringIndexMarisa::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return UploadV3(config);
-    }
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
 
@@ -305,10 +303,6 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 void
 StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
                         const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -416,8 +410,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
         case OpType::GreaterThan: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         ids.push_back(agent.key().id());
                         break;
@@ -430,8 +424,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         ids.push_back(agent.key().id());
                     }
@@ -442,8 +436,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
         case OpType::GreaterEqual: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         ids.push_back(agent.key().id());
                         break;
@@ -456,8 +450,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         ids.push_back(agent.key().id());
                     }
@@ -468,8 +462,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
         case OpType::LessThan: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key >= value) {
                         break;
                     }
@@ -478,8 +472,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key < value) {
                         ids.push_back(agent.key().id());
                     }
@@ -490,8 +484,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
         case OpType::LessEqual: {
             if (in_lexico_order) {
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key > value) {
                         break;
                     }
@@ -500,8 +494,8 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
             } else {
                 // lexicographic order is not guaranteed, check all values
                 while (trie_.predictive_search(agent)) {
-                    auto key =
-                        std::string(agent.key().ptr(), agent.key().length());
+                    std::string_view key(agent.key().ptr(),
+                                         agent.key().length());
                     if (key <= value) {
                         ids.push_back(agent.key().id());
                     }
@@ -594,6 +588,60 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     return bitset;
 }
 
+const TargetBitmap
+StringIndexMarisa::PatternMatch(const std::string& pattern,
+                                proto::plan::OpType op) {
+    if (op == proto::plan::OpType::PrefixMatch) {
+        return PrefixMatch(pattern);
+    }
+
+    if (op != proto::plan::OpType::Match &&
+        op != proto::plan::OpType::PostfixMatch &&
+        op != proto::plan::OpType::InnerMatch) {
+        ThrowInfo(Unsupported,
+                  "StringIndexMarisa::PatternMatch only supports Match, "
+                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
+                  static_cast<int>(op));
+    }
+
+    // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys
+    // instead of all rows to avoid redundant matching on duplicate values.
+    TargetBitmap bitset(str_ids_.size());
+
+    auto match_fn = [&](const std::string& val) -> bool {
+        switch (op) {
+            case proto::plan::OpType::PostfixMatch:
+                return PostfixMatch(val, pattern);
+            case proto::plan::OpType::InnerMatch:
+                return InnerMatch(val, pattern);
+            default:
+                return false;
+        }
+    };
+
+    if (op == proto::plan::OpType::Match) {
+        LikePatternMatcher matcher(pattern);
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && matcher(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
+        }
+    } else {
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && match_fn(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
+        }
+    }
+    return bitset;
+}
+
 void
 StringIndexMarisa::fill_str_ids(size_t n,
                                 const std::string* values,
@@ -614,9 +662,6 @@ void
 StringIndexMarisa::fill_offsets() {
     for (size_t offset = 0; offset < str_ids_.size(); offset++) {
         auto str_id = str_ids_[offset];
-        if (str_ids_to_offsets_.find(str_id) == str_ids_to_offsets_.end()) {
-            str_ids_to_offsets_[str_id] = std::vector<size_t>{};
-        }
         str_ids_to_offsets_[str_id].push_back(offset);
     }
 }

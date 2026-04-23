@@ -98,7 +98,8 @@ class SegmentInterface {
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
            Timestamp collection_ttl,
-           int64_t entity_ttl_physical_time_us = 0) const = 0;
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -111,7 +112,8 @@ class SegmentInterface {
                       folly::CancellationToken(),
                       0,
                       0,
-                      0);
+                      0,
+                      false);
     }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -243,6 +245,23 @@ class SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
+    // Compute exact distances from the index for given query vectors and candidate IDs.
+    // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
+    virtual bool
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return false;
+    }
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
@@ -251,10 +270,11 @@ class SegmentInterface {
     Reopen(SchemaPtr sch) = 0;
 
     virtual void
-    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     virtual void
-    SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;
 
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
@@ -381,7 +401,8 @@ class SegmentInternalInterface : public SegmentInterface {
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
            Timestamp collection_ttl,
-           int64_t entity_ttl_physical_time_us = 0) const override;
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -463,9 +484,8 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
     void
-    SetLoadInfo(
-        const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
-        load_info_ = load_info;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
+        load_info_ = std::move(load_info);
     }
 
     virtual std::shared_ptr<index::JsonKeyStats>
@@ -520,6 +540,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
+
+    virtual Timestamp
+    get_max_timestamp() const = 0;
 
     /**
      * search offset by possible pk values and mvcc timestamp

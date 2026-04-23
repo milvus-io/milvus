@@ -113,15 +113,15 @@ func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 	ctx := context.Background()
 	checker := suite.checker
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 1)
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -148,9 +148,9 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	ctx := context.Background()
 	checker := suite.checker
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 
 	channels := []*datapb.VchannelInfo{
 		{
@@ -210,10 +210,10 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	ctx := context.Background()
 	checker := suite.checker
-	err := checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	err := checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
 	suite.NoError(err)
-	err = checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	err = checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	suite.NoError(err)
 
 	segments := []*datapb.SegmentInfo{
@@ -299,10 +299,10 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 	ctx := context.Background()
 	checker := suite.checker
-	err := checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	err := checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
 	suite.NoError(err)
-	err = checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
+	err = checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.NoError(err)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{

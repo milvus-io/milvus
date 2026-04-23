@@ -19,13 +19,13 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -386,7 +386,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 		StatslogFiles:     []AvroFieldBinlog{},
 		Bm25StatslogFiles: []AvroFieldBinlog{},
 		TextIndexFiles:    []AvroTextIndexEntry{},
-		JsonKeyIndexFiles: []AvroJsonKeyIndexEntry{},
+		JSONKeyIndexFiles: []AvroJSONKeyIndexEntry{},
 		IndexFiles:        []AvroIndexFilePathInfo{},
 		StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
 		DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
@@ -822,8 +822,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			BuildID:                6000,
 			JsonKeyStatsDataFormat: 1,
 		}
-		avro := convertJsonKeyStatsToAvro(original)
-		restored := convertAvroToJsonKeyStats(avro)
+		avro := convertJSONKeyStatsToAvro(original)
+		restored := convertAvroToJSONKeyStats(avro)
 
 		assert.Equal(t, original.FieldID, restored.FieldID)
 		assert.Equal(t, original.Version, restored.Version)
@@ -859,8 +859,8 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			100: {FieldID: 100, Version: 1, Files: []string{"/json1"}, JsonKeyStatsDataFormat: 1},
 			200: {FieldID: 200, Version: 2, Files: []string{"/json2"}, JsonKeyStatsDataFormat: 2},
 		}
-		avroArray := convertJsonKeyIndexMapToAvro(originalMap)
-		restoredMap := convertAvroToJsonKeyIndexMap(avroArray)
+		avroArray := convertJSONKeyIndexMapToAvro(originalMap)
+		restoredMap := convertAvroToJSONKeyIndexMap(avroArray)
 
 		assert.Equal(t, len(originalMap), len(restoredMap))
 		for fieldID, origStats := range originalMap {

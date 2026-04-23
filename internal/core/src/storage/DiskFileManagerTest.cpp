@@ -272,8 +272,6 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path);
 }
 
-// Ensure that index v3 generated path is the same as v2 path, only with different
-// file name.
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
@@ -283,16 +281,16 @@ TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     std::vector<int64_t> values = {1, 2, 3};
     index.Build(values.size(), values.data());
 
-    auto stats = index.UploadV3({});
+    auto stats = index.UploadUnified({});
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
 
     storage::MemFileManagerImpl file_manager(context);
-    std::string v2_path = file_manager.GetRemoteIndexObjectPrefixV2() +
-                          "/milvus_packed_stlsort_index.v3";
+    std::string expected_path = file_manager.GetRemoteIndexObjectPrefix() +
+                                "/milvus_packed_stlsort_index.v3";
     std::string v3_path = files[0];
 
-    EXPECT_EQ(v3_path, v2_path);
+    EXPECT_EQ(v3_path, expected_path);
 }
 
 int
@@ -1064,7 +1062,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1074,7 +1072,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1126,7 +1124,7 @@ TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1136,7 +1134,7 @@ TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1170,7 +1168,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1180,7 +1178,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 
@@ -1212,7 +1210,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     build_index.Build(N, values.data());
     ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadV3({});
+    auto stats = build_index.UploadUnified({});
     ASSERT_NE(stats, nullptr);
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
@@ -1222,7 +1220,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     load_config[milvus::index::INDEX_FILES] =
         std::vector<std::string>{files[0]};
     load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadV3(load_config);
+    load_index.LoadUnified(load_config);
 
     EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
 

@@ -70,7 +70,8 @@ type PackWriterV3Suite struct {
 func (s *PackWriterV3Suite) SetupTest() {
 	s.ctx = context.Background()
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
-	s.rootPath = "/tmp"
+	s.rootPath = s.T().TempDir()
+	initcore.CleanArrowFileSystemSingleton()
 	initcore.InitLocalArrowFileSystem(s.rootPath)
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, "/tmp")
@@ -142,7 +143,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -188,7 +189,7 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
@@ -212,7 +213,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
@@ -240,7 +241,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
@@ -289,7 +290,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -319,8 +320,12 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 	gotInserts, gotDeletes, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
-	// For V3, deltas are nil since deltalogs are stored in manifest
-	s.Nil(gotDeletes)
+	// For V3, delta summary is returned for compaction trigger (no path, only stats)
+	s.NotNil(gotDeletes)
+	s.Equal(1, len(gotDeletes.GetBinlogs()))
+	s.EqualValues(int64(rows), gotDeletes.GetBinlogs()[0].GetEntriesNum())
+	s.NotZero(gotDeletes.GetBinlogs()[0].GetLogID())
+	s.Empty(gotDeletes.GetBinlogs()[0].GetLogPath())
 	// Verify manifest was updated (version should be > -1)
 	_, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
@@ -334,7 +339,7 @@ func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
 
@@ -395,7 +400,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -481,7 +486,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,

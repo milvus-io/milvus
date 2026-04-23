@@ -97,6 +97,10 @@ func (w *segmentAllocWorker) doOnce() error {
 	// Build a fresh message each time to avoid reusing a contaminated message.
 	// After a failed WAL append, the message may have internal state set (e.g., WAL term)
 	// that would cause a panic if reused.
+	// TODO: include SchemaVersion in CreateSegmentMessageHeader so that the flusher
+	// can propagate it to DataCoord's AllocSegment RPC. Currently streaming-created
+	// segments get SchemaVersion=0, causing unnecessary backfill triggers.
+	// Tracked in companion PR: https://github.com/milvus-io/milvus/pull/48865
 	msg := message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).
 		WithHeader(&message.CreateSegmentMessageHeader{

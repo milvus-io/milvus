@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/mock"
@@ -633,6 +632,9 @@ func Test_Flush(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -688,6 +690,9 @@ func Test_GetSegmentStates(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -742,6 +747,9 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -796,6 +804,9 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -850,6 +861,9 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -904,6 +918,9 @@ func Test_GetSegmentInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -959,6 +976,9 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1014,6 +1034,9 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1068,6 +1091,9 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1123,6 +1149,9 @@ func Test_GetFlushedSegments(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1178,6 +1207,9 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1232,6 +1264,9 @@ func Test_ManualCompaction(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1286,6 +1321,9 @@ func Test_GetCompactionState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1340,6 +1378,9 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1394,6 +1435,9 @@ func Test_WatchChannels(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1448,6 +1492,9 @@ func Test_GetFlushState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1502,6 +1549,9 @@ func Test_GetFlushAllState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1557,6 +1607,9 @@ func Test_DropVirtualChannel(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1612,6 +1665,9 @@ func Test_SetSegmentState(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1667,6 +1723,9 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1716,6 +1775,9 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1765,6 +1827,9 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1814,6 +1879,9 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1863,6 +1931,9 @@ func Test_GcConfirm(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1913,6 +1984,9 @@ func Test_CreateIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -1968,6 +2042,9 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2027,6 +2104,9 @@ func Test_GetIndexState(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2085,6 +2165,9 @@ func Test_GetIndexInfos(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2144,6 +2227,9 @@ func Test_DescribeIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2203,6 +2289,9 @@ func Test_GetIndexStatistics(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2262,6 +2351,9 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2321,6 +2413,9 @@ func Test_DropIndex(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2377,6 +2472,9 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2426,6 +2524,9 @@ func Test_GcControl(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2475,6 +2576,9 @@ func Test_ListIndexes(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2526,6 +2630,9 @@ func Test_GetChannelRecoveryInfo(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2577,6 +2684,9 @@ func Test_GetQuotaMetrics(t *testing.T) {
 	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
@@ -2610,6 +2720,9 @@ func Test_FlushAll(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2665,6 +2778,9 @@ func TestClient_TruncateCollection(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2718,6 +2834,9 @@ func TestClient_GetRestoreSnapshotState(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2778,6 +2897,9 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2836,6 +2958,9 @@ func TestClient_BatchUpdateManifest(t *testing.T) {
 	mockGrpcClient.EXPECT().Close().Return(nil)
 	mockGrpcClient.EXPECT().GetNodeID().Return(1)
 	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return f(mockmix)
 	})
 	client.(*Client).grpcClient = mockGrpcClient
@@ -2882,66 +3007,6 @@ func TestClient_BatchUpdateManifest(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-func Test_CreateExternalCollection(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	client, err := NewClient(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	defer client.Close()
-
-	config := &Params.RootCoordGrpcClientCfg
-	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
-	client.(*Client).grpcClient = grpcClient
-	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
-		Return(nil).Build()
-	defer mockClose.UnPatch()
-	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
-		Return(1).Build()
-	defer mockGetNodeID.UnPatch()
-
-	req := &msgpb.CreateCollectionRequest{
-		CollectionName: "test_external_collection",
-	}
-
-	// 构造一个 MixCoordClient，用于在 ReCall 中使用
-	mockMix := MixCoordClient{
-		DataCoordClient: datapb.NewDataCoordClient(nil),
-	}
-
-	// Test success case
-	// Mock DataCoordClient 的 CreateExternalCollection 方法
-	mockCreate := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
-		Return(&datapb.CreateExternalCollectionResponse{
-			Status: merr.Success(),
-		}, nil).Build()
-
-	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
-		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-			return f(mockMix)
-		}).Build()
-
-	_, err = client.CreateExternalCollection(ctx, req)
-	assert.Nil(t, err)
-	mockCreate.UnPatch()
-	mockReCall.UnPatch()
-
-	// Test error case
-	mockCreateErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
-		Return(nil, mockErr).Build()
-	defer mockCreateErr.UnPatch()
-
-	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
-		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-			return f(mockMix)
-		}).Build()
-	defer mockReCall.UnPatch()
-
-	_, err = client.CreateExternalCollection(ctx, req)
-	assert.NotNil(t, err)
 }
 
 func Test_RefreshExternalCollection(t *testing.T) {

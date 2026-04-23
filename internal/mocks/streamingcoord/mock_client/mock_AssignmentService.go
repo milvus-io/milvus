@@ -5,9 +5,9 @@ package mock_client
 import (
 	assignment "github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
 	context "context"
+
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 

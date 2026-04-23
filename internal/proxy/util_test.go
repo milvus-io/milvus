@@ -2124,12 +2124,12 @@ func Test_TopKLimit(t *testing.T) {
 	assert.Error(t, validateLimit(0, false))
 }
 
-func Test_BigTopKLimit(t *testing.T) {
+func Test_LargeTopKLimit(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
-	Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+	Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
 	defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
-	defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+	defer Params.Reset(Params.QuotaConfig.LargeTopKLimit.Key)
 
 	assert.Nil(t, validateLimit(100, false))
 	assert.Error(t, validateLimit(101, false))
@@ -2148,8 +2148,8 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 	assert.Error(t, validateMaxQueryResultWindow(0, 0, false))
 	assert.Error(t, validateMaxQueryResultWindow(1, 0, false))
 
-	Params.Save(Params.QuotaConfig.BigMaxQueryResultWindow.Key, "1000000")
-	defer Params.Reset(Params.QuotaConfig.BigMaxQueryResultWindow.Key)
+	Params.Save(Params.QuotaConfig.LargeMaxQueryResultWindow.Key, "1000000")
+	defer Params.Reset(Params.QuotaConfig.LargeMaxQueryResultWindow.Key)
 	assert.Nil(t, validateMaxQueryResultWindow(0, 16385, true))
 	assert.Nil(t, validateMaxQueryResultWindow(0, 1000000, true))
 	assert.Error(t, validateMaxQueryResultWindow(0, 1000001, true))
@@ -2189,8 +2189,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2218,8 +2218,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2247,8 +2247,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2275,8 +2275,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
-		jsonFieldData := autoGenDynamicFieldData(jsonData)
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, jsonData)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2291,8 +2291,8 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 	})
 	t.Run("json data is string", func(t *testing.T) {
 		data := "abcdefg"
-		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
 		schema := newTestSchema()
+		jsonFieldData := autoGenDynamicFieldData(schema, [][]byte{[]byte(data)})
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -3385,6 +3385,71 @@ func TestComputeRecall(t *testing.T) {
 		err := computeRecall(result1, gt)
 		assert.Error(t, err)
 	})
+
+	t.Run("empty result with nil ids", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Topks:      []int64{0, 0},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+					},
+				},
+			},
+			Scores: []float32{1.0, 0.9, 0.8, 0.7, 0.6, 1.0, 0.9, 0.8, 0.7, 0.6},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+		assert.Equal(t, float32(0), result.Recalls[1])
+	})
+
+	t.Run("empty gt with nil ids", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 2, 3},
+					},
+				},
+			},
+			Scores: []float32{1.0, 0.9, 0.8},
+			Topks:  []int64{3},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+	})
+
+	t.Run("both empty results", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+	})
 }
 
 func TestCheckVarcharFormat(t *testing.T) {
@@ -4023,7 +4088,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
 	})
 
 	t.Run("JSON not supported in struct", func(t *testing.T) {
@@ -4054,7 +4119,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "Nested array is not supported")
+			assert.Contains(t, err.Error(), "nested array is not supported")
 		}
 	})
 
@@ -4218,7 +4283,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 	})
 }
 
-func Test_reconstructStructFieldDataCommon(t *testing.T) {
+func Test_reconstructStructFieldData(t *testing.T) {
 	t.Run("count(*) query - should return early", func(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{
@@ -4251,7 +4316,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		originalOutputFields := make([]string, len(outputFields))
 		copy(originalOutputFields, outputFields)
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should not modify anything for count(*) query
 		assert.Equal(t, originalFieldsData, resultFieldsData)
@@ -4301,7 +4366,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should reconstruct the struct field with the restored field name
 		assert.Len(t, resultFieldsData, 1)
@@ -4342,7 +4407,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		originalOutputFields := make([]string, len(outputFields))
 		copy(originalOutputFields, outputFields)
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should not modify anything when no struct array fields
 		assert.Equal(t, originalFieldsData, resultFieldsData)
@@ -4429,7 +4494,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result
 		assert.Len(t, resultFieldsData, 1, "Should only have one reconstructed struct field")
@@ -4529,7 +4594,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result: should have 2 fields (1 regular + 1 reconstructed struct)
 		assert.Len(t, resultFieldsData, 2)
@@ -4648,7 +4713,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result: should have 2 struct fields
 		assert.Len(t, resultFieldsData, 2)
@@ -4750,7 +4815,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result
 		assert.Len(t, resultFieldsData, 1, "Should have one reconstructed struct field")
@@ -5193,7 +5258,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid hash_function empty value", func(t *testing.T) {
@@ -5218,7 +5283,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown hash function")
+		assert.Contains(t, err.Error(), "unknown hash function")
 	})
 
 	t.Run("invalid token_level value", func(t *testing.T) {
@@ -5243,7 +5308,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid token_level empty value", func(t *testing.T) {
@@ -5268,7 +5333,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid seed string value", func(t *testing.T) {
@@ -5343,5 +5408,76 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
+	})
+}
+
+func TestInjectVirtualPKForExternalCollection(t *testing.T) {
+	t.Run("NoPKExists_InjectsVirtualPK", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:           "test_ext_coll",
+			ExternalSource: "s3://bucket/data",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col"},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// Virtual PK should be prepended as first field
+		assert.Len(t, schema.Fields, 3)
+		vpk := schema.Fields[0]
+		assert.Equal(t, common.VirtualPKFieldName, vpk.Name)
+		assert.Equal(t, schemapb.DataType_Int64, vpk.DataType)
+		assert.True(t, vpk.IsPrimaryKey)
+		assert.True(t, vpk.AutoID)
+
+		// Original fields remain unchanged
+		assert.Equal(t, "text", schema.Fields[1].Name)
+		assert.Equal(t, "vec", schema.Fields[2].Name)
+	})
+
+	t.Run("PKAlreadyExists_NoInjection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "my_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// No virtual PK injected — only 2 fields remain
+		assert.Len(t, schema.Fields, 2)
+		assert.Equal(t, "my_pk", schema.Fields[0].Name)
+	})
+
+	t.Run("EmptyFields_InjectsVirtualPK", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		assert.Len(t, schema.Fields, 1)
+		assert.Equal(t, common.VirtualPKFieldName, schema.Fields[0].Name)
+		assert.True(t, schema.Fields[0].IsPrimaryKey)
+	})
+
+	t.Run("VirtualPKFieldID_IsZero", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col"},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// FieldID should be 0 (assigned by RootCoord later)
+		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
 	})
 }

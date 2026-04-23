@@ -139,6 +139,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#StructIndexField.
+	VisitStructIndexField(ctx *StructIndexFieldContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#IsNull.
 	VisitIsNull(ctx *IsNullContext) interface{}
 

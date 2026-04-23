@@ -26,6 +26,7 @@ CStatus
 ReduceSearchResultsAndFillData(CTraceContext c_trace,
                                CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
+                               CPlaceholderGroup c_placeholder_group,
                                CSearchResult* search_results,
                                int64_t num_segments,
                                int64_t* slice_nqs,

@@ -32,6 +32,9 @@ const (
 	defaultToleranceMB = 0.05
 )
 
+// IsInlineExecutable returns false: force merge is real compaction work.
+func (v *ForceMergeSegmentView) IsInlineExecutable() bool { return false }
+
 // static segment view, only algothrims here, no IO
 type ForceMergeSegmentView struct {
 	label         *CompactionGroupLabel
@@ -153,7 +156,7 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 
 func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 	targetSizePerSegment, targetCount := v.calculateTargetSizeCount()
-	groups := adaptiveGroupSegments(v.segments, float64(targetSizePerSegment))
+	groups := adaptiveGroupSegments(v.segments, targetSizePerSegment)
 
 	results := make([]CompactionView, 0, len(groups))
 	for _, group := range groups {

@@ -1,10 +1,10 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.24.12
+go 1.25.8
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260304062516-e7e54d966ef2
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260323081523-53649783989c
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
 	github.com/minio/minio-go/v7 v7.0.73
@@ -15,7 +15,7 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
 	go.uber.org/zap v1.27.0
-	google.golang.org/grpc v1.71.0
+	google.golang.org/grpc v1.79.3
 )
 
 replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
@@ -133,9 +133,9 @@ require (
 	golang.org/x/tools v0.39.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250227231956-55c901821b1e // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
+	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

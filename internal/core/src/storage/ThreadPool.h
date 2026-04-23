@@ -32,6 +32,9 @@
 #include <unordered_map>
 #include <utility>
 
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+
 #include "SafeQueue.h"
 #include "glog/logging.h"
 #include "log/Log.h"
@@ -44,11 +47,14 @@ const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
 const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
 const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
 
+const int DEFAULT_THREAD_POOL_MAX_THREADS_SIZE = 16;
+
 extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 
 extern int CPU_NUM;
+extern std::atomic<int> THREAD_POOL_MAX_THREADS_SIZE;
 
 void
 SetHighPriorityThreadCoreCoefficient(const float coefficient);
@@ -62,6 +68,9 @@ SetLowPriorityThreadCoreCoefficient(const float coefficient);
 void
 InitCpuNum(const int core);
 
+void
+SetThreadPoolMaxThreadsSize(const int size);
+
 class ThreadPool {
  public:
     explicit ThreadPool(const float thread_core_coefficient, std::string name)
@@ -73,11 +82,9 @@ class ThreadPool {
             1,
             static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
 
-        // only IO pool will set large limit, but the CPU helps nothing to IO operations,
-        // we need to limit the max thread num, each thread will download 16~64 MiB data,
-        // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
-        if (max_threads_size_.load() > 16) {
-            max_threads_size_.store(16);
+        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+        if (max_limit > 0 && max_threads_size_.load() > max_limit) {
+            max_threads_size_.store(max_limit);
         }
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
@@ -124,6 +131,12 @@ class ThreadPool {
         std::function<void()> wrap_func = [task_ptr]() { (*task_ptr)(); };
 
         work_queue_.enqueue(wrap_func);
+        if (metric_submitted_) {
+            metric_submitted_->Increment();
+        }
+        if (metric_queue_depth_) {
+            metric_queue_depth_->Set(work_queue_.size());
+        }
 
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -151,10 +164,42 @@ class ThreadPool {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
         new_size = std::max(1, new_size);
-        if (new_size > 16) {
-            new_size = 16;
+        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+        if (max_limit > 0 && new_size > max_limit) {
+            new_size = max_limit;
         }
         max_threads_size_.store(new_size);
+        if (metric_capacity_) {
+            metric_capacity_->Set(new_size);
+        }
+    }
+
+    void
+    SetMetrics(prometheus::Gauge* capacity,
+               prometheus::Gauge* active,
+               prometheus::Gauge* idle,
+               prometheus::Gauge* queue_depth,
+               prometheus::Counter* submitted,
+               prometheus::Counter* completed) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        metric_capacity_ = capacity;
+        metric_active_ = active;
+        metric_idle_ = idle;
+        metric_queue_depth_ = queue_depth;
+        metric_submitted_ = submitted;
+        metric_completed_ = completed;
+        if (metric_capacity_) {
+            metric_capacity_->Set(max_threads_size_.load());
+        }
+        if (metric_active_) {
+            metric_active_->Set(current_threads_size_ - idle_threads_size_);
+        }
+        if (metric_idle_) {
+            metric_idle_->Set(idle_threads_size_);
+        }
+        if (metric_queue_depth_) {
+            metric_queue_depth_->Set(work_queue_.size());
+        }
     }
 
  public:
@@ -170,6 +215,14 @@ class ThreadPool {
     std::mutex mutex_;
     std::condition_variable condition_lock_;
     std::string name_;
+
+    // Prometheus metrics (set via SetMetrics, nullptr if not wired)
+    prometheus::Gauge* metric_capacity_{nullptr};
+    prometheus::Gauge* metric_active_{nullptr};
+    prometheus::Gauge* metric_idle_{nullptr};
+    prometheus::Gauge* metric_queue_depth_{nullptr};
+    prometheus::Counter* metric_submitted_{nullptr};
+    prometheus::Counter* metric_completed_{nullptr};
 };
 
 }  // namespace milvus

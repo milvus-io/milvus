@@ -97,14 +97,14 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRONodes() {
 	collectionID := int64(1)
 	replicaID := int64(101)
 
-	suite.meta.CollectionManager.PutCollection(ctx, &meta.Collection{
+	suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
 		},
 	})
 
-	suite.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(replicaID, collectionID, []int64{1, 2, 3}))
+	suite.meta.Put(ctx, utils.CreateTestReplica(replicaID, collectionID, []int64{1, 2, 3}))
 
 	// Add nodes to node manager
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -123,7 +123,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRONodes() {
 		Hostname: "localhost",
 	}))
 
-	replica := suite.meta.ReplicaManager.Get(ctx, replicaID)
+	replica := suite.meta.Get(ctx, replicaID)
 	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, replica)
 
 	// Should return empty plans since there are no RO nodes
@@ -139,7 +139,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 	replicaID := int64(101)
 	channelName := "test-channel"
 
-	suite.meta.CollectionManager.PutCollection(ctx, &meta.Collection{
+	suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
@@ -155,7 +155,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 		},
 		typeutil.NewUniqueSet([]int64{1, 2, 3, 4}...),
 	)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 
 	// Add nodes to node manager
 	for i := int64(1); i <= 4; i++ {
@@ -202,7 +202,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{10}, nil).Maybe()
 
-	suite.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, 10))
+	suite.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, 10))
 	suite.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -240,7 +240,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 		{Channel: dmChannels[0], To: 1}, // Move channel from node 3 to node 1
 	}).Once() // Only called once for node 3 which has the channel
 
-	gotReplica := suite.meta.ReplicaManager.Get(ctx, replicaID)
+	gotReplica := suite.meta.Get(ctx, replicaID)
 	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, gotReplica)
 
 	// StoppingBalancer prioritizes channel balance over segment balance
@@ -277,7 +277,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 	collectionID := int64(1)
 	replicaID := int64(101)
 
-	suite.meta.CollectionManager.PutCollection(ctx, &meta.Collection{
+	suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collectionID,
 			ReplicaNumber: 1,
@@ -293,7 +293,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 		},
 		typeutil.NewUniqueSet([]int64{1, 2}...),
 	)
-	suite.meta.ReplicaManager.Put(ctx, replica)
+	suite.meta.Put(ctx, replica)
 
 	// Add nodes to node manager
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -307,7 +307,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {
 		Hostname: "localhost",
 	}))
 
-	gotReplica2 := suite.meta.ReplicaManager.Get(ctx, replicaID)
+	gotReplica2 := suite.meta.Get(ctx, replicaID)
 	segmentPlans, channelPlans := suite.balancer.BalanceReplica(ctx, gotReplica2)
 
 	// Should return empty plans since there are no RW nodes to move to

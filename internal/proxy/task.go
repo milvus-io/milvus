@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -82,6 +83,7 @@ const (
 	SearchIterIdKey        = "search_iter_id"
 	QueryGroupByFieldsKey  = "group_by_fields"
 	OrderByFieldsKey       = "order_by_fields"
+	PipelineTraceKey       = "pipeline_trace"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
@@ -128,7 +130,8 @@ const (
 	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
 	DescribeDatabaseTaskName = "DescribeDatabaseTaskName"
 
-	AddFieldTaskName = "AddFieldTaskName"
+	AddFieldTaskName              = "AddFieldTaskName"
+	AlterCollectionSchemaTaskName = "AlterCollectionSchemaTaskName"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -424,7 +427,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.DbName = t.GetDbName()
 
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
-	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
 
@@ -434,6 +437,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
+	}
+
+	// External collections must be single-shard: the refresh mechanism assigns all
+	// segments to VChannelNames[0], so multiple shards would leave segments orphaned.
+	if isExternalCollection && t.ShardsNum > 1 {
+		return fmt.Errorf("external collection does not support multiple shards, got ShardsNum=%d", t.ShardsNum)
 	}
 
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
@@ -459,11 +468,16 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate primary key definition when needed
-	if !isExternalCollection {
-		if err := validatePrimaryKey(t.schema); err != nil {
+	// For external collections, inject virtual PK field if no PK exists
+	if isExternalCollection {
+		if err := injectVirtualPKForExternalCollection(t.schema); err != nil {
 			return err
 		}
+	}
+
+	// validate primary key definition
+	if err := validatePrimaryKey(t.schema); err != nil {
+		return err
 	}
 
 	// validate dynamic field
@@ -491,8 +505,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate bigTopK optimization mode
-	if _, err := common.IsBigTopKOptimizationEnabled(t.GetProperties()...); err != nil {
+	// validate query mode
+	if err := common.ValidateQueryMode(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -563,7 +577,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
+	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
 	}
@@ -638,71 +652,20 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.fieldSchema = &schemapb.FieldSchema{}
-	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
-	if err != nil {
+	if err := proto.Unmarshal(t.GetSchema(), t.fieldSchema); err != nil {
 		return err
 	}
-	fieldList := typeutil.NewSet[string]()
-	for _, schema := range t.oldSchema.Fields {
-		fieldList.Insert(schema.Name)
+	if err := validateAddFieldRequest(t.oldSchema, t.fieldSchema); err != nil {
+		return err
 	}
-
-	if len(fieldList) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
-		return merr.WrapErrParameterInvalidMsg(msg)
-	}
-
-	if typeutil.IsVectorType(t.fieldSchema.DataType) {
-		vectorFields := len(typeutil.GetVectorFieldSchemas(t.oldSchema))
-		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
-		}
-	}
-
-	if _, ok := schemapb.DataType_name[int32(t.fieldSchema.DataType)]; !ok || t.fieldSchema.GetDataType() == schemapb.DataType_None {
-		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.fieldSchema.GetDataType()))
-	}
-
-	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, t.fieldSchema.GetName()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.fieldSchema.Name))
-	}
-	if t.fieldSchema.IsPrimaryKey {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add pk field, field name = %s", t.fieldSchema.Name))
-	}
-	if !t.fieldSchema.Nullable {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.Name))
-	}
-	if typeutil.IsVectorType(t.fieldSchema.DataType) && t.fieldSchema.Nullable {
-		if t.fieldSchema.DataType == schemapb.DataType_FloatVector ||
-			t.fieldSchema.DataType == schemapb.DataType_Float16Vector ||
-			t.fieldSchema.DataType == schemapb.DataType_BFloat16Vector ||
-			t.fieldSchema.DataType == schemapb.DataType_BinaryVector ||
-			t.fieldSchema.DataType == schemapb.DataType_Int8Vector {
-			if len(t.fieldSchema.TypeParams) == 0 {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", t.fieldSchema.Name))
-			}
-		}
-	}
-	if t.fieldSchema.AutoID {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))
-	}
-	if t.fieldSchema.IsPartitionKey {
-		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", t.fieldSchema.Name)
-	}
-	if t.fieldSchema.GetIsClusteringKey() {
-		for _, f := range t.oldSchema.Fields {
-			if f.GetIsClusteringKey() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clutering key field, field name: %s", t.fieldSchema.GetName()))
-			}
-		}
+	// User-added fields must be nullable so that old segments without this field can return
+	// NULL rather than causing a schema inconsistency at query time.
+	if !t.fieldSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName()))
 	}
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
 	}
-	if fieldList.Contain(t.fieldSchema.Name) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("duplicate field name: %s", t.fieldSchema.GetName()))
-	}
-
 	log.Info("PreExecute addField task done", zap.Any("field schema", t.fieldSchema))
 	return nil
 }
@@ -714,6 +677,238 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 }
 
 func (t *addCollectionFieldTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+// validateAddFieldRequest validates both the old schema constraints and the new field properties
+// for an AddCollectionField request. It is the single source of truth for add-field validation.
+func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *schemapb.FieldSchema) error {
+	// --- old schema constraints ---
+	fieldList := typeutil.NewSet[string]()
+	for _, f := range schema.Fields {
+		fieldList.Insert(f.Name)
+	}
+	if len(fieldList) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+		return merr.WrapErrParameterInvalidMsg(msg)
+	}
+	if fieldList.Contain(newFieldSchema.GetName()) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("duplicated field name %s", newFieldSchema.GetName()))
+	}
+
+	// --- new field property constraints ---
+	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
+		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
+	}
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, newFieldSchema.GetName()) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
+	}
+	if newFieldSchema.GetIsPrimaryKey() {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add pk field, field name = %s", newFieldSchema.GetName()))
+	}
+	if newFieldSchema.GetAutoID() {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", newFieldSchema.GetName()))
+	}
+	if newFieldSchema.GetIsPartitionKey() {
+		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", newFieldSchema.GetName())
+	}
+	if newFieldSchema.GetIsClusteringKey() {
+		if !typeutil.IsClusteringKeyType(newFieldSchema.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("clustering key field %s has unsupported data type %s",
+					newFieldSchema.GetName(), newFieldSchema.GetDataType().String()))
+		}
+		for _, f := range schema.GetFields() {
+			if f.GetIsClusteringKey() {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clustering key field, field name: %s", newFieldSchema.GetName()))
+			}
+		}
+	}
+	if typeutil.IsVectorType(newFieldSchema.DataType) {
+		vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
+		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		}
+	}
+
+	// NOTE: The nullable requirement for added fields is enforced by callers that deal with
+	// user-defined fields (e.g. addCollectionFieldTask). Function output fields managed by
+	// alterCollectionSchemaTask are explicitly prohibited from being nullable by validateFunction,
+	// so the check is intentionally left to callers rather than enforced here universally.
+	//
+	// Dense vector types require a dimension TypeParam. This check applies unconditionally
+	// (regardless of nullable) because a vector field without dimension is always invalid.
+	// SparseFloatVector is excluded because it does not have a fixed dimension by design.
+	if typeutil.IsVectorType(newFieldSchema.DataType) {
+		if newFieldSchema.DataType == schemapb.DataType_FloatVector ||
+			newFieldSchema.DataType == schemapb.DataType_Float16Vector ||
+			newFieldSchema.DataType == schemapb.DataType_BFloat16Vector ||
+			newFieldSchema.DataType == schemapb.DataType_BinaryVector ||
+			newFieldSchema.DataType == schemapb.DataType_Int8Vector {
+			if len(newFieldSchema.TypeParams) == 0 {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", newFieldSchema.GetName()))
+			}
+		}
+	}
+	return nil
+}
+
+type alterCollectionSchemaTask struct {
+	baseTask
+	Condition
+	*milvuspb.AlterCollectionSchemaRequest
+	*milvuspb.AlterCollectionSchemaResponse
+	ctx       context.Context
+	mixCoord  types.MixCoordClient
+	oldSchema *schemapb.CollectionSchema
+}
+
+func (t *alterCollectionSchemaTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterCollectionSchemaTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *alterCollectionSchemaTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *alterCollectionSchemaTask) Name() string {
+	return AlterCollectionSchemaTaskName
+}
+
+func (t *alterCollectionSchemaTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *alterCollectionSchemaTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionSchemaTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterCollectionSchemaTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *alterCollectionSchemaTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_AlterCollectionSchema
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
+	if t.oldSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("empty old schema in alter collection schema task")
+	}
+
+	action := t.GetAction()
+	if action == nil {
+		return merr.WrapErrParameterInvalidMsg("action is nil in alter schema task")
+	}
+	addRequest := action.GetAddRequest()
+	if addRequest == nil {
+		return merr.WrapErrParameterInvalidMsg("add_request is nil, only add operation is supported for now")
+	}
+
+	fieldInfos := addRequest.GetFieldInfos()
+	funcSchemas := addRequest.GetFuncSchema()
+
+	// AlterCollectionSchema currently only supports adding exactly one function with its output fields.
+	// RootCoord enforces the same constraint (ddl_callbacks_alter_collection_schema.go);
+	// validate early at Proxy to give clearer error messages.
+	if len(funcSchemas) != 1 || funcSchemas[0] == nil {
+		return merr.WrapErrParameterInvalidMsg("For now, exactly one function schema is required in alter schema task")
+	}
+	if len(fieldInfos) == 0 {
+		return merr.WrapErrParameterInvalidMsg("fieldInfos is empty, function output fields are required")
+	}
+
+	if len(fieldInfos) != 1 {
+		return merr.WrapErrParameterInvalidMsg("For now, only one field info is supported in alter schema task")
+	}
+	newFieldSchema := fieldInfos[0].GetFieldSchema()
+	if newFieldSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("empty new field schema in alter schema task")
+	}
+	if err := validateAddFieldRequest(t.oldSchema, newFieldSchema); err != nil {
+		return err
+	}
+	if err := ValidateField(newFieldSchema, t.oldSchema); err != nil {
+		return err
+	}
+
+	// Verify that every OutputFieldName of the function refers to one of the newly-added
+	// fields (from fieldInfos), not to a field that already exists in the old schema.
+	// This prevents a caller from wiring function output to an existing field, which
+	// would corrupt that field's data silently.
+	newFieldNames := make(map[string]struct{}, len(fieldInfos))
+	for _, fi := range fieldInfos {
+		if fi.GetFieldSchema() != nil {
+			newFieldNames[fi.GetFieldSchema().GetName()] = struct{}{}
+		}
+	}
+	for _, outName := range funcSchemas[0].GetOutputFieldNames() {
+		if _, isNew := newFieldNames[outName]; !isNew {
+			return merr.WrapErrParameterInvalidMsg(
+				"function output field %q must be one of the newly-added fields, not an existing field",
+				outName,
+			)
+		}
+	}
+
+	// Physical backfill is currently only implemented for BM25 in the datanode backfill
+	// compactor. Reject unsupported types early so the request never reaches RootCoord
+	// and no segment is left in an unrecoverable stale-schema state.
+	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg(
+			"physical backfill is currently only supported for BM25 functions, got %s",
+			funcSchemas[0].GetType().String())
+	}
+
+	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
+	// SparseFloatVector output). Construct a merged schema with old fields + new fields
+	// + new function, then validate only the new function to avoid re-checking existing
+	// functions' runtime providers.
+	// Deep-copy each new field schema so validateFunction's mutations (e.g. clearing
+	// IsFunctionOutput) do not affect the original request objects.
+	mergedSchema := proto.Clone(t.oldSchema).(*schemapb.CollectionSchema)
+	for _, fieldInfo := range fieldInfos {
+		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(fieldInfo.GetFieldSchema()).(*schemapb.FieldSchema))
+	}
+	mergedSchema.Functions = append(mergedSchema.Functions, funcSchemas[0])
+	if err := validateFunction(mergedSchema, funcSchemas[0].GetName(), false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
+	action := t.GetAction()
+	if action != nil {
+		addRequest := action.GetAddRequest()
+		if addRequest != nil {
+			for _, fieldInfo := range addRequest.GetFieldInfos() {
+				if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
+					fieldInfo.GetFieldSchema().IsFunctionOutput = true
+				}
+			}
+		}
+	}
+	var err error
+	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
+	return merr.CheckRPCCall(t.GetAlterStatus(), err)
+}
+
+func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
@@ -772,11 +967,11 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
-	_, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
+	_, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 			// make dropping collection idempotent.
-			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.DropCollectionRequest.GetCollectionName()), zap.String("database", t.DropCollectionRequest.GetDbName()))
+			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.GetCollectionName()), zap.String("database", t.GetDbName()))
 			return nil
 		}
 		return err
@@ -921,7 +1116,7 @@ func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	t.result = &milvuspb.BoolResponse{
 		Status: merr.Success(),
 	}
-	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
+	_, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
 	// error other than
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
 		t.result.Status = merr.Status(err)
@@ -1420,6 +1615,36 @@ func detectBoolPropChange(
 	return newValue, changed, nil
 }
 
+// detectQueryModeChange detects whether the query_mode collection property is
+// being changed via Properties or DeleteKeys. Returns the new query mode string
+// (empty string means no query mode) and whether it changed.
+func detectQueryModeChange(
+	oldQueryMode string,
+	properties []*commonpb.KeyValuePair,
+	deleteKeys []string,
+) (newQueryMode string, changed bool, err error) {
+	// this is duplicated with the check in alterCollectionTask PreExecute
+	if len(properties) > 0 && len(deleteKeys) > 0 {
+		return "", false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+	newQueryMode = oldQueryMode
+	if common.IsQueryModeKeyExists(properties...) {
+		if err := common.ValidateQueryMode(properties...); err != nil {
+			return "", false, err
+		}
+		newQueryMode = common.GetQueryMode(properties...)
+		changed = oldQueryMode != newQueryMode
+	}
+	for _, key := range deleteKeys {
+		if key == common.QueryModeKey {
+			newQueryMode = ""
+			changed = oldQueryMode != newQueryMode
+			break
+		}
+	}
+	return newQueryMode, changed, nil
+}
+
 func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
 	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
 	if err != nil {
@@ -1563,32 +1788,25 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	newBigTopK, bigTopKChanged, err := detectBoolPropChange(
-		collBasicInfo.bigTopKOptimization, common.BigTopKOptimizationEnabledKey,
+	newQueryMode, queryModeChanged, err := detectQueryModeChange(
+		collBasicInfo.queryMode,
 		t.Properties, t.GetDeleteKeys(),
-		func() (bool, error) {
-			return common.IsBigTopKOptimizationEnabled(t.Properties...)
-		},
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/big topk optimization",
+	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/query mode",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
 		zap.Bool("oldIsoValue", collBasicInfo.partitionKeyIsolation),
-		zap.Bool("newBigTopKOptimizationValue", newBigTopK),
-		zap.Bool("oldBigTopKOptimizationValue", collBasicInfo.bigTopKOptimization))
+		zap.String("newQueryMode", newQueryMode),
+		zap.String("oldQueryMode", collBasicInfo.queryMode))
 
-	// if the isolation/bigTopKOptimization flag in properties is not set, meta cache will assign partitionKeyIsolation/bigTopKOptimization in collection info to false
-	//   - None|false -> false, skip
-	//   - None|false -> true, check if the collection has vector index
-	//   - true -> false, check if the collection has vector index
-	//   - false -> true, check if the collection has vector index
-	//   - true -> true, skip
-	if isoChanged || bigTopKChanged {
+	// If partition key isolation or query_mode changed, check for existing vector index.
+	// Changing these properties requires dropping the vector index first.
+	if isoChanged || queryModeChanged {
 		if vecField, err := checkVectorIndexExist(ctx, t.GetDbName(), t.CollectionName, t.CollectionID, t.mixCoord); err != nil {
 			return err
 		} else if vecField != "" {
@@ -1596,9 +1814,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrIndexDuplicate(vecField,
 					"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 			}
-			if bigTopKChanged {
+			if queryModeChanged {
 				return merr.WrapErrIndexDuplicate(vecField,
-					"can not alter "+common.BigTopKOptimizationEnabledKey+" if the collection already has a vector index. Please drop the index first")
+					"can not alter "+common.QueryModeKey+" if the collection already has a vector index. Please drop the index first")
 			}
 		}
 	}
@@ -2364,7 +2582,7 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 
 func (t *loadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
-	loadPriorityStr, ok := t.LoadCollectionRequest.LoadParams[LoadPriorityName]
+	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
 		loadPriority = commonpb.LoadPriority_LOW
 	}
@@ -2628,7 +2846,7 @@ func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (t *loadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
-	loadPriorityStr, ok := t.LoadPartitionsRequest.LoadParams[LoadPriorityName]
+	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
 		loadPriority = commonpb.LoadPriority_LOW
 	}
@@ -2955,8 +3173,8 @@ func (t *UpdateResourceGroupsTask) PreExecute(ctx context.Context) error {
 func (t *UpdateResourceGroupsTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
-		Base:           t.UpdateResourceGroupsRequest.GetBase(),
-		ResourceGroups: t.UpdateResourceGroupsRequest.GetResourceGroups(),
+		Base:           t.GetBase(),
+		ResourceGroups: t.GetResourceGroups(),
 	})
 	return merr.CheckRPCCall(t.result, err)
 }
@@ -3530,7 +3748,8 @@ func (t *HighlightTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	t.GetHighlightRequest.Channel = channel
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+	t.Channel = channel
 	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
 	if err != nil {
 		return err

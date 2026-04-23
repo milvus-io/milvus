@@ -176,3 +176,95 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
 }
+
+func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
+	suite.Run("empty existing returns new unchanged", func() {
+		newLogs := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
+		}}
+		result := filterDuplicateFieldBinlogs(nil, newLogs)
+		suite.Equal(newLogs, result)
+	})
+
+	suite.Run("empty new returns empty", func() {
+		existing := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}}
+		result := filterDuplicateFieldBinlogs(existing, nil)
+		suite.Empty(result)
+	})
+
+	suite.Run("partial overlap same field", func() {
+		existing := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
+		}}
+		newLogs := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 2}, {LogID: 3}}, // 2 dup, 3 new
+		}}
+		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		suite.Equal(1, len(result))
+		suite.Equal(int64(102), result[0].FieldID)
+		suite.Equal(1, len(result[0].Binlogs))
+		suite.Equal(int64(3), result[0].Binlogs[0].LogID)
+	})
+
+	suite.Run("full overlap returns empty", func() {
+		existing := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
+		}}
+		newLogs := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
+		}}
+		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		suite.Empty(result)
+	})
+
+	suite.Run("different fieldIDs no filtering", func() {
+		existing := []*datapb.FieldBinlog{{
+			FieldID: 102,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}}
+		newLogs := []*datapb.FieldBinlog{{
+			FieldID: 103,
+			Binlogs: []*datapb.Binlog{{LogID: 1}}, // same logID but different field
+		}}
+		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		suite.Equal(1, len(result))
+		suite.Equal(int64(103), result[0].FieldID)
+		suite.Equal(1, len(result[0].Binlogs))
+	})
+
+	suite.Run("mixed fields partial overlap", func() {
+		existing := []*datapb.FieldBinlog{
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 1}}},
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogID: 5}}},
+		}
+		newLogs := []*datapb.FieldBinlog{
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}}}, // 1 dup, 2 new
+			{FieldID: 104, Binlogs: []*datapb.Binlog{{LogID: 10}}},            // completely new field
+		}
+		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		suite.Equal(2, len(result))
+		// find fieldID 102 in result
+		var fb102, fb104 *datapb.FieldBinlog
+		for _, fb := range result {
+			if fb.FieldID == 102 {
+				fb102 = fb
+			}
+			if fb.FieldID == 104 {
+				fb104 = fb
+			}
+		}
+		suite.NotNil(fb102)
+		suite.Equal(1, len(fb102.Binlogs))
+		suite.Equal(int64(2), fb102.Binlogs[0].LogID)
+		suite.NotNil(fb104)
+		suite.Equal(1, len(fb104.Binlogs))
+	})
+}

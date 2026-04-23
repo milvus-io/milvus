@@ -82,7 +82,7 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check replica loop")
 
-	listener := ob.meta.ResourceManager.ListenNodeChanged(ctx)
+	listener := ob.meta.ListenNodeChanged(ctx)
 	for {
 		ob.waitNodeChangedOrTimeout(ctx, listener)
 		// stop if the context is canceled.
@@ -109,8 +109,8 @@ func (ob *ReplicaObserver) scheduleStreamingQN(ctx context.Context) {
 			return
 		}
 
-		ids := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-		ob.checkStreamingQueryNodesInReplica(ids)
+		idsByRG := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()
+		ob.checkStreamingQueryNodesInReplica(idsByRG)
 	}
 }
 
@@ -120,17 +120,17 @@ func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listene
 	listener.Wait(ctxWithTimeout)
 }
 
-func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDs typeutil.UniqueSet) {
+func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[string]typeutil.UniqueSet) {
 	ctx := context.Background()
 	log := log.Ctx(ctx).WithRateGroup("qcv2.checkStreamingQueryNodesInReplica", 1, 60)
 	collections := ob.meta.GetAll(context.Background())
 
 	for _, collectionID := range collections {
-		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDs)
+		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDsByRG)
 	}
 
 	for _, collectionID := range collections {
-		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		replicas := ob.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			roSQNodes := replica.GetROSQNodes()
 			rwSQNodes := replica.GetRWSQNodes()
@@ -155,7 +155,7 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDs typeutil.
 				zap.Int64s("roNodes", roSQNodes),
 				zap.Int64s("rwNodes", rwSQNodes),
 			)
-			if err := ob.meta.ReplicaManager.RemoveSQNode(ctx, replica.GetID(), removeNodes...); err != nil {
+			if err := ob.meta.RemoveSQNode(ctx, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove streaming query node from replica", zap.Error(err))
 				continue
 			}
@@ -177,7 +177,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 
 	// check all ro nodes, remove it from replica if all segment/channel has been moved
 	for _, collectionID := range collections {
-		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		replicas := ob.meta.GetByCollection(ctx, collectionID)
 		hasNodeRemoved := false
 		for _, replica := range replicas {
 			if enableChannelExclusiveMode && !replica.IsChannelExclusiveModeEnabled() {
@@ -186,7 +186,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				channels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTargetFirst)
 				mutableReplica.TryEnableChannelExclusiveMode(lo.Keys(channels)...)
 				replica = mutableReplica.IntoReplica()
-				ob.meta.ReplicaManager.Put(ctx, replica)
+				ob.meta.Put(ctx, replica)
 			}
 
 			roNodes := replica.GetRONodes()
@@ -213,7 +213,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			if len(removeNodes) == 0 {
 				continue
 			}
-			if err := ob.meta.ReplicaManager.RemoveNode(ctx, replica.GetID(), removeNodes...); err != nil {
+			if err := ob.meta.RemoveNode(ctx, replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove node from replica",
 					zap.Int64s("removedNodes", removeNodes),
 					zap.Error(err))

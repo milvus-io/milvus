@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -107,8 +109,9 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-i.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
+			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace())
+				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -132,9 +135,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 }
 
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg)
-	}))
+	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
@@ -146,7 +147,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -157,16 +158,71 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 
 	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+
+	// MinSchemaVersion enforcement is only applied while the collection has an in-flight
+	// physical backfill (e.g. AlterCollectionSchema adding a BM25 function): until backfill
+	// writes the new field's data, an index built on the empty binlog would silently return
+	// wrong results. For metadata-only schema changes (e.g. nullable AddCollectionField),
+	// the index builder handles null/default values, so no delay is needed.
+	// Within the physical-backfill branch we still double-check segment binlogs because a
+	// function output field that was backfilled in a previous schema version is already
+	// present in this segment.
+	coll := i.meta.GetCollection(segment.CollectionID)
+	collectionInPhysicalBackfill := coll != nil && coll.Schema != nil && coll.Schema.GetDoPhysicalBackfill()
+	var segmentBinlogFields map[int64]struct{}
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
-			if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
-					zap.Int64("indexID", index.IndexID))
-				return err
+		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+			continue
+		}
+		if collectionInPhysicalBackfill && index.MinSchemaVersion > segment.GetSchemaVersion() {
+			if segmentBinlogFields == nil {
+				segmentBinlogFields = getSegmentBinlogFields(segment)
 			}
+			if _, hasField := segmentBinlogFields[index.FieldID]; !hasField {
+				log.Ctx(ctx).Info("skip index creation: field data not yet present in segment, waiting for physical backfill",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("indexID", index.IndexID),
+					zap.Int64("fieldID", index.FieldID),
+					zap.Int32("segSchemaVersion", segment.GetSchemaVersion()),
+					zap.Int32("indexMinSchemaVersion", index.MinSchemaVersion))
+				continue
+			}
+			// Transient inconsistency window: backfill has already written the field's
+			// binlog data to this segment, but the metadata tick has not yet bumped
+			// segment.SchemaVersion to match. The window should close within one backfill
+			// tick. Bail out with an error so the inspector retries on the next tick by
+			// which time the metadata is expected to have caught up. Sustained occurrences
+			// indicate the metadata-update path is stuck and warrant investigation.
+			log.Ctx(ctx).Warn("inconsistent state: field binlogs present but segment schema version still behind, will retry",
+				zap.Int64("segmentID", segment.ID),
+				zap.Int64("indexID", index.IndexID),
+				zap.Int64("fieldID", index.FieldID),
+				zap.Int32("segSchemaVersion", segment.GetSchemaVersion()),
+				zap.Int32("indexMinSchemaVersion", index.MinSchemaVersion))
+			return merr.WrapErrServiceInternal(
+				fmt.Sprintf("segment schema version %d behind index min schema version %d while field %d binlogs already present, retry next tick",
+					segment.GetSchemaVersion(), index.MinSchemaVersion, index.FieldID))
+		}
+		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
+			log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
+				zap.Int64("indexID", index.IndexID))
+			return err
 		}
 	}
 	return nil
+}
+
+// getSegmentBinlogFields returns the set of field IDs that have binlog data in the segment.
+// binlog.GetFieldID() is a columnGroupID, not a real field ID; the actual field IDs
+// are always in binlog.GetChildFields().
+func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
+	result := make(map[int64]struct{})
+	for _, binlog := range segment.GetBinlogs() {
+		for _, childFieldID := range binlog.GetChildFields() {
+			result[childFieldID] = struct{}{}
+		}
+	}
+	return result
 }
 
 func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
@@ -225,6 +281,11 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		zap.Int64("field size", fieldSize),
 		zap.Int64("task slot", taskSlot))
 	return nil
+}
+
+func (i *indexInspector) isExternalCollection(collectionID int64) bool {
+	coll := i.meta.GetCollection(collectionID)
+	return coll != nil && coll.IsExternal()
 }
 
 func (i *indexInspector) reloadFromMeta() {

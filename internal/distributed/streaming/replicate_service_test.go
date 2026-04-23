@@ -876,6 +876,74 @@ func TestReplicateServiceGetCheckpoint(t *testing.T) {
 	})
 }
 
+func TestReplicateServiceGetSalvageCheckpoint(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		expected := []*wal.ReplicateCheckpoint{
+			{ClusterID: "primary", PChannel: "primary-rootcoord-dml_0", TimeTick: 500},
+		}
+		h.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-channel").Return(expected, nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "test-channel")
+		assert.NoError(t, err)
+		assert.Equal(t, expected, checkpoints)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		h.EXPECT().GetSalvageCheckpoint(mock.Anything, "bad-channel").Return(nil, errors.New("not found"))
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "bad-channel")
+		assert.Error(t, err)
+		assert.Nil(t, checkpoints)
+	})
+
+	t.Run("closed_lifetime", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+		rs.lifetime.SetState(typeutil.LifetimeStateStopped)
+		rs.lifetime.Wait()
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "test-channel")
+		assert.ErrorIs(t, err, ErrWALAccesserClosed)
+		assert.Nil(t, checkpoints)
+	})
+}
+
 func TestReplicateServiceAppendClosed(t *testing.T) {
 	c := mock_client.NewMockClient(t)
 	h := mock_handler.NewMockHandlerClient(t)
@@ -931,7 +999,8 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(newConfig, []string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}, false)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(newConfig)
+
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
 			assert.NoError(t, err)
@@ -957,7 +1026,8 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(newConfig, []string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}, false)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(newConfig)
+
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
 			assert.NoError(t, err)
@@ -1055,7 +1125,8 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{SourceClusterId: "by-dev", TargetClusterId: "nonexistent"},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(invalidConfig, []string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}, false)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(invalidConfig)
+
 		_, err := rs.Append(context.Background(), replicateMsgs[0])
 		assert.Error(t, err)
 	})
@@ -1206,6 +1277,25 @@ func TestReplicateServiceGetConfigError(t *testing.T) {
 	_, err := rs.Append(context.Background(), replicateMsgs[0])
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "config unavailable")
+}
+
+func createSimpleReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration) []message.ReplicateMutableMessage {
+	alterMsg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
+			ReplicateConfiguration: newConfig,
+		}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithBroadcast([]string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}).
+		MustBuildBroadcast()
+	msgs := alterMsg.WithBroadcastID(200).SplitIntoMutableMessage()
+	replicateMsgs := make([]message.ReplicateMutableMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+			pulsar.NewMessageID(1, 2, 3, 4),
+		))
+		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+	}
+	return replicateMsgs
 }
 
 func createReplicateControlChannelMessages() []message.ReplicateMutableMessage {

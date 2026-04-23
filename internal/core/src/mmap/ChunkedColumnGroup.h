@@ -195,6 +195,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         CancelWarmup();
     }
 
+    bool
+    IsInMultiFieldColumnGroup() const override {
+        return group_->NumFieldsInGroup() > 1;
+    }
+
     void
     ManualEvictCache() const override {
         if (group_->NumFieldsInGroup() == 1) {
@@ -433,16 +438,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     const std::vector<int64_t>&
     GetNumRowsUntilChunk() const override {
         return group_->GetNumRowsUntilChunk();
-    }
-
-    const std::vector<int64_t>&
-    GetNumValidRowsUntilChunk() const override {
-        // For nullable columns, return the cumulative valid row counts
-        // For non-nullable columns, this equals num_rows_until_chunk_
-        if (!num_valid_rows_until_chunk_.empty()) {
-            return num_valid_rows_until_chunk_;
-        }
-        return GetNumRowsUntilChunk();
     }
 
     void
@@ -710,45 +705,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                              .output_data();
             fn(std::move(array), i);
         }
-    }
-
-    void
-    BuildValidRowIds(milvus::OpContext* op_ctx) override {
-        if (!field_meta_.is_nullable()) {
-            return;
-        }
-        auto total_rows = NumRows();
-        auto total_chunks = num_chunks();
-        valid_data_.resize(total_rows);
-        valid_count_per_chunk_.resize(total_chunks);
-
-        int64_t logical_offset = 0;
-        for (int64_t i = 0; i < total_chunks; i++) {
-            auto group_chunk = group_->GetGroupChunk(op_ctx, i);
-            auto chunk = group_chunk.get()->GetChunk(field_id_);
-            auto rows = chunk->RowNums();
-            int64_t valid_count = 0;
-            for (int64_t j = 0; j < rows; j++) {
-                if (chunk->isValid(j)) {
-                    valid_data_[logical_offset + j] = true;
-                    valid_count++;
-                } else {
-                    valid_data_[logical_offset + j] = false;
-                }
-            }
-            valid_count_per_chunk_[i] = valid_count;
-            logical_offset += rows;
-        }
-
-        num_valid_rows_until_chunk_.clear();
-        num_valid_rows_until_chunk_.reserve(total_chunks + 1);
-        num_valid_rows_until_chunk_.push_back(0);
-        for (int64_t i = 0; i < total_chunks; i++) {
-            num_valid_rows_until_chunk_.push_back(
-                num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
-        }
-
-        BuildOffsetMapping();
     }
 
  private:

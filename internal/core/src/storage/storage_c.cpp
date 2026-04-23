@@ -97,6 +97,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
             storage_config.tls_min_version =
                 std::string(c_storage_config.tls_min_version);
         }
+        storage_config.use_crc32c_checksum =
+            c_storage_config.use_crc32c_checksum;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 

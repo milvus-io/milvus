@@ -101,6 +101,11 @@ struct LoadDiff {
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
+    // External collections with manifest should bypass ComputeDiffColumnGroups
+    // (their column names are parquet field names, not numeric field IDs)
+    // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
+    bool load_external_manifest = false;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -118,7 +123,8 @@ struct LoadDiff {
                !fields_to_reload.empty() || !indexes_to_drop.empty() ||
                !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() ||
-               !text_indexes_to_create.empty() || manifest_updated;
+               !text_indexes_to_create.empty() || manifest_updated ||
+               load_external_manifest;
     }
 
     [[nodiscard]] bool
@@ -317,6 +323,11 @@ struct LoadDiff {
             oss << ", new_manifest_path=" << new_manifest_path;
         }
 
+        // load_external_manifest
+        if (load_external_manifest) {
+            oss << ", load_external_manifest=true";
+        }
+
         oss << "}";
         return oss.str();
     }
@@ -499,6 +510,16 @@ class SegmentLoadInfo {
     [[nodiscard]] proto::common::LoadPriority
     GetPriority() const {
         return info_.priority();
+    }
+
+    [[nodiscard]] bool
+    GetUseTakeForOutput() const {
+        return info_.use_take_for_output();
+    }
+
+    [[nodiscard]] int64_t
+    GetEstimatedBytesPerRow() const {
+        return info_.estimated_bytes_per_row();
     }
 
     // ==================== Compaction Info ====================
@@ -692,6 +713,17 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups();
 
+    /**
+     * @brief Pre-populate the column group cache without parsing a manifest
+     * @note Test-only hook: lets unit tests exercise diff logic that depends
+     *       on ColumnGroup contents without constructing real manifest files.
+     */
+    void
+    SetColumnGroupsForTesting(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
+        column_groups_ = std::move(cg);
+    }
+
     // ==================== Stats & Delta Logs ====================
 
     [[nodiscard]] int
@@ -801,6 +833,11 @@ class SegmentLoadInfo {
     HasTextIndexCreated(FieldId field_id) const {
         return created_text_indexes_.find(field_id) !=
                created_text_indexes_.end();
+    }
+
+    [[nodiscard]] const std::unordered_set<FieldId>&
+    GetCreatedTextIndexes() const {
+        return created_text_indexes_;
     }
 
     // ==================== Diff Computation ====================

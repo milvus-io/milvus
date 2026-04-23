@@ -260,9 +260,6 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     auto index_build_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - index_build_begin_)
@@ -408,10 +405,6 @@ template <typename T>
 void
 ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -435,16 +428,15 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        const auto target = IndexStructure<T>(*(values + i));
+        auto lb = std::lower_bound(begin(), end(), target);
+        auto ub = std::upper_bound(lb, end(), target);
         for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
+            if (lb->a_ != target.a_) {
                 LOG_ERROR(
                     "error happens in ScalarIndexSort<T>::In, "
                     "expected value is: {}, but real value is: {}",
-                    *(values + i),
+                    target.a_,
                     lb->a_);
             }
             bitset[lb->idx_] = true;
@@ -459,16 +451,15 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
-        auto lb =
-            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
-        auto ub =
-            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        const auto target = IndexStructure<T>(*(values + i));
+        auto lb = std::lower_bound(begin(), end(), target);
+        auto ub = std::upper_bound(lb, end(), target);
         for (; lb < ub; ++lb) {
-            if (lb->a_ != *(values + i)) {
+            if (lb->a_ != target.a_) {
                 LOG_ERROR(
                     "error happens in ScalarIndexSort<T>::NotIn, "
                     "expected value is: {}, but real value is: {}",
-                    *(values + i),
+                    target.a_,
                     lb->a_);
             }
             bitset[lb->idx_] = false;

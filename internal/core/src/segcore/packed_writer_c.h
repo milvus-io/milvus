@@ -15,6 +15,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #include "common/common_type_c.h"
 #ifdef __cplusplus
@@ -61,12 +62,7 @@ CStatus
 CloseWriter(CPackedWriter c_packed_writer);
 
 CStatus
-GetFileSize(const char* path, int64_t* size);
-
-CStatus
-GetFileSizeWithStorageConfig(const char* path,
-                             int64_t* size,
-                             CStorageConfig c_storage_config);
+CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups);
 
 #ifdef __cplusplus
 }

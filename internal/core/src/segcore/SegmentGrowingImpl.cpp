@@ -641,8 +641,9 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     std::vector<PkType> pks(num_rows);
-    ParsePksFromFieldData(
-        pks, insert_record_proto->fields_data(field_id_to_offset[field_id]));
+    ParsePksFromFieldData(pks,
+                          *insert_record_proto->mutable_fields_data(
+                              field_id_to_offset[field_id]));
     for (int i = 0; i < num_rows; ++i) {
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
@@ -1168,7 +1169,7 @@ SegmentGrowingImpl::bulk_subscript(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         dst->at(i) =
-            ExtractSubJson(std::string(src[offset]), dynamic_field_names);
+            ExtractSubJson(std::string_view(src[offset]), dynamic_field_names);
     }
     return result;
 }
@@ -1921,6 +1922,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
 void
 SegmentGrowingImpl::Reopen(
+    milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
     ThrowInfo(milvus::UnexpectedError,
               "Unexpected reopening growing segment {} with load info",

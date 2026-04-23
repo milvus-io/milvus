@@ -423,4 +423,110 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
+// External files store vectors in list format (e.g. List<Float32>);
+// Milvus expects FixedSizeBinary (raw bytes). Returns the input
+// unchanged if already FixedSizeBinary.
+arrow::ArrayVector
+NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
+                                       DataType data_type,
+                                       int dim);
+
+// Convert a single row of an Arrow ListArray to a protobuf ScalarField.
+// The element type is inferred from the ListArray's value type.
+// Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
+proto::schema::ScalarField
+ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
+                            int64_t row_index);
+
+// Convert a timestamp value to microseconds based on its Arrow TimeUnit.
+inline int64_t
+ConvertToMicroseconds(int64_t value, arrow::TimeUnit::type unit) {
+    switch (unit) {
+        case arrow::TimeUnit::SECOND:
+            return value * 1000000;
+        case arrow::TimeUnit::MILLI:
+            return value * 1000;
+        case arrow::TimeUnit::MICRO:
+            return value;
+        case arrow::TimeUnit::NANO:
+            return value / 1000;
+        default:
+            return value;
+    }
+}
+
+// ============================================================
+// Arrow type normalization helpers for external table loading.
+// Schemaless Parquet reader returns native Arrow types; these
+// helpers convert them to the types each consumer expects.
+// ============================================================
+
+// --- Tier 1: Atomic conversion helpers ---
+
+// Convert FixedSizeBinaryArray → BinaryArray (for nullable vectors).
+// Null rows are skipped in the data buffer; offsets encode the gaps.
+arrow::ArrayVector
+ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays);
+
+// Zero-copy: reinterpret StringArray as BinaryArray (identical layout).
+arrow::ArrayVector
+ConvertStringArrayToBinary(const arrow::ArrayVector& arrays);
+
+// Convert StringArray (WKT) → BinaryArray (WKB) via GEOS.
+arrow::ArrayVector
+ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays);
+
+// Convert TimestampArray → Int64Array (microseconds).
+arrow::ArrayVector
+ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
+
+// Convert ListArray<Scalar> → BinaryArray (protobuf-serialized ScalarFieldProto).
+arrow::ArrayVector
+ConvertListToProtobufBinary(const arrow::ArrayVector& arrays);
+
+// Unified vector normalization: List/FSList → final format.
+// Non-nullable → FixedSizeBinaryArray; nullable → BinaryArray.
+arrow::ArrayVector
+NormalizeVectorArrays(const arrow::ArrayVector& arrays,
+                      DataType data_type,
+                      int64_t dim,
+                      bool nullable);
+
+// Normalize VectorArray inner arrays: List<List<Float>> → List<FixedSizeBinary>.
+arrow::ArrayVector
+NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
+                          DataType element_type,
+                          int64_t dim);
+
+// --- Tier 2: Per-consumer entry points ---
+
+// Unified single-array normalize: converts external Parquet arrow types to
+// Milvus internal arrow types. All consumer-specific entry points delegate here.
+//
+// Conversions:
+//   VARCHAR/STRING/TEXT/JSON: String → Binary (zero-copy)
+//   Geometry: String(WKT) → Binary(WKB) via GEOS; Binary stays as-is
+//   Timestamptz: Timestamp → Int64 (microseconds)
+//   Array: List(element) → Binary (protobuf)
+//   Vectors: various → FixedSizeBinary
+//   VectorArray: List<List<scalar>> → List<FixedSizeBinary>
+//
+std::shared_ptr<arrow::Array>
+NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
+                       const FieldMeta& field_meta);
+
+// Overload for callers without FieldMeta (e.g. index build path).
+std::shared_ptr<arrow::Array>
+NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
+                       DataType data_type,
+                       int64_t dim,
+                       bool nullable,
+                       DataType element_type = DataType::NONE);
+
+// Load path: batch wrapper around NormalizeExternalArrow.
+arrow::ArrayVector
+NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
+                             const FieldMeta& field_meta);
+
 }  // namespace milvus::storage

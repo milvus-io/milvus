@@ -162,7 +162,7 @@ func (s Catalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[
 
 	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
 	for i, partitions := range collectionPartitions {
-		result[collectionIDs[i]] = partitions
+		result[collectionIDs[i]] = partitions //nolint:gosec // collectionPartitions and collectionIDs have same length
 	}
 	return result, nil
 }
@@ -324,6 +324,10 @@ func (s Catalog) SaveCollectionTargets(ctx context.Context, targets ...*querypb.
 func (s Catalog) RemoveCollectionTarget(ctx context.Context, collectionID int64) error {
 	k := encodeCollectionTargetKey(collectionID)
 	return s.cli.Remove(ctx, k)
+}
+
+func (s Catalog) RemoveCollectionTargets(ctx context.Context) error {
+	return s.cli.RemoveWithPrefix(ctx, CollectionTargetPrefix)
 }
 
 func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error) {

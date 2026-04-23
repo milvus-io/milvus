@@ -19,10 +19,13 @@ package delegator
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
@@ -129,6 +132,7 @@ func shallowCopyRetrieveRequest(req *internalpb.RetrieveRequest, targetID int64)
 		GroupByFieldIds:              req.GroupByFieldIds,
 		Aggregates:                   req.Aggregates,
 		EntityTtlPhysicalTime:        req.EntityTtlPhysicalTime,
+		OrderByFields:                req.OrderByFields,
 	}
 }
 
@@ -224,6 +228,96 @@ func BenchmarkGetStatisticsRequest_ShallowCopy(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = modifyGetStatisticsRequestWithShallowCopy(req, querypb.DataScope_Historical, segmentIDs, int64(i))
 	}
+}
+
+// =========================================================================
+// Functional tests for shallowCopyRetrieveRequest
+// =========================================================================
+
+func TestShallowCopyRetrieveRequest_OrderByFields(t *testing.T) {
+	orderByFields := []*planpb.OrderByField{
+		{FieldId: 101, Ascending: true},
+		{FieldId: 102, Ascending: false},
+	}
+	req := &internalpb.RetrieveRequest{
+		Base:          &commonpb.MsgBase{TargetID: 1},
+		CollectionID:  1000,
+		Limit:         10,
+		OrderByFields: orderByFields,
+	}
+
+	copied := shallowcopy.ShallowCopyRetrieveRequest(req, 99)
+
+	// Verify OrderByFields is shallow-copied
+	assert.Equal(t, len(req.OrderByFields), len(copied.OrderByFields))
+	for i, f := range req.OrderByFields {
+		assert.Equal(t, f.FieldId, copied.OrderByFields[i].FieldId)
+		assert.Equal(t, f.Ascending, copied.OrderByFields[i].Ascending)
+	}
+	// Verify it's the same underlying slice (shallow copy)
+	assert.Equal(t, &req.OrderByFields[0], &copied.OrderByFields[0])
+
+	// Verify TargetID is updated
+	assert.Equal(t, int64(99), copied.Base.TargetID)
+	// Verify other fields are copied
+	assert.Equal(t, int64(1000), copied.CollectionID)
+	assert.Equal(t, int64(10), copied.Limit)
+}
+
+func TestShallowCopyRetrieveRequest_AllFields(t *testing.T) {
+	req := &internalpb.RetrieveRequest{
+		Base:                         &commonpb.MsgBase{TargetID: 1},
+		ReqID:                        42,
+		DbID:                         1,
+		CollectionID:                 1000,
+		PartitionIDs:                 []int64{1, 2},
+		SerializedExprPlan:           []byte{1, 2, 3},
+		OutputFieldsId:               []int64{100, 101},
+		MvccTimestamp:                500,
+		GuaranteeTimestamp:           400,
+		TimeoutTimestamp:             600,
+		Limit:                        10,
+		IgnoreGrowing:                true,
+		IsCount:                      true,
+		IterationExtensionReduceRate: 2,
+		Username:                     "user",
+		ReduceStopForBest:            true,
+		ReduceType:                   1,
+		ConsistencyLevel:             commonpb.ConsistencyLevel_Strong,
+		IsIterator:                   true,
+		CollectionTtlTimestamps:      999,
+		GroupByFieldIds:              []int64{200},
+		Aggregates:                   []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 300}},
+		EntityTtlPhysicalTime:        777,
+		OrderByFields:                []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}
+
+	copied := shallowcopy.ShallowCopyRetrieveRequest(req, 99)
+
+	assert.Equal(t, int64(99), copied.Base.TargetID)
+	assert.Equal(t, req.ReqID, copied.ReqID)
+	assert.Equal(t, req.DbID, copied.DbID)
+	assert.Equal(t, req.CollectionID, copied.CollectionID)
+	assert.Equal(t, req.PartitionIDs, copied.PartitionIDs)
+	assert.Equal(t, req.SerializedExprPlan, copied.SerializedExprPlan)
+	assert.Equal(t, req.OutputFieldsId, copied.OutputFieldsId)
+	assert.Equal(t, req.MvccTimestamp, copied.MvccTimestamp)
+	assert.Equal(t, req.GuaranteeTimestamp, copied.GuaranteeTimestamp)
+	assert.Equal(t, req.TimeoutTimestamp, copied.TimeoutTimestamp)
+	assert.Equal(t, req.Limit, copied.Limit)
+	assert.Equal(t, req.IgnoreGrowing, copied.IgnoreGrowing)
+	assert.Equal(t, req.IsCount, copied.IsCount)
+	assert.Equal(t, req.IterationExtensionReduceRate, copied.IterationExtensionReduceRate)
+	assert.Equal(t, req.Username, copied.Username)
+	assert.Equal(t, req.ReduceStopForBest, copied.ReduceStopForBest)
+	assert.Equal(t, req.ReduceType, copied.ReduceType)
+	assert.Equal(t, req.ConsistencyLevel, copied.ConsistencyLevel)
+	assert.Equal(t, req.IsIterator, copied.IsIterator)
+	assert.Equal(t, req.CollectionTtlTimestamps, copied.CollectionTtlTimestamps)
+	assert.Equal(t, req.GroupByFieldIds, copied.GroupByFieldIds)
+	assert.Equal(t, req.Aggregates, copied.Aggregates)
+	assert.Equal(t, req.EntityTtlPhysicalTime, copied.EntityTtlPhysicalTime)
+	assert.Equal(t, req.OrderByFields, copied.OrderByFields)
 }
 
 // Benchmark simulating multiple worker nodes (realistic scenario)

@@ -101,21 +101,33 @@ type stubCluster struct {
 	session.Cluster
 }
 
-func (s *stubCluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error {
+func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
 	return nil
 }
 
-func (s *stubCluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error) {
-	return &datapb.UpdateExternalCollectionResponse{
+func (s *stubCluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+	return &datapb.RefreshExternalCollectionTaskResponse{
 		State: indexpb.JobState_JobStateInProgress,
 	}, nil
 }
 
-func (s *stubCluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
+func (s *stubCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
 	return nil
 }
 
 // ==================== Helper Functions ====================
+
+// newTestCollections creates a collections map with a single external collection
+// that has one VChannel and one partition, as expected by SetJobInfo.
+func newTestCollections(collectionID int64) *typeutil.ConcurrentMap[UniqueID, *collectionInfo] {
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collectionID, &collectionInfo{
+		ID:            collectionID,
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+		Partitions:    []int64{1},
+	})
+	return collections
+}
 
 func createTestRefreshTaskWithStubs(t *testing.T, taskID, jobID, collectionID int64) (*refreshExternalCollectionTask, *externalCollectionRefreshMeta) {
 	catalog := &stubCatalog{}
@@ -167,12 +179,12 @@ func TestRefreshExternalCollectionTask_GetTaskID(t *testing.T) {
 
 func TestRefreshExternalCollectionTask_GetTaskType(t *testing.T) {
 	task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
-	assert.Equal(t, taskcommon.Stats, task.GetTaskType())
+	assert.Equal(t, taskcommon.RefreshExternalCollection, task.GetTaskType())
 }
 
 func TestRefreshExternalCollectionTask_GetTaskState(t *testing.T) {
 	task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
-	assert.Equal(t, taskcommon.State(indexpb.JobState_JobStateInit), task.GetTaskState())
+	assert.Equal(t, indexpb.JobState_JobStateInit, task.GetTaskState())
 }
 
 func TestRefreshExternalCollectionTask_GetTaskSlot(t *testing.T) {
@@ -311,6 +323,68 @@ func TestRefreshExternalCollectionTask_UpdateStateWithMeta(t *testing.T) {
 		err := task.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, "")
 		assert.Error(t, err)
 	})
+
+	// Eager synchronous contract: when the task transitions to a terminal
+	// state, processFinishedJob must fire BEFORE UpdateStateWithMeta returns,
+	// with the correct jobID. This guarantees callers polling progress see a
+	// consistent state (schema update has already been applied).
+	t.Run("terminal_finished_fires_process_finished_job_synchronously", func(t *testing.T) {
+		task, refreshMeta := createTestRefreshTaskWithStubs(t, 1001, 42, 100)
+		err := refreshMeta.AddTask(task.ExternalCollectionRefreshTask)
+		assert.NoError(t, err)
+
+		var callbackJobID int64
+		callbackCount := 0
+		task.processFinishedJob = func(jobID int64) {
+			callbackJobID = jobID
+			callbackCount++
+		}
+
+		err = task.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "")
+		assert.NoError(t, err)
+
+		// Callback fired exactly once, with correct jobID, before return.
+		assert.Equal(t, 1, callbackCount, "processFinishedJob must fire exactly once")
+		assert.Equal(t, int64(42), callbackJobID, "processFinishedJob must receive the task's jobID")
+	})
+
+	t.Run("terminal_failed_fires_process_finished_job", func(t *testing.T) {
+		task, refreshMeta := createTestRefreshTaskWithStubs(t, 1001, 7, 100)
+		err := refreshMeta.AddTask(task.ExternalCollectionRefreshTask)
+		assert.NoError(t, err)
+
+		called := false
+		task.processFinishedJob = func(jobID int64) { called = true }
+
+		err = task.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "worker crashed")
+		assert.NoError(t, err)
+		assert.True(t, called, "processFinishedJob must also fire on Failed transitions")
+	})
+
+	t.Run("non_terminal_does_not_fire_process_finished_job", func(t *testing.T) {
+		task, refreshMeta := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
+		err := refreshMeta.AddTask(task.ExternalCollectionRefreshTask)
+		assert.NoError(t, err)
+
+		called := false
+		task.processFinishedJob = func(jobID int64) { called = true }
+
+		err = task.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, "")
+		assert.NoError(t, err)
+		assert.False(t, called, "processFinishedJob must NOT fire on non-terminal transitions")
+	})
+
+	t.Run("nil_process_finished_job_no_panic", func(t *testing.T) {
+		task, refreshMeta := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
+		err := refreshMeta.AddTask(task.ExternalCollectionRefreshTask)
+		assert.NoError(t, err)
+
+		// processFinishedJob unset (nil) — test-fixture case.
+		task.processFinishedJob = nil
+		assert.NotPanics(t, func() {
+			_ = task.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "")
+		})
+	})
 }
 
 // ==================== UpdateProgressWithMeta Tests ====================
@@ -350,7 +424,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
 		// task.mt is nil
 
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			KeptSegments:    []int64{1, 2},
 			UpdatedSegments: []*datapb.SegmentInfo{},
 		}
@@ -390,7 +464,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
 		// Try to drop all segments without replacement
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			KeptSegments:    []int64{},               // Keep none
 			UpdatedSegments: []*datapb.SegmentInfo{}, // Add none
 		}
@@ -435,13 +509,13 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
 		// Keep segment 1, drop segment 2, add segment 10
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			KeptSegments: []int64{1},
 			UpdatedSegments: []*datapb.SegmentInfo{
 				{ID: 10, CollectionID: 100, NumOfRows: 1000},
@@ -473,13 +547,13 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
 		// Keep only 1 segment (drop 9 out of 10 = 90% drop ratio, triggers warning)
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			KeptSegments: []int64{1},
 			UpdatedSegments: []*datapb.SegmentInfo{
 				{ID: 20, CollectionID: 100, NumOfRows: 2000},
@@ -502,7 +576,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
@@ -517,7 +591,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		alloc := &stubAllocator{}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
-		resp := &datapb.UpdateExternalCollectionResponse{
+		resp := &datapb.RefreshExternalCollectionTaskResponse{
 			KeptSegments: []int64{},
 			UpdatedSegments: []*datapb.SegmentInfo{
 				{ID: 1, CollectionID: 100, NumOfRows: 1000},
@@ -697,8 +771,8 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock CreateExternalCollectionTask to return error
-		mockCreate := mockey.Mock(mockey.GetMethod(cluster, "CreateExternalCollectionTask")).Return(errors.New("create task failed")).Build()
+		// Mock CreateRefreshExternalCollectionTask to return error
+		mockCreate := mockey.Mock(mockey.GetMethod(cluster, "CreateRefreshExternalCollectionTask")).Return(errors.New("create task failed")).Build()
 		defer mockCreate.UnPatch()
 
 		task.CreateTaskOnWorker(1, cluster)
@@ -784,7 +858,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+		assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 	})
 
 	t.Run("job_already_failed", func(t *testing.T) {
@@ -824,7 +898,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+		assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 	})
 
 	t.Run("query_failed", func(t *testing.T) {
@@ -860,8 +934,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryExternalCollectionTask to return error
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(nil, errors.New("query failed")).Build()
+		// Mock QueryRefreshExternalCollectionTask to return error
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(nil, errors.New("query failed")).Build()
 		defer mockQuery.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
@@ -905,7 +979,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// stubCluster.QueryExternalCollectionTask returns InProgress by default
+		// stubCluster.QueryRefreshExternalCollectionTask returns InProgress by default
 
 		task.QueryTaskOnWorker(cluster)
 
@@ -947,8 +1021,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryExternalCollectionTask to return failed state
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+		// Mock QueryRefreshExternalCollectionTask to return failed state
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:      indexpb.JobState_JobStateFailed,
 			FailReason: "worker error",
 		}, nil).Build()
@@ -1001,12 +1075,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			},
 		})
 
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: collections,
+			collections: newTestCollections(100),
 		}
 
 		alloc := &stubAllocator{nextID: 99999}
@@ -1014,8 +1086,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryExternalCollectionTask to return Finished with response
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+		// Mock QueryRefreshExternalCollectionTask to return Finished with response
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:        indexpb.JobState_JobStateFinished,
 			KeptSegments: []int64{1},
 			UpdatedSegments: []*datapb.SegmentInfo{
@@ -1023,6 +1095,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			},
 		}, nil).Build()
 		defer mockQuery.UnPatch()
+
+		// Mock UpdateSegmentsInfo to succeed
+		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(nil).Build()
+		defer mockUpdate.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
 
@@ -1070,8 +1146,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryExternalCollectionTask to return Finished
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+		// Mock QueryRefreshExternalCollectionTask to return Finished
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
@@ -1084,18 +1160,21 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Contains(t, metaTask.GetFailReason(), "task source mismatch")
 	})
 
-	t.Run("task_unexpected_state", func(t *testing.T) {
+	// Part 8 cross-bucket relaxed JobStateNone/JobStateInit to mean "not yet
+	// picked up by the worker scheduler" (benign no-op) instead of "task not
+	// found" (failure). JobStateRetry is the only state still treated as
+	// unexpected and forces Failed.
+	t.Run("task_state_none_no_op", func(t *testing.T) {
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		// Add active job
 		job := &datapb.ExternalCollectionRefreshJob{
 			JobId:          1,
 			CollectionId:   100,
 			State:          indexpb.JobState_JobStateInProgress,
 			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
+			ExternalSpec:   `{"format":"parquet"}`,
 		}
 		err = refreshMeta.AddJob(job)
 		assert.NoError(t, err)
@@ -1107,7 +1186,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			NodeId:         1,
 			State:          indexpb.JobState_JobStateInProgress,
 			ExternalSource: "s3://bucket/path",
-			ExternalSpec:   "iceberg",
+			ExternalSpec:   `{"format":"parquet"}`,
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
@@ -1117,15 +1196,109 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock QueryExternalCollectionTask to return unexpected state
-		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+		// Worker reports JobStateNone — task hasn't been picked up yet.
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State: indexpb.JobState_JobStateNone,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
 
-		// Task should be marked as failed due to unexpected state
+		// Task state should remain InProgress (no-op), not Failed.
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
+		assert.Empty(t, metaTask.GetFailReason())
+	})
+
+	// JobStateInit shares the no-op branch with JobStateNone/JobStateInProgress:
+	// worker has the task but hasn't started execution yet. Task must stay
+	// InProgress from DataCoord's view, not be marked Failed.
+	t.Run("task_state_init_no_op", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		job := &datapb.ExternalCollectionRefreshJob{
+			JobId:          1,
+			CollectionId:   100,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}
+		err = refreshMeta.AddJob(job)
+		assert.NoError(t, err)
+
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:         1001,
+			JobId:          1,
+			CollectionId:   100,
+			NodeId:         1,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}
+		err = refreshMeta.AddTask(protoTask)
+		assert.NoError(t, err)
+
+		alloc := &stubAllocator{nextID: 99999}
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
+
+		cluster := &stubCluster{}
+
+		// Worker reports JobStateInit — task accepted but not yet running.
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+			State: indexpb.JobState_JobStateInit,
+		}, nil).Build()
+		defer mockQuery.UnPatch()
+
+		task.QueryTaskOnWorker(cluster)
+
+		// Task state must remain InProgress (no-op), not Failed.
+		metaTask := refreshMeta.GetTask(1001)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
+		assert.Empty(t, metaTask.GetFailReason())
+	})
+
+	t.Run("task_state_retry_marks_failed", func(t *testing.T) {
+		catalog := &stubCatalog{}
+		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
+		assert.NoError(t, err)
+
+		job := &datapb.ExternalCollectionRefreshJob{
+			JobId:          1,
+			CollectionId:   100,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}
+		err = refreshMeta.AddJob(job)
+		assert.NoError(t, err)
+
+		protoTask := &datapb.ExternalCollectionRefreshTask{
+			TaskId:         1001,
+			JobId:          1,
+			CollectionId:   100,
+			NodeId:         1,
+			State:          indexpb.JobState_JobStateInProgress,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
+		}
+		err = refreshMeta.AddTask(protoTask)
+		assert.NoError(t, err)
+
+		alloc := &stubAllocator{nextID: 99999}
+		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
+
+		cluster := &stubCluster{}
+
+		// JobStateRetry is the only state still considered unexpected.
+		mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
+			State: indexpb.JobState_JobStateRetry,
+		}, nil).Build()
+		defer mockQuery.UnPatch()
+
+		task.QueryTaskOnWorker(cluster)
+
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
 		assert.Contains(t, metaTask.GetFailReason(), "unexpected state")
@@ -1165,7 +1338,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	segments := NewSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1173,8 +1346,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 
 	cluster := &stubCluster{}
 
-	// Mock QueryExternalCollectionTask to return Finished with response
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+	// Mock QueryRefreshExternalCollectionTask to return Finished with response
+	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State:        indexpb.JobState_JobStateFinished,
 		KeptSegments: []int64{},
 		UpdatedSegments: []*datapb.SegmentInfo{
@@ -1234,7 +1407,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedValidateSourceF
 	cluster := &stubCluster{}
 
 	// Mock query to return Finished
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State: indexpb.JobState_JobStateFinished,
 	}, nil).Build()
 	defer mockQuery.UnPatch()
@@ -1282,7 +1455,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSetJobInfoFaile
 	cluster := &stubCluster{}
 
 	// Mock query to return Finished
-	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryExternalCollectionTask")).Return(&datapb.UpdateExternalCollectionResponse{
+	mockQuery := mockey.Mock(mockey.GetMethod(cluster, "QueryRefreshExternalCollectionTask")).Return(&datapb.RefreshExternalCollectionTaskResponse{
 		State: indexpb.JobState_JobStateFinished,
 	}, nil).Build()
 	defer mockQuery.UnPatch()
@@ -1317,12 +1490,12 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_JobNotFoundNodeIdZero(t
 
 	cluster := &stubCluster{}
 
-	// Job doesn't exist, nodeId is 0 so DropExternalCollectionTask should NOT be called
+	// Job doesn't exist, nodeId is 0 so DropRefreshExternalCollectionTask should NOT be called
 	task.QueryTaskOnWorker(cluster)
 
 	metaTask := refreshMeta.GetTask(1001)
 	assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-	assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+	assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 }
 
 // ==================== SetJobInfo Additional Tests ====================
@@ -1355,7 +1528,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1370,7 +1543,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
 	// Keep segment 1, drop segment 2, add a new segment
-	resp := &datapb.UpdateExternalCollectionResponse{
+	resp := &datapb.RefreshExternalCollectionTaskResponse{
 		KeptSegments: []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{
 			{ID: 999, CollectionID: 100, NumOfRows: 3000},
@@ -1408,7 +1581,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1423,7 +1596,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
 	// Keep only 1 out of 10 segments (90% drop ratio) → triggers warning
-	resp := &datapb.UpdateExternalCollectionResponse{
+	resp := &datapb.RefreshExternalCollectionTaskResponse{
 		KeptSegments: []int64{1},
 		UpdatedSegments: []*datapb.SegmentInfo{
 			{ID: 999, CollectionID: 100, NumOfRows: 5000},
@@ -1448,7 +1621,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_UpdateSegmentsInfoFailed(t *te
 	segments := NewSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1462,7 +1635,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_UpdateSegmentsInfoFailed(t *te
 	}
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
-	resp := &datapb.UpdateExternalCollectionResponse{
+	resp := &datapb.RefreshExternalCollectionTaskResponse{
 		KeptSegments: []int64{},
 		UpdatedSegments: []*datapb.SegmentInfo{
 			{ID: 1, CollectionID: 100, NumOfRows: 1000},
@@ -1538,8 +1711,8 @@ func TestRefreshExternalCollectionTask_DropTaskOnWorker(t *testing.T) {
 
 		cluster := &stubCluster{}
 
-		// Mock DropExternalCollectionTask to return error
-		mockDrop := mockey.Mock(mockey.GetMethod(cluster, "DropExternalCollectionTask")).Return(errors.New("drop failed")).Build()
+		// Mock DropRefreshExternalCollectionTask to return error
+		mockDrop := mockey.Mock(mockey.GetMethod(cluster, "DropRefreshExternalCollectionTask")).Return(errors.New("drop failed")).Build()
 		defer mockDrop.UnPatch()
 
 		task.DropTaskOnWorker(cluster)

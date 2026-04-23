@@ -25,6 +25,9 @@ type l0CompactionPolicy struct {
 	allocator         allocator.Allocator
 }
 
+// Ensure l0CompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*l0CompactionPolicy)(nil)
+
 func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
 		meta:              meta,
@@ -35,6 +38,14 @@ func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0Compact
 
 func (policy *l0CompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+}
+
+func (policy *l0CompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
+}
+
+func (policy *l0CompactionPolicy) Name() string {
+	return "L0Compaction"
 }
 
 // Notify policy to record the active updated(when adding a new L0 segment) collections.

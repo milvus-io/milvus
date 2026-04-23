@@ -43,6 +43,9 @@ func (s *DistributionSuite) SetupTest() {
 }
 
 func (s *DistributionSuite) TearDownTest() {
+	if s.dist != nil {
+		s.dist.Close()
+	}
 	s.dist = nil
 }
 
@@ -193,6 +196,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 			_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.Unpin(version)
@@ -628,12 +632,10 @@ func (s *DistributionSuite) TestPeek() {
 			s.SetupTest()
 			defer s.TearDownTest()
 
-			// peek during lock
 			s.dist.AddDistributions(tc.input...)
-			s.dist.mut.Lock()
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(tc.readable)
 			s.compareSnapshotItems(tc.expected, sealed)
-			s.dist.mut.Unlock()
 		})
 	}
 }
@@ -698,6 +700,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 				DroppedInTarget:       nil,
 			}, nil)
 			s.dist.MarkOfflineSegments(tc.offlines...)
+			s.dist.Flush()
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
 			for _, offline := range tc.offlines {
@@ -1441,6 +1444,10 @@ func TestPinReadableSegments(t *testing.T) {
 			SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 			GrowingInTarget:       []int64{},
 		}, []int64{1})
+		// Flush pending snapshot and stop background goroutine to avoid
+		// data race with mockey patches in sub-tests.
+		dist.Flush()
+		dist.Close()
 		return dist
 	}
 
@@ -1524,6 +1531,10 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
 	// This tests the case where load ratio is satisfied but serviceable is false
 	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
@@ -1556,6 +1567,10 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=false, loadRatioSatisfy=false
 	// This tests the case where partial result is requested but load ratio is insufficient
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
@@ -1585,6 +1600,10 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
+
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
@@ -1646,6 +1665,10 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
 
@@ -1692,6 +1715,14 @@ func (m *mockCandidate) Partition() int64 {
 func (m *mockCandidate) Type() commonpb.SegmentState {
 	return commonpb.SegmentState_Sealed
 }
+
+func (m *mockCandidate) PkCandidateExist() bool                   { return true }
+func (m *mockCandidate) UpdatePkCandidate(_ []storage.PrimaryKey) {}
+func (m *mockCandidate) Stats() *storage.PkStatistics             { return nil }
+func (m *mockCandidate) GetMinPk() *storage.PrimaryKey            { return nil }
+func (m *mockCandidate) GetMaxPk() *storage.PrimaryKey            { return nil }
+func (m *mockCandidate) Charge()                                  {}
+func (m *mockCandidate) Refund()                                  {}
 
 func TestBatchGetFromSegments(t *testing.T) {
 	t.Run("basic_sealed_segments", func(t *testing.T) {
@@ -1754,20 +1785,49 @@ func TestBatchGetFromSegments(t *testing.T) {
 				NodeID: 1,
 				Segments: []SegmentEntry{
 					{SegmentID: 1, PartitionID: 1, Candidate: candidate1, Offline: true}, // offline
-					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate
+					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate — skipped
 				},
 			},
 		}
 		growing := []SegmentEntry{
-			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate in growing
+			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate — skipped
 		}
 
 		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
 
 		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
 
-		// All should be skipped
-		assert.Empty(t, result)
+		// nil candidates are skipped (not broadcast) in streaming forward path
+		assert.Len(t, result, 0)
+		assert.NotContains(t, result, int64(1))
+		assert.NotContains(t, result, int64(2))
+		assert.NotContains(t, result, int64(10))
+	})
+
+	t.Run("nil_candidates_are_skipped", func(t *testing.T) {
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: nil},
+					{SegmentID: 2, PartitionID: 2, Candidate: nil},
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: nil},
+			{SegmentID: 11, PartitionID: 2, Candidate: nil},
+		}
+
+		pks := []storage.PrimaryKey{
+			storage.NewInt64PrimaryKey(100),
+			storage.NewInt64PrimaryKey(200),
+		}
+
+		result := BatchGetFromSegments(pks, 1, sealed, growing)
+
+		// nil candidates are skipped entirely
+		assert.Len(t, result, 0)
 	})
 
 	t.Run("growing_segments", func(t *testing.T) {

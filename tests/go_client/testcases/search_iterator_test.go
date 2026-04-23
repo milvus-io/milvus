@@ -18,6 +18,8 @@ import (
 )
 
 func TestSearchIteratorDefault(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -57,6 +59,8 @@ func TestSearchIteratorDefault(t *testing.T) {
 }
 
 func TestSearchIteratorGrowing(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -77,6 +81,8 @@ func TestSearchIteratorGrowing(t *testing.T) {
 }
 
 func TestSearchIteratorHitEmpty(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -94,6 +100,8 @@ func TestSearchIteratorHitEmpty(t *testing.T) {
 }
 
 func TestSearchIteratorBatchSize(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -206,6 +214,8 @@ func TestQueryIteratorOutputSparseFieldsRows(t *testing.T) {
 }
 
 func TestSearchIteratorInvalid(t *testing.T) {
+	t.Parallel()
+
 	nb := 201
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -256,6 +266,8 @@ func TestSearchIteratorInvalid(t *testing.T) {
 }
 
 func TestSearchIteratorWithInvalidExpr(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -276,6 +288,8 @@ func TestSearchIteratorWithInvalidExpr(t *testing.T) {
 }
 
 func TestSearchIteratorTemplateKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -316,6 +330,8 @@ func TestSearchIteratorTemplateKey(t *testing.T) {
 }
 
 func TestSearchIteratorGroupBy(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -334,6 +350,8 @@ func TestSearchIteratorGroupBy(t *testing.T) {
 }
 
 func TestSearchIteratorIgnoreGrowing(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -371,6 +389,8 @@ func TestSearchIteratorIgnoreGrowing(t *testing.T) {
 }
 
 func TestSearchIteratorNull(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -437,6 +457,8 @@ func TestSearchIteratorNull(t *testing.T) {
 }
 
 func TestSearchIteratorDefaultValue(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

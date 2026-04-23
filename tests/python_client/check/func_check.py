@@ -453,8 +453,6 @@ class ResponseChecker:
             else:
                 ids = list(hits.ids)
                 distances = list(hits.distances)
-            if len(hits) == 0:
-                continue
             if check_items.get("limit", None) is not None \
                     and ((len(hits) != check_items["limit"]) or (len(set(ids)) != check_items["limit"])):
                 log.error("search_results_check: limit(topK) searched (%d) "
@@ -536,6 +534,11 @@ class ResponseChecker:
                 return True
         log.debug(f"check: total {len(pk_list)} results, set len: {len(set(pk_list))}, iterate_times: {iterate_times}")
         assert len(pk_list) == len(set(pk_list)) != 0
+        # Verify filter was applied: all PKs must fall within the expected range
+        if check_items.get("pk_range", None):
+            pk_low, pk_high = check_items["pk_range"]
+            for pk in pk_list:
+                assert pk_low <= pk < pk_high, f"PK {pk} doesn't satisfy filter [{pk_low}, {pk_high})"
         return True
 
     @staticmethod
@@ -567,10 +570,15 @@ class ResponseChecker:
         if count is not None:
             assert count == query_res[0].get("count(*)", None)
             return True
-        if exp_limit is None and exp_res is None:
+        if exp_limit is None and exp_res is None and check_items.get("output_fields") is None:
             raise Exception(f"No expected values would be checked in the check task")
         if exp_limit is not None:
             assert len(query_res) == exp_limit
+        output_fields = check_items.get("output_fields", None)
+        if output_fields is not None:
+            for row in query_res:
+                assert set(output_fields) == set(row.keys()), \
+                    f"output_fields check failed: expected {output_fields}, got {list(row.keys())}"
         # pk_name = check_items.get("pk_name", ct.default_primary_field_name)
         if exp_res is not None:
             if with_vec is True:

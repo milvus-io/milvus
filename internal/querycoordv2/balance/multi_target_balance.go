@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -18,16 +17,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // rowCountCostModel calculates the cost based on row count distribution across nodes.
 // A lower cost indicates a more balanced distribution of rows.
@@ -557,13 +550,7 @@ func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.
 // balanceChannels generates channel balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
-	var rwNodes []int64
-	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-	} else {
-		rwNodes = replica.GetRWNodes()
-	}
-
+	rwNodes := b.GetRWNodesForChannels(replica)
 	if len(rwNodes) < 2 {
 		br.AddRecord(StrRecord("no enough rwNodes to balance channels"))
 		return nil
@@ -642,9 +629,9 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 
 // NewMultiTargetBalancer creates a new MultiTargetBalancer instance.
 // It embeds a ScoreBasedBalancer and adds multi-objective optimization capabilities.
-func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
+func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
 	return &MultiTargetBalancer{
-		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
+		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, targetMgr),
 		dist:               dist,
 		targetMgr:          targetMgr,
 	}

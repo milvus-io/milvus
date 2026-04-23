@@ -167,6 +167,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // Cache meta file to local disk
     // Returns local file path
+    // remote_file must be an absolute remote path (basePath + relative file)
     std::string
     CacheJsonStatsMetaToDisk(const std::string& remote_file,
                              milvus::proto::common::LoadPriority priority);
@@ -238,6 +239,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     template <typename T>
     std::string
     cache_raw_data_to_disk_storage_v2(const Config& config);
+
+    std::string
+    cache_opt_field_to_disk_v2(const Config& config);
+
+    std::string
+    cache_opt_field_to_disk_v3(const Config& config);
 
     template <typename DataType>
     void

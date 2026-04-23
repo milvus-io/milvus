@@ -685,6 +685,10 @@ func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	return s.proxy.AlterCollectionField(ctx, request)
 }
 
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.proxy.AlterCollectionSchema(ctx, request)
+}
+
 func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	return s.proxy.AddCollectionFunction(ctx, request)
 }
@@ -1192,6 +1196,11 @@ func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateRepli
 	return s.proxy.CreateReplicateStream(stream)
 }
 
+// DumpMessages streams messages from a WAL range for data salvage.
+func (s *Server) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	return s.proxy.DumpMessages(req, stream)
+}
+
 // ComputePhraseMatchSlop computes the minimum slop required for phrase matching.
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
 	return s.proxy.ComputePhraseMatchSlop(ctx, req)
@@ -1223,6 +1232,14 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetR
 
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.ListRestoreSnapshotJobsRequest) (*milvuspb.ListRestoreSnapshotJobsResponse, error) {
 	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
+}
+
+func (s *Server) PinSnapshotData(ctx context.Context, req *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	return s.proxy.PinSnapshotData(ctx, req)
+}
+
+func (s *Server) UnpinSnapshotData(ctx context.Context, req *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	return s.proxy.UnpinSnapshotData(ctx, req)
 }
 
 // ClientHeartbeat handles client telemetry heartbeat requests

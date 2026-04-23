@@ -510,9 +510,10 @@ func TestPrintCollectionDetails(t *testing.T) {
 	assert.Equal(t, DefaultMetricType, getMetricType(nil))
 	fields := []*schemapb.FieldSchema{}
 	for _, field := range newCollectionSchema(coll).Fields {
-		if field.DataType == schemapb.DataType_VarChar {
+		switch field.DataType {
+		case schemapb.DataType_VarChar:
 			fields = append(fields, field)
-		} else if field.DataType == schemapb.DataType_Array {
+		case schemapb.DataType_Array:
 			fields = append(fields, field)
 		}
 	}
@@ -605,7 +606,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(0), req.Data[0]["id"])
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
@@ -622,7 +623,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(0), req.Data[0]["id"])
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
@@ -639,7 +640,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, true)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(0), req.Data[0]["id"])
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
@@ -658,7 +659,7 @@ func TestAnyToColumns(t *testing.T) {
 			Value: "true",
 		})
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(0), req.Data[0]["id"])
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
@@ -672,7 +673,7 @@ func TestAnyToColumns(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
-		err, _, _ = checkAndSetData(body, coll, false)
+		_, _, err = checkAndSetData(body, coll, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "has pass more fiel"))
 	})
@@ -682,7 +683,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
 		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
@@ -697,7 +698,7 @@ func TestAnyToColumns(t *testing.T) {
 		body := []byte("{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		var err error
-		err, _, _ = checkAndSetData(body, coll, false)
+		_, _, err = checkAndSetData(body, coll, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "strconv.ParseInt: parsing \"\": invalid syntax"))
 	})
@@ -707,7 +708,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
 		assert.Equal(t, int64(2), req.Data[0]["word_count"])
@@ -722,7 +723,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
 		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
@@ -738,7 +739,7 @@ func TestAnyToColumns(t *testing.T) {
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
-		err, req.Data, _ = checkAndSetData(body, coll, false)
+		req.Data, _, err = checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, int64(1), req.Data[0]["book_id"])
 		assert.Equal(t, []float32{0.1, 0.2}, req.Data[0]["book_intro"])
@@ -849,6 +850,158 @@ func TestAnyToColumns(t *testing.T) {
 		// Field 'b' should not be present since it wasn't provided in any row
 		assert.False(t, fieldNames["b"])
 	})
+
+	t.Run("function output field not provided in any row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}},
+		}
+		fieldsData, err := anyToColumns(rows, nil, schema, true, false)
+		assert.NoError(t, err)
+		fieldNames := make(map[string]bool)
+		for _, fd := range fieldsData {
+			fieldNames[fd.FieldName] = true
+		}
+		assert.True(t, fieldNames["id"])
+		assert.True(t, fieldNames["vec"])
+		assert.False(t, fieldNames["fn_out"])
+	})
+
+	t.Run("function output field provided in all rows", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}, "fn_out": int64(10)},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}, "fn_out": int64(20)},
+		}
+		fieldsData, err := anyToColumns(rows, nil, schema, true, false)
+		assert.NoError(t, err)
+		fieldNames := make(map[string]bool)
+		for _, fd := range fieldsData {
+			fieldNames[fd.FieldName] = true
+		}
+		assert.True(t, fieldNames["fn_out"])
+	})
+
+	t.Run("function output field provided in row 0 but missing in later row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}, "fn_out": int64(10)},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}}, // fn_out missing
+		}
+		_, err := anyToColumns(rows, nil, schema, true, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not has field fn_out")
+	})
+
+	t.Run("function output field missing in row 0 but provided in later row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}},                      // fn_out missing
+			{"id": int64(2), "vec": []float32{0.3, 0.4}, "fn_out": int64(20)}, // fn_out provided
+		}
+		// row 0 doesn't have fn_out but row 1 does, column is allocated,
+		// so row 0 hits the "does not has field" error
+		_, err := anyToColumns(rows, nil, schema, true, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not has field fn_out")
+	})
 }
 
 func TestCheckAndSetData(t *testing.T) {
@@ -856,7 +1009,7 @@ func TestCheckAndSetData(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
-		err, _, _ = checkAndSetData(body, coll, false)
+		_, _, err = checkAndSetData(body, coll, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "use the invalid field name"))
 	})
@@ -874,7 +1027,7 @@ func TestCheckAndSetData(t *testing.T) {
 		bfloat16VectorField.Name = "bfloat16Vector"
 		int8VectorField := generateVectorFieldSchema(schemapb.DataType_Int8Vector)
 		int8VectorField.Name = "int8Vector"
-		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, floatVectorField,
@@ -883,7 +1036,7 @@ func TestCheckAndSetData(t *testing.T) {
 		}, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, binaryVectorField,
@@ -892,7 +1045,7 @@ func TestCheckAndSetData(t *testing.T) {
 		}, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, float16VectorField,
@@ -901,7 +1054,7 @@ func TestCheckAndSetData(t *testing.T) {
 		}, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, bfloat16VectorField,
@@ -910,7 +1063,7 @@ func TestCheckAndSetData(t *testing.T) {
 		}, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-		err, _, _ = checkAndSetData(body, &schemapb.CollectionSchema{
+		_, _, err = checkAndSetData(body, &schemapb.CollectionSchema{
 			Name: DefaultCollectionName,
 			Fields: []*schemapb.FieldSchema{
 				primaryField, int8VectorField,
@@ -930,7 +1083,7 @@ func TestCheckAndSetData(t *testing.T) {
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Int64,
 		})
-		err, data, validData := checkAndSetData(body, coll, false)
+		data, validData, err := checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, 1, len(data))
 		assert.Equal(t, 0, len(validData))
@@ -945,7 +1098,7 @@ func TestCheckAndSetData(t *testing.T) {
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Int64,
 		})
-		err, data, validData := checkAndSetData(body, coll, false)
+		data, validData, err := checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, 1, len(data))
 		assert.Equal(t, 0, len(validData))
@@ -960,7 +1113,7 @@ func TestCheckAndSetData(t *testing.T) {
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Int64,
 		})
-		err, data, validData := checkAndSetData(body, coll, false)
+		data, validData, err := checkAndSetData(body, coll, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, 1, len(data))
 		assert.Equal(t, 0, len(validData))
@@ -976,7 +1129,7 @@ func TestInsertWithInt64(t *testing.T) {
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_Int64,
 	})
-	err, data, validData := checkAndSetData(body, coll, false)
+	data, validData, err := checkAndSetData(body, coll, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 1, len(data))
 	assert.Equal(t, 0, len(validData))
@@ -999,7 +1152,7 @@ func TestInsertWithNullableField(t *testing.T) {
 		Nullable: true,
 	})
 	body := []byte("{\"data\": [{\"book_id\": 9999999999999999, \"\nullable\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"nullable\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]")
-	err, data, validData := checkAndSetData(body, coll, false)
+	data, validData, err := checkAndSetData(body, coll, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 2, len(data))
 	assert.Equal(t, 1, len(validData))
@@ -1035,7 +1188,7 @@ func TestInsertWithDefaultValueField(t *testing.T) {
 		},
 	})
 	body := []byte("{\"data\": [{\"book_id\": 9999999999999999, \"\fid\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"fid\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]")
-	err, data, validData := checkAndSetData(body, coll, false)
+	data, validData, err := checkAndSetData(body, coll, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 2, len(data))
 	assert.Equal(t, 1, len(validData))
@@ -2235,7 +2388,7 @@ func newRowsWithArray(results []map[string]interface{}) []map[string]interface{}
 func TestArray(t *testing.T) {
 	body, _ := generateRequestBody(schemapb.DataType_Int64)
 	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
-	err, rows, validRows := checkAndSetData(body, collectionSchema, false)
+	rows, validRows, err := checkAndSetData(body, collectionSchema, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, generateRawRows(schemapb.DataType_Int64), compareRow))
@@ -2245,7 +2398,7 @@ func TestArray(t *testing.T) {
 
 	body, _ = generateRequestBodyWithArray(schemapb.DataType_Int64)
 	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false, true))
-	err, rows, validRows = checkAndSetData(body, collectionSchema, false)
+	rows, validRows, err = checkAndSetData(body, collectionSchema, false)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, newRowsWithArray(generateRawRows(schemapb.DataType_Int64)), compareRow))
@@ -2332,7 +2485,7 @@ func TestVector(t *testing.T) {
 		},
 		EnableDynamicField: true,
 	}
-	err, rows, validRows := checkAndSetData(body, collectionSchema, false)
+	rows, validRows, err := checkAndSetData(body, collectionSchema, false)
 	assert.Equal(t, nil, err)
 	for i, row := range rows {
 		assert.Equal(t, 2, len(row[floatVector].([]float32)))
@@ -2368,7 +2521,7 @@ func TestVector(t *testing.T) {
 		}
 		row[field] = value
 		body, _ = wrapRequestBody([]map[string]interface{}{row})
-		err, _, _ = checkAndSetData(body, collectionSchema, false)
+		_, _, err = checkAndSetData(body, collectionSchema, false)
 		assert.Error(t, err)
 	}
 

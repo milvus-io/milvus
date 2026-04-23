@@ -29,7 +29,7 @@
 namespace milvus::segcore {
 
 void
-ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
+ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data);
 
 void
 ParsePksFromFieldData(DataType data_type,
@@ -264,6 +264,21 @@ CheckCancellation(milvus::OpContext* op_ctx,
                                        segment_id,
                                        field_id));
     }
+}
+
+inline int64_t
+GetEffectiveSearchTopk(const SearchInfo& search_info) {
+    int64_t lower_bound = index::GetValueFromConfig<int64_t>(
+                              search_info.search_params_, index::HNSW_QUERY_EF)
+                              .value_or(0);
+    lower_bound =
+        std::max(lower_bound,
+                 index::GetValueFromConfig<int64_t>(search_info.search_params_,
+                                                    index::DISK_ANN_QUERY_LIST)
+                     .value_or(0));
+    return std::max(static_cast<int64_t>(std::ceil(
+                        search_info.search_topk_ratio_ * search_info.topk_)),
+                    lower_bound);
 }
 
 }  // namespace milvus::segcore

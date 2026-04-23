@@ -14,7 +14,8 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION 50dd3c9)
+
+set( milvus-storage_VERSION 9c4e211)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -31,26 +32,17 @@ endif ()
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} ${CONAN_PROTOBUF_ROOT} )
-
-# Make Conan's protoc visible to milvus-storage's find_package(Protobuf)
+# Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake.
+# find_package(Protobuf) sets Protobuf_PROTOC_EXECUTABLE automatically.
+# Fallback: search CMAKE_BINARY_DIR/bin for protoc installed by conan imports.
 find_program(_PROTOC_PROGRAM protoc
-    PATHS ${CONAN_BIN_DIRS_PROTOBUF} ${CONAN_BIN_DIRS}
-          "${CMAKE_BINARY_DIR}/bin"
+    PATHS "${CMAKE_BINARY_DIR}/bin"
     NO_DEFAULT_PATH)
-if(NOT _PROTOC_PROGRAM)
-    file(GLOB _PROTOC_CANDIDATES
-        "${CONAN_BIN_DIRS_PROTOBUF}/protoc-*"
-        "${CMAKE_BINARY_DIR}/bin/protoc-*")
-    if(_PROTOC_CANDIDATES)
-        list(SORT _PROTOC_CANDIDATES)
-        list(GET _PROTOC_CANDIDATES -1 _PROTOC_PROGRAM)
-    endif()
-endif()
 if(_PROTOC_PROGRAM)
     message(STATUS "Setting Protobuf_PROTOC_EXECUTABLE for milvus-storage: ${_PROTOC_PROGRAM}")
     set(Protobuf_PROTOC_EXECUTABLE "${_PROTOC_PROGRAM}" CACHE FILEPATH "" FORCE)
 endif()
+
 FetchContent_Declare(
         milvus-storage
         GIT_REPOSITORY  ${GIT_REPOSITORY}

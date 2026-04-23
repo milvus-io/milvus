@@ -381,7 +381,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
-		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
 	// set analyzer resource for text match index if use ref mode

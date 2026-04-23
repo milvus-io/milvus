@@ -28,6 +28,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
+#include "fmt/core.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -244,8 +245,9 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             if (!array.ok()) {
                 return milvus::FailureCStatus(
                     milvus::ErrorCode::FileWriteFailed,
-                    "Failed to import array " + std::to_string(i) + ": " +
-                        array.status().ToString());
+                    fmt::format("Failed to import array {}: {}",
+                                i,
+                                array.status().ToString()));
             }
             all_arrays.push_back(array.ValueOrDie());
         }
@@ -285,80 +287,38 @@ CloseWriter(CPackedWriter c_packed_writer) {
 }
 
 CStatus
-GetFileSize(const char* path, int64_t* size) {
+CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups) {
     SCOPE_CGO_CALL_METRIC();
 
-    try {
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
-        if (!trueFs) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get filesystem");
-        }
-
-        auto result = trueFs->GetFileInfo(path);
-        if (!result.ok()) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get file info");
-        }
-        *size = result.ValueOrDie().size();
-
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-GetFileSizeWithStorageConfig(const char* path,
-                             int64_t* size,
-                             CStorageConfig c_storage_config) {
-    SCOPE_CGO_CALL_METRIC();
+    auto packed_writer =
+        static_cast<std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(
+            c_packed_writer);
 
     try {
-        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config.address),
-            std::string(c_storage_config.bucket_name),
-            std::string(c_storage_config.access_key_id),
-            std::string(c_storage_config.access_key_value),
-            std::string(c_storage_config.root_path),
-            std::string(c_storage_config.storage_type),
-            std::string(c_storage_config.cloud_provider),
-            std::string(c_storage_config.iam_endpoint),
-            std::string(c_storage_config.log_level),
-            std::string(c_storage_config.region),
-            c_storage_config.useSSL,
-            std::string(c_storage_config.sslCACert),
-            c_storage_config.useIAM,
-            c_storage_config.useVirtualHost,
-            c_storage_config.requestTimeoutMs,
-            false,
-            std::string(c_storage_config.gcp_credential_json),
-            c_storage_config.use_custom_part_upload,
-            c_storage_config.max_connections,
-            c_storage_config.tls_min_version != nullptr
-                ? std::string(c_storage_config.tls_min_version)
-                : "",
-        });
-
-        if (!trueFs) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get filesystem");
+        auto status = (*packed_writer)->Close();
+        if (!status.ok()) {
+            delete packed_writer;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
+                                          status.ToString());
         }
 
-        auto result = trueFs->GetFileInfo(path);
-        if (!result.ok()) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get file info");
+        auto res = (*packed_writer)->Tell();
+        if (!res.ok()) {
+            delete packed_writer;
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          res.status().ToString());
         }
-        *size = result.ValueOrDie().size();
 
+        const auto& size_vec = res.ValueOrDie();
+        AssertInfo(size_vec.size() == num_groups,
+                   "tell returned size is not equal to num_groups");
+        for (size_t i = 0; i < num_groups; i++) {
+            sizes[i] = size_vec[i];
+        }
+        delete packed_writer;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        delete packed_writer;
         return milvus::FailureCStatus(&e);
     }
 }

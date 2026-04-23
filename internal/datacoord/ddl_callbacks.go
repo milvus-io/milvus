@@ -38,6 +38,8 @@ func RegisterDDLCallbacks(s *Server) {
 	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
 	ddlCallback.registerSnapshotCallbacks()
 	ddlCallback.registerExternalCollectionCallbacks()
+	ddlCallback.registerImportCallbacks()
+	ddlCallback.registerBatchUpdateManifestCallbacks()
 }
 
 type DDLCallbacks struct {
@@ -54,10 +56,19 @@ func (c *DDLCallbacks) registerSnapshotCallbacks() {
 	registry.RegisterCreateSnapshotV2AckCallback(c.createSnapshotV2AckCallback)
 	registry.RegisterDropSnapshotV2AckCallback(c.dropSnapshotV2AckCallback)
 	registry.RegisterRestoreSnapshotV2AckCallback(c.restoreSnapshotV2AckCallback)
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(c.dropSnapshotsByCollectionV2AckCallback)
 }
 
 func (c *DDLCallbacks) registerExternalCollectionCallbacks() {
 	registry.RegisterRefreshExternalCollectionV2AckCallback(c.refreshExternalCollectionV2AckCallback)
+}
+
+func (c *DDLCallbacks) registerImportCallbacks() {
+	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
+}
+
+func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
+	registry.RegisterBatchUpdateManifestV2AckCallback(c.batchUpdateManifestV2AckCallback)
 }
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
@@ -91,7 +102,7 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 		ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(snapshotName),
+		message.NewExclusiveSnapshotNameResourceKey(collectionID, snapshotName),
 	)
 	if err != nil {
 		return nil, err
@@ -103,16 +114,59 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 	return b, nil
 }
 
+// startRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
+//
+// It holds three locks that together serialize the full restore flow against
+// concurrent DropSnapshot / CreateCollection on both the source snapshot and
+// the target collection name:
+//
+//   - Shared lock on target database
+//   - Exclusive lock on target collection name (reserves the name before the
+//     collection is created in Phase 2)
+//   - Exclusive lock on (sourceCollectionID, snapshotName) — namespaced by
+//     collection so cross-collection same-name snapshots do not contend,
+//     and serializes against DropSnapshot of the same source snapshot
+//
+// The returned broadcaster holds the locks only; Close() releases them
+// without broadcasting any message. Callers are expected to increment
+// the restore reference count while the lock is held, then Close() — the
+// refcount becomes the persistent guard after the lock is released.
+func (s *Server) startRestoreSnapshotLock(
+	ctx context.Context,
+	sourceCollectionID int64,
+	snapshotName, targetDbName, targetCollectionName string,
+) (broadcaster.BroadcastAPI, error) {
+	b, err := broadcast.StartBroadcastWithResourceKeys(
+		ctx,
+		message.NewSharedDBNameResourceKey(targetDbName),
+		message.NewExclusiveCollectionNameResourceKey(targetDbName, targetCollectionName),
+		message.NewExclusiveSnapshotNameResourceKey(sourceCollectionID, snapshotName),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info("phase 0 restore lock acquired",
+		zap.Int64("sourceCollectionID", sourceCollectionID),
+		zap.String("snapshotName", snapshotName),
+		zap.String("targetDbName", targetDbName),
+		zap.String("targetCollectionName", targetCollectionName))
+	return b, nil
+}
+
 // validateRestoreSnapshotResources validates that all required resources exist for restore.
 // This includes snapshot, collection, partitions, and indexes.
 func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
 	// ========== Validate Snapshot Exists ==========
-	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, snapshotData.SnapshotInfo.GetName())
+	// Use source collection ID from snapshot data (not the target collectionID parameter)
+	// because snapshots are stored under the source collection's namespace.
+	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
+	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
 		return fmt.Errorf("snapshot %s does not exist for collection %d: %w",
-			snapshotData.SnapshotInfo.GetName(), collectionID, err)
+			snapshotData.SnapshotInfo.GetName(), sourceCollectionID, err)
 	}
 	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
 

@@ -61,6 +61,22 @@ func (s *SegmentBM25Stats) Serialize() (map[int64][]byte, map[int64]int64, error
 	return result, numRow, nil
 }
 
+// Clone returns a deep copy of the SegmentBM25Stats. Used by callers that
+// need to compute a hypothetical merged result without mutating the metacache
+// copy (e.g. BulkPackWriterV3 retry path needs to serialize merged stats
+// including the current batch before the metacache RollStats action has been
+// committed).
+func (s *SegmentBM25Stats) Clone() *SegmentBM25Stats {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	cloned := make(map[int64]*storage.BM25Stats, len(s.stats))
+	for fieldID, stats := range s.stats {
+		cloned[fieldID] = stats.Clone()
+	}
+	return &SegmentBM25Stats{stats: cloned}
+}
+
 func NewEmptySegmentBM25Stats() *SegmentBM25Stats {
 	return &SegmentBM25Stats{
 		stats: make(map[int64]*storage.BM25Stats),

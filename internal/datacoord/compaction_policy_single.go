@@ -40,12 +40,23 @@ type singleCompactionPolicy struct {
 	handler   Handler
 }
 
+// Ensure singleCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*singleCompactionPolicy)(nil)
+
 func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
 	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
 
 func (policy *singleCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+}
+
+func (policy *singleCompactionPolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
+}
+
+func (policy *singleCompactionPolicy) Name() string {
+	return "SingleCompactionPolicy"
 }
 
 func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
@@ -60,6 +71,11 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 		}
 		if collection.IsExternal() {
 			log.Ctx(ctx).Info("skip single compaction trigger for external collection", zap.Int64("collectionID", collection.ID))
+			continue
+		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Ctx(ctx).Info("skip single compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
 			continue
 		}
 		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
@@ -113,6 +129,11 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 			zap.Bool("isImporting", segment.GetIsImporting()),
 			zap.Bool("isCompacting", segment.isCompacting),
 			zap.Bool("isInvisible", segment.GetIsInvisible()))
+		return nil
+	}
+	if policy.meta.isSegmentCompactionProtected(segment.GetID()) {
+		log.Info("skip sort compaction for snapshot-protected segment",
+			zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
 
@@ -170,7 +191,8 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	}
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg)
+			return canTriggerSortCompaction(seg) &&
+				!policy.meta.isSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")
@@ -263,7 +285,8 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
-			!segment.GetIsInvisible()
+			!segment.GetIsInvisible() &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	for _, group := range partSegments {
@@ -294,6 +317,9 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)
+
+// IsInlineExecutable returns false: mix compaction is real compaction work.
+func (v *MixSegmentView) IsInlineExecutable() bool { return false }
 
 type MixSegmentView struct {
 	label         *CompactionGroupLabel

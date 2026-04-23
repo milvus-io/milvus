@@ -19,6 +19,7 @@ package packed
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_exttable_c.h"
+#include "milvus-storage/ffi_filesystem_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -26,10 +27,37 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
+
+// formatExtensions maps format names to their expected file extensions.
+// lance-table is directory-based and not included (no extension filtering needed).
+var formatExtensions = map[string]string{
+	"parquet": ".parquet",
+	"vortex":  ".vortex",
+}
+
+// filterFileInfosByFormat filters out files that don't match the expected format extension.
+// Returns the filtered list and the count of skipped files.
+func filterFileInfosByFormat(fileInfos []FileInfo, format string) ([]FileInfo, int) {
+	ext, ok := formatExtensions[format]
+	if !ok {
+		return fileInfos, 0
+	}
+	filtered := make([]FileInfo, 0, len(fileInfos))
+	for _, fi := range fileInfos {
+		if strings.HasSuffix(strings.ToLower(fi.FilePath), ext) {
+			filtered = append(filtered, fi)
+		}
+	}
+	return filtered, len(fileInfos) - len(filtered)
+}
 
 // FileInfo represents information about an external file
 type FileInfo struct {
@@ -37,128 +65,15 @@ type FileInfo struct {
 	NumRows  int64
 }
 
-// ExploreFiles scans an external directory and returns a list of file paths.
+// ExploreFiles scans an external directory and returns file information.
 // It internally calls exttable_explore to find files, then reads the manifest
-// to extract column group and file information.
-func ExploreFiles(
-	columns []string,
-	format string,
-	baseDir string,
-	exploreDir string,
-	storageConfig *indexpb.StorageConfig,
-) ([]string, error) {
-	// Create C string arrays for columns
-	cColumns := make([]*C.char, len(columns))
-	for i, col := range columns {
-		cColumns[i] = C.CString(col)
-	}
-	defer func() {
-		for _, c := range cColumns {
-			C.free(unsafe.Pointer(c))
-		}
-	}()
-
-	cFormat := C.CString(format)
-	defer C.free(unsafe.Pointer(cFormat))
-
-	cBaseDir := C.CString(baseDir)
-	defer C.free(unsafe.Pointer(cBaseDir))
-
-	cExploreDir := C.CString(exploreDir)
-	defer C.free(unsafe.Pointer(cExploreDir))
-
-	// Create properties from storage config
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
-	}
-	defer C.loon_properties_free(cProperties)
-
-	var numFiles C.uint64_t
-	var outColumnGroupsPath *C.char
-
-	var cColumnsPtr **C.char
-	if len(cColumns) > 0 {
-		cColumnsPtr = &cColumns[0]
-	}
-
-	// Step 1: Call loon_exttable_explore to discover external files
-	result := C.loon_exttable_explore(
-		cColumnsPtr,
-		C.size_t(len(columns)),
-		cFormat,
-		cBaseDir,
-		cExploreDir,
-		cProperties,
-		&numFiles,
-		&outColumnGroupsPath,
-	)
-
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_explore failed: %w", err)
-	}
-
-	// Check if we got valid column groups path
-	if outColumnGroupsPath == nil {
-		return nil, fmt.Errorf("loon_exttable_explore succeeded but returned nil column groups path")
-	}
-
-	// Ensure we free the C-allocated path when done
-	defer C.loon_free_cstr(outColumnGroupsPath)
-
-	// Step 2: Read the manifest file (which contains column groups information)
-	var manifest *C.LoonManifest
-
-	result = C.loon_exttable_read_manifest(outColumnGroupsPath, cProperties, &manifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
-	}
-
-	// Ensure we destroy the manifest when done (this also frees column_groups)
-	defer C.loon_manifest_destroy(manifest)
-
-	// Step 3: Extract file paths from manifest's column groups
-	var filePaths []string
-	cgroups := &manifest.column_groups
-
-	// Validate column groups structure before accessing
-	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
-	}
-
-	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
-	for i := range cgArray {
-		cg := &cgArray[i]
-
-		// Check if files array is valid
-		if cg.files == nil && cg.num_of_files > 0 {
-			return nil, fmt.Errorf("column group %d has num_of_files=%d but files array is nil (possible FFI data corruption)",
-				i, cg.num_of_files)
-		}
-
-		if cg.files == nil {
-			continue // Empty column group, skip
-		}
-
-		fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
-		for j := range fileArray {
-			// Validate file path pointer
-			if fileArray[j].path == nil {
-				return nil, fmt.Errorf("file path is nil in column group %d, file %d (possible FFI data corruption)", i, j)
-			}
-			filePaths = append(filePaths, C.GoString(fileArray[j].path))
-		}
-	}
-
-	return filePaths, nil
-}
-
 // GetFileInfo retrieves row count information for a single external file.
 // This is used to determine how to split large files into multiple fragments.
 func GetFileInfo(
 	format string,
 	filePath string,
 	storageConfig *indexpb.StorageConfig,
+	extraKVs map[string]string,
 ) (*FileInfo, error) {
 	cFormat := C.CString(format)
 	defer C.free(unsafe.Pointer(cFormat))
@@ -166,7 +81,7 @@ func GetFileInfo(
 	cFilePath := C.CString(filePath)
 	defer C.free(unsafe.Pointer(cFilePath))
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extraKVs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)
 	}
@@ -183,4 +98,128 @@ func GetFileInfo(
 		FilePath: filePath,
 		NumRows:  int64(numRows),
 	}, nil
+}
+
+// ExploreFilesReturnManifestPath is like ExploreFiles but also returns the manifest path
+// written by loon_exttable_explore. The caller can pass this path to other nodes so they
+// can read the file list via ReadFileInfosFromManifestPath without re-exploring.
+// NOTE: The temp dir created here is reclaimed by the datacoord refresh manager via
+// ChunkManager once the refresh job reaches a terminal state — see
+// externalCollectionRefreshManager.cleanupExploreTempForJob.
+func ExploreFilesReturnManifestPath(
+	columns []string,
+	format string,
+	baseDir string,
+	exploreDir string,
+	storageConfig *indexpb.StorageConfig,
+	extraKVs map[string]string,
+) ([]FileInfo, string, error) {
+	cColumns := make([]*C.char, len(columns))
+	for i, col := range columns {
+		cColumns[i] = C.CString(col)
+	}
+	defer func() {
+		for _, c := range cColumns {
+			C.free(unsafe.Pointer(c))
+		}
+	}()
+
+	cFormat := C.CString(format)
+	defer C.free(unsafe.Pointer(cFormat))
+	cBaseDir := C.CString(baseDir)
+	defer C.free(unsafe.Pointer(cBaseDir))
+	cExploreDir := C.CString(exploreDir)
+	defer C.free(unsafe.Pointer(cExploreDir))
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extraKVs)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	var numFiles C.uint64_t
+	var outColumnGroupsPath *C.char
+
+	var cColumnsPtr **C.char
+	if len(cColumns) > 0 {
+		cColumnsPtr = &cColumns[0]
+	}
+
+	result := C.loon_exttable_explore(
+		cColumnsPtr, C.size_t(len(columns)),
+		cFormat, cBaseDir, cExploreDir, cProperties,
+		&numFiles, &outColumnGroupsPath,
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, "", fmt.Errorf("loon_exttable_explore failed: %w", err)
+	}
+	if outColumnGroupsPath == nil {
+		return nil, "", fmt.Errorf("loon_exttable_explore returned nil column groups path")
+	}
+	manifestPath := C.GoString(outColumnGroupsPath)
+	C.loon_free_cstr(outColumnGroupsPath)
+
+	// Read manifest to get file infos
+	fileInfos, err := ReadFileInfosFromManifestPath(manifestPath, storageConfig)
+	if err != nil {
+		return nil, "", err
+	}
+
+	fileInfos, skipped := filterFileInfosByFormat(fileInfos, format)
+	if skipped > 0 {
+		log.Info("Skipped files with non-matching format during explore",
+			zap.Int("skippedCount", skipped),
+			zap.String("format", format))
+	}
+
+	return fileInfos, manifestPath, nil
+}
+
+// ReadFileInfosFromManifestPath reads the explore manifest and returns file infos.
+// This allows DataNode to skip ExploreFiles and directly read the file list.
+func ReadFileInfosFromManifestPath(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+) ([]FileInfo, error) {
+	cManifestPath := C.CString(manifestPath)
+	defer C.free(unsafe.Pointer(cManifestPath))
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	var manifest *C.LoonManifest
+	result := C.loon_exttable_read_manifest(cManifestPath, cProperties, &manifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
+	}
+	defer C.loon_manifest_destroy(manifest)
+
+	var fileInfos []FileInfo
+	cgroups := &manifest.column_groups
+	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
+		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+	}
+
+	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
+	for i := range cgArray {
+		cg := &cgArray[i]
+		if cg.files == nil {
+			continue
+		}
+		fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
+		for j := range fileArray {
+			if fileArray[j].path == nil {
+				return nil, fmt.Errorf("file path is nil in column group %d, file %d", i, j)
+			}
+			fileInfos = append(fileInfos, FileInfo{
+				FilePath: C.GoString(fileArray[j].path),
+				NumRows:  int64(fileArray[j].end_index),
+			})
+		}
+	}
+
+	return fileInfos, nil
 }

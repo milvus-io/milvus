@@ -51,8 +51,16 @@ func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, h
 	}
 }
 
+func (policy *storageVersionUpgradePolicy) Name() string {
+	return "storageVersionUpgrade"
+}
+
 func (policy *storageVersionUpgradePolicy) Enable() bool {
 	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
+}
+
+func (policy *storageVersionUpgradePolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
 }
 
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
@@ -90,6 +98,11 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 	for _, collection := range collections {
 		if policy.currentCount >= maxCount {
 			break
+		}
+		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
+			log.Info("skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("collectionID", collection.ID))
+			continue
 		}
 		collectionViews, err := policy.triggerOneCollection(ctx, collection.ID, maxCount)
 		if err != nil {
@@ -135,7 +148,8 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 			!segment.isCompacting &&
 			!segment.GetIsImporting() &&
 			segment.GetLevel() != datapb.SegmentLevel_L0 &&
-			segment.GetStorageVersion() != targetVersion
+			segment.GetStorageVersion() != targetVersion &&
+			!policy.meta.isSegmentCompactionProtected(segment.GetID())
 	}))
 
 	views := make([]CompactionView, 0, len(segments))

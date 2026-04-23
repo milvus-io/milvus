@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -219,13 +218,8 @@ func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.Broad
 	}
 	defer bm.lifetime.Done()
 
-	// check if the message is valid to be broadcasted.
-	// TODO: the message check callback should not be an component of broadcaster,
-	// it should be removed after the import operation refactory.
-	if err := registry.CallMessageCheckCallback(ctx, msg); err != nil {
-		guards.Unlock()
-		return nil, err
-	}
+	// Validation is now done before calling broadcast (in DataCoord for import operations)
+	// CheckCallback mechanism has been removed as part of the import refactoring
 
 	task := bm.addBroadcastTask(msg, broadcastID, guards)
 	pendingTask := newPendingBroadcastTask(task)
@@ -367,6 +361,34 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 			continue
 		}
 		result = append(result, task)
+	}
+	return result
+}
+
+// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
+// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
+func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	result := make(map[int64][]int64)
+	for _, task := range bm.tasks {
+		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			continue
+		}
+		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+			continue
+		}
+		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+		if err != nil {
+			continue
+		}
+		body := createMsg.MustBody()
+		ids := body.CollectionSchema.GetFileResourceIds()
+		if len(ids) > 0 {
+			result[createMsg.Header().CollectionId] = ids
+		}
 	}
 	return result
 }

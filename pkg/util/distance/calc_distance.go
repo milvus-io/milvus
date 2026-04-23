@@ -90,11 +90,12 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 	rightNum := int64(len(right)) / dim
 	for i := int64(0); i < rightNum; i++ {
 		var distance float32 = -1.0
-		if metric == L2 {
+		switch metric {
+		case L2:
 			distance = L2Impl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
-		} else if metric == IP {
+		case IP:
 			distance = IPImpl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
-		} else if metric == COSINE {
+		case COSINE:
 			distance = CosineImpl(left[lIndex*dim:lIndex*dim+dim], right[i*dim:i*dim+dim])
 		}
 		(*result)[lIndex*rightNum+i] = distance

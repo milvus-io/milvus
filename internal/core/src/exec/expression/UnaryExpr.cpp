@@ -23,18 +23,13 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <cctype>
 #include <set>
 #include <unordered_set>
 #include <variant>
 
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
-#include "boost/regex/v5/basic_regex.hpp"
-#include "boost/regex/v5/perl_matcher_common.hpp"
-#include "boost/regex/v5/perl_matcher_non_recursive.hpp"
-#include "boost/regex/v5/regex.hpp"
-#include "boost/regex/v5/regex_fwd.hpp"
-#include "boost/regex/v5/regex_search.hpp"
 #include "bsoncxx/array/view.hpp"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -728,35 +723,44 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-#define UnaryRangeJSONCompare(cmp)                                  \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = !x.error() && (cmp);                       \
-                break;                                              \
-            }                                                       \
-            res[i] = false;                                         \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
+// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
+// number in a single parse.  Branches on actual type to preserve int64
+// precision; uint64 and double values fall back to double comparison,
+// consistent with the Tantivy index and JSON-stats paths.
+// - 'cmp' must reference 'value' (auto-typed as int64_t or double).
+// - 'error_result': result when JSON path is missing or type mismatch.
+#define UnaryRangeJSONCompareCore(cmp, error_result)                   \
+    do {                                                               \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x_num = data[offset].at_numeric(pointer);             \
+            if (x_num.error()) {                                       \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto n = x_num.value();                                    \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = data[offset].template at<GetType>(pointer);       \
+            if (x.error()) {                                           \
+                res[i] = (error_result);                               \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
-#define UnaryRangeJSONCompareNotEqual(cmp)                          \
-    do {                                                            \
-        auto x = data[offset].template at<GetType>(pointer);        \
-        if (x.error()) {                                            \
-            if constexpr (std::is_same_v<GetType, int64_t>) {       \
-                auto x = data[offset].template at<double>(pointer); \
-                res[i] = x.error() || (cmp);                        \
-                break;                                              \
-            }                                                       \
-            res[i] = true;                                          \
-            break;                                                  \
-        }                                                           \
-        res[i] = (cmp);                                             \
-    } while (false)
+#define UnaryRangeJSONCompare(cmp) UnaryRangeJSONCompareCore(cmp, false)
+
+#define UnaryRangeJSONCompareNotEqual(cmp) UnaryRangeJSONCompareCore(cmp, true)
 
     int processed_cursor = 0;
     auto execute_sub_batch =
@@ -788,7 +792,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() > val);
+                        UnaryRangeJSONCompare(value > val);
                     }
                 }
                 break;
@@ -810,7 +814,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() >= val);
+                        UnaryRangeJSONCompare(value >= val);
                     }
                 }
                 break;
@@ -832,7 +836,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() < val);
+                        UnaryRangeJSONCompare(value < val);
                     }
                 }
                 break;
@@ -854,7 +858,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(x.value() <= val);
+                        UnaryRangeJSONCompare(value <= val);
                     }
                 }
                 break;
@@ -882,7 +886,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(x.value() == val);
+                        UnaryRangeJSONCompare(value == val);
                     }
                 }
                 break;
@@ -911,7 +915,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompareNotEqual(x.value() != val);
+                        UnaryRangeJSONCompareNotEqual(value != val);
                     }
                 }
                 break;
@@ -935,35 +939,33 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(milvus::query::Match(
-                            ExprValueType(x.value()), val, op_type));
+                        UnaryRangeJSONCompare(
+                            milvus::query::Match(value, val, op_type));
                     }
                 }
                 break;
             }
             case proto::plan::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
-                for (size_t i = 0; i < size; ++i) {
-                    auto offset = i;
-                    if constexpr (filter_type == FilterType::random) {
-                        offset = (offsets) ? offsets[i] : i;
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    LikePatternMatcher matcher(val);
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
+                        UnaryRangeJSONCompare(matcher(value));
                     }
-                    if (valid_data != nullptr && !valid_data[offset]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if (has_bitmap_input &&
-                        !bitmap_input[i + processed_cursor]) {
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                        res[i] = false;
-                    } else {
-                        UnaryRangeJSONCompare(
-                            matcher(ExprValueType(x.value())));
-                    }
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
                 }
                 break;
             }
@@ -994,15 +996,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
 
 std::pair<std::string, std::string>
 PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    boost::regex rgx("/\\d+");
-    boost::smatch match;
-    if (boost::regex_search(input, match, rgx)) {
-        std::string firstPart = input.substr(0, match.position());
-        std::string secondPart = input.substr(match.position());
-        return {firstPart, secondPart};
-    } else {
-        return {input, ""};
+    // Find pattern /\d+ (slash followed by ASCII digits) without regex
+    // Use explicit ASCII range check to avoid locale-dependent std::isdigit behavior
+    auto is_ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '/' && i + 1 < input.size() &&
+            is_ascii_digit(input[i + 1])) {
+            return {input.substr(0, i), input.substr(i)};
+        }
     }
+    return {input, ""};
 }
 
 template <typename ExprValueType>
@@ -1153,7 +1156,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         }
 
         // process shared data
-        auto shared_executor = [op_type, val, array_index, &res_view](
+        // Pre-construct context with LikePatternMatcher for Match ops on
+        // string types to avoid re-parsing the pattern on every row.
+        [[maybe_unused]] std::optional<LikePatternMatcher> like_matcher;
+        if constexpr (std::is_same_v<GetType, std::string> ||
+                      std::is_same_v<GetType, std::string_view>) {
+            if (op_type == proto::plan::OpType::Match) {
+                like_matcher.emplace(val);
+            }
+        }
+        UnaryCompareContext context{
+            like_matcher.has_value() ? &like_matcher.value() : nullptr};
+        auto shared_executor = [op_type, val, array_index, &res_view, &context](
                                    milvus::BsonView bson,
                                    uint32_t row_id,
                                    uint32_t value_offset) {
@@ -1274,7 +1288,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     return;
                 }
                 res_view[row_id] =
-                    UnaryCompare(get_value.value(), val, op_type);
+                    UnaryCompare(get_value.value(), val, op_type, &context);
             }
         };
 
@@ -1413,52 +1427,52 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryIndexFunc<T, proto::plan::GreaterEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryIndexFunc<T, proto::plan::LessThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryIndexFunc<T, proto::plan::LessEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryIndexFunc<T, proto::plan::Equal> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryIndexFunc<T, proto::plan::NotEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PostfixMatch: {
                 UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::InnerMatch: {
                 UnaryIndexFunc<T, proto::plan::InnerMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             default:
@@ -1950,6 +1964,11 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             TargetBitmap tail(active_count_ - cached_match_res_->size());
             cached_match_res_->append(tail);
             cached_index_chunk_valid_res_->append(tail);
+        } else if (cached_match_res_->size() > active_count_) {
+            // on growing segments, the text index may have indexed rows
+            // beyond the query timestamp. Truncate to active_count_.
+            cached_match_res_->resize(active_count_);
+            cached_index_chunk_valid_res_->resize(active_count_);
         }
 
         // Insert into process-level cache

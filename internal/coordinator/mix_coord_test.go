@@ -401,9 +401,9 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 		}
 
 		req := &datapb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			DbName:         "default",
-			CollectionName: "test_collection",
+			Name:                 "test_snapshot",
+			TargetDbName:         "default",
+			TargetCollectionName: "test_collection",
 		}
 
 		mockey.PatchConvey("test RestoreSnapshot", t, func() {

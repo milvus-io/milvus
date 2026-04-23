@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -184,93 +185,131 @@ type dbInfo struct {
 	Properties []*commonpb.KeyValuePair
 }
 
-// NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
-	im, err := newIndexMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	am, err := newAnalyzeMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	psm, err := newPartitionStatsMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	ctm, err := newCompactionTaskMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	stm, err := newStatsTaskMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	ecrm, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
-	if err != nil {
-		return nil, err
-	}
-
-	mt := &meta{
-		ctx:                           ctx,
-		catalog:                       catalog,
-		collections:                   typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:                      NewSegmentsInfo(),
-		channelCPs:                    newChannelCps(),
-		indexMeta:                     im,
-		analyzeMeta:                   am,
-		chunkManager:                  chunkManager,
-		partitionStatsMeta:            psm,
-		compactionTaskMeta:            ctm,
-		statsTaskMeta:                 stm,
-		externalCollectionRefreshMeta: ecrm,
-		resourceIDMap:                 make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion:               0,
-		resourceLock:                  lock.RWMutex{},
-		snapshotMeta:                  spm,
-	}
-	err = mt.reloadFromKV(ctx, broker)
-	if err != nil {
-		return nil, err
-	}
-	return mt, nil
-}
-
-// reloadFromKV loads meta from KV storage
-func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
-	record := timerecord.NewTimeRecorder("datacoord")
-
+// showCollectionIDs retrieves all collection IDs from RootCoord with retry on ErrServiceUnimplemented.
+func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, error) {
 	var (
 		err  error
 		resp *rootcoordpb.ShowCollectionIDsResponse
 	)
-	// retry on un implemented for compatibility
 	retryErr := retry.Handle(ctx, func() (bool, error) {
-		resp, err = broker.ShowCollectionIDs(m.ctx)
+		resp, err = broker.ShowCollectionIDs(ctx)
 		if errors.Is(err, merr.ErrServiceUnimplemented) {
 			return true, err
 		}
 		return false, err
 	})
 	if retryErr != nil {
-		return retryErr
+		return nil, retryErr
 	}
-	log.Ctx(ctx).Info("datacoord show collections done", zap.Duration("dur", record.RecordSpan()))
 
 	collectionIDs := make([]int64, 0, 4096)
 	for _, collections := range resp.GetDbCollections() {
 		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
 	}
+	return collectionIDs, nil
+}
+
+// NewMeta creates meta from provided `kv.TxnKV`
+func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
+	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
+	collectionIDs, err := showCollectionIDs(ctx, broker)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		im   *indexMeta
+		am   *analyzeMeta
+		psm  *partitionStatsMeta
+		ctm  *compactionTaskMeta
+		stm  *statsTaskMeta
+		ecrm *externalCollectionRefreshMeta
+		spm  *snapshotMeta
+	)
+
+	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
+	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
+	mt := &meta{
+		ctx:             ctx,
+		catalog:         catalog,
+		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:        NewSegmentsInfo(),
+		channelCPs:      newChannelCps(),
+		chunkManager:    chunkManager,
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion: 0,
+		resourceLock:    lock.RWMutex{},
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		var err error
+		im, err = newIndexMeta(ctx, catalog, collectionIDs)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		am, err = newAnalyzeMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		psm, err = newPartitionStatsMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		ctm, err = newCompactionTaskMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		stm, err = newStatsTaskMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		ecrm, err = newExternalCollectionRefreshMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		spm, err = newSnapshotMeta(ctx, catalog, chunkManager)
+		return err
+	})
+
+	// reloadFromKV (ListSegments, ListChannelCheckpoint) runs in parallel with sub-meta loading.
+	// It only uses mt.catalog/mt.segments/mt.channelCPs, which are independent of sub-metas.
+	g.Go(func() error {
+		return mt.reloadFromKV(ctx, collectionIDs)
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Assign sub-metas after all goroutines complete
+	mt.indexMeta = im
+	mt.analyzeMeta = am
+	mt.partitionStatsMeta = psm
+	mt.compactionTaskMeta = ctm
+	mt.statsTaskMeta = stm
+	mt.externalCollectionRefreshMeta = ecrm
+	mt.snapshotMeta = spm
+
+	return mt, nil
+}
+
+// reloadFromKV loads meta from KV storage
+func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
+	record := timerecord.NewTimeRecorder("datacoord")
 
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	defer pool.Release()
@@ -288,8 +327,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 			return nil, nil
 		}))
 	}
-	err = conc.AwaitAll(futures...)
-	if err != nil {
+	if err := conc.AwaitAll(futures...); err != nil {
 		return err
 	}
 
@@ -475,9 +513,7 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
 	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return isSegmentHealthy(si)
-	}))
+	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isSegmentHealthy))
 	for _, segment := range segments {
 		ret += segment.GetNumOfRows()
 	}
@@ -539,8 +575,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
 				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
-			} else {
-				log.Ctx(context.TODO()).Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
 
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
@@ -1760,6 +1794,37 @@ func getMinPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 	return minPos
 }
 
+func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
+	var maxPos *msgpb.MsgPosition
+	for _, pos := range positions {
+		if maxPos == nil ||
+			pos != nil && pos.GetTimestamp() > maxPos.GetTimestamp() {
+			maxPos = pos
+		}
+	}
+	return maxPos
+}
+
+// recalculateSegmentPosition recalculates StartPosition and DmlPosition from
+// actual binlog timestamps on the compaction result segment. This makes compaction
+// self-healing: wrong positions from import or prior compaction are corrected.
+// Also fixes the DmlPosition bug where getMinPosition was used instead of max.
+// Falls back to the provided fallback positions if binlog timestamps are unavailable
+// (e.g., legacy segments without TimestampFrom/TimestampTo populated).
+func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
+	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
+		return &msgpb.MsgPosition{
+				ChannelName: channel,
+				Timestamp:   minTs,
+			}, &msgpb.MsgPosition{
+				ChannelName: channel,
+				Timestamp:   maxTs,
+			}
+	}
+	return fallbackStart, fallbackDml
+}
+
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
@@ -1795,7 +1860,16 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
 	}
 
+	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	}))
+
 	for _, seg := range result.GetSegments() {
+		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		segmentInfo := &datapb.SegmentInfo{
 			ID:                  seg.GetSegmentID(),
 			CollectionID:        compactFromSegInfos[0].CollectionID,
@@ -1810,17 +1884,14 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			CompactionFrom:      compactFromSegIDs,
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 			Level:               datapb.SegmentLevel_L2,
-			StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetStartPosition()
-			})),
-			DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetDmlPosition()
-			})),
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
 			ManifestPath:   seg.GetManifest(),
 			ExpirQuantiles: seg.GetExpirQuantiles(),
+			SchemaVersion:  compactFromSegInfos[0].GetSchemaVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1901,8 +1972,17 @@ func (m *meta) completeMixCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
+	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	}))
+
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
+		startPos, dmlPos := recalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		compactToSegmentInfo := NewSegmentInfo(
 			&datapb.SegmentInfo{
 				ID:            compactToSegment.GetSegmentID(),
@@ -1923,16 +2003,13 @@ func (m *meta) completeMixCompactionMutation(
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 				Level:               datapb.SegmentLevel_L1,
 				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-					return info.GetStartPosition()
-				})),
-				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-					return info.GetDmlPosition()
-				})),
+				StartPosition:       startPos,
+				DmlPosition:         dmlPos,
 				IsSorted:            compactToSegment.GetIsSorted(),
 				ManifestPath:        compactToSegment.GetManifest(),
 				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
 				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
+				SchemaVersion:       compactFromSegInfos[0].GetSchemaVersion(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1992,6 +2069,43 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 
+	// Snapshot compaction protection exists to keep the sealed-segment list stable during
+	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
+	// L0 segments are transient delete-log carriers, not part of that stable list, and
+	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
+	// So L0 delete compaction is outside the protection's concern and must not be blocked.
+	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
+		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
+			log.Info("compaction rejected: collection has pending snapshot or unloaded RefIndex",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.String("type", t.GetType().String()),
+				zap.Int64("collectionID", t.GetCollectionID()),
+				zap.String("channel", t.GetChannel()),
+				zap.Int64s("inputSegments", t.GetInputSegments()),
+			)
+			return merr.WrapErrCompactionBlocked(
+				fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
+					t.GetCollectionID()))
+		}
+
+		// Check if any input segment is protected by a snapshot.
+		for _, segmentID := range t.GetInputSegments() {
+			if m.isSegmentCompactionProtected(segmentID) {
+				log.Info("compaction rejected: input segment is protected by snapshot",
+					zap.Int64("planID", t.GetPlanID()),
+					zap.String("type", t.GetType().String()),
+					zap.Int64("collectionID", t.GetCollectionID()),
+					zap.String("channel", t.GetChannel()),
+					zap.Int64("segmentID", segmentID),
+					zap.Int64s("inputSegments", t.GetInputSegments()),
+				)
+				return merr.WrapErrCompactionBlocked(
+					fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
+			}
+		}
+	}
+
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.segments.GetSegment(segmentID)
 		if !isSegmentHealthy(segment) {
@@ -2021,6 +2135,8 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeClusterCompactionMutation(t, result)
 	case datapb.CompactionType_SortCompaction:
 		return m.completeSortCompactionMutation(t, result)
+	case datapb.CompactionType_BackfillCompaction:
+		return m.completeBackfillCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }
@@ -2187,6 +2303,29 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
 }
 
+// isSegmentCompactionProtected checks if a segment is protected from compaction by a snapshot.
+func (m *meta) isSegmentCompactionProtected(segmentID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsSegmentCompactionProtected(segmentID)
+}
+
+// isCollectionCompactionBlocked checks if compaction is blocked for a collection
+// because a protected snapshot's RefIndex hasn't been loaded yet (fail-closed).
+func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+}
+
+// GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.
+// This is consumed exclusively by the L0 compaction policy, which only acts on L0 segments.
+// Snapshot compaction protection targets L1/L2 segments referenced by snapshots, so it must
+// NOT filter segments here: doing so would prevent L0 delete-log compaction and cause
+// delta log accumulation, query latency spikes, and write stalls on collections with
+// active snapshots.
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
 	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
@@ -2197,10 +2336,6 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 
 	ret := make(map[int64][]*SegmentInfo)
 	for _, seg := range allSegs {
-		if _, ok := ret[seg.CollectionID]; !ok {
-			ret[seg.CollectionID] = make([]*SegmentInfo, 0)
-		}
-
 		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
 	}
 
@@ -2411,14 +2546,17 @@ func (m *meta) completeSortCompactionMutation(
 
 	resultSegment := result.GetSegments()[0]
 
+	startPos, dmlPos := recalculateSegmentPosition(resultSegment.GetInsertLogs(), oldSegment.GetInsertChannel(),
+		oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
+
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:              oldSegment.GetCollectionID(),
 		PartitionID:               oldSegment.GetPartitionID(),
 		InsertChannel:             oldSegment.GetInsertChannel(),
 		MaxRowNum:                 oldSegment.GetMaxRowNum(),
 		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             oldSegment.GetStartPosition(),
-		DmlPosition:               oldSegment.GetDmlPosition(),
+		StartPosition:             startPos,
+		DmlPosition:               dmlPos,
 		IsImporting:               oldSegment.GetIsImporting(),
 		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),
@@ -2440,6 +2578,7 @@ func (m *meta) completeSortCompactionMutation(
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
+		SchemaVersion:             oldSegment.GetSchemaVersion(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -2472,6 +2611,125 @@ func (m *meta) completeSortCompactionMutation(
 	m.segments.SetSegment(segment.GetID(), segment)
 	log.Info("meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, metricMutation, nil
+}
+
+func (m *meta) completeBackfillCompactionMutation(
+	t *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, *segMetricMutation, error) {
+	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
+		zap.String("type", t.GetType().String()),
+		zap.Int64("collectionID", t.CollectionID),
+		zap.Int64("partitionID", t.PartitionID),
+		zap.String("channel", t.GetChannel()))
+
+	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
+
+	// Backfill compaction updates the existing segment, not creating a new one
+	if len(t.GetInputSegments()) != 1 {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("backfill compaction should have exactly one input segment")
+	}
+	if len(result.GetSegments()) != 1 {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("backfill compaction result should have exactly one segment")
+	}
+
+	segmentID := t.GetInputSegments()[0]
+	oldSegment := m.segments.GetSegment(segmentID)
+	if oldSegment == nil {
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
+	}
+
+	// Re-validate segment health to prevent race condition with drop collection
+	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
+	if !isSegmentHealthy(oldSegment) {
+		log.Warn("input segment was dropped during compaction mutation",
+			zap.Int64("planID", t.GetPlanID()),
+			zap.Int64("segmentID", segmentID),
+			zap.String("state", oldSegment.GetState().String()))
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+	}
+
+	resultSegment := result.GetSegments()[0]
+	if resultSegment.GetSegmentID() != segmentID {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("backfill compaction result segment ID %d does not match input segment ID %d", resultSegment.GetSegmentID(), segmentID))
+	}
+
+	// Clone the segment for update
+	cloned := oldSegment.Clone()
+
+	// Replace binlogs with the merged result (original fields + new function output field).
+	// For V3 segments, buildMergedLogsV3 assigns LogID!=0 so buildBinlogKvs validation passes
+	// and getSegmentBinlogFields can detect the new field via ChildFields.
+	cloned.Binlogs = resultSegment.GetInsertLogs()
+
+	// Update BM25 stats logs: for V2 segments, stats are separate files tracked in Bm25Statslogs.
+	// Merge so that stats for previously backfilled BM25 fields are preserved when a second
+	// AlterCollectionSchema adds another BM25 function. Before merging, filter out entries
+	// whose (fieldID, logID) already exist so that crash-replay — where the same result is
+	// applied twice because datacoord crashed between the etcd write and the task state
+	// transition — does not produce duplicate stats entries.
+	// For V3 segments (manifest-based), BM25 stats are embedded in the manifest and
+	// Bm25Logs in the result is nil — skip updating Bm25Statslogs to avoid clearing existing stats.
+	if resultSegment.GetManifest() == "" {
+		dedupedBm25Logs := filterDuplicateFieldBinlogs(cloned.GetBm25Statslogs(), resultSegment.GetBm25Logs())
+		cloned.Bm25Statslogs = mergeFieldBinlogs(cloned.GetBm25Statslogs(), dedupedBm25Logs)
+	}
+
+	// Update SchemaVersion from task schema.
+	// t.Schema is set from collection.Schema at task creation time and should never be nil.
+	// A nil schema here indicates data corruption (e.g. etcd serialization loss); we warn
+	// and skip the update so the segment's schemaVersion remains stale, causing the next
+	// backfill trigger to re-evaluate and re-submit the task.
+	if t.GetSchema() == nil {
+		log.Warn("backfill compaction task has nil schema, skipping schemaVersion update — segment will be re-evaluated on next trigger",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64("planID", t.GetPlanID()))
+	} else {
+		newSchemaVersion := t.GetSchema().GetVersion()
+		if newSchemaVersion > cloned.GetSchemaVersion() {
+			cloned.SchemaVersion = newSchemaVersion
+			log.Info("meta update: update schema version for backfill compaction",
+				zap.Int64("segmentID", segmentID),
+				zap.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
+				zap.Int32("newSchemaVersion", newSchemaVersion))
+		}
+	}
+
+	// Update StorageVersion only when result has manifest (true V3 segment).
+	// V2 segments on V3 clusters stay V2 — backfill forces V2 path to avoid
+	// creating partial manifests that would corrupt segment loading.
+	// Update ManifestPath for V3 segments — the merged manifest contains both
+	// original columns and new function output columns + BM25 stats.
+	if resultSegment.GetManifest() != "" {
+		cloned.StorageVersion = resultSegment.GetStorageVersion()
+		cloned.ManifestPath = resultSegment.GetManifest()
+	}
+
+	// Prepare binlogs increment for catalog update
+	binlogsIncrement := metastore.BinlogsIncrement{
+		Segment: cloned.SegmentInfo,
+	}
+
+	log = log.With(zap.Int64("segmentID", segmentID),
+		zap.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
+		zap.Int32("newSchemaVersion", cloned.GetSchemaVersion()),
+		zap.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())),
+		zap.Int("newBm25LogsCount", len(resultSegment.GetBm25Logs())))
+
+	log.Info("meta update: prepare for complete backfill compaction mutation - complete",
+		zap.Int64("num rows", cloned.GetNumOfRows()))
+
+	// Save to catalog
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
+		log.Warn("fail to alter segment for backfill compaction", zap.Error(err))
+		return nil, nil, err
+	}
+
+	// Update in-memory meta
+	m.segments.SetSegment(segmentID, cloned)
+	log.Info("meta update: alter in memory meta after backfill compaction - complete")
+
+	return []*SegmentInfo{cloned}, metricMutation, nil
 }
 
 func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {

@@ -9,7 +9,7 @@ default_flush_interval = 1
 big_flush_interval = 1000
 default_drop_interval = 3
 default_dim = 128
-default_nb = 2000
+default_nb = 3000
 default_nb_medium = 5000
 default_max_capacity = 100
 default_max_length = 500
@@ -461,3 +461,4 @@ class CaseLabel:
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
     MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
     GPU = "GPU"
+    CDC = "CDC"

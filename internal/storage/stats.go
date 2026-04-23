@@ -514,6 +514,51 @@ func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeySt
 	return DeserializeStats(blobs)
 }
 
+// MemSize estimates the in-memory size of this BM25Stats in bytes.
+// len(map) is O(1) in Go (reads hmap.count directly). Per-entry cost is configurable
+// via queryNode.idfOracle.bm25StatsBytesPerEntry.
+func (m *BM25Stats) MemSize() int64 {
+	// Fixed overhead: numRow(8) + numToken(8) + map header (~100B)
+	return 120 + int64(len(m.rowsWithToken))*paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+}
+
+// DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.
+// Unlike Deserialize([]byte), this does not require knowing the total size upfront.
+func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
+	var version int32
+	if err := binary.Read(r, common.Endian, &version); err != nil {
+		return err
+	}
+
+	var numRow, tokenNum int64
+	if err := binary.Read(r, common.Endian, &numRow); err != nil {
+		return err
+	}
+	if err := binary.Read(r, common.Endian, &tokenNum); err != nil {
+		return err
+	}
+
+	m.numRow += numRow
+	m.numToken += tokenNum
+
+	var key uint32
+	var value int32
+	for {
+		if err := binary.Read(r, common.Endian, &key); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		if err := binary.Read(r, common.Endian, &value); err != nil {
+			return err
+		}
+		m.rowsWithToken[key] += value
+	}
+
+	return nil
+}
+
 // DeserializeStats deserializes @blobs as []*PrimaryKeyStats
 func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 	results := make([]*PrimaryKeyStats, 0, len(blobs))

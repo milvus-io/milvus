@@ -93,7 +93,6 @@ func testSegmentWriterBatchSize(b *testing.B, batchSize int) {
 	writer, err := NewSegmentWriter(schema, numRows, batchSize, 1, 2, 3, nil)
 	assert.NoError(b, err)
 
-	b.N = 10
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start = time.Now()

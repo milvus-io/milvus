@@ -50,6 +50,20 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 		if !CheckStrByValues(params, Metric, SparseMetrics) {
 			return fmt.Errorf("metric type not found or not supported, supported: %v", SparseMetrics)
 		}
+		// Validate inverted_index_algo if provided. This check is done in Go because
+		// the C++ knowhere library no longer validates this parameter (removed in knowhere fd532fb).
+		if algo, ok := params[SparseInvertedIndexAlgo]; ok {
+			validAlgo := false
+			for _, a := range SparseInvertedIndexAlgos {
+				if a == algo {
+					validAlgo = true
+					break
+				}
+			}
+			if !validAlgo {
+				return fmt.Errorf("sparse inverted index algo %s not found or not supported, supported: %v", algo, SparseInvertedIndexAlgos)
+			}
+		}
 	} else if typeutil.IsBinaryVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, BinaryVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], BinaryVectorMetrics)

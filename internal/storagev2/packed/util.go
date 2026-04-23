@@ -44,22 +44,6 @@ func ConsumeCStatusIntoError(status *C.CStatus) error {
 	return merr.SegcoreError(int32(errorCode), errorMsg)
 }
 
-func GetFileSize(path string, storageConfig *indexpb.StorageConfig) (int64, error) {
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
-
-	var fileSize int64
-	if storageConfig == nil {
-		status := C.GetFileSize(cPath, (*C.int64_t)(unsafe.Pointer(&fileSize)))
-		return fileSize, ConsumeCStatusIntoError(&status)
-	} else {
-		cStorageConfig := GetCStorageConfig(storageConfig)
-		defer DeleteCStorageConfig(cStorageConfig)
-		status := C.GetFileSizeWithStorageConfig(cPath, (*C.int64_t)(unsafe.Pointer(&fileSize)), cStorageConfig)
-		return fileSize, ConsumeCStatusIntoError(&status)
-	}
-}
-
 // tlsMinVersionForStorage converts TLS min version config value
 // to the format expected by milvus-storage. "default" and "" map to ""
 // (empty string = system/library default).
@@ -91,6 +75,7 @@ func GetCStorageConfig(storageConfig *indexpb.StorageConfig) C.CStorageConfig {
 		use_custom_part_upload: true,
 		max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
 		tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+		use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
 	}
 	return cStorageConfig
 }

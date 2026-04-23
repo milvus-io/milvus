@@ -177,7 +177,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to encode insert header, there's a bug, %+v, %s", m.header, err.Error()))
 	}
-	m.messageImpl.properties.Set(messageHeader, newHeader)
+	m.properties.Set(messageHeader, newHeader)
 }
 
 // OverwriteBody overwrites the message body.
@@ -186,7 +186,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
 	}
-	m.messageImpl.payload = payload
+	m.payload = payload
 }
 
 // BroadcastMessage returns the broadcast message.

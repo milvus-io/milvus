@@ -44,3 +44,4 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/loon_ffi)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)

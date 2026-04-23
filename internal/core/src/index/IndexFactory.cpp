@@ -36,6 +36,7 @@
 #include "index/Index.h"
 #include "index/IndexInfo.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/TextMatchIndex.h"
 #include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/Meta.h"
@@ -92,6 +93,16 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
         assert(create_index_info.tantivy_index_version != 0);
+        if (create_index_info.is_text_match) {
+            auto field_schema = FieldMeta::ParseFrom(
+                file_manager_context.fieldDataMeta.field_schema);
+            return std::make_unique<TextMatchIndex>(
+                file_manager_context,
+                create_index_info.tantivy_index_version,
+                "milvus_tokenizer",
+                field_schema.get_analyzer_params().c_str(),
+                create_index_info.analyzer_extra_info.c_str());
+        }
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
             create_index_info.tantivy_index_version,
@@ -155,9 +166,9 @@ IndexFactory::VecIndexLoadResource(
     int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
-    std::string index_type = index_params.at("index_type");
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    const std::string& index_type = index_type_it->second;
 
     bool mmaped = false;
     if (mmap_enable &&
@@ -253,6 +264,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_FLOAT16:
                     resource = knowhere::IndexStaticFaced<knowhere::fp16>::
@@ -262,6 +276,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::fp16>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_BFLOAT16:
                     resource = knowhere::IndexStaticFaced<knowhere::bf16>::
@@ -271,6 +288,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::bf16>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_BINARY:
                     resource = knowhere::IndexStaticFaced<knowhere::bin1>::
@@ -280,6 +300,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::bin1>::HasRawData(
+                            index_type, index_version, config);
                     break;
                 case milvus::DataType::VECTOR_INT8:
                     resource = knowhere::IndexStaticFaced<knowhere::int8>::
@@ -289,6 +312,9 @@ IndexFactory::VecIndexLoadResource(
                                              num_rows,
                                              dim,
                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::int8>::HasRawData(
+                            index_type, index_version, config);
                     break;
 
                 default:
@@ -299,9 +325,6 @@ IndexFactory::VecIndexLoadResource(
                         element_type);
                     return LoadResourceRequest{0, 0, 0, 0, true};
             }
-            // For VectorArray, has_raw_data is always false as get_vector of index does not provide offsets which
-            // is required for reconstructing the raw data
-            has_raw_data = false;
             break;
         }
         default:
@@ -311,17 +334,18 @@ IndexFactory::VecIndexLoadResource(
     }
 
     LoadResourceRequest request{};
+    const auto& res = resource.value();
 
     request.has_raw_data = has_raw_data;
-    request.final_disk_cost = resource.value().diskCost;
-    request.final_memory_cost = resource.value().memoryCost;
+    request.final_disk_cost = res.diskCost;
+    request.final_memory_cost = res.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
-        request.max_disk_cost = resource.value().diskCost;
-        request.max_memory_cost = std::max(resource.value().memoryCost,
-                                           download_buffer_size_in_bytes);
+        request.max_disk_cost = res.diskCost;
+        request.max_memory_cost =
+            std::max(res.memoryCost, download_buffer_size_in_bytes);
     } else {
         request.max_disk_cost = 0;
-        request.max_memory_cost = 2 * resource.value().memoryCost;
+        request.max_memory_cost = 2 * res.memoryCost;
     }
     return request;
 }
@@ -335,9 +359,9 @@ IndexFactory::ScalarIndexLoadResource(
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
-    std::string index_type = index_params.at("index_type");
+    auto index_type_it = index_params.find("index_type");
+    AssertInfo(index_type_it != index_params.end(), "index type is empty");
+    const std::string& index_type = index_type_it->second;
 
     knowhere::expected<knowhere::Resource> resource;
 

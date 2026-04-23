@@ -373,6 +373,8 @@ func validateSpatialResults(t *testing.T, actualIDs []int64, expectedIDs []int64
 
 // 1. Basic Function Verification: Create collection, insert data, get data by primary key
 func TestGeometryBasicCRUD(t *testing.T) {
+	t.Parallel()
+
 	// Use unified test setup function
 	setup := setupGeometryTest(t, true, false, nil)
 	defer func() {}()
@@ -395,6 +397,8 @@ func TestGeometryBasicCRUD(t *testing.T) {
 
 // 2. Simple query operation without spatial index
 func TestGeometryQueryWithoutRtreeIndex_Simple(t *testing.T) {
+	t.Parallel()
+
 	// Use unified setup, without creating spatial index
 	setup := setupGeometryTest(t, true, false, nil)
 
@@ -425,6 +429,8 @@ func TestGeometryQueryWithoutRtreeIndex_Simple(t *testing.T) {
 
 // 3. Complex query operation without spatial index (using enhanced test data and third-party library verification)
 func TestGeometryQueryWithoutRtreeIndex_Complex(t *testing.T) {
+	t.Parallel()
+
 	// Use enhanced test data
 	testData := createEnhancedSpatialTestData()
 	setup := setupGeometryTest(t, true, false, testData)
@@ -526,6 +532,8 @@ func TestGeometryQueryWithoutRtreeIndex_Complex(t *testing.T) {
 
 // 4. Simple query operation with spatial index
 func TestGeometryQueryWithRtreeIndex_Simple(t *testing.T) {
+	t.Parallel()
+
 	// Use unified setup, create spatial index
 	setup := setupGeometryTest(t, true, true, nil)
 
@@ -547,6 +555,8 @@ func TestGeometryQueryWithRtreeIndex_Simple(t *testing.T) {
 
 // 5. Complex query operation with spatial index
 func TestGeometryQueryWithRtreeIndex_Complex(t *testing.T) {
+	t.Parallel()
+
 	// Use enhanced test data and spatial index
 	testData := createEnhancedSpatialTestData()
 	setup := setupGeometryTest(t, true, true, testData)
@@ -603,6 +613,8 @@ func TestGeometryQueryWithRtreeIndex_Complex(t *testing.T) {
 
 // 6. Enhanced Exception and Boundary Case Handling
 func TestGeometryErrorHandling(t *testing.T) {
+	t.Parallel()
+
 	// Use enhanced test data
 	testData := createEnhancedSpatialTestData()
 	setup := setupGeometryTest(t, true, false, testData)
@@ -766,6 +778,8 @@ func TestGeometryErrorHandling(t *testing.T) {
 
 // Comprehensive Test: Verify complete Geometry workflow
 func TestGeometryCompleteWorkflow(t *testing.T) {
+	t.Parallel()
+
 	// Use enhanced test data and full index configuration
 	testData := createEnhancedSpatialTestData()
 	setup := setupGeometryTest(t, true, true, testData)
