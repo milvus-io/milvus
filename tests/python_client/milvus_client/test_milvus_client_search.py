@@ -46,6 +46,11 @@ default_string_field_name = ct.default_string_field_name
 default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
 
+# v2-migrated TestSearchInvalid{Shared,Independent} classes create collections with
+# ct.default_int64_field_name as the PK field, so their filter expression must match
+# that field name (distinct from v1's default_search_exp = 'id >= 0').
+v2_invalid_search_exp = f"{ct.default_int64_field_name} >= 0"
+
 # Module-level search vectors used across TestSearchInvalid{Shared,Independent} tests
 # (migrated from milvus_client_v2/test_milvus_client_search_invalid.py where these were
 # referenced bare without `self.` — keep as module-level to preserve byte-identical bodies).
@@ -479,7 +484,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=invalid_vectors, anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999, "err_msg": err_msg})
 
@@ -497,7 +502,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=wrong_vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": 'vector dimension mismatch'})
@@ -517,7 +522,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=invalid_field_name,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -535,7 +540,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             self.search(client, self.collection_name,
                         data=vectors[:default_nq], anns_field=default_search_field,
                         search_params=search_params, limit=default_limit,
-                        filter=default_search_exp,
+                        filter=v2_invalid_search_exp,
                         check_task=CheckTasks.err_res,
                         check_items={"err_code": 1,
                                      "err_msg": "Dict key must be str"})
@@ -543,7 +548,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
             self.search(client, self.collection_name,
                         data=vectors[:default_nq], anns_field=default_search_field,
                         search_params=search_params, limit=default_limit,
-                        filter=default_search_exp,
+                        filter=v2_invalid_search_exp,
                         check_task=CheckTasks.err_res,
                         check_items={"err_code": 65535,
                                      "err_msg": "metric type not match"})
@@ -561,7 +566,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "metric type not match: invalid parameter"
@@ -582,7 +587,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=invalid_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "`limit` value %s is illegal" % invalid_limit})
@@ -602,7 +607,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": err_msg})
@@ -682,7 +687,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999,
@@ -701,7 +706,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=invalid_partitions,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999, "err_msg": err_msg})
@@ -719,7 +724,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     output_fields=invalid_output_fields,
                     check_task=CheckTasks.err_res,
                     check_items={ct.err_code: 999,
@@ -739,7 +744,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     output_fields=non_existing_output_fields,
                     check_task=CheckTasks.err_res,
                     check_items={ct.err_code: 999,
@@ -760,7 +765,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     output_fields=output_fields,
                     check_task=CheckTasks.check_search_results,
                     check_items={"nq": default_nq, "limit": default_limit,
@@ -781,7 +786,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     output_fields=output_fields,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
@@ -803,7 +808,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     guarantee_timestamp=invalid_guarantee_time,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
@@ -824,7 +829,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     round_decimal=round_decimal,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
@@ -844,7 +849,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=search_vectors[:nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "nq (number of search vector per search "
@@ -866,7 +871,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=range_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999, "err_msg": "type must be number"})
 
@@ -974,7 +979,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=range_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999, "err_msg": "type must be number"})
 
@@ -1025,7 +1030,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "should create connection first"})
@@ -1053,7 +1058,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors, anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "collection not found"})
@@ -1096,7 +1101,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                 self.search(client, collection_name,
                             data=vectors[:default_nq], anns_field=default_search_field,
                             search_params=search_params, limit=default_limit,
-                            filter=default_search_exp,
+                            filter=v2_invalid_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 999,
                                          "err_msg": "fail to search on QueryNode"})
@@ -1133,7 +1138,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=annoy_search_param, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "Search params check failed"})
@@ -1410,7 +1415,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors, anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "collection not loaded"})
@@ -1452,7 +1457,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors, anns_field=default_search_field,
                     search_params=default_search_params, limit=limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=[par_name],
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
@@ -1489,7 +1494,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=search_vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 101,
                                  "err_msg": err_msg})
@@ -1509,7 +1514,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=search_vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.check_search_results,
                     check_items={"nq": default_nq,
                                  "ids": [],
@@ -1525,7 +1530,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=search_vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.check_search_results,
                     check_items={"nq": default_nq,
                                  "ids": insert_ids,
@@ -1560,7 +1565,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.check_search_results,
                     check_items={"nq": default_nq,
                                  "ids": [],
@@ -1572,7 +1577,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=[par_name],
                     check_task=CheckTasks.check_search_results,
                     check_items={"nq": default_nq,
@@ -1619,7 +1624,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=[deleted_par_name],
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
@@ -1649,7 +1654,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     partition_names=[partition_name],
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
@@ -1725,7 +1730,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=search_binary_vectors[:default_nq],
                     anns_field=ct.default_binary_vec_field_name,
                     search_params=wrong_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "metric type not match"})
@@ -1805,14 +1810,14 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
             self.search(client, collection_name,
                         data=vectors[:default_nq], anns_field=default_search_field,
                         search_params=default_search_params, limit=default_limit,
-                        filter=default_search_exp,
+                        filter=v2_invalid_search_exp,
                         output_fields=[output_fields])
         elif output_fields == "":
             # empty string output field
             self.search(client, collection_name,
                         data=vectors[:default_nq], anns_field=default_search_field,
                         search_params=default_search_params, limit=default_limit,
-                        filter=default_search_exp,
+                        filter=v2_invalid_search_exp,
                         output_fields=[output_fields],
                         check_task=CheckTasks.err_res,
                         check_items={ct.err_code: 1,
@@ -1822,7 +1827,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
             self.search(client, collection_name,
                         data=vectors[:default_nq], anns_field=default_search_field,
                         search_params=default_search_params, limit=default_limit,
-                        filter=default_search_exp,
+                        filter=v2_invalid_search_exp,
                         output_fields=[output_fields],
                         check_task=CheckTasks.err_res,
                         check_items={ct.err_code: 65535,
@@ -1898,7 +1903,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vector[:default_nq], anns_field=default_search_field,
                     search_params=search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999,
                                  "err_msg": "parse ignore growing field failed"})
@@ -1933,7 +1938,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=range_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "must be less than radius"})
@@ -1969,7 +1974,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=range_search_params, limit=default_limit,
-                    filter=default_search_exp,
+                    filter=v2_invalid_search_exp,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "must be greater than radius"})
