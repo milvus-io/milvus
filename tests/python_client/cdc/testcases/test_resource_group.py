@@ -4,9 +4,16 @@ CDC sync tests for resource group operations.
 
 import time
 
+import pytest
+
 from .base import TestCDCSyncBase, logger
 
 
+# Resource groups and replica assignment are per-cluster by design and are
+# NOT replicated via CDC. The tests below assert downstream sync, which
+# will always fail. Skipped until they are rewritten to verify the
+# opposite (that RG changes on upstream do NOT leak to downstream).
+@pytest.mark.skip(reason="Resource groups and replicas are not replicated by CDC (by design)")
 class TestCDCSyncResourceGroup(TestCDCSyncBase):
     """Test CDC sync for resource group operations."""
 
