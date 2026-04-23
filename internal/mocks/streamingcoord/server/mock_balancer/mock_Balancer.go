@@ -124,6 +124,52 @@ func (_c *MockBalancer_Close_Call) RunAndReturn(run func()) *MockBalancer_Close_
 	return _c
 }
 
+// ConfirmPrimaryResourceGroupReady provides a mock function with given fields: ctx
+func (_m *MockBalancer) ConfirmPrimaryResourceGroupReady(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfirmPrimaryResourceGroupReady")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_ConfirmPrimaryResourceGroupReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConfirmPrimaryResourceGroupReady'
+type MockBalancer_ConfirmPrimaryResourceGroupReady_Call struct {
+	*mock.Call
+}
+
+// ConfirmPrimaryResourceGroupReady is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBalancer_Expecter) ConfirmPrimaryResourceGroupReady(ctx interface{}) *MockBalancer_ConfirmPrimaryResourceGroupReady_Call {
+	return &MockBalancer_ConfirmPrimaryResourceGroupReady_Call{Call: _e.mock.On("ConfirmPrimaryResourceGroupReady", ctx)}
+}
+
+func (_c *MockBalancer_ConfirmPrimaryResourceGroupReady_Call) Run(run func(ctx context.Context)) *MockBalancer_ConfirmPrimaryResourceGroupReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_ConfirmPrimaryResourceGroupReady_Call) Return(_a0 error) *MockBalancer_ConfirmPrimaryResourceGroupReady_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_ConfirmPrimaryResourceGroupReady_Call) RunAndReturn(run func(context.Context) error) *MockBalancer_ConfirmPrimaryResourceGroupReady_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAllStreamingNodes provides a mock function with given fields: ctx
 func (_m *MockBalancer) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	ret := _m.Called(ctx)
