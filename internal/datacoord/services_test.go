@@ -3473,10 +3473,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		for _, id := range []int64{1001, 1002} {
 			m.AddSegment(ctx, &SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
-					ID:           id,
-					CollectionID: 100,
-					State:        commonpb.SegmentState_Flushed,
-					ManifestPath: packed.MarshalManifestPath("/seg/"+strconv.FormatInt(id, 10), 1),
+					ID:             id,
+					CollectionID:   100,
+					State:          commonpb.SegmentState_Flushed,
+					StorageVersion: storage.StorageV3,
+					ManifestPath:   packed.MarshalManifestPath("/seg/"+strconv.FormatInt(id, 10), 1),
 				},
 			})
 		}
@@ -3619,12 +3620,14 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 101, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			ManifestPath: packed.MarshalManifestPath("/seg/101", 1),
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/101", 1),
 		}})
 		// 102 belongs to a different collection
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 102, CollectionID: 999, State: commonpb.SegmentState_Flushed,
-			ManifestPath: packed.MarshalManifestPath("/seg/102", 1),
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/102", 1),
 		}})
 		jsonStr := `{
           "success": true,
@@ -3753,6 +3756,67 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		fb := it.GetV2ColumnGroups().GetColumnGroups()[100]
 		require.Len(t, fb.GetBinlogs(), 1)
 		assert.Equal(t, int64(100), fb.GetBinlogs()[0].GetEntriesNum())
+	})
+
+	// V3 entry pointing at a segment whose actual storage version is V2 must
+	// be rejected: UpdateManifestVersion would no-op and the caller would see
+	// a fake committed=true.
+	t.Run("v3_rejected_on_non_v3_segment", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 301, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV2, // V2 segment, JSON misroutes it as V3
+			ManifestPath:   packed.MarshalManifestPath("/seg/301", 1),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "301": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "storage version is not V3")
+	})
+
+	// V3 entry pointing at a V3 segment that has never had a manifest written
+	// (ManifestPath == "") must be rejected at pre-validation.
+	t.Run("v3_rejected_on_empty_manifest_path", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 302, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			// ManifestPath intentionally empty.
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "302": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "no existing manifest path")
 	})
 }
 

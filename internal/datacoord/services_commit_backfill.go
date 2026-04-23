@@ -249,6 +249,22 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			})
 		} else {
 			// V3 path
+			if segInfo.GetStorageVersion() != storage.StorageV3 {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3",
+					Reason: "segment storage version is not V3",
+				})
+				continue
+			}
+			// UpdateManifestVersion no-ops when ManifestPath is empty. Reject
+			// here so the caller never sees a fake committed=true.
+			if segInfo.GetManifestPath() == "" {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3",
+					Reason: "segment has no existing manifest path",
+				})
+				continue
+			}
 			if entry.Version <= 0 {
 				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 					SegmentId: segID, Ok: false, Kind: "v3",

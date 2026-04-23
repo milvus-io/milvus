@@ -88,8 +88,8 @@ func TestBackfillResult_ParseMixedV2V3(t *testing.T) {
 }
 
 func TestBackfillResult_IsV2(t *testing.T) {
-	v2 := int64(storage.StorageV2)
-	v3 := int64(storage.StorageV3)
+	v2 := storage.StorageV2
+	v3 := storage.StorageV3
 	zero := int64(0)
 
 	cases := []struct {
@@ -193,7 +193,7 @@ func TestParseLogIDFromKey(t *testing.T) {
 }
 
 func TestBuildV2Groups(t *testing.T) {
-	v2 := int64(storage.StorageV2)
+	v2 := storage.StorageV2
 
 	t.Run("single file per group", func(t *testing.T) {
 		seg := &BackfillSegment{
@@ -211,6 +211,9 @@ func TestBuildV2Groups(t *testing.T) {
 		assert.Len(t, groups, 1)
 		fb := groups[100]
 		assert.Equal(t, int64(100), fb.GetFieldID())
+		// ChildFields must be populated — index creation and backfill-
+		// compaction detection look up fields via ChildFields, not FieldID.
+		assert.Equal(t, []int64{100}, fb.GetChildFields())
 		assert.Len(t, fb.GetBinlogs(), 1)
 		assert.Equal(t, int64(1000), fb.GetBinlogs()[0].GetEntriesNum())
 		assert.Equal(t, int64(7), fb.GetBinlogs()[0].GetLogID())

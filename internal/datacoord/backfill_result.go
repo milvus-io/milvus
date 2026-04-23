@@ -28,7 +28,7 @@ import (
 )
 
 // BackfillResult is the decoded form of the JSON produced by the Spark
-// backfill job. Only fields required for commit are modelled; other diagnostic
+// backfill job. Only fields required for commit are modeled; other diagnostic
 // fields (executionTimeMs, usedSourceByField, etc.) are ignored.
 //
 // Reference: spark-milvus/docs/backfill-result-json-format.md
@@ -169,7 +169,14 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		}
 		out[fid] = &datapb.FieldBinlog{
 			FieldID: fid,
-			Binlogs: binlogs,
+			// ChildFields carries the real field IDs that index creation
+			// (getSegmentBinlogFields) and backfill-compaction detection
+			// (getMissingFunctions) rely on. Without it the new group is
+			// invisible to both paths; it also lets the operator's strip
+			// logic reference-count the field out of the old groups.
+			// The backfill invariant guarantees len(g.FieldIDs) == 1.
+			ChildFields: []int64{fid},
+			Binlogs:     binlogs,
 		}
 	}
 	return out, nil
