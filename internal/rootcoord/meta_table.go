@@ -2363,7 +2363,6 @@ func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]in
 		if _, exists := mt.collID2Meta[collID]; exists {
 			continue // collection already persisted, reload already counted it
 		}
-		var missing []int64
 		for _, id := range resourceIds {
 			if _, ok := mt.fileResourceID2Meta[id]; ok {
 				mt.fileResourceRefCnt[id]++
