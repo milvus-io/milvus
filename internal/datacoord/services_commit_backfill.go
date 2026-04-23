@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -280,6 +281,26 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 					SegmentId: segID, Ok: false, Kind: "v3",
 					Reason: "missing or invalid manifest version",
+				})
+				continue
+			}
+			// Reject stale results (e.g. Spark retry) that would move the
+			// manifest pointer backwards. UpdateManifestVersion short-circuits
+			// only on equality, so enforcing strict monotonicity here is the
+			// correct guard against silent rollback.
+			_, currentVer, verErr := packed.UnmarshalManifestPath(segInfo.GetManifestPath())
+			if verErr != nil {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3",
+					Reason: "failed to parse current manifest path: " + verErr.Error(),
+				})
+				continue
+			}
+			if entry.Version <= currentVer {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3",
+					Reason: "incoming manifest version " + strconv.FormatInt(entry.Version, 10) +
+						" is not greater than current " + strconv.FormatInt(currentVer, 10),
 				})
 				continue
 			}

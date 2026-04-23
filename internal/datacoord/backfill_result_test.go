@@ -155,6 +155,10 @@ func TestNormalizeObjectKey(t *testing.T) {
 		{"empty expected bucket skips check", "s3a://anything/foo", "", "foo", false, ""},
 		{"unsupported scheme", "hdfs://host/path", "", "", true, "unsupported object URI scheme"},
 		{"missing key", "s3a://bkt", "bkt", "", true, "missing object key"},
+		// trailing slash produces an empty key -- chunkManager.Read with an
+		// empty key has undefined behavior, must be rejected.
+		{"empty key after scheme", "s3a://bkt/", "bkt", "", true, "empty object key"},
+		{"empty key no scheme", "/", "", "", true, "empty object key"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

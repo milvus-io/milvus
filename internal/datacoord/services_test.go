@@ -3821,6 +3821,68 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "storage version is not V3")
 	})
 
+	// V3 entry whose version is not strictly greater than the segment's
+	// current manifest version must be rejected. This prevents a stale
+	// Spark retry from silently rolling the manifest pointer backwards.
+	t.Run("v3_rejected_on_stale_version", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 401, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			// current manifest version = 10
+			ManifestPath: packed.MarshalManifestPath("/seg/401", 10),
+		}})
+		// JSON reports version=5, which is less than current 10.
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "401": {"version": 5, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "not greater than current")
+	})
+
+	// Same-version retry must also be rejected -- UpdateManifestVersion
+	// short-circuits on equality so the item would otherwise broadcast as a
+	// no-op while we report committed=true.
+	t.Run("v3_rejected_on_equal_version", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 402, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/402", 7),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "402": {"version": 7, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "not greater than current")
+	})
+
 	// V3 entry pointing at a V3 segment that has never had a manifest written
 	// (ManifestPath == "") must be rejected at pre-validation.
 	t.Run("v3_rejected_on_empty_manifest_path", func(t *testing.T) {

@@ -89,7 +89,11 @@ func normalizeObjectKey(raw, expectedBucket string) (string, error) {
 		return "", errors.New("empty object path")
 	}
 	if !strings.Contains(raw, "://") {
-		return strings.TrimPrefix(raw, "/"), nil
+		key := strings.TrimPrefix(raw, "/")
+		if key == "" {
+			return "", errors.Newf("empty object key in %q", raw)
+		}
+		return key, nil
 	}
 	idx := strings.Index(raw, "://")
 	scheme := strings.ToLower(raw[:idx])
@@ -105,6 +109,11 @@ func normalizeObjectKey(raw, expectedBucket string) (string, error) {
 	key := rest[slash+1:]
 	if expectedBucket != "" && bucket != expectedBucket {
 		return "", errors.Newf("object URI bucket %q differs from datacoord bucket %q (path=%s)", bucket, expectedBucket, raw)
+	}
+	// Reject inputs like "s3a://bucket/" that parse to an empty key -- passing
+	// an empty key to chunkManager.Read has undefined behavior across SDKs.
+	if key == "" {
+		return "", errors.Newf("empty object key in %q", raw)
 	}
 	return key, nil
 }
