@@ -538,7 +538,6 @@ queryNode:
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
-  preferFieldDataWhenIndexHasRawData: false # when true, sealed retrieve prefers field data in columns over index raw data when both are available. Note: enabling this keeps both the raw field data and the index resident in memory, roughly doubling the memory footprint for fields whose index normally supplies raw data.
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
