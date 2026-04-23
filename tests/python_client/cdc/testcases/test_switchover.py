@@ -220,10 +220,13 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             logger.info("[SWITCHOVER] Initiating switchover during writes...")
             switchover_helper(target_cluster_id, source_cluster_id)
 
-            # One insert batch can stall up to ~70 s while the switchover is in
-            # flight (observed in build #238), so give the thread enough headroom
-            # to complete the remaining batches at its 2s cadence.
-            insert_thread.join(timeout=180)
+            # One insert batch can stall for minutes while the switchover is in
+            # flight — pymilvus's retry_on_rpc_failure decorator retries the
+            # insert through channel recovery, and the server-side role flip is
+            # load-dependent (observed ~70 s in build #238, ~190 s in #240).
+            # Give the thread enough headroom to absorb the worst case plus
+            # the 2 s cadence for the remaining batches.
+            insert_thread.join(timeout=360)
             assert not insert_thread.is_alive(), "Background insert thread did not finish in time"
             assert not write_error, f"Background inserts raised errors: {write_error}"
 
