@@ -2,12 +2,32 @@ package datacoord
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+// resolveLatestDeletePos returns the position used as the L0 trigger Pos.
+// When dataCoord.compaction.levelzero.forceSelectAllSegments is enabled, it
+// returns a max-timestamp position so that all L1/L2 segments pass the
+// startPos < taskPos filter in selectSealedSegment — used during repair to
+// recover from wrong StartPosition metadata caused by the import position bug.
+func resolveLatestDeletePos(pos *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if paramtable.Get().DataCoordCfg.LevelZeroCompactionForceSelectAll.GetAsBool() {
+		channel := ""
+		if pos != nil {
+			channel = pos.GetChannelName()
+		}
+		return &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   math.MaxUint64,
+		}
+	}
+	return pos
+}
 
 // The LevelZeroSegments keeps the min group
 type LevelZeroSegmentsView struct {
@@ -85,7 +105,7 @@ func (v *LevelZeroSegmentsView) ForceTrigger() (CompactionView, string) {
 		return &LevelZeroSegmentsView{
 			label:                     v.label,
 			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+			earliestGrowingSegmentPos: resolveLatestDeletePos(v.earliestGrowingSegmentPos),
 		}, reason
 	}
 
@@ -104,7 +124,7 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 		return &LevelZeroSegmentsView{
 			label:                     v.label,
 			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
+			earliestGrowingSegmentPos: resolveLatestDeletePos(v.earliestGrowingSegmentPos),
 		}, reason
 	}
 
