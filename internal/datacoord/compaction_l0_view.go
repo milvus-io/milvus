@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/samber/lo"
@@ -9,6 +10,25 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+// resolveLatestDeletePos returns the position used as the L0 trigger Pos.
+// When dataCoord.compaction.levelzero.forceSelectAllSegments is enabled, it
+// returns a max-timestamp position so that all L1/L2 segments pass the
+// startPos < taskPos filter in selectFlushedSegment — used during repair to
+// recover from wrong StartPosition metadata caused by the import position bug.
+func resolveLatestDeletePos(latestL0DmlPos *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if paramtable.Get().DataCoordCfg.LevelZeroCompactionForceSelectAll.GetAsBool() {
+		channel := ""
+		if latestL0DmlPos != nil {
+			channel = latestL0DmlPos.GetChannelName()
+		}
+		return &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   math.MaxUint64,
+		}
+	}
+	return latestL0DmlPos
+}
 
 // LevelZeroCompactionView holds all compactable L0 segments in a compaction group
 // Trigger use static algorithm, it will selects l0Segments according to the min and max threshold
@@ -24,6 +44,10 @@ type LevelZeroCompactionView struct {
 }
 
 var _ CompactionView = (*LevelZeroCompactionView)(nil)
+
+// IsInlineExecutable returns false: L0 compaction is real compaction work that must
+// be dispatched to the inspector.
+func (v *LevelZeroCompactionView) IsInlineExecutable() bool { return false }
 
 func (v *LevelZeroCompactionView) String() string {
 	l0strings := lo.Map(v.l0Segments, func(v *SegmentView, _ int) string {
@@ -81,7 +105,7 @@ func (v *LevelZeroCompactionView) ForceTrigger() (CompactionView, string) {
 		return &LevelZeroCompactionView{
 			label:           v.label,
 			l0Segments:      targetViews,
-			latestDeletePos: latestL0.dmlPos,
+			latestDeletePos: resolveLatestDeletePos(latestL0.dmlPos),
 			triggerID:       v.triggerID,
 		}, reason
 	}
@@ -112,7 +136,7 @@ func (v *LevelZeroCompactionView) ForceTriggerAll() ([]CompactionView, string) {
 		roundView := &LevelZeroCompactionView{
 			label:           v.label,
 			l0Segments:      targetViews,
-			latestDeletePos: latestL0.dmlPos,
+			latestDeletePos: resolveLatestDeletePos(latestL0.dmlPos),
 			triggerID:       v.triggerID,
 		}
 		resultViews = append(resultViews, roundView)
@@ -144,7 +168,7 @@ func (v *LevelZeroCompactionView) Trigger() (CompactionView, string) {
 		return &LevelZeroCompactionView{
 			label:           v.label,
 			l0Segments:      targetViews,
-			latestDeletePos: latestL0.dmlPos,
+			latestDeletePos: resolveLatestDeletePos(latestL0.dmlPos),
 			triggerID:       v.triggerID,
 		}, reason
 	}

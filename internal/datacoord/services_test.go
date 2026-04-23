@@ -1264,6 +1264,76 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
+	t.Run("test data version propagated to querycoord", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
+		svr.meta.AddCollection(&collectionInfo{
+			Schema: newTestSchema(),
+		})
+
+		const expectedDataVersion int32 = 7
+		binlogReq := &datapb.SaveBinlogPathsRequest{
+			SegmentID:    20087,
+			CollectionID: 0,
+			Field2BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 801,
+						},
+					},
+				},
+			},
+			Flushed: true,
+		}
+		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		segment.DataVersion = expectedDataVersion
+		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		assert.NoError(t, err)
+
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: 0,
+			FieldID:      2,
+			IndexID:      rand.Int63n(1000),
+		})
+		assert.NoError(t, err)
+		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID: segment.ID,
+			BuildID:   segment.ID,
+		})
+		assert.NoError(t, err)
+		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: segment.ID,
+			State:   commonpb.IndexState_Finished,
+		})
+		assert.NoError(t, err)
+
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
+		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
+
+		// Sanity check: DataVersion survives SaveBinlogPaths in meta.
+		assert.EqualValues(t, expectedDataVersion, svr.meta.GetSegment(context.TODO(), binlogReq.SegmentID).GetDataVersion())
+
+		req := &datapb.GetRecoveryInfoRequestV2{
+			CollectionID: 0,
+			PartitionIDs: []int64{1},
+		}
+		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.Status))
+		assert.EqualValues(t, 1, len(resp.GetSegments()))
+		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
+		// Regression: DataVersion must be propagated to the QueryCoord response.
+		assert.EqualValues(t, expectedDataVersion, resp.GetSegments()[0].GetDataVersion())
+	})
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)

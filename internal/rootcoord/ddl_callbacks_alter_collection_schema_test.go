@@ -121,6 +121,77 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 
+	// case 4.1: physical backfill with non-BM25 function must be rejected.
+	// Otherwise the backfill task would fail at datanode with "unsupported function type"
+	// and permanently block subsequent schema-change DDLs via the consistency gate.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FuncSchema: []*schemapb.FunctionSchema{
+						{
+							Name:             "minhash_fn",
+							Type:             schemapb.FunctionType_MinHash,
+							InputFieldNames:  []string{"text_input"},
+							OutputFieldNames: []string{"sparse_minhash"},
+						},
+					},
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{
+							Name:             "sparse_minhash",
+							DataType:         schemapb.DataType_SparseFloatVector,
+							IsFunctionOutput: true,
+						}},
+					},
+					DoPhysicalBackfill: true,
+				},
+			},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "physical backfill is currently only supported for BM25 functions")
+
+	// case 4.2: non-BM25 function with DoPhysicalBackfill=false should NOT be rejected by
+	// the type check (it may still fail later for other reasons, but the type check must pass).
+	// This path never invokes the backfill_compactor, so "unsupported type" cannot be triggered.
+	// We don't assert success here because downstream validation may reject for unrelated
+	// reasons in this minimal test setup — we only assert that the error, if any, is not the
+	// physical-backfill type rejection.
+	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FuncSchema: []*schemapb.FunctionSchema{
+						{
+							Name:             "minhash_fn_nophys",
+							Type:             schemapb.FunctionType_MinHash,
+							InputFieldNames:  []string{"text_input"},
+							OutputFieldNames: []string{"sparse_minhash2"},
+						},
+					},
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+						{FieldSchema: &schemapb.FieldSchema{
+							Name:             "sparse_minhash2",
+							DataType:         schemapb.DataType_SparseFloatVector,
+							IsFunctionOutput: true,
+						}},
+					},
+					DoPhysicalBackfill: false,
+				},
+			},
+		},
+	})
+	// Whatever happens, it must not be the BM25-only rejection.
+	if err := merr.CheckRPCCall(resp.GetAlterStatus(), err); err != nil {
+		require.NotContains(t, resp.GetAlterStatus().GetReason(),
+			"physical backfill is currently only supported for BM25 functions",
+			"non-BM25 with DoPhysicalBackfill=false must not be rejected by the BM25-only type check")
+	}
+
 	// case 5: fieldSchema nil in fieldInfos
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,

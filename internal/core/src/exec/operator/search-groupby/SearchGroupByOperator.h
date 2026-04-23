@@ -19,10 +19,12 @@
 #include <simdjson.h>
 #include <stdint.h>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -36,7 +38,6 @@
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "folly/FBVector.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
@@ -107,6 +108,8 @@ namespace exec {
 template <typename T>
 class DataGetter {
  public:
+    virtual ~DataGetter() = default;
+
     virtual std::optional<T>
     Get(int64_t idx) const = 0;
 
@@ -133,13 +136,6 @@ class GrowingDataGetter : public DataGetter<OutputType> {
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
-    }
-
-    GrowingDataGetter(const GrowingDataGetter<OutputType, InnerRawType>& other)
-        : growing_raw_data_(other.growing_raw_data_) {
-        this->json_path_ = other.json_path_;
-        this->specific_json_type_ = other.specific_json_type_;
-        this->strict_cast_ = other.strict_cast_;
     }
 
     std::optional<OutputType>
@@ -191,13 +187,20 @@ class SealedDataGetter : public DataGetter<OutputType> {
     const FieldId field_id_;
     bool from_data_;
 
+    // Thread-safety contract: str_pw_map / json_pw_map are `mutable` and
+    // accessed without locks inside Get(). This is safe ONLY because each
+    // SealedDataGetter instance is scoped to a single SearchGroupBy invocation
+    // on a single segment, executed on one Driver thread (Velox-style single-
+    // threaded operator pipeline). If groupby is ever parallelized per-nq or
+    // shared across queries, this cache must be guarded — data race otherwise.
     mutable std::unordered_map<
         int64_t,
         PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
         str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
-    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
+    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance.
+    // Shares the same single-thread contract as str_pw_map above.
     mutable std::unordered_map<
         int64_t,
         PinWrapper<std::pair<std::vector<milvus::Json>, FixedVector<bool>>>>
@@ -281,10 +284,15 @@ class SealedDataGetter : public DataGetter<OutputType> {
         } else {
             // null is not supported for indexed fields
             AssertInfo(index_ptr_.get() != nullptr,
-                       "indexed field should have only one index");
+                       "indexed field {} has no valid index pointer",
+                       field_id_.get());
             auto chunk_index =
                 dynamic_cast<const index::ScalarIndex<OutputType>*>(
                     index_ptr_.get());
+            AssertInfo(chunk_index != nullptr,
+                       "index type mismatch for field {}: expected "
+                       "ScalarIndex<OutputType>",
+                       field_id_.get());
             auto raw = chunk_index->Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();
@@ -329,68 +337,54 @@ GetDataGetter(milvus::OpContext* op_ctx,
     }
 }
 
-void
-SearchGroupBy(milvus::OpContext* op_ctx,
-              const std::vector<std::shared_ptr<VectorIterator>>& iterators,
-              const SearchInfo& searchInfo,
-              std::vector<GroupByValueType>& group_by_values,
-              const segcore::SegmentInternalInterface& segment,
-              std::vector<int64_t>& seg_offsets,
-              std::vector<float>& distances,
-              std::vector<size_t>& topk_per_nq_prefix_sum);
-
-template <typename T>
-void
-GroupIteratorsByType(
-    const std::vector<std::shared_ptr<VectorIterator>>& iterators,
-    const SearchInfo& search_info,
-    const std::shared_ptr<DataGetter<T>>& data_getter,
-    std::vector<GroupByValueType>& group_by_values,
-    std::vector<int64_t>& seg_offsets,
-    std::vector<float>& distances,
-    std::vector<size_t>& topk_per_nq_prefix_sum);
-
-template <typename T>
-struct GroupByMap {
+// GroupByMap for CompositeGroupKey
+struct CompositeGroupByMap {
  private:
-    std::unordered_map<std::optional<T>, int> group_map_{};
+    std::unordered_map<CompositeGroupKey, int, CompositeGroupKeyHash>
+        group_map_{};
     int group_capacity_{0};
     int group_size_{0};
     int enough_group_count_{0};
     bool strict_group_size_{false};
 
  public:
-    GroupByMap(int group_capacity,
-               int group_size,
-               bool strict_group_size = false)
+    CompositeGroupByMap(int group_capacity,
+                        int group_size,
+                        bool strict_group_size = false)
         : group_capacity_(group_capacity),
           group_size_(group_size),
-          strict_group_size_(strict_group_size){};
+          strict_group_size_(strict_group_size) {
+        if (group_capacity > 0) {
+            group_map_.reserve(static_cast<size_t>(group_capacity));
+        }
+    }
+
     bool
     IsGroupResEnough() {
         bool enough = false;
         if (strict_group_size_) {
-            enough = group_map_.size() == group_capacity_ &&
+            enough = static_cast<int>(group_map_.size()) == group_capacity_ &&
                      enough_group_count_ == group_capacity_;
         } else {
-            enough = group_map_.size() == group_capacity_;
+            enough = static_cast<int>(group_map_.size()) == group_capacity_;
         }
         return enough;
     }
+
     bool
-    Push(const std::optional<T>& t) {
-        if (group_map_.size() >= group_capacity_ &&
-            group_map_.find(t) == group_map_.end()) {
+    Push(const CompositeGroupKey& key) {
+        auto [it, inserted] = group_map_.try_emplace(key, 0);
+        if (inserted) {
+            if (static_cast<int>(group_map_.size()) > group_capacity_) {
+                group_map_.erase(it);
+                return false;
+            }
+        }
+        if (it->second >= group_size_) {
             return false;
         }
-        if (group_map_[t] >= group_size_) {
-            //we ignore following input no matter the distance as knowhere::iterator doesn't guarantee
-            //strictly increase/decreasing distance output
-            //but this should not be a very serious influence to overall recall rate
-            return false;
-        }
-        group_map_[t] += 1;
-        if (group_map_[t] >= group_size_) {
+        it->second += 1;
+        if (it->second >= group_size_) {
             enough_group_count_ += 1;
         }
         return true;
@@ -407,16 +401,42 @@ struct GroupByMap {
     }
 };
 
-template <typename T>
+// Multi-field DataGetter that reads multiple fields and builds CompositeGroupKey
+class MultiFieldDataGetter {
+ public:
+    MultiFieldDataGetter(
+        milvus::OpContext* op_ctx,
+        const segcore::SegmentInternalInterface& segment,
+        const std::vector<FieldId>& field_ids,
+        const std::optional<std::string>& json_path = std::nullopt,
+        const std::optional<DataType>& json_type = std::nullopt,
+        bool strict_cast = false);
+
+    CompositeGroupKey
+    Get(int64_t idx) const;
+
+    void
+    GetInto(int64_t idx, CompositeGroupKey& out) const;
+
+ private:
+    std::vector<std::function<GroupByValueType(int64_t)>> getters_;
+    size_t field_count_;
+};
+
+// Unified group by interface - always emits CompositeGroupKey
 void
-GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
-                    const SearchInfo& search_info,
-                    const std::shared_ptr<DataGetter<T>>& data_getter,
-                    std::vector<GroupByValueType>& group_by_values,
-                    std::vector<int64_t>& offsets,
-                    std::vector<float>& distances);
+SearchGroupBy(milvus::OpContext* op_ctx,
+              const std::vector<std::shared_ptr<VectorIterator>>& iterators,
+              const SearchInfo& searchInfo,
+              std::vector<CompositeGroupKey>& composite_group_by_values,
+              const segcore::SegmentInternalInterface& segment,
+              std::vector<int64_t>& seg_offsets,
+              std::vector<float>& distances,
+              std::vector<size_t>& topk_per_nq_prefix_sum);
 
 }  // namespace exec
 }  // namespace milvus
 
 #undef JSON_TYPE_CASE
+#undef JSON_STRING_CASE
+#undef JSON_TYPE_CASES

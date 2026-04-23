@@ -171,6 +171,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     IndexHasRawData(FieldId field_id) const;
 
+    bool
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const override;
+
+    bool
+    IsIndexRefineEnabled(FieldId field_id) const override;
+
     DataType
     GetFieldDataType(FieldId fieldId) const override;
 
@@ -304,6 +315,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                FieldId field_id,
                const int64_t* ids,
                int64_t count) const override;
+
+    std::unique_ptr<DataArray>
+    get_emb_list(milvus::OpContext* op_ctx,
+                 FieldId field_id,
+                 const FieldMeta& field_meta,
+                 const int64_t* seg_offsets,
+                 int64_t count) const;
 
     bool
     is_nullable(FieldId field_id) const override {
@@ -1279,6 +1297,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     SetUseTakeForOutputForTesting(bool val) {
         use_take_for_output_ = val;
+    }
+
+    // Test-only: direct access to segment_load_info_ for asserting Reopen
+    // preserves runtime-only state (e.g. created_text_indexes_).
+    SegmentLoadInfo&
+    TestGetSegmentLoadInfo() {
+        return segment_load_info_;
     }
 #endif
 

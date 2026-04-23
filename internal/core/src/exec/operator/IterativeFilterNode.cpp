@@ -54,7 +54,7 @@ namespace exec {
 PhyIterativeFilterNode::PhyIterativeFilterNode(
     int32_t operator_id,
     DriverContext* driverctx,
-    const std::shared_ptr<const plan::FilterNode>& filter)
+    const std::shared_ptr<const plan::IterativeFilterNode>& filter)
     : Operator(driverctx,
                filter->output_type(),
                operator_id,

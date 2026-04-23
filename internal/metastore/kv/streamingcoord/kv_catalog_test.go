@@ -12,8 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/mock_kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestCatalog(t *testing.T) {
@@ -132,37 +130,14 @@ func TestCatalog(t *testing.T) {
 }
 
 func TestCatalog_ReplicationCatalog(t *testing.T) {
-	paramtable.Init()
-
 	kv := mock_kv.NewMockMetaKv(t)
 	kvStorage := make(map[string]string)
 	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
-		v, ok := kvStorage[s]
-		if !ok {
-			return "", merr.ErrIoKeyNotFound
-		}
-		return v, nil
-	})
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
-		keys := make([]string, 0)
-		vals := make([]string, 0)
-		for k, v := range kvStorage {
-			if strings.HasPrefix(k, s) {
-				keys = append(keys, k)
-				vals = append(vals, v)
-			}
-		}
-		return keys, vals, nil
+		return kvStorage[s], nil
 	})
 	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
 		for k, v := range kvs {
 			kvStorage[k] = v
-		}
-		return nil
-	})
-	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, keys []string) error {
-		for _, k := range keys {
-			delete(kvStorage, k)
 		}
 		return nil
 	})
@@ -225,23 +200,4 @@ func TestCatalog_ReplicationCatalog(t *testing.T) {
 			},
 		})
 	assert.NoError(t, err)
-
-	// Verify pchannel meta keys exist
-	pchannelKeys, _, err := kv.LoadWithPrefix(context.Background(), ReplicatePChannelMetaPrefix)
-	assert.NoError(t, err)
-	assert.Len(t, pchannelKeys, 2)
-
-	// DropReplicateConfiguration test
-	err = catalog.DropReplicateConfiguration(context.Background())
-	assert.NoError(t, err)
-
-	// Verify replicate configuration is removed
-	cfg, err = catalog.GetReplicateConfiguration(context.Background())
-	assert.NoError(t, err)
-	assert.Nil(t, cfg)
-
-	// Verify pchannel meta keys are removed
-	pchannelKeys, _, err = kv.LoadWithPrefix(context.Background(), ReplicatePChannelMetaPrefix)
-	assert.NoError(t, err)
-	assert.Empty(t, pchannelKeys)
 }

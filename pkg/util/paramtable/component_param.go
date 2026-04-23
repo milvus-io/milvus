@@ -232,6 +232,8 @@ type commonConfig struct {
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -703,6 +705,38 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
+
+	p.ArrowIOThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.ioThreadPoolCoefficient",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Coefficient for arrow's internal IO thread pool size ` +
+			`(threads = CPU cores × coefficient, then clamped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
+			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
+			`S3 GetObject requests — it is the real ceiling on parallel ` +
+			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
+			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
+			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
+			`arrow's default (and the cap is ignored).`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowIOThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.ioThreadPoolMaxCapacity",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
+			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
+			`threads = coefficient × CPU cores is clamped to this value — ` +
+			`useful on very large hosts where the coefficient would otherwise ` +
+			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
+			`can service. 0 disables the cap. Has no effect when coefficient ` +
+			`is 0.`,
+		Export: false,
+	}
+	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -3446,6 +3480,7 @@ type queryNodeConfig struct {
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
 	DowngradeTsafe            ParamItem `refreshable:"true"`
+	WaitTsafeStallTimeout     ParamItem `refreshable:"true"`
 	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
@@ -3511,13 +3546,17 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFPreload        ParamItem `refreshable:"true"`
-	IDFReadBufferSize ParamItem `refreshable:"true"`
+	IDFPreload             ParamItem `refreshable:"true"`
+	IDFReadBufferSize      ParamItem `refreshable:"true"`
+	BM25StatsBytesPerEntry ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 
 	// external collection
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
+	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
+	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3538,6 +3577,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.",
 	}
 	p.IDFReadBufferSize.Init(base.mgr)
+
+	p.BM25StatsBytesPerEntry = ParamItem{
+		Key:          "queryNode.idfOracle.bm25StatsBytesPerEntry",
+		Version:      "2.6.15",
+		Export:       true,
+		DefaultValue: "20",
+		Doc:          "Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.",
+	}
+	p.BM25StatsBytesPerEntry.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -4402,6 +4450,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.DowngradeTsafe.Init(base.mgr)
 
+	p.WaitTsafeStallTimeout = ParamItem{
+		Key:          "queryNode.waitTsafeStallTimeout",
+		Version:      "2.6.15",
+		Doc:          "If tSafe does not advance within this duration during waitTSafe, the delegator returns an error to allow proxy failover to another replica",
+		DefaultValue: "3s",
+		Export:       false,
+	}
+	p.WaitTsafeStallTimeout.Init(base.mgr)
+
 	p.CatchUpStreamingDataTsLag = ParamItem{
 		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
 		Version:      "2.6.8",
@@ -4714,6 +4771,33 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.ExternalCollectionSamplePerSegment = ParamItem{
+		Key:          "queryNode.externalCollection.samplePerSegment",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "When true, sample each segment for size estimation; when false, sample once per collection",
+		Export:       false,
+	}
+	p.ExternalCollectionSamplePerSegment.Init(base.mgr)
+
+	p.ExternalCollectionSampleRows = ParamItem{
+		Key:          "queryNode.externalCollection.sampleRows",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Number of rows to read via Take API for sampling external segment size",
+		Export:       false,
+	}
+	p.ExternalCollectionSampleRows.Init(base.mgr)
+
+	p.ExternalCollectionRawDataFactor = ParamItem{
+		Key:          "queryNode.externalCollection.rawDataFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "Peak memory amplification factor for external segment loading. External tables always download, decompress, and deserialize entire row groups into Arrow buffers regardless of mmap/eviction settings, so peak transient memory = rawDataSize * this factor.",
+		Export:       false,
+	}
+	p.ExternalCollectionRawDataFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4818,6 +4902,7 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
+	LevelZeroCompactionForceSelectAll        ParamItem `refreshable:"true"`
 
 	// Garbage Collection
 	EnableGarbageCollection                ParamItem `refreshable:"false"`
@@ -5451,6 +5536,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.LevelZeroCompactionForceSelectAll = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.forceSelectAllSegments",
+		Version:      "2.6.15",
+		DefaultValue: "false",
+		Doc: "When enabled, L0 compaction selects all L1/L2 segments regardless of position filtering. " +
+			"Use during repair to bypass wrong StartPosition metadata from the import position bug.",
+		Export: false,
+	}
+	p.LevelZeroCompactionForceSelectAll.Init(base.mgr)
 
 	p.IndexMemSizeEstimateMultiplier = ParamItem{
 		Key:          "dataCoord.index.memSizeEstimateMultiplier",

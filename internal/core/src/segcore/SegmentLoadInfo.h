@@ -517,6 +517,11 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    [[nodiscard]] int64_t
+    GetEstimatedBytesPerRow() const {
+        return info_.estimated_bytes_per_row();
+    }
+
     // ==================== Compaction Info ====================
 
     [[nodiscard]] const google::protobuf::RepeatedField<int64_t>&
@@ -828,6 +833,11 @@ class SegmentLoadInfo {
     HasTextIndexCreated(FieldId field_id) const {
         return created_text_indexes_.find(field_id) !=
                created_text_indexes_.end();
+    }
+
+    [[nodiscard]] const std::unordered_set<FieldId>&
+    GetCreatedTextIndexes() const {
+        return created_text_indexes_;
     }
 
     // ==================== Diff Computation ====================

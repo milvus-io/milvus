@@ -2187,18 +2187,19 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
-// ValidateExternalCollectionSchema ensures unsupported features are disabled
-// for external collections AND mutates each user field to set nullable=true.
-// The mutation is intentional: external Parquet sources may contain nulls in
-// any column, and a non-nullable field would silently produce incorrect
-// results when reading those nulls.
+// NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
+// disabled for external collections AND mutates each user field to set
+// nullable=true. The mutation is intentional: external Parquet sources may
+// contain nulls in any column, and a non-nullable field would silently produce
+// incorrect results when reading those nulls. The function is named
+// "NormalizeAndValidate" so callers know it has a write-back side effect.
 //
 // Validation runs in two passes: pass 1 checks every field; pass 2 mutates
 // only after all checks succeed. Without this split, a failing check on a
 // later field would leave earlier fields with their Nullable bit silently
 // flipped — the caller receives an error but the schema pointer it owns is
 // already partially mutated.
-func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
+func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 	if !IsExternalCollection(schema) {
 		return nil
 	}

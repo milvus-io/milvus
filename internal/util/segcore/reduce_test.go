@@ -190,7 +190,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	searchResult, err := suite.segment.Search(context.Background(), searchReq)
 	suite.NoError(err)
 
-	err = mock_segcore.CheckSearchResult(context.Background(), nq, searchReq.Plan(), searchResult)
+	err = mock_segcore.CheckSearchResult(context.Background(), nq, searchReq.Plan(), searchReq.PlaceholderGroup(), searchResult)
 	suite.NoError(err)
 
 	// Test Illegal Query
@@ -237,14 +237,14 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 
 func (suite *ReduceSuite) TestReduceInvalid() {
 	plan := &segcore.SearchPlan{}
-	_, err := segcore.ReduceSearchResultsAndFillData(context.Background(), plan, nil, 1, nil, nil)
+	_, err := segcore.ReduceSearchResultsAndFillData(context.Background(), plan, nil, nil, 1, nil, nil)
 	suite.Error(err)
 
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection, []int64{suite.segmentID}, mock_segcore.IndexHNSW, 10)
 	suite.NoError(err)
 	searchResults := make([]*segcore.SearchResult, 0)
 	searchResults = append(searchResults, nil)
-	_, err = segcore.ReduceSearchResultsAndFillData(context.Background(), searchReq.Plan(), searchResults, 1, []int64{10}, []int64{10})
+	_, err = segcore.ReduceSearchResultsAndFillData(context.Background(), searchReq.Plan(), searchReq.PlaceholderGroup(), searchResults, 1, []int64{10}, []int64{10})
 	suite.Error(err)
 }
 

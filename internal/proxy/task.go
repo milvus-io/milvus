@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -426,7 +427,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.DbName = t.GetDbName()
 
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
-	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
 
@@ -861,6 +862,15 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 				outName,
 			)
 		}
+	}
+
+	// Physical backfill is currently only implemented for BM25 in the datanode backfill
+	// compactor. Reject unsupported types early so the request never reaches RootCoord
+	// and no segment is left in an unrecoverable stale-schema state.
+	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg(
+			"physical backfill is currently only supported for BM25 functions, got %s",
+			funcSchemas[0].GetType().String())
 	}
 
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
@@ -3739,6 +3749,7 @@ func (t *HighlightTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	t.Channel = channel
 	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
 	if err != nil {

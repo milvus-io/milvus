@@ -335,6 +335,23 @@ func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
 }
 
+// isExternalCollectionLazyLoad checks if all external fields in the schema
+// have warmup=disable (lazy load). Returns true only when every external
+// field's resolved warmup policy is "disable", meaning no field data will be
+// downloaded during segment load.
+func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() == "" {
+			continue
+		}
+		policy := getFieldWarmupPolicy(field)
+		if policy != common.WarmupDisable {
+			return false
+		}
+	}
+	return true
+}
+
 // GetVirtualPK generates a virtual primary key from segmentID and offset.
 // Virtual PK format: (truncated_segmentID << 32) | offset
 // Only the lower 32 bits of segmentID are preserved. Milvus segment IDs are

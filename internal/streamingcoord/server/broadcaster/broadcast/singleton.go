@@ -62,6 +62,15 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)
 }
 
+// GetPendingCreateCollectionResources returns pending CreateCollection file resource
+// IDs from the broadcaster. Must be called after Register.
+func GetPendingCreateCollectionResources() map[int64][]int64 {
+	if !singleton.Ready() {
+		return nil
+	}
+	return singleton.Get().GetPendingCreateCollectionResources()
+}
+
 // Release releases the broadcaster.
 func Release() {
 	if !singleton.Ready() {

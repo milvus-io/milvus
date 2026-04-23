@@ -775,25 +775,21 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     }
 
     // 1. VirtualPKChunkedColumn for the synthetic primary key
+    //    This is lazy — data is only materialized if DataOfChunk/Span is called.
     auto pk_field_id = schema_->get_primary_field_id().value();
     auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
     fields_.wlock()->emplace(pk_field_id, virtual_pk);
     set_bit(field_data_ready_bitset_, pk_field_id, true);
 
-    // 2. PK→offset index for filter expressions
-    insert_record_.insert_pks(DataType::INT64, virtual_pk.get());
-    insert_record_.seal_pks();
+    // 2. PK→offset index using VirtualPKOffsetMap (zero storage).
+    //    Virtual PK = (seg_id << 32) | offset, so pk→offset is a simple
+    //    bit-extract. This replaces the OffsetOrderedArray that would
+    //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
+    insert_record_.set_virtual_pk_offset_map(id_, num_rows);
 
-    // 3. Synthetic timestamps (all 0 — rows always visible)
-    std::vector<Timestamp> timestamps(num_rows, 0);
-    TimestampIndex index;
-    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
-    auto meta =
-        GenerateFakeSlices(timestamps.data(), num_rows, min_slice_length);
-    index.set_length_meta(std::move(meta));
-    index.build_with(timestamps.data(), num_rows);
-    insert_record_.init_timestamps_from_owned(std::move(timestamps),
-                                              std::move(index));
+    // 3. Synthetic timestamps: constant mode (all 0 — rows always visible).
+    //    No data is materialized, saving ~8 GB for 1B-row external tables.
+    insert_record_.init_timestamps_constant(num_rows, 0);
 
     // 4. Row count + readiness
     {
@@ -986,10 +982,21 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             mmap_dir_path);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
+
+        std::vector<FieldId> fields_for_stats;
+        if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
+            fields_for_stats = milvus_field_ids;
+        } else {
+            for (auto field_id : milvus_field_ids) {
+                const auto& fm = field_metas.at(field_id);
+                if (fm.is_nullable() && IsVectorDataType(fm.get_data_type())) {
+                    fields_for_stats.push_back(field_id);
+                }
+            }
+        }
         auto metadata = LoadGroupChunkMetadata(
             insert_files,
-            ENABLE_PARQUET_STATS_SKIP_INDEX ? milvus_field_ids
-                                            : std::vector<FieldId>{},
+            fields_for_stats,
             fmt::format(
                 "seg_{}_cg_{}", get_segment_id(), column_group_id.get()));
         auto parquet_stats_by_field =
@@ -1018,24 +1025,20 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
             std::optional<ParquetStatistics> statistics_opt;
-            if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
-                auto it = parquet_stats_by_field.find(field_id.get());
-                AssertInfo(it != parquet_stats_by_field.end(),
-                           "parquet statistics for field {} not found",
-                           field_id.get());
+            auto it = parquet_stats_by_field.find(field_id.get());
+            if (it != parquet_stats_by_field.end()) {
                 statistics_opt = std::move(it->second);
             }
 
-            load_field_data_common(
-                field_id,
-                column,
-                num_rows,
-                data_type,
-                info.enable_mmap,
-                true,
-                ENABLE_PARQUET_STATS_SKIP_INDEX ? statistics_opt : std::nullopt,
-                op_ctx,
-                is_replace);
+            load_field_data_common(field_id,
+                                   column,
+                                   num_rows,
+                                   data_type,
+                                   info.enable_mmap,
+                                   true,
+                                   statistics_opt,
+                                   op_ctx,
+                                   is_replace);
             if (field_id == TimestampFieldID) {
                 init_storage_v2_timestamp_index(
                     column, num_rows, info.warmup_policy);
@@ -1498,6 +1501,10 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(index_ready_bitset_, field_id)) {
+        if (search_info.global_refine_enable_ &&
+            IsIndexRefineEnabled(field_id)) {
+            search_info.topk_ = GetEffectiveSearchTopk(search_info);
+        }
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -1581,6 +1588,15 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
             result.valid_data = std::make_unique<bool[]>(count);
             result.valid_offsets.reserve(count);
 
+            std::unordered_set<int64_t> touched_chunks;
+            for (int64_t i = 0; i < count; ++i) {
+                auto [chunk_id, _] = column->GetChunkIDByOffset(seg_offsets[i]);
+                touched_chunks.insert(static_cast<int64_t>(chunk_id));
+            }
+            for (int64_t c : touched_chunks) {
+                column->EnsureChunkOffsetMapping(c, op_ctx);
+            }
+
             const auto& offset_mapping = column->GetOffsetMapping();
             for (int64_t i = 0; i < count; ++i) {
                 bool is_valid = offset_mapping.IsValid(seg_offsets[i]);
@@ -1620,8 +1636,6 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
     auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
-    auto index_type = vec_index->GetIndexType();
-    auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
     if (has_raw_data) {
@@ -1654,6 +1668,109 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
 
     AssertInfo(false, "get_vector called on vector index without raw data");
     return nullptr;
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
+                                       FieldId field_id,
+                                       const FieldMeta& field_meta,
+                                       const int64_t* seg_offsets,
+                                       int64_t count) const {
+    AssertInfo(field_meta.get_data_type() == DataType::VECTOR_ARRAY,
+               "get_emb_list only supports VECTOR_ARRAY");
+
+    if (!get_bit(index_ready_bitset_, field_id) &&
+        !get_bit(binlog_index_bitset_, field_id)) {
+        return fill_with_empty(field_id, count);
+    }
+
+    AssertInfo(vector_indexings_.is_ready(field_id),
+               "vector index is not ready");
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto cache_index = field_indexing->indexing_;
+    auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+    AssertInfo(vec_index, "invalid vector indexing");
+    auto has_raw_data = vec_index->HasRawData();
+    AssertInfo(has_raw_data,
+               "get_emb_list called on vector index without raw data");
+
+    auto metric_type = vec_index->GetMetricType();
+
+    // Build el_ids dataset from seg_offsets (seg_offsets are el_ids for VECTOR_ARRAY)
+    auto ids_ds = GenIdsDataset(count, seg_offsets);
+
+    auto [raw_data, offsets] = vec_index->GetEmbListByIds(ids_ds, metric_type);
+    AssertInfo(offsets.size() == static_cast<size_t>(count + 1),
+               "GetEmbListByIds returned invalid offsets size {}, expected {}",
+               offsets.size(),
+               count + 1);
+
+    auto dim = field_meta.get_dim();
+    auto element_type = field_meta.get_element_type();
+    const size_t vec_size_per_element =
+        milvus::vector_bytes_per_element(element_type, dim);
+
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(
+        field_meta.get_data_type()));
+
+    auto vector_array = data_array->mutable_vectors();
+    auto obj = vector_array->mutable_vector_array();
+    obj->set_dim(dim);
+    obj->set_element_type(milvus::ToProtoDataType(element_type));
+
+    // Build a VectorFieldProto for each embedding list
+    for (int64_t i = 0; i < count; i++) {
+        auto* entry = obj->mutable_data()->Add();
+        entry->set_dim(dim);
+        size_t vec_start = offsets[i];
+        size_t vec_count = offsets[i + 1] - offsets[i];
+        if (vec_count == 0) {
+            continue;
+        }
+        size_t byte_offset = vec_start * vec_size_per_element;
+        size_t byte_len = vec_count * vec_size_per_element;
+
+        switch (element_type) {
+            case DataType::VECTOR_FLOAT: {
+                auto* src = reinterpret_cast<const float*>(raw_data.data() +
+                                                           byte_offset);
+                entry->mutable_float_vector()->mutable_data()->Add(
+                    src, src + vec_count * dim);
+                break;
+            }
+            case DataType::VECTOR_BINARY: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_binary_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_FLOAT16: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_float16_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_bfloat16_vector()->assign(src, byte_len);
+                break;
+            }
+            case DataType::VECTOR_INT8: {
+                auto* src = reinterpret_cast<const char*>(raw_data.data() +
+                                                          byte_offset);
+                entry->mutable_int8_vector()->assign(src, byte_len);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    return data_array;
 }
 
 void
@@ -2596,6 +2713,14 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
     std::unique_lock lck(mutex_);
 
+    // Guard against re-entry on a field whose temp text index was already
+    // built: the path `<mmap>/<segment_id>_<field_id>` is shared with the
+    // live holder in text_indexes_, and rebuilding there races with its
+    // destructor's RemoveDir (issue #49076).
+    AssertInfo(text_indexes_.find(field_id) == text_indexes_.end(),
+               "text index for field {} already exists, refusing to rebuild",
+               field_id.get());
+
     const auto& field_meta = schema_->operator[](field_id);
     auto& cfg = storage::MmapManager::GetInstance().GetMmapConfig();
     std::unique_ptr<index::TextMatchIndex> index;
@@ -2681,6 +2806,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
     text_indexes_[field_id] = std::make_shared<index::TextMatchIndexHolder>(
         std::move(index), cfg.GetScalarIndexEnableMmap());
+    // Record under mutex_ together with text_indexes_ write — concurrent
+    // readers of segment_load_info_ see a consistent view.
+    segment_load_info_.SetTextIndexCreated(field_id);
 }
 
 void
@@ -3073,7 +3201,12 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
     std::unique_ptr<DataArray> vector{nullptr};
     // Try index first: if vector index exists and has raw data, read from index
     if (IndexHasRawData(field_id)) {
-        vector = get_vector(op_ctx, field_id, seg_offsets, count);
+        if (IsVectorArrayDataType(field_meta.get_data_type())) {
+            vector =
+                get_emb_list(op_ctx, field_id, field_meta, seg_offsets, count);
+        } else {
+            vector = get_vector(op_ctx, field_id, seg_offsets, count);
+        }
     } else {
         // Fallback to field data
         auto [field, exist] = GetFieldDataIfExist(field_id);
@@ -3212,6 +3345,68 @@ ChunkedSegmentSealedImpl::IndexHasRawData(FieldId field_id) const {
         return false;
     }
     return it->second;
+}
+
+bool
+ChunkedSegmentSealedImpl::CalcDistByIDs(
+    FieldId field_id,
+    const knowhere::DataSetPtr& query_dataset,
+    const int64_t* seg_offsets,
+    size_t count,
+    bool is_cosine,
+    float* distances) const {
+    if (!vector_indexings_.is_ready(field_id)) {
+        return false;
+    }
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto accessor =
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
+    if (vec_index == nullptr) {
+        return false;
+    }
+    // Callers pass logical offsets (already translated from physical by
+    // SearchOnIndex). When the index carries an offset_mapping (nullable
+    // vector), the underlying knowhere index operates on physical offsets,
+    // so translate logical -> physical before the call.
+    const auto& offset_mapping = vec_index->GetOffsetMapping();
+    std::vector<int64_t> physical_offsets;
+    const int64_t* labels = seg_offsets;
+    if (offset_mapping.IsEnabled()) {
+        physical_offsets.resize(count);
+        for (size_t i = 0; i < count; ++i) {
+            physical_offsets[i] =
+                seg_offsets[i] < 0
+                    ? seg_offsets[i]
+                    : offset_mapping.GetPhysicalOffset(seg_offsets[i]);
+        }
+        labels = physical_offsets.data();
+    }
+    auto res = vec_index->CalcDistByIDs(
+        query_dataset, BitsetView(), labels, count, is_cosine, nullptr);
+    if (!res.has_value()) {
+        return false;
+    }
+    auto result_distances = res.value()->GetDistance();
+    if (result_distances == nullptr) {
+        return false;
+    }
+    std::memcpy(distances, result_distances, count * sizeof(float));
+    return true;
+}
+
+bool
+ChunkedSegmentSealedImpl::IsIndexRefineEnabled(FieldId field_id) const {
+    if (!vector_indexings_.is_ready(field_id)) {
+        return false;
+    }
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto accessor =
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
+    return vec_index != nullptr && vec_index->IsIndexRefineEnabled();
 }
 
 DataType
@@ -3626,7 +3821,28 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (column->IsNullable() && IsVectorDataType(data_type)) {
-        column->BuildValidRowIds(op_ctx);
+        bool lazy_inited = false;
+        if (statistics.has_value() && !statistics.value().empty()) {
+            const auto& stats = statistics.value();
+            bool any_null = false;
+            for (const auto& s : stats) {
+                if (s == nullptr) {
+                    any_null = true;
+                    break;
+                }
+            }
+            if (!any_null) {
+                lazy_inited = column->TryInitValidRowIdsFromRowGroups(
+                    stats.size(),
+                    [&](size_t i) {
+                        return stats[i]->num_values() + stats[i]->null_count();
+                    },
+                    [&](size_t i) { return stats[i]->null_count(); });
+            }
+        }
+        if (!lazy_inited) {
+            column->BuildValidRowIds(op_ctx);
+        }
     }
 
     if (!enable_mmap) {
@@ -3767,6 +3983,11 @@ ChunkedSegmentSealedImpl::Reopen(
 
     std::unique_lock lck(mutex_);
     SegmentLoadInfo current(segment_load_info_);
+    // Carry runtime-only state forward so subsequent Reopens don't
+    // re-schedule CreateTextIndex on a field whose temp index was built.
+    for (auto fid : current.GetCreatedTextIndexes()) {
+        new_seg_load_info.SetTextIndexCreated(fid);
+    }
     segment_load_info_ = new_seg_load_info;
     use_take_for_output_ = segment_load_info_.GetUseTakeForOutput();
     lck.unlock();
@@ -3903,7 +4124,6 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     if (!diff.text_indexes_to_create.empty()) {
         for (const auto& field_id : diff.text_indexes_to_create) {
             CreateTextIndex(field_id, op_ctx);
-            segment_load_info.SetTextIndexCreated(field_id);
         }
     }
 
@@ -4210,7 +4430,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info_.GetPriority(),
             eager_load,
             warmup_policy,
-            cache_key_suffix);
+            cache_key_suffix,
+            segment_load_info_.GetEstimatedBytesPerRow());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

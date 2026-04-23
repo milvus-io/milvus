@@ -33,7 +33,6 @@ type ReplicateConfigValidator struct {
 	incomingConfig       *commonpb.ReplicateConfiguration
 	currentConfig        *commonpb.ReplicateConfiguration
 	isPChannelIncreasing bool // detected during validateConfigComparison
-	isDropConfig         bool // true when incoming config has empty clusters (drop/clear)
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
@@ -55,7 +54,7 @@ func (v *ReplicateConfigValidator) Validate() error {
 	}
 	clusters := v.incomingConfig.GetClusters()
 	if len(clusters) == 0 {
-		return v.validateDropConfig()
+		return fmt.Errorf("clusters list cannot be empty")
 	}
 	// Perform all validation checks
 	if err := v.validateClusterBasic(clusters); err != nil {
@@ -264,46 +263,6 @@ func (v *ReplicateConfigValidator) validateConfigComparison() error {
 		// If cluster doesn't exist in current config, it's a new cluster, which is allowed
 	}
 
-	// When pchannels are increasing, enforce stricter rules
-	if v.isPChannelIncreasing {
-		if err := v.validatePChannelIncreasingConstraints(currentClusterMap); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validatePChannelIncreasingConstraints enforces that when pchannels grow,
-// only pchannel lists can change — cluster set and topology must remain identical.
-func (v *ReplicateConfigValidator) validatePChannelIncreasingConstraints(currentClusterMap map[string]*commonpb.MilvusCluster) error {
-	// Cluster set must be identical (no new or removed clusters)
-	if len(currentClusterMap) != len(v.clusterMap) {
-		return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: current has %d clusters, incoming has %d",
-			len(currentClusterMap), len(v.clusterMap))
-	}
-	for clusterID := range currentClusterMap {
-		if _, ok := v.clusterMap[clusterID]; !ok {
-			return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: cluster '%s' missing from incoming config", clusterID)
-		}
-	}
-
-	// Topology must be identical
-	currentTopos := v.currentConfig.GetCrossClusterTopology()
-	incomingTopos := v.incomingConfig.GetCrossClusterTopology()
-	if len(currentTopos) != len(incomingTopos) {
-		return fmt.Errorf("when pchannels are increasing, topology must remain identical: current has %d edges, incoming has %d",
-			len(currentTopos), len(incomingTopos))
-	}
-	currentEdges := make(map[string]struct{})
-	for _, topo := range currentTopos {
-		currentEdges[topo.GetSourceClusterId()+"->"+topo.GetTargetClusterId()] = struct{}{}
-	}
-	for _, topo := range incomingTopos {
-		edge := topo.GetSourceClusterId() + "->" + topo.GetTargetClusterId()
-		if _, ok := currentEdges[edge]; !ok {
-			return fmt.Errorf("when pchannels are increasing, topology must remain identical: edge '%s' not in current config", edge)
-		}
-	}
 	return nil
 }
 
@@ -344,27 +303,6 @@ func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming 
 // Must be called after Validate().
 func (v *ReplicateConfigValidator) IsPChannelIncreasing() bool {
 	return v.isPChannelIncreasing
-}
-
-// IsDropConfig returns true if the incoming config is a drop request (empty clusters).
-// Must be called after Validate().
-func (v *ReplicateConfigValidator) IsDropConfig() bool {
-	return v.isDropConfig
-}
-
-// validateDropConfig validates that the current config can be safely dropped.
-// Requirements:
-// 1. Current config must be nil (idempotent) or single-cluster with no topology edges.
-func (v *ReplicateConfigValidator) validateDropConfig() error {
-	v.isDropConfig = true
-	if v.currentConfig == nil {
-		return nil
-	}
-	if len(v.currentConfig.GetClusters()) != 1 || len(v.currentConfig.GetCrossClusterTopology()) > 0 {
-		return fmt.Errorf("drop replicate configuration requires current config to be single-cluster with no topology, got %d clusters and %d topology edges",
-			len(v.currentConfig.GetClusters()), len(v.currentConfig.GetCrossClusterTopology()))
-	}
-	return nil
 }
 
 func equalIgnoreOrder(a, b []string) bool {

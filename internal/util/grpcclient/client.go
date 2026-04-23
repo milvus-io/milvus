@@ -419,6 +419,10 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 	// grpc err
 	log.Warn("call received grpc error", zap.Error(err))
 	switch {
+	case IsConnectionClosingErr(err):
+		// Connection is being torn down, retry is pointless.
+		// Fast-fail and force reconnection for next call.
+		return false, true, true, err
 	case funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded):
 		// canceled or deadline exceeded
 		return true, c.needResetCancel(), false, err
@@ -545,7 +549,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			return true, err
 		}
 		return false, nil
-	}, retry.Attempts(uint(c.MaxAttempts)),
+	}, retry.Attempts(retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))),
 		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
 		// For compatibility, this is multiplied by 1000.
 		retry.Sleep(time.Duration(c.InitialBackoff*1000)*time.Millisecond),
@@ -615,13 +619,23 @@ func (c *ClientBase[T]) SetSession(sess *sessionutil.Session) {
 }
 
 func IsCrossClusterRoutingErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
 	return strings.Contains(err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 }
 
 func IsServerIDMismatchErr(err error) bool {
+	if err == nil {
+		return false
+	}
 	// GRPC utilizes `status.Status` to encapsulate errors,
 	// hence it is not viable to employ the `errors.Is` for assessment.
 	return strings.Contains(err.Error(), merr.ErrNodeNotMatch.Error())
+}
+
+func IsConnectionClosingErr(err error) bool {
+	return errors.Is(err, grpc.ErrClientConnClosing)
 }

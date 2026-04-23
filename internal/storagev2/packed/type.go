@@ -39,6 +39,12 @@ type FFIPackedWriter struct {
 	baseVersion   int64
 	cWriterHandle C.LoonWriterHandle
 	cProperties   *C.LoonProperties
+	// addNewColumnGroups controls whether Close() uses loon_transaction_add_column_group
+	// (true) or loon_transaction_append_files (false).
+	//
+	// Use true when adding columns that do not yet exist in the manifest (e.g. backfill).
+	// Use false (default) when writing more files into the same column structure (e.g. multi-batch write).
+	addNewColumnGroups bool
 }
 
 type PackedReader struct {

@@ -3729,7 +3729,12 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			}
 		}
 
-		t.Run("vector array with range search", func(t *testing.T) {
+		// ArrayOfVector-specific validation (range / iterator / group-by) has been
+		// moved out of parseSearchInfo. The checks below verify that parseSearchInfo
+		// now passes regardless of those features; the real rejections are asserted
+		// in TestSearchTask_ArrayOfVectorSimpleSearch and
+		// TestSearchTask_ArrayOfVectorHybridSearch.
+		t.Run("vector array with range search passes parseSearchInfo", func(t *testing.T) {
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
@@ -3737,11 +3742,8 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			fmt.Println(err.Error())
-			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
 		})
 
 		t.Run("vector array with group by passes parseSearchInfo", func(t *testing.T) {
@@ -3761,7 +3763,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.NotNil(t, searchInfo)
 		})
 
-		t.Run("vector array with iterator", func(t *testing.T) {
+		t.Run("vector array with iterator passes parseSearchInfo", func(t *testing.T) {
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
@@ -3772,14 +3774,11 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			})
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
-			assert.Contains(t, err.Error(), "embeddings_list")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
 		})
 
-		t.Run("vector array with iterator v2", func(t *testing.T) {
+		t.Run("vector array with iterator v2 passes parseSearchInfo", func(t *testing.T) {
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
@@ -3800,11 +3799,8 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields")
-			assert.Contains(t, err.Error(), "embeddings_list")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
 		})
 
 		t.Run("normal search on vector array should succeed", func(t *testing.T) {
@@ -3863,18 +3859,6 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.NotNil(t, searchInfo.planInfo)
 		})
 
-		t.Run("vector array with range search", func(t *testing.T) {
-			schema := createSchemaWithVectorArray("embeddings_list")
-			params := createSearchParams("embeddings_list")
-			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
-
-			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			// Should fail on range search first
-			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
-		})
-
 		t.Run("no anns field specified", func(t *testing.T) {
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := getValidSearchParams()
@@ -3896,7 +3880,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			// Should not trigger vector array validation for non-existent field
 		})
 
-		t.Run("hybrid search with outer group by on vector array", func(t *testing.T) {
+		t.Run("hybrid search with outer group by on vector array passes parseSearchInfo", func(t *testing.T) {
+			// Hybrid + ArrayOfVector + group-by is rejected in initAdvancedSearchRequest,
+			// not in parseSearchInfo. This subtest verifies the parse step no longer fails.
 			schema := createSchemaWithVectorArray("embeddings_list")
 
 			// Create rank params with group by
@@ -3916,12 +3902,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.NoError(t, err)
 
 			searchParams := createSearchParams("embeddings_list")
-			// Parse search info with rank params
 			searchInfo, err := parseSearchInfo(searchParams, schema, parsedRankParams, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
 		})
 	})
 
@@ -5849,6 +5832,227 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		task := makeTask("regular_vec", "scalar_field", commonpb.PlaceholderType_FloatVector)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+// TestSearchTask_ArrayOfVectorSimpleSearch verifies the placeholder-type-aware
+// validation in initSearchRequest for range search and search iterator on
+// ArrayOfVector fields:
+//   - element-level (plain vector placeholder) is allowed for both features.
+//   - embedding-list-level (EmbList placeholder) is rejected for both.
+func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "regular_vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 103,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+				},
+			},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+		phg := &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{{
+				Tag:    "$0",
+				Type:   phType,
+				Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, // 4 floats
+			}},
+		}
+		bs, _ := proto.Marshal(phg)
+		return bs
+	}
+
+	// paramsJSON is inlined into the ParamsKey field; setting withIterator adds
+	// the iterator flag as a separate KV pair.
+	makeTask := func(annsField string, phType commonpb.PlaceholderType, paramsJSON string, withIterator bool) *searchTask {
+		params := []*commonpb.KeyValuePair{
+			{Key: AnnsFieldKey, Value: annsField},
+			{Key: TopKKey, Value: "10"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: ParamsKey, Value: paramsJSON},
+		}
+		if withIterator {
+			params = append(params, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		}
+
+		phgBytes := makePlaceholderGroup(phType)
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				OutputFieldsId:   []int64{100},
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   []string{"pk"},
+				SearchParams:   params,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: phgBytes,
+				},
+				Nq:               1,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+	}
+
+	const rangeParams = `{"nprobe": 10, "radius": 0.2}`
+	const plainParams = `{"nprobe": 10}`
+
+	t.Run("element-level range search should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("element-level iterator should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("emblist range search should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, rangeParams, false)
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "range search is not supported for multi-search-multi")
+	})
+
+	t.Run("emblist iterator should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, true)
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator is not supported for multi-search-multi")
+	})
+
+	t.Run("regular vector range search should succeed", func(t *testing.T) {
+		// Regression: new checks must not impact plain FloatVector fields.
+		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+// TestSearchTask_ArrayOfVectorHybridSearch verifies that hybrid search rejects
+// range search, search iterator, and group-by on ArrayOfVector fields directly
+// at the initAdvancedSearchRequest layer (hybrid does not yet support the
+// element-level/embedding-list-level split, so all three are rejected).
+func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "regular_vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{FieldID: 102, Name: "scalar_field", DataType: schemapb.DataType_VarChar},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 103,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+				},
+			},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	// buildHybridTask constructs a hybrid-search task with a single sub-request.
+	// rangeRadius != "" attaches a radius param to the sub-request; withIterator
+	// appends the iterator flag; groupByField != "" adds GroupByFieldKey to the
+	// outer rank params.
+	buildHybridTask := func(annsField string, rangeRadius string, withIterator bool, groupByField string) *searchTask {
+		paramsJSON := `{"nprobe": 10}`
+		if rangeRadius != "" {
+			paramsJSON = `{"nprobe": 10, "radius": ` + rangeRadius + `}`
+		}
+		subParams := []*commonpb.KeyValuePair{
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: ParamsKey, Value: paramsJSON},
+			{Key: AnnsFieldKey, Value: annsField},
+			{Key: TopKKey, Value: "10"},
+		}
+		if withIterator {
+			subParams = append(subParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "True"})
+		}
+
+		outerParams := []*commonpb.KeyValuePair{
+			{Key: LimitKey, Value: "10"},
+		}
+		if groupByField != "" {
+			outerParams = append(outerParams, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: groupByField})
+		}
+
+		return &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Search,
+					Timestamp: uint64(time.Now().UnixNano()),
+				},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				SearchParams:   outerParams,
+				SubReqs: []*milvuspb.SubSearchRequest{
+					{
+						Dsl:              "",
+						PlaceholderGroup: nil,
+						SearchParams:     subParams,
+					},
+				},
+			},
+			schema: schemaInfo,
+			tr:     timerecord.NewTimeRecorder("test"),
+		}
+	}
+
+	t.Run("hybrid with ArrayOfVector range search should fail", func(t *testing.T) {
+		qt := buildHybridTask("emb_vec", "0.2", false, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields in hybrid search")
+	})
+
+	t.Run("hybrid with ArrayOfVector iterator should fail", func(t *testing.T) {
+		qt := buildHybridTask("emb_vec", "", true, "")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "search iterator is not supported for vector array (embedding list) fields in hybrid search")
+	})
+
+	t.Run("hybrid with ArrayOfVector group by should fail", func(t *testing.T) {
+		qt := buildHybridTask("emb_vec", "", false, "scalar_field")
+		err := qt.initAdvancedSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields in hybrid search")
 	})
 }
 
