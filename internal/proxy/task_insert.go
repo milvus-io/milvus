@@ -37,6 +37,7 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	schemaVersion   int32
 }
 
 // TraceCtx returns insertTask context
@@ -155,6 +156,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	it.schema = schema.CollectionSchema
+	it.schemaVersion = schema.Version
 
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err

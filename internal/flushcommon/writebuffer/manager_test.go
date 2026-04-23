@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -142,11 +143,13 @@ func (s *ManagerSuite) TestFlushAllSegments() {
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
-	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 0)
 	s.Error(err)
 
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
-	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+	s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
+		return info.GetSchemaVersion() == 100
+	}), mock.Anything, mock.Anything, mock.Anything).Return()
 
 	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
 		idAllocator: s.allocator,
@@ -154,14 +157,14 @@ func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	s.NoError(err)
 
 	s.manager.buffers.Insert(s.channelName, wb)
-	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 100)
 	s.NoError(err)
 }
 
 func (s *ManagerSuite) TestBufferData() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {
-		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
+		err := manager.BufferData(s.channelName, nil, nil, nil, nil, 0)
 		s.Error(err, "BufferData shall return error when channel not found")
 	})
 
@@ -169,9 +172,9 @@ func (s *ManagerSuite) TestBufferData() {
 		wb := NewMockWriteBuffer(s.T())
 
 		s.manager.buffers.Insert(s.channelName, wb)
-		wb.EXPECT().BufferData(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		wb.EXPECT().BufferData(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-		err := manager.BufferData(s.channelName, nil, nil, nil, nil)
+		err := manager.BufferData(s.channelName, nil, nil, nil, nil, 100)
 		s.NoError(err)
 	})
 }

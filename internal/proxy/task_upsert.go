@@ -71,6 +71,7 @@ type upsertTask struct {
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
+	schemaVersion   int32
 
 	// write after read, generate write part by queryPreExecute
 	node types.ProxyComponent
@@ -1273,6 +1274,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+	it.schemaVersion = schema.Version
 
 	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
 	if err != nil {

@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -43,7 +45,9 @@ type embeddingNode struct {
 	channelName string
 
 	// embeddingType EmbeddingType
+	// curSchema and functionRunners are updated only from Operate (single flow-graph worker).
 	functionRunners map[int64]function.FunctionRunner
+	curSchema       *schemapb.CollectionSchema
 }
 
 func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embeddingNode, error) {
@@ -51,14 +55,14 @@ func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embed
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
+	schema := metaCache.GetSchema(0)
 	node := &embeddingNode{
 		BaseNode:        baseNode,
 		channelName:     channelName,
 		metaCache:       metaCache,
 		functionRunners: make(map[int64]function.FunctionRunner),
+		curSchema:       schema,
 	}
-
-	schema := metaCache.GetSchema(0)
 
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -67,16 +71,11 @@ func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embed
 		}
 	}
 
-	for _, tf := range schema.GetFunctions() {
-		functionRunner, err := function.NewFunctionRunner(schema, tf)
-		if err != nil {
-			return nil, err
-		}
-		if functionRunner == nil {
-			continue
-		}
-		node.functionRunners[tf.GetId()] = functionRunner
+	runners, err := buildFunctionRunners(schema)
+	if err != nil {
+		return nil, err
 	}
+	node.functionRunners = runners
 	return node, nil
 }
 
@@ -179,7 +178,8 @@ func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*s
 					return nil, err
 				}
 			default:
-				return nil, fmt.Errorf("unknown function type %s", functionSchema.Type)
+				return nil, merr.WrapErrServiceInternal("unknown function type in embedding node",
+					"type="+strconv.FormatInt(int64(functionSchema.GetType()), 10))
 			}
 		}
 	}
@@ -199,24 +199,88 @@ func (eNode *embeddingNode) Embedding(datas []*writebuffer.InsertData) error {
 	return nil
 }
 
+func buildFunctionRunners(schema *schemapb.CollectionSchema) (map[int64]function.FunctionRunner, error) {
+	runners := make(map[int64]function.FunctionRunner)
+	for _, tf := range schema.GetFunctions() {
+		functionRunner, err := function.NewFunctionRunner(schema, tf)
+		if err != nil {
+			closeFunctionRunners(runners)
+			return nil, err
+		}
+		if functionRunner == nil {
+			continue
+		}
+		runners[tf.GetId()] = functionRunner
+	}
+	return runners, nil
+}
+
+func closeFunctionRunners(runners map[int64]function.FunctionRunner) {
+	for _, r := range runners {
+		if r != nil {
+			r.Close()
+		}
+	}
+}
+
+// syncFunctionRunners rebuilds runners when the collection schema pointer changes.
+// Replacement is atomic: on error the previous schema and runners are preserved.
+func (eNode *embeddingNode) syncFunctionRunners(schema *schemapb.CollectionSchema) (bool, error) {
+	if schema == eNode.curSchema {
+		return len(eNode.functionRunners) > 0, nil
+	}
+
+	newRunners, err := buildFunctionRunners(schema)
+	if err != nil {
+		return false, err
+	}
+
+	closeFunctionRunners(eNode.functionRunners)
+	eNode.functionRunners = newRunners
+	eNode.curSchema = schema
+	return len(newRunners) > 0, nil
+}
+
 func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*FlowGraphMsg)
 
 	if fgMsg.IsCloseMsg() {
 		return []Msg{fgMsg}
 	}
+	currentSchema := eNode.metaCache.GetSchema(fgMsg.TimeTick())
+	hasFunctions, err := eNode.syncFunctionRunners(currentSchema)
+	if err != nil {
+		log.Error("embedding node: sync function runners failed",
+			zap.Int64("collectionID", eNode.metaCache.Collection()),
+			zap.String("channel", eNode.channelName),
+			zap.Uint64("timeTick", fgMsg.TimeTick()),
+			zap.Error(err))
+		panic(err)
+	}
+	if !hasFunctions {
+		return []Msg{fgMsg}
+	}
+	if len(fgMsg.InsertMessages) == 0 {
+		fgMsg.InsertData = make([]*writebuffer.InsertData, 0)
+		return []Msg{fgMsg}
+	}
 
-	insertData := make([]*writebuffer.InsertData, 0)
-	if len(fgMsg.InsertMessages) > 0 {
-		var err error
-		if insertData, err = writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages); err != nil {
-			log.Error("failed to prepare insert data", zap.Error(err))
-			panic(err)
-		}
+	insertData, err := writebuffer.PrepareInsert(currentSchema, eNode.pkField, fgMsg.InsertMessages)
+	if err != nil {
+		log.Error("embedding node: prepare insert data failed",
+			zap.Int64("collectionID", eNode.metaCache.Collection()),
+			zap.String("channel", eNode.channelName),
+			zap.Uint64("timeTick", fgMsg.TimeTick()),
+			zap.Error(err))
+		panic(err)
 	}
 
 	if err := eNode.Embedding(insertData); err != nil {
-		log.Warn("failed to embedding insert data", zap.Error(err))
+		log.Error("embedding node: embedding insert data failed",
+			zap.Int64("collectionID", eNode.metaCache.Collection()),
+			zap.String("channel", eNode.channelName),
+			zap.Uint64("timeTick", fgMsg.TimeTick()),
+			zap.Error(err))
 		panic(err)
 	}
 

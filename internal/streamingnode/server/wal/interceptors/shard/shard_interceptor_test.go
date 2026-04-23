@@ -202,13 +202,44 @@ func TestShardInterceptor(t *testing.T) {
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable().WithTimeTick(1)
 
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 1, Acknowledge: atomic.NewInt32(1)}, nil)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
 	shardManager.EXPECT().AssignSegment(mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(0), nil)
 	shardManager.EXPECT().AssignSegment(mock.Anything).Return(nil, mockErr)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+
+	// ErrCollectionNotFound from schema version check must surface as an unrecoverable insert error.
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Unset()
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(-1), shards.ErrCollectionNotFound)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+
+	// ErrCollectionSchemaNotFound must also become an unrecoverable insert error.
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Unset()
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(-1), shards.ErrCollectionSchemaNotFound)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+
+	// ErrCollectionSchemaVersionNotMatch must surface as a schema-version-mismatch error
+	// so the proxy can refresh its cache and retry.
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Unset()
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(5), shards.ErrCollectionSchemaVersionNotMatch)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
+
+	// Unexpected error from the schema version check must be propagated as-is.
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Unset()
+	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(int64(1), int32(0)).Return(int32(-1), mockErr)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
