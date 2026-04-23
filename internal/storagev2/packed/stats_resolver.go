@@ -288,7 +288,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 				textBasePaths[fieldID] = statBasePath
 			}
 
-		case "json_key_index":
+		case "json_stats":
 			// For V3: extract basePath and convert to relative paths
 			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)

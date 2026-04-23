@@ -48,10 +48,10 @@ func TestParseStatKey(t *testing.T) {
 		assert.Equal(t, int64(50), fieldID)
 	})
 
-	t.Run("valid json_key_index key", func(t *testing.T) {
-		prefix, fieldID, ok := ParseStatKey("json_key_index.30")
+	t.Run("valid json_stats key", func(t *testing.T) {
+		prefix, fieldID, ok := ParseStatKey("json_stats.30")
 		assert.True(t, ok)
-		assert.Equal(t, "json_key_index", prefix)
+		assert.Equal(t, "json_stats", prefix)
 		assert.Equal(t, int64(30), fieldID)
 	})
 
@@ -266,6 +266,7 @@ func TestStatsResolverManifest(t *testing.T) {
 	// Add bloom filter + BM25 stats to manifest
 	bfPath := filepath.Join(bp, "_stats/bloom_filter.100/42")
 	bm25Path := filepath.Join(bp, "_stats/bm25.200/43")
+	jsonPath := filepath.Join(bp, "_stats/json_stats.300/shared_key_index/.managed.json_0")
 	newManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
 		{
 			Key:      "bloom_filter.100",
@@ -275,6 +276,17 @@ func TestStatsResolverManifest(t *testing.T) {
 		{
 			Key:   "bm25.200",
 			Files: []string{bm25Path},
+		},
+		{
+			Key:   "json_stats.300",
+			Files: []string{jsonPath},
+			Metadata: map[string]string{
+				"version":                    "7",
+				"build_id":                   "7000",
+				"log_size":                   "1024",
+				"memory_size":                "2048",
+				"json_key_stats_data_format": "3",
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -307,5 +319,17 @@ func TestStatsResolverManifest(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(paths[200]))
 		assert.Equal(t, bm25Path, paths[200][0])
+	})
+
+	t.Run("TextAndJSONIndexStatsWithBasePaths returns relative json stats", func(t *testing.T) {
+		result := resolver.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+
+		require.Contains(t, result.JSONKeyStats, int64(300))
+		assert.Equal(t, []string{"shared_key_index/.managed.json_0"}, result.JSONKeyStats[300].GetFiles())
+		assert.Equal(t, filepath.ToSlash(filepath.Join(bp, "_stats/json_stats.300")), filepath.ToSlash(result.JSONBasePaths[300]))
+		assert.Equal(t, int64(7), result.JSONKeyStats[300].GetVersion())
+		assert.Equal(t, int64(7000), result.JSONKeyStats[300].GetBuildID())
+		assert.Equal(t, int64(3), result.JSONKeyStats[300].GetJsonKeyStatsDataFormat())
 	})
 }

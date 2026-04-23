@@ -133,8 +133,9 @@ func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*dat
 			return err
 		}
 
-		// Restore full paths for text index logs (compatible with old version)
-		// segments from etcd may have filenames only in TextStatsLogs
+		// Restore full paths for text index logs (compatible with old version).
+		// JsonKeyStats.Files intentionally remain relative in SegmentInfo; callers
+		// that need full paths should rebuild them with the segment's V2/V3 basePath.
 		metautil.BuildTextLogPaths(
 			kc.ChunkManagerRootPath,
 			segmentInfo.GetCollectionID(),
@@ -142,6 +143,7 @@ func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*dat
 			segmentInfo.GetID(),
 			segmentInfo.GetTextStatsLogs(),
 		)
+		metautil.ExtractJSONKeyStatsRelativePaths(segmentInfo.GetJsonKeyStats())
 
 		segments = append(segments, segmentInfo)
 		return nil
