@@ -104,7 +104,7 @@ index_engine = knowhere
 # both -c options and GIT_CONFIG_COUNT env vars are processed.
 $(shell git config --global --add safe.directory '*' 2>/dev/null)
 
-export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
+export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-3.0}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
 
 ifeq (${ENABLE_AZURE}, false)
