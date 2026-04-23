@@ -753,6 +753,9 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	extfsPrefix := packed.ExtfsPrefixForCollection(job.GetCollectionId())
 	specExtfs := spec.BuildExtfsOverrides(extfsPrefix)
 	extfsOverrides := packed.BuildExtfsOverrides(job.GetExternalSource(), storageConfig, extfsPrefix, specExtfs)
+	for k, v := range spec.BuildFormatProperties() {
+		extfsOverrides[k] = v
+	}
 
 	exploreBaseDir := exploreTempDirForJob(job.GetJobId())
 	fileInfos, manifestPath, err := packed.ExploreFilesReturnManifestPath(
