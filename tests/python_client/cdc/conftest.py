@@ -210,7 +210,21 @@ def switchover_helper(request, upstream_client, downstream_client):
             ],
             "cross_cluster_topology": [{"source_cluster_id": new_source_id, "target_cluster_id": new_target_id}],
         }
-        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
+        # Dedicated short-lived clients so switchover RPCs don't share a
+        # gRPC channel with concurrent DML on the session-scoped clients.
+        # pymilvus's connection manager closes a channel on UNAVAILABLE /
+        # STREAMING_CODE_REPLICATE_VIOLATION to trigger recovery; if a DML
+        # on the session client triggers that close while our sibling
+        # update_replicate_configuration RPC is in flight on the same
+        # channel, the latter surfaces "Cannot invoke RPC on closed
+        # channel!". Separate clients = separate channels = no race.
+        up_tmp = MilvusClient(uri=upstream_uri, token=upstream_token)
+        dn_tmp = MilvusClient(uri=downstream_uri, token=downstream_token)
+        try:
+            apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
+        finally:
+            up_tmp.close()
+            dn_tmp.close()
         logger.info("Switchover completed, waiting 10s for stabilization...")
         time.sleep(10)
 
@@ -257,8 +271,16 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
     }
 
     try:
-        # Update replication configuration on both clusters
-        apply_replicate_configuration([(upstream_client, config), (downstream_client, config)])
+        # Dedicated clients for the control-plane update_replicate_configuration
+        # RPC, mirroring switchover_helper. Keeps the session-scoped clients'
+        # channels clean of any recovery side effects from the initial setup.
+        up_tmp = MilvusClient(uri=upstream_uri, token=request.config.getoption("--upstream-token"))
+        dn_tmp = MilvusClient(uri=downstream_uri, token=request.config.getoption("--downstream-token"))
+        try:
+            apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
+        finally:
+            up_tmp.close()
+            dn_tmp.close()
         logger.info("CDC topology setup completed successfully")
 
         # Allow some time for CDC to initialize
