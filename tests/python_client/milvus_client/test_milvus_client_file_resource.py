@@ -1910,3 +1910,100 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
                 raise
 
         assert self.wait_until(_ok, timeout=30, interval=1), f"{res_name} still in-use after drop_database"
+
+
+# ---------------------------------------------------------------------------
+# C. run_analyzer runtime scenarios
+# ---------------------------------------------------------------------------
+class TestMilvusClientFileResourceRunAnalyzer(FileResourceTestBase):
+    """run_analyzer scenarios that don't depend on an existing collection."""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_run_analyzer_remote_without_collection(self, file_resource_env):
+        """
+        target: run_analyzer with remote stop-words file works without any collection
+        method: add resource -> call run_analyzer with inline analyzer_params
+                referencing the remote stop_words_file
+        expected: tokens filtered per the stop list
+        """
+        client = self._client()
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
+
+        analyzer_params = {
+            "tokenizer": "standard",
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words_file": {
+                        "type": "remote",
+                        "resource_name": res_name,
+                        "file_name": "stop_words.txt",
+                    },
+                }
+            ],
+        }
+        text = "the apple 的 是 hello"
+        res, _ = self.run_analyzer(client, text, analyzer_params)
+        tokens = set(res.tokens)
+        assert "的" not in tokens and "是" not in tokens, f"remote stop-words should have been applied, got {tokens}"
+
+    @pytest.mark.xfail(
+        reason="Known server bug: see TestMilvusClientFileResourceLifecycleAdvanced::"
+        "test_multi_resource_same_collection — same tokenizer.h:31 panic.",
+        strict=False,
+    )
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_combined_remote_filters(self, file_resource_env):
+        """
+        target: jieba(remote dict) + stop(remote) + synonym(remote) chained in one
+                analyzer config all work together
+        method: build analyzer_params combining 3 remote files, run_analyzer on
+                a Chinese sentence
+        expected: custom jieba word split out, stop words removed,
+                  synonym filter applied (canonical form present)
+        """
+        client = self._client()
+        jieba_name = cf.gen_unique_str(prefix + "_j")
+        stop_name = cf.gen_unique_str(prefix + "_s")
+        synonym_name = cf.gen_unique_str(prefix + "_y")
+        self.add_file_resource(client, jieba_name, JIEBA_DICT_PATH)
+        self.add_file_resource(client, stop_name, STOPWORDS_PATH)
+        self.add_file_resource(client, synonym_name, SYNONYMS_PATH)
+
+        analyzer_params = {
+            "tokenizer": {
+                "type": "jieba",
+                "extra_dict_file": {
+                    "type": "remote",
+                    "resource_name": jieba_name,
+                    "file_name": "jieba_dict.txt",
+                },
+            },
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words_file": {
+                        "type": "remote",
+                        "resource_name": stop_name,
+                        "file_name": "stop_words.txt",
+                    },
+                },
+                {
+                    "type": "synonym",
+                    "synonyms_file": {
+                        "type": "remote",
+                        "resource_name": synonym_name,
+                        "file_name": "synonyms.txt",
+                    },
+                },
+            ],
+        }
+        # "向量数据库" — custom jieba word; "的" — stop; "向量" — synonym
+        text = "向量数据库是向量搜索的基础"
+        res, _ = self.run_analyzer(client, text, analyzer_params)
+        tokens = set(res.tokens)
+        # jieba custom tokenizer should emit the compound word
+        assert "向量数据库" in tokens, f"custom jieba word missing, got {tokens}"
+        # stop filter should drop 是/的
+        assert "是" not in tokens and "的" not in tokens, f"stop words present: {tokens}"
