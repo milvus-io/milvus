@@ -223,9 +223,14 @@ func CleanSession(metaPath string, etcdEndpoints []string, sessionSuffix []strin
 		return nil
 	}
 
-	for _, key := range keys {
-		_, _ = etcdCli.Delete(ctx, key)
-	}
+	_ = etcd.RemoveByBatchWithLimit(keys, 128, func(partialKeys []string) error {
+		ops := make([]clientv3.Op, 0, len(partialKeys))
+		for _, key := range partialKeys {
+			ops = append(ops, clientv3.OpDelete(key))
+		}
+		_, err := etcdCli.Txn(ctx).Then(ops...).Commit()
+		return err
+	})
 	log.Ctx(ctx).Info("clean sessions from etcd", zap.Any("keys", keys))
 	return nil
 }
