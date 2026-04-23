@@ -119,11 +119,12 @@ class TestCDCSyncResourceGroup(TestCDCSyncBase):
 
         # Upstream has already been created with its config; nothing else to
         # update since config drift itself would be the leak. Wait and confirm
-        # downstream config is unchanged.
+        # downstream config is unchanged. ResourceGroupInfo has no __eq__, so
+        # compare the str() form (includes config/limits/requests/nodes).
         time.sleep(sync_timeout)
         downstream_desc_after = downstream_client.describe_resource_group(rg_name)
         logger.info(f"Downstream RG after upstream update: {downstream_desc_after}")
-        assert downstream_desc_after == downstream_desc_before, (
+        assert str(downstream_desc_after) == str(downstream_desc_before), (
             f"Downstream RG {rg_name} was modified by upstream config (RG ops must not replicate). "
             f"before={downstream_desc_before}, after={downstream_desc_after}"
         )
