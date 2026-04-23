@@ -2619,16 +2619,6 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}, nil
 	}
 
-	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
-	allocatedJobID, err := s.allocator.AllocID(ctx)
-	if err != nil {
-		log.Warn("failed to allocate job ID", zap.Error(err))
-		return &datapb.RefreshExternalCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
-
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
 	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
@@ -2638,6 +2628,37 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}, nil
 	}
 	defer b.Close()
+
+	// Synchronous duplicate detection at the RPC edge. The WAL ack callback
+	// already rejects duplicates, but it does so AFTER the RPC has already
+	// returned a fresh jobID to the client; that jobID then dies silently and
+	// the client polls it forever. Surfacing the in-progress jobID here
+	// (along with merr.ErrTaskDuplicate) lets the caller switch to polling
+	// the real job. The remaining TOCTOU window between this read and the
+	// ack-side AddJob falls back to the existing ack-side rejection, i.e.
+	// today's behavior — never worse.
+	if active := s.externalCollectionRefreshManager.GetActiveJobByCollectionID(req.GetCollectionId()); active != nil {
+		log.Info("refresh job already in progress, rejecting at RPC edge",
+			zap.Int64("existingJobID", active.GetJobId()),
+			zap.String("existingState", active.GetState().String()))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrTaskDuplicate(
+				"refresh_external_collection",
+				fmt.Sprintf("refresh job %d is already in progress for collection %s; poll that jobID or wait for it to complete",
+					active.GetJobId(), req.GetCollectionName()))),
+			JobId: active.GetJobId(),
+		}, nil
+	}
+
+	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
+	allocatedJobID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("failed to allocate job ID", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
 
 	// Build and broadcast the message
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
