@@ -642,6 +642,17 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// Manifest is written to S3 so DataNodes can read file info by range.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
+		// Any FFI failure during explore is terminal for this job: the
+		// source is unreachable, denied, malformed, or absent and no
+		// amount of in-loop retrying can change that. Surface as
+		// non-retriable so the user gets a clear RefreshFailed signal
+		// (with the underlying error attached) and can re-issue refresh
+		// after fixing the source. Pure in-process errors (ctx cancel,
+		// etcd unavailable, etc.) keep the existing transient path so
+		// a real outage still gets retried.
+		if errors.Is(err, packed.ErrLoonTransient) {
+			return nil, newNonRetriableJobError("explore external files failed: %v", err)
+		}
 		return nil, fmt.Errorf("failed to explore external files: %w", err)
 	}
 	if len(allFiles) == 0 {
