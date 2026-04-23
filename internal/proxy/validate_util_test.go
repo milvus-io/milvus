@@ -8020,7 +8020,7 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
 
-	t.Run("ArrayOfVector stays compact", func(t *testing.T) {
+	t.Run("ArrayOfVector expands to dense with null placeholder", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			FieldName: "vec_array",
 			Type:      schemapb.DataType_ArrayOfVector,
@@ -8053,7 +8053,12 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 
 		vectorArray := field.GetVectors().GetVectorArray()
 		require.NotNil(t, vectorArray)
-		assert.Equal(t, 2, len(vectorArray.Data))
+		// Plan B: ArrayOfVector is expanded to dense; null row gets an empty per-row placeholder.
+		assert.Equal(t, 3, len(vectorArray.Data))
+		assert.Equal(t, []float32{1, 2, 3, 4}, vectorArray.Data[0].GetFloatVector().GetData())
+		assert.Empty(t, vectorArray.Data[1].GetFloatVector().GetData())
+		assert.Equal(t, int64(4), vectorArray.Data[1].GetDim())
+		assert.Equal(t, []float32{5, 6, 7, 8}, vectorArray.Data[2].GetFloatVector().GetData())
 	})
 }
 
