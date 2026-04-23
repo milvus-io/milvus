@@ -3170,18 +3170,15 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name, replica_number=2)
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded
-
-        # Verify query still works after replica change
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
-                   check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": [rows[0]], "with_vec": True})
-
         # Release and reload with replica_number=2
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name, replica_number=2)
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded
-
+        # Verify query still works after replica change
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [rows[0]], "with_vec": True})
         # Cleanup
         self.drop_collection(client, collection_name)
 
