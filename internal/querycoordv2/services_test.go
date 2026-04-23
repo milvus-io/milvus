@@ -1912,6 +1912,49 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 	suite.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded))
 }
 
+func (suite *ServiceSuite) TestGetShardLeadersWithUnserviceableShards() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	for _, collection := range suite.collections {
+		// Mirror the state PutCollection writes during a replica-count change:
+		// Status=Loading, LoadPercentage=0, even though existing replicas still hold data.
+		suite.updateCollectionStatus(ctx, collection, querypb.LoadStatus_Loading)
+		suite.updateChannelDist(ctx, collection)
+		suite.fetchHeartbeats(time.Now())
+
+		// Strict path (WithUnserviceableShards=false) still rejects as before.
+		strictReq := &querypb.GetShardLeadersRequest{CollectionID: collection}
+		strictResp, err := server.GetShardLeaders(ctx, strictReq)
+		suite.NoError(err)
+		suite.True(errors.Is(merr.Error(strictResp.GetStatus()), merr.ErrCollectionNotFullyLoaded))
+
+		// Relaxed path (WithUnserviceableShards=true) now skips checkLoadStatus
+		// and returns the current shard leaders so the proxy can route by Serviceable.
+		relaxedReq := &querypb.GetShardLeadersRequest{
+			CollectionID:            collection,
+			WithUnserviceableShards: true,
+		}
+		relaxedResp, err := server.GetShardLeaders(ctx, relaxedReq)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, relaxedResp.GetStatus().GetErrorCode())
+		suite.Len(relaxedResp.GetShards(), len(suite.channels[collection]))
+		for _, shard := range relaxedResp.GetShards() {
+			suite.Len(shard.GetServiceable(), len(shard.GetNodeIds()))
+		}
+	}
+
+	// Existence check still fires even when WithUnserviceableShards=true.
+	ghostReq := &querypb.GetShardLeadersRequest{
+		CollectionID:            -1,
+		WithUnserviceableShards: true,
+	}
+	ghostResp, err := server.GetShardLeaders(ctx, ghostReq)
+	suite.NoError(err)
+	suite.True(errors.Is(merr.Error(ghostResp.GetStatus()), merr.ErrCollectionNotLoaded))
+}
+
 func (suite *ServiceSuite) TestHandleNodeUp() {
 	suite.server.replicaObserver = observers.NewReplicaObserver(
 		suite.server.meta,
