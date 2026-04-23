@@ -1649,9 +1649,11 @@ TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
     props["fs.region"] = std::string("us-west-2");
 
     const int64_t coll_id = 42;
-    std::string spec = R"({"format":"parquet","extfs":{"access_key_id":"USER_AK","access_key_value":"USER_SK","region":"us-east-1"}})";
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"USER_AK","access_key_value":"USER_SK","region":"us-east-1"}})";
 
-    ::InjectExternalSpecProperties(props, coll_id, "s3://user-bucket/key", spec);
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://user-bucket/key", spec);
 
     // use_iam MUST be false — neither fs.* nor spec sets it.
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
@@ -1666,6 +1668,74 @@ TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
     EXPECT_EQ(std::get<std::string>(props.at("fs.use_iam")), "true");
     EXPECT_EQ(std::get<std::string>(props.at("fs.access_key_id")),
               "MILVUS_INTERNAL_AK");
+}
+
+// Azure endpoint derivation: when extfs supplies cloud_provider=azure but
+// omits extfs.address, DeriveEndpoint fills in the bare sovereign-cloud
+// authority. The swap then relocates the URI host (container) into
+// bucket_name. AzureFileSystemProducer requires address to stay schemeless
+// so its `.blob.` / `.dfs.` concatenation produces a valid authority.
+TEST(InjectExtfsAllowlist, AzureDefaultEndpoint) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "azure://mycontainer/data", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "mycontainer");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "core.windows.net");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.cloud_provider")),
+              "azure");
+}
+
+TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
+    struct Case {
+        std::string region;
+        std::string expected_suffix;
+    };
+    std::vector<Case> cases = {
+        {"chinanorth2", "core.chinacloudapi.cn"},
+        {"chinaeast", "core.chinacloudapi.cn"},
+        {"usgovvirginia", "core.usgovcloudapi.net"},
+        {"usdodcentral", "core.usgovcloudapi.net"},
+        {"germanynortheast", "core.cloudapi.de"},
+        {"eastus", "core.windows.net"},
+        {"", "core.windows.net"},
+    };
+    for (const auto& c : cases) {
+        milvus_storage::api::Properties props;
+        const int64_t coll_id = 42;
+        std::string spec =
+            R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure","region":")" +
+            c.region + R"("}})";
+
+        ::InjectExternalSpecProperties(
+            props, coll_id, "azure://mycontainer/data", spec);
+
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.expected_suffix)
+            << "region=" << c.region;
+    }
+}
+
+TEST(InjectExtfsAllowlist, AzureExplicitAddressOverridesDerivation) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure","address":"custom.blob.endpoint"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "azure://mycontainer/data", spec);
+
+    // Explicit extfs.address wins over DeriveEndpoint fallback.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "custom.blob.endpoint");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "mycontainer");
 }
 
 TEST(InjectExtfsAllowlist, InvalidJsonIsHandledGracefully) {

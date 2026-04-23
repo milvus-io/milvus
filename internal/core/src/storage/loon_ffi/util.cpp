@@ -376,6 +376,36 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         }
         return "https://obs." + region + ".myhuaweicloud.com";
     }
+    if (cp == "azure") {
+        // Azure endpoint derivation differs from S3-family: the "region" slot
+        // selects the sovereign cloud (4 fixed suffixes), not a geographic
+        // region. AzureFileSystemProducer concatenates ".blob."/".dfs." onto
+        // config_.address verbatim, so the returned value is a bare authority
+        // (no scheme, no account) — the scheme reconciliation block below
+        // skips azure to preserve this shape.
+        //
+        // Azure Stack Hub (customer-domain) and Azurite (127.0.0.1:10000) do
+        // not match any fixed suffix; callers must supply extfs.address
+        // explicitly for those cases.
+        std::string r = region;
+        std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+        // Real Azure region names have no hyphen prefix: chinanorth2,
+        // usgovvirginia, germanynortheast. Prefix match is enough.
+        if (r.rfind("china", 0) == 0) {
+            return "core.chinacloudapi.cn";
+        }
+        if (r.rfind("usgov", 0) == 0 || r.rfind("usdod", 0) == 0) {
+            return "core.usgovcloudapi.net";
+        }
+        if (r.rfind("germany", 0) == 0) {
+            return "core.cloudapi.de";
+        }
+        // Default / public / unknown → public cloud. Empty region is also
+        // valid (public-cloud-only deployments commonly omit it).
+        return "core.windows.net";
+    }
     return "";
 }
 
@@ -428,10 +458,9 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
 
     milvus_storage::api::SetValue(
         properties, (extfs_prefix + "storage_type").c_str(), "remote");
-    milvus_storage::api::SetValue(
-        properties,
-        (extfs_prefix + "use_ssl").c_str(),
-        DeriveUseSSLFromScheme(scheme).c_str());
+    milvus_storage::api::SetValue(properties,
+                                  (extfs_prefix + "use_ssl").c_str(),
+                                  DeriveUseSSLFromScheme(scheme).c_str());
 
     // Default to Milvus-form; AWS-form swap happens in the post-merge
     // block when spec.extfs supplied an explicit address.
@@ -440,9 +469,8 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         DeriveUseSSLFromScheme(scheme) == "false") {
         address = "http://" + address;
     }
-    milvus_storage::api::SetValue(properties,
-                                  (extfs_prefix + "address").c_str(),
-                                  address.c_str());
+    milvus_storage::api::SetValue(
+        properties, (extfs_prefix + "address").c_str(), address.c_str());
     if (!path_bucket.empty()) {
         milvus_storage::api::SetValue(properties,
                                       (extfs_prefix + "bucket_name").c_str(),
@@ -532,28 +560,32 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     }
     if (!effective_address.empty() &&
         StripURIScheme(effective_address) != host) {
-        milvus_storage::api::SetValue(properties,
-                                      (extfs_prefix + "bucket_name").c_str(),
-                                      host.c_str());
+        milvus_storage::api::SetValue(
+            properties, (extfs_prefix + "bucket_name").c_str(), host.c_str());
         milvus_storage::api::SetValue(properties,
                                       (extfs_prefix + "address").c_str(),
                                       effective_address.c_str());
     }
 
     // Reconcile bare address with final use_ssl. Addresses that already
-    // carry a scheme win.
+    // carry a scheme win. Azure is exempt: AzureFileSystemProducer does
+    // `options.blob_storage_authority = ".blob." + config_.address`, so the
+    // address must be a bare authority (e.g. "core.windows.net"); prepending
+    // a scheme would break the concatenation.
+    auto final_cp = milvus_storage::api::GetValue<std::string>(
+        properties, (extfs_prefix + "cloud_provider").c_str());
+    bool is_azure = final_cp.ok() && *final_cp == "azure";
     auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
         properties, (extfs_prefix + "use_ssl").c_str());
     auto final_address = milvus_storage::api::GetValue<std::string>(
         properties, (extfs_prefix + "address").c_str());
-    if (final_use_ssl.ok() && final_address.ok() &&
+    if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
         final_address->find("://") == std::string::npos) {
         const char* scheme =
             (*final_use_ssl == "true") ? "https://" : "http://";
-        milvus_storage::api::SetValue(
-            properties,
-            (extfs_prefix + "address").c_str(),
-            (scheme + *final_address).c_str());
+        milvus_storage::api::SetValue(properties,
+                                      (extfs_prefix + "address").c_str(),
+                                      (scheme + *final_address).c_str());
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
@@ -572,8 +604,9 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
             std::string format{format_view};
             if (format == "iceberg-table") {
                 int64_t snapshot_id = 0;
-                if (doc.find_field("snapshot_id").get_int64().get(snapshot_id) ==
-                    simdjson::SUCCESS) {
+                if (doc.find_field("snapshot_id")
+                        .get_int64()
+                        .get(snapshot_id) == simdjson::SUCCESS) {
                     milvus_storage::api::SetValue(
                         properties,
                         "iceberg.snapshot_id",
@@ -584,10 +617,9 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     } catch (const simdjson::simdjson_error& e) {
         // Top-level parse failure already caught by the extfs block above;
         // this second pass only runs after the first succeeded.
-        LOG_WARN(
-            "format-props parse failed (collection_id={}): {}",
-            collection_id,
-            e.what());
+        LOG_WARN("format-props parse failed (collection_id={}): {}",
+                 collection_id,
+                 e.what());
     }
 }
 
@@ -705,9 +737,9 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         }
 
         InjectExternalSpecProperties(props,
-                              collection_id,
-                              external_source,
-                              external_spec ? external_spec : "");
+                                     collection_id,
+                                     external_source,
+                                     external_spec ? external_spec : "");
 
         // Rebuild LoonProperties from the merged map. Free old entries first
         // so ownership stays with loon_properties_free.
@@ -723,10 +755,12 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         if (n == 0) {
             RETURN_SUCCESS();
         }
-        auto* arr = static_cast<LoonProperty*>(malloc(sizeof(LoonProperty) * n));
+        auto* arr =
+            static_cast<LoonProperty*>(malloc(sizeof(LoonProperty) * n));
         if (arr == nullptr) {
             RETURN_ERROR(LOON_MEMORY_ERROR,
-                         "failed to malloc LoonProperty array of size ", n);
+                         "failed to malloc LoonProperty array of size ",
+                         n);
         }
         size_t i = 0;
         for (const auto& kv : props) {

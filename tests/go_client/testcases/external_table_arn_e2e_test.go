@@ -508,6 +508,7 @@ func TestSetupMinIOStsUser(t *testing.T) {
 
 	for _, cmd := range commands {
 		t.Logf("Running: %s", cmd.name)
+		// #nosec G204 -- test helper; args are hardcoded literals for MinIO mc setup
 		out, err := exec.Command(cmd.args[0], cmd.args[1:]...).CombinedOutput()
 		if err != nil {
 			t.Logf("Warning: %s failed: %v\nOutput: %s", cmd.name, err, string(out))

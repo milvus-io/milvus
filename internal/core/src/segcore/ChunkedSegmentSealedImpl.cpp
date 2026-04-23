@@ -627,9 +627,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     // matches.
     if (schema_->is_external_collection()) {
         InjectExternalSpecProperties(*properties,
-                              segment_load_info_.GetCollectionID(),
-                              schema_->get_external_source(),
-                              schema_->get_external_spec());
+                                     segment_load_info_.GetCollectionID(),
+                                     schema_->get_external_source(),
+                                     schema_->get_external_spec());
     }
 
     // Schemaless reader for external collections: pass nullptr schema and

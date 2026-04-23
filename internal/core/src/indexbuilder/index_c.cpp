@@ -289,10 +289,11 @@ CreateIndex(CIndex* res_index,
                 ToCStorageConfig(storage_config));
             // For external collections, inject extfs.{collID}.* from build_index_info
             if (!build_index_info->external_source().empty()) {
-                InjectExternalSpecProperties(*loon_properties,
-                                      build_index_info->collectionid(),
-                                      build_index_info->external_source(),
-                                      build_index_info->external_spec());
+                InjectExternalSpecProperties(
+                    *loon_properties,
+                    build_index_info->collectionid(),
+                    build_index_info->external_source(),
+                    build_index_info->external_spec());
             }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
@@ -405,10 +406,11 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
                 ToCStorageConfig(storage_config));
             // For external collections, inject extfs.{collID}.* from build_index_info
             if (!build_index_info->external_source().empty()) {
-                InjectExternalSpecProperties(*loon_properties,
-                                      build_index_info->collectionid(),
-                                      build_index_info->external_source(),
-                                      build_index_info->external_spec());
+                InjectExternalSpecProperties(
+                    *loon_properties,
+                    build_index_info->collectionid(),
+                    build_index_info->external_source(),
+                    build_index_info->external_spec());
             }
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
