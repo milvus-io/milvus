@@ -800,7 +800,7 @@ func generateTargetIndexPath(
 
 	// Set offsets based on index type
 	// collectionOffset = -1 means collectionID is not present in the path
-	buildIDOffset := 1
+	var buildIDOffset int
 	switch indexType {
 	case IndexTypeVectorScalar:
 		// Detect path format by counting segments after "index_files"
