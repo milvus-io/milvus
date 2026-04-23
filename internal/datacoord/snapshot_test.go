@@ -668,6 +668,54 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSnapshot_JSONStatsPaths_RoundTripPreservesSnapshotRestorePaths(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	writer := NewSnapshotWriter(cm)
+	reader := NewSnapshotReader(cm)
+
+	snapshotData := createTestSnapshotData()
+	snapshotData.Segments[0].ManifestPath = `{"ver":7,"base_path":"files/insert_log/1/2/1001"}`
+	snapshotData.Segments[0].JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
+		200: {
+			FieldID:                200,
+			Version:                2,
+			Files:                  []string{"files/json_stats/3/6000/2/100/1/1001/200/shared_key_index/.managed.json_0"},
+			LogSize:                1024,
+			MemorySize:             2048,
+			BuildID:                6000,
+			JsonKeyStatsDataFormat: 3,
+		},
+		201: {
+			FieldID: 201,
+			Version: 3,
+			Files: []string{
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shared_key_index/.managed.json_1",
+				"files/insert_log/1/2/1001/_stats/json_stats.201/shredding_data/data.parquet",
+			},
+			LogSize:                2048,
+			MemorySize:             4096,
+			BuildID:                6001,
+			JsonKeyStatsDataFormat: 3,
+		},
+	}
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+
+	readSnapshot, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
+	assert.NoError(t, err)
+	assert.Len(t, readSnapshot.Segments, 1)
+
+	got := readSnapshot.Segments[0].GetJsonKeyIndexFiles()
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[200].GetFiles(), got[200].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetJsonKeyIndexFiles()[201].GetFiles(), got[201].GetFiles())
+	assert.Equal(t, snapshotData.Segments[0].GetManifestPath(), readSnapshot.Segments[0].GetManifestPath())
+}
+
 // =========================== New Fields Tests ===========================
 
 func TestSnapshot_NewFields_Serialization(t *testing.T) {
