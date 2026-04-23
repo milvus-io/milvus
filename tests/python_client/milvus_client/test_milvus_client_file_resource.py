@@ -33,6 +33,39 @@ class FileResourceTestBase(TestMilvusClientV2Base):
             secure=False,
         )
 
+    @pytest.fixture(autouse=True)
+    def _force_clean_stale_resources(self, request):
+        """Before each test, sweep any leftover file resources from earlier runs.
+
+        Server has a known bug where a resource whose MinIO object is missing
+        blocks every subsequent add/remove with 'node sync failed' until it is
+        finally purged. Retrying removal a few times usually drains it.
+        """
+        host = request.config.getoption("--host")
+        port = request.config.getoption("--port")
+        user = request.config.getoption("--user")
+        password = request.config.getoption("--password")
+        try:
+            from pymilvus import MilvusClient
+
+            sweeper = MilvusClient(
+                uri=f"http://{host}:{port}", user=user, password=password, timeout=10
+            )
+            for _ in range(5):
+                leftovers = sweeper.list_file_resources()
+                if not leftovers:
+                    break
+                for r in leftovers:
+                    try:
+                        sweeper.remove_file_resource(name=r.name)
+                    except Exception:
+                        pass
+            sweeper.close()
+        except Exception:
+            # Non-fatal — real connectivity issues will surface in the actual test.
+            pass
+        yield
+
     def setup_method(self, method):
         super().setup_method(method)
         self._file_resources_to_cleanup = []
@@ -42,14 +75,22 @@ class FileResourceTestBase(TestMilvusClientV2Base):
     def teardown_method(self, method):
         # Phase 1: drop collections first (releases file resource references)
         super().teardown_method(method)
-        # Phase 2: clean up file resources via MilvusClient independent gRPC channel
+        # Phase 2: clean up file resources via MilvusClient independent gRPC channel.
+        # Retry a few times: server has a known bug where remove returns
+        # "node sync failed" on first call but succeeds on a subsequent attempt.
         client = self._teardown_client
         if client and self._file_resources_to_cleanup:
-            for name in self._file_resources_to_cleanup:
-                try:
-                    client.remove_file_resource(name=name)
-                except Exception:
-                    pass
+            pending = list(self._file_resources_to_cleanup)
+            for _ in range(3):
+                if not pending:
+                    break
+                still = []
+                for name in pending:
+                    try:
+                        client.remove_file_resource(name=name)
+                    except Exception:
+                        still.append(name)
+                pending = still
         # Phase 3: clean up MinIO temporary objects (large file tests only)
         minio = self._minio_client
         if minio and self._minio_objects_to_cleanup:
