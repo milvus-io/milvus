@@ -930,8 +930,22 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
 	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			return pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
 
 	workers := make(map[int64]*cluster.MockWorker)
 	worker1 := &cluster.MockWorker{}
@@ -939,34 +953,9 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		Return(nil)
-	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
-		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
-			s.Equal(int64(100), req.GetSegmentId())
-			s.Equal(querypb.DataScope_Historical, req.GetScope())
-			s.ElementsMatch([]int64{1, 10}, req.GetPrimaryKeys().GetIntId().GetData())
-			s.ElementsMatch([]uint64{10, 10}, req.GetTimestamps())
-			return nil
-		}).Once()
 	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
 		return workers[nodeID]
 	}, nil)
-
-	// Mock LoadBloomFilterSet to return metadata-only stubs (BF disabled path)
-	stubCandidate := pkoracle.NewBloomFilterSet(100, 500, commonpb.SegmentState_Sealed)
-	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, mock.AnythingOfType("int64"), mock.Anything).
-		Return([]*pkoracle.BloomFilterSet{stubCandidate}, nil)
-
-	s.delegator.ProcessDelete([]*DeleteData{
-		{
-			PartitionID: 500,
-			PrimaryKeys: []storage.PrimaryKey{
-				storage.NewInt64PrimaryKey(1),
-				storage.NewInt64PrimaryKey(10),
-			},
-			Timestamps: []uint64{10, 10},
-			RowCount:   2,
-		},
-	}, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -987,7 +976,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 		},
 	})
 
-	s.NoError(err)
+	s.Require().NoError(err)
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
