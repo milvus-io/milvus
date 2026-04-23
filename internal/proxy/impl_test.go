@@ -2642,3 +2642,57 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	mkInfo := func(src, spec string) *collectionInfo {
+		schema := &schemapb.CollectionSchema{
+			Name:           "demo",
+			ExternalSource: src,
+			ExternalSpec:   spec,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		return &collectionInfo{
+			collID: 1,
+			schema: &schemaInfo{CollectionSchema: schema},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		persisted *collectionInfo
+		wantErr   bool
+	}{
+		{"persisted both empty rejected", mkInfo("", ""), true},
+		{"persisted source empty rejected", mkInfo("", `{"format":"parquet"}`), true},
+		{"persisted spec empty rejected", mkInfo("s3://bucket/p", ""), true},
+	}
+	cacheBak := globalMetaCache
+	defer func() { globalMetaCache = cacheBak }()
+	globalMetaCache = &MetaCache{}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockey.Mock((*MetaCache).GetCollectionInfo).Return(tc.persisted, nil).Build()
+			defer m.UnPatch()
+
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "demo",
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				assert.Contains(t, resp.GetStatus().GetReason(), "no persisted external_source")
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+		})
+	}
+}

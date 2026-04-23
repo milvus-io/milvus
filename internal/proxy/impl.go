@@ -7548,6 +7548,25 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
+	// Reuse path: caller did not provide override. The persisted
+	// (source, spec) on the collection must both be non-empty, otherwise
+	// downstream would look for files at "" and the job would fail with
+	// "no files found" after enqueue. Reject early so the user gets
+	// InvalidArgument instead of a stuck-then-failed job. Both halves are
+	// checked to defensively reassert the atomic-tuple invariant in case
+	// any legacy collection holds a half-initialized pair.
+	if !srcSet {
+		persistedSrc := collectionInfo.schema.GetExternalSource()
+		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		if persistedSrc == "" || persistedSpec == "" {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"collection %s has no persisted external_source/external_spec; provide both in the refresh request to initialize",
+					req.GetCollectionName())),
+			}, nil
+		}
+	}
+
 	collectionID := collectionInfo.collID
 
 	// Call DataCoord to refresh the external collection
