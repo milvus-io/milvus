@@ -58,6 +58,16 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             schema = self.create_manual_id_schema(upstream_client)
             upstream_client.create_collection(collection_name=c_name, schema=schema)
 
+            index_params = upstream_client.prepare_index_params()
+            index_params.add_index(
+                field_name="vector",
+                index_type="HNSW",
+                metric_type="L2",
+                params={"M": 16, "efConstruction": 200},
+            )
+            upstream_client.create_index(c_name, index_params)
+            upstream_client.load_collection(c_name)
+
             # Wait for collection to appear on downstream
             def check_create():
                 return downstream_client.has_collection(c_name)
@@ -167,6 +177,16 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
 
             schema = self.create_manual_id_schema(upstream_client)
             upstream_client.create_collection(collection_name=c_name, schema=schema)
+
+            index_params = upstream_client.prepare_index_params()
+            index_params.add_index(
+                field_name="vector",
+                index_type="HNSW",
+                metric_type="L2",
+                params={"M": 16, "efConstruction": 200},
+            )
+            upstream_client.create_index(c_name, index_params)
+            upstream_client.load_collection(c_name)
 
             def check_create():
                 return downstream_client.has_collection(c_name)
@@ -279,6 +299,15 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
 
             schema = self.create_comprehensive_schema(upstream_client)
             upstream_client.create_collection(collection_name=c_name, schema=schema)
+
+            # Index every vector field; load_collection fails otherwise.
+            index_params = upstream_client.prepare_index_params()
+            index_params.add_index(field_name="float_vector", index_type="AUTOINDEX", metric_type="L2")
+            index_params.add_index(field_name="float16_vector", index_type="AUTOINDEX", metric_type="L2")
+            index_params.add_index(field_name="binary_vector", index_type="BIN_FLAT", metric_type="HAMMING")
+            index_params.add_index(field_name="sparse_vector", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+            upstream_client.create_index(c_name, index_params)
+            upstream_client.load_collection(c_name)
 
             def check_create():
                 return downstream_client.has_collection(c_name)
@@ -635,6 +664,16 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
 
             schema = self.create_manual_id_schema(upstream_client)
             upstream_client.create_collection(collection_name=c_name, schema=schema)
+
+            index_params = upstream_client.prepare_index_params()
+            index_params.add_index(
+                field_name="vector",
+                index_type="HNSW",
+                metric_type="L2",
+                params={"M": 16, "efConstruction": 200},
+            )
+            upstream_client.create_index(c_name, index_params)
+            upstream_client.load_collection(c_name)
 
             def check_create():
                 return downstream_client.has_collection(c_name)
