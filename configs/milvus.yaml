@@ -1001,6 +1001,7 @@ common:
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
+    hashAlgorithm: sha256 # Hash algorithm for internal hashing (e.g. telemetry fingerprints, config digests). Supported values: sha256 (default), sha3 (SHA3-256). Changing this invalidates previously computed hashes.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups

@@ -353,6 +353,9 @@ type commonConfig struct {
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
+
+	// hash algorithm
+	HashAlgorithm ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1448,6 +1451,21 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		},
 	}
 	p.GroupByMaxGroups.Init(base.mgr)
+
+	p.HashAlgorithm = ParamItem{
+		Key:          "common.security.hashAlgorithm",
+		Version:      "2.6.0",
+		DefaultValue: "sha256",
+		Doc:          "Hash algorithm for internal hashing (e.g. telemetry fingerprints, config digests). Supported values: sha256 (default), sha3 (SHA3-256). Changing this invalidates previously computed hashes.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if v == "sha3" {
+				return v
+			}
+			return "sha256"
+		},
+	}
+	p.HashAlgorithm.Init(base.mgr)
 }
 
 type gpuConfig struct {

@@ -18,8 +18,6 @@ package telemetry
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -32,8 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // PushClientConfigRequest is a request to push a persistent config
@@ -517,12 +517,13 @@ func computeConfigHashFromConfigs(configs map[string]*storedConfig) string {
 	}
 	sort.Strings(ids)
 
-	h := sha256.New()
+	var data []byte
 	for _, id := range ids {
 		cfg := configs[id]
-		h.Write([]byte(cfg.ConfigID))
-		h.Write([]byte(cfg.ConfigType))
-		h.Write(cfg.Payload)
+		data = append(data, []byte(cfg.ConfigID)...)
+		data = append(data, []byte(cfg.ConfigType)...)
+		data = append(data, cfg.Payload...)
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	hashType := crypto.HashType(paramtable.Get().CommonCfg.HashAlgorithm.GetValue())
+	return crypto.ComputeHash(data, hashType)[:16]
 }

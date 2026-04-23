@@ -18,8 +18,6 @@ package telemetry
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -34,8 +32,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // TelemetryConfig holds configurable time values for the telemetry manager
@@ -503,8 +503,9 @@ func (m *TelemetryManager) getOrCreateClientID(info *commonpb.ClientInfo) string
 		user = info.User
 	}
 	seed := fmt.Sprintf("%s|%s|%s|%s", sdkType, sdkVersion, host, user)
-	sum := sha256.Sum256([]byte(seed))
-	return fmt.Sprintf("legacy:%s:%s", host, hex.EncodeToString(sum[:8]))
+	hashType := crypto.HashType(paramtable.Get().CommonCfg.HashAlgorithm.GetValue())
+	hash := crypto.ComputeHash([]byte(seed), hashType)
+	return fmt.Sprintf("legacy:%s:%s", host, hash[:16])
 }
 
 func (m *TelemetryManager) getDatabaseFromClientInfo(info *commonpb.ClientInfo) string {
@@ -625,13 +626,14 @@ func computeClientConfigHash(configs []*ClientConfig) string {
 		return sorted[i].ConfigId < sorted[j].ConfigId
 	})
 
-	h := sha256.New()
+	var data []byte
 	for _, cfg := range sorted {
-		h.Write([]byte(cfg.ConfigId))
-		h.Write([]byte(cfg.ConfigType))
-		h.Write(cfg.Payload)
+		data = append(data, []byte(cfg.ConfigId)...)
+		data = append(data, []byte(cfg.ConfigType)...)
+		data = append(data, cfg.Payload...)
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	hashType := crypto.HashType(paramtable.Get().CommonCfg.HashAlgorithm.GetValue())
+	return crypto.ComputeHash(data, hashType)[:16]
 }
 
 // ListClients returns all clients, optionally filtered by database

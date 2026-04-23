@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // mockCommandStore implements CommandStoreInterface for testing
@@ -3762,4 +3763,125 @@ func TestProcessCommandRepliesPayloadFormat(t *testing.T) {
 	jsonStr := string(data)
 	assert.Contains(t, jsonStr, `"payload":"{\"user_config\"`)
 	assert.NotContains(t, jsonStr, "eyJ1c2VyX2NvbmZpZyI") // base64 prefix
+}
+
+func TestGetOrCreateClientIDWithSHA3(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	mgr := NewTelemetryManager(nil)
+
+	info := &commonpb.ClientInfo{
+		Host:       "10.0.0.1",
+		SdkType:    "python",
+		SdkVersion: "2.7.0",
+		User:       "root",
+	}
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+	sha256ID := mgr.getOrCreateClientID(info)
+
+	params.Save("common.security.hashAlgorithm", "sha3")
+	sha3ID := mgr.getOrCreateClientID(info)
+
+	assert.Contains(t, sha256ID, "legacy:10.0.0.1:")
+	assert.Contains(t, sha3ID, "legacy:10.0.0.1:")
+	assert.NotEqual(t, sha256ID, sha3ID, "SHA-256 and SHA-3 should produce different legacy client IDs")
+	assert.Len(t, sha256ID, len("legacy:10.0.0.1:")+16)
+	assert.Len(t, sha3ID, len("legacy:10.0.0.1:")+16)
+
+	// Deterministic: same algorithm should produce same ID
+	sha3ID2 := mgr.getOrCreateClientID(info)
+	assert.Equal(t, sha3ID, sha3ID2)
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+}
+
+func TestComputeClientConfigHashWithSHA3(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	configs := []*ClientConfig{
+		{ConfigId: "cfg-1", ConfigType: "persistent", Payload: []byte(`{"key":"val1"}`)},
+		{ConfigId: "cfg-2", ConfigType: "one_time", Payload: []byte(`{"key":"val2"}`)},
+	}
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+	sha256Hash := computeClientConfigHash(configs)
+
+	params.Save("common.security.hashAlgorithm", "sha3")
+	sha3Hash := computeClientConfigHash(configs)
+
+	assert.Len(t, sha256Hash, 16)
+	assert.Len(t, sha3Hash, 16)
+	assert.NotEqual(t, sha256Hash, sha3Hash, "SHA-256 and SHA-3 should produce different config hashes")
+
+	// Deterministic
+	sha3Hash2 := computeClientConfigHash(configs)
+	assert.Equal(t, sha3Hash, sha3Hash2)
+
+	// Empty configs should return empty regardless of algorithm
+	assert.Equal(t, "", computeClientConfigHash(nil))
+	assert.Equal(t, "", computeClientConfigHash([]*ClientConfig{}))
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+}
+
+func TestComputeConfigHashFromConfigsWithSHA3(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	configs := map[string]*storedConfig{
+		"id-1": {ConfigID: "id-1", ConfigType: "persistent", Payload: []byte(`{"a":"b"}`)},
+		"id-2": {ConfigID: "id-2", ConfigType: "one_time", Payload: []byte(`{"c":"d"}`)},
+	}
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+	sha256Hash := computeConfigHashFromConfigs(configs)
+
+	params.Save("common.security.hashAlgorithm", "sha3")
+	sha3Hash := computeConfigHashFromConfigs(configs)
+
+	assert.Len(t, sha256Hash, 16)
+	assert.Len(t, sha3Hash, 16)
+	assert.NotEqual(t, sha256Hash, sha3Hash, "SHA-256 and SHA-3 should produce different hashes")
+
+	// Deterministic
+	sha3Hash2 := computeConfigHashFromConfigs(configs)
+	assert.Equal(t, sha3Hash, sha3Hash2)
+
+	// Empty
+	assert.Equal(t, "", computeConfigHashFromConfigs(nil))
+	assert.Equal(t, "", computeConfigHashFromConfigs(map[string]*storedConfig{}))
+
+	params.Save("common.security.hashAlgorithm", "sha256")
+}
+
+func TestHashAlgorithmSwitchDuringHeartbeat(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save("common.security.hashAlgorithm", "sha256")
+
+	mgr := NewTelemetryManager(nil)
+
+	info := &commonpb.ClientInfo{
+		Host:       "10.0.0.5",
+		SdkType:    "go",
+		SdkVersion: "2.6.0",
+		User:       "admin",
+	}
+
+	// Heartbeat with SHA-256
+	resp1, err := mgr.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{ClientInfo: info})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp1)
+
+	// Switch to SHA-3 mid-flight
+	params.Save("common.security.hashAlgorithm", "sha3")
+
+	resp2, err := mgr.HandleHeartbeat(&milvuspb.ClientHeartbeatRequest{ClientInfo: info})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp2)
+
+	params.Save("common.security.hashAlgorithm", "sha256")
 }
