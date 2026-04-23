@@ -793,6 +793,226 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("vector_type,index_type,metric_type", [
+        (DataType.BINARY_VECTOR, "BIN_FLAT", "HAMMING"),
+        (DataType.BINARY_VECTOR, "BIN_IVF_FLAT", "JACCARD"),
+        (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_INVERTED_INDEX", "IP"),
+        (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_WAND", "IP"),
+        (DataType.FLOAT16_VECTOR, "HNSW", "L2"),
+        (DataType.FLOAT16_VECTOR, "IVF_FLAT", "COSINE"),
+        (DataType.BFLOAT16_VECTOR, "HNSW", "IP"),
+        (DataType.BFLOAT16_VECTOR, "IVF_FLAT", "COSINE"),
+        (DataType.INT8_VECTOR, "HNSW", "COSINE"),
+        (DataType.INT8_VECTOR, "HNSW", "L2"),
+    ])
+    def test_milvus_client_add_vector_field_all_types(self, vector_type, index_type, metric_type):
+        """
+        target: test add nullable vector field for BINARY/SPARSE/FLOAT16/BFLOAT16/INT8 vector types
+        method:
+            1. create collection with base FLOAT_VECTOR field
+            2. insert basic data (base field only)
+            3. add new nullable vector field of the parametrized type
+            4. insert mixed null/non-null vectors for the new field
+            5. verify search on new field fails before indexing (not loaded)
+            6. verify load fails without index, then create index and reload
+            7. search on new field succeeds
+            8. verify null vectors return empty search-by-id result (dense types only)
+        expected: CRUD and search succeed for all supported vector types
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        base_dim = 32
+        pk_name = default_primary_key_field_name
+        base_vec_field = "embeddings"
+        new_vec_field = "embeddings_new"
+        is_sparse = (vector_type == DataType.SPARSE_FLOAT_VECTOR)
+        new_dim = None if is_sparse else base_dim
+        # sparse gen_vectors uses dim as the upper bound of sparse indices
+        search_dim = ct.default_dim if is_sparse else new_dim
+
+        # 1. create collection with base FLOAT_VECTOR
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(pk_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(base_vec_field, DataType.FLOAT_VECTOR, dim=base_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(base_vec_field, index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=base_dim, schema=schema, index_params=index_params)
+
+        # 2. insert basic data (base field only, no new field yet)
+        basic_rows = cf.gen_row_data_by_schema(nb=ct.default_nb // 2, schema=schema)
+        self.insert(client, collection_name, basic_rows)
+
+        # 3. add new nullable vector field of the parametrized type
+        add_kwargs = dict(field_name=new_vec_field, data_type=vector_type, nullable=True)
+        if not is_sparse:
+            add_kwargs["dim"] = new_dim
+        self.add_collection_field(client, collection_name, **add_kwargs)
+
+        # 4. insert mixed null/non-null vectors for new field
+        half_nb = ct.default_nb // 2
+        new_rows = []
+        for i in range(half_nb):
+            vec_val = None if i % 2 == 0 else cf.gen_vectors(1, search_dim, vector_data_type=vector_type)[0]
+            new_rows.append({
+                pk_name: i + half_nb,
+                base_vec_field: cf.gen_vectors(1, base_dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                new_vec_field: vec_val,
+            })
+        self.insert(client, collection_name, new_rows)
+
+        # 5. verify search on new field fails before indexing (field not loaded)
+        search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"field {new_vec_field} is not loaded, please reload the collection"}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field,
+                    limit=ct.default_limit, check_task=CheckTasks.err_res, check_items=error)
+
+        # 6. release → verify load fails without index → create index → reload
+        self.release_collection(client, collection_name)
+        error = {ct.err_code: 999,
+                 ct.err_msg: f"there is no vector index on field: [{new_vec_field}], please create index first"}
+        self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
+        new_index_params = self.prepare_index_params(client)[0]
+        new_index_params.add_index(new_vec_field, index_type=index_type, metric_type=metric_type)
+        self.create_index(client, collection_name, new_index_params)
+        self.load_collection(client, collection_name)
+
+        # 7. search on new indexed field succeeds
+        search_params = ct.default_sparse_search_params if is_sparse else {}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field,
+                    limit=ct.default_limit, search_params=search_params,
+                    consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "pk_name": pk_name})
+
+        # 8. null vectors must return empty result via search-by-id (dense types only;
+        #    sparse search-by-id with null vectors is covered by test_search_by_pk_nullable_vector_field)
+        if not is_sparse:
+            # basic rows (pk 0..half_nb-1) are backfilled null for the new field
+            null_pks = [0]
+            # new_rows: null when i%2==0, non-null when i%2==1; pk = half_nb + i
+            non_null_pks = [half_nb + i for i in range(1, half_nb, 2)][:3]
+            res = self.search(client, collection_name, ids=null_pks,
+                              anns_field=new_vec_field, limit=ct.default_limit)[0]
+            assert len(res) == len(null_pks)
+            assert all(len(r) == 0 for r in res), "null vector must return empty search result"
+            res = self.search(client, collection_name, ids=non_null_pks,
+                              anns_field=new_vec_field, limit=ct.default_limit)[0]
+            assert len(res) == len(non_null_pks)
+            assert all(len(r) > 0 for r in res), "non-null vector must return non-empty search result"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("insert_order", ["insert_before_index", "index_before_insert"])
+    @pytest.mark.parametrize("vector_type,index_type,metric_type", [
+        (DataType.BINARY_VECTOR, "BIN_FLAT", "HAMMING"),
+        (DataType.SPARSE_FLOAT_VECTOR, "SPARSE_INVERTED_INDEX", "IP"),
+        (DataType.FLOAT16_VECTOR, "HNSW", "L2"),
+        (DataType.BFLOAT16_VECTOR, "HNSW", "IP"),
+        (DataType.INT8_VECTOR, "HNSW", "COSINE"),
+    ])
+    def test_milvus_client_add_vector_field_index_insert_order(self, vector_type, index_type, metric_type,
+                                                               insert_order):
+        """
+        target: test add nullable vector field with different orderings of add_field, create_index, and insert
+        method:
+            insert_before_index — add_field → insert(null/non-null) → flush →
+                                  create_index → wait_ready → release → load → search
+            index_before_insert — add_field → create_index → wait_ready →
+                                  insert(null/non-null) → flush → release → load → search
+        expected: search on the newly added field succeeds regardless of the ordering, and the
+                  base vector field search is unaffected
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        base_dim = 32
+        pk_name = default_primary_key_field_name
+        base_vec_field = "embeddings"
+        new_vec_field = "embeddings_new"
+        is_sparse = (vector_type == DataType.SPARSE_FLOAT_VECTOR)
+        new_dim = None if is_sparse else base_dim
+        search_dim = ct.default_dim if is_sparse else new_dim
+
+        # 1. create collection with base FLOAT_VECTOR (auto-loaded via index_params)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(pk_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(base_vec_field, DataType.FLOAT_VECTOR, dim=base_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(base_vec_field, index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=base_dim, schema=schema, index_params=index_params)
+
+        # 2. insert pre-existing data (base field only, before add_field)
+        basic_rows = cf.gen_row_data_by_schema(nb=ct.default_nb // 2, schema=schema)
+        self.insert(client, collection_name, basic_rows)
+
+        # 3. add new nullable vector field
+        add_kwargs = dict(field_name=new_vec_field, data_type=vector_type, nullable=True)
+        if not is_sparse:
+            add_kwargs["dim"] = new_dim
+        self.add_collection_field(client, collection_name, **add_kwargs)
+
+        def gen_new_rows(start_pk, nb):
+            rows = []
+            for i in range(nb):
+                vec_val = (None if i % 2 == 0
+                           else cf.gen_vectors(1, search_dim, vector_data_type=vector_type)[0])
+                rows.append({
+                    pk_name: start_pk + i,
+                    base_vec_field: cf.gen_vectors(1, base_dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                    new_vec_field: vec_val,
+                })
+            return rows
+
+        new_index_params = self.prepare_index_params(client)[0]
+        new_index_params.add_index(new_vec_field, index_type=index_type, metric_type=metric_type)
+        half_nb = ct.default_nb // 2
+
+        if insert_order == "insert_before_index":
+            # add_field → insert → create_index → reload
+            new_rows = gen_new_rows(half_nb, half_nb)
+            self.insert(client, collection_name, new_rows)
+            self.create_index(client, collection_name, new_index_params)
+            self.wait_for_index_ready(client, collection_name, new_vec_field)
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+
+        else:  # "index_before_insert": add_field → create_index → insert → reload
+            self.create_index(client, collection_name, new_index_params)
+            self.wait_for_index_ready(client, collection_name, new_vec_field)
+            new_rows = gen_new_rows(half_nb, half_nb)
+            self.insert(client, collection_name, new_rows)
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+
+        # 4. search on the new vector field must succeed
+        search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
+        search_params = ct.default_sparse_search_params if is_sparse else {}
+        self.search(client, collection_name, search_vecs, anns_field=new_vec_field,
+                    limit=ct.default_limit, search_params=search_params,
+                    consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "pk_name": pk_name})
+
+        # 5. base vector field search must remain unaffected
+        base_vecs = cf.gen_vectors(ct.default_nq, base_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, base_vecs, anns_field=base_vec_field,
+                    limit=ct.default_limit, consistency_level=CONSISTENCY_STRONG,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "pk_name": pk_name})
+
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
     """Test invalid cases for add field feature"""
@@ -1022,54 +1242,46 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_add_field_with_reranker_unsupported(self):
+    def test_milvus_client_add_field_used_as_decay_reranker_input(self):
         """
-        target: test that add_collection_field and decay ranker combination is not supported
-        method: create collection without reranker field, add nullable reranker field via add_collection_field,
-                then try to use it with decay ranker
-        expected: raise exception because decay ranker requires non-nullable fields but add_collection_field
-                 only supports nullable fields, creating a technical limitation
+        target: verify a nullable field added via add_collection_field can be used
+                as the input field of a decay reranker in search
+        method: create collection without reranker field, add nullable INT64 field
+                via add_collection_field, then search with decay reranker referencing it
+        expected: search succeeds
+        note: PR #47919 removed the "Function input field cannot be nullable" Go-side
+              validation, but segcore still hits an assertion (offset out of range)
+              when the reranker reads the newly added nullable field. Tracked as a
+              separate kernel bug; this test guards the intended behavior.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 8
 
-        # 1. create collection WITHOUT reranker field initially
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
-        # Note: NO reranker field here - we'll try to add it later via add_collection_field
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
 
-        # 2. insert initial data WITHOUT reranker field
         vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i)} for i in range(default_nb)]
-        results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
+        self.insert(client, collection_name, rows)
 
-        # 3. Try to add nullable reranker field via add_collection_field (nullable must be True)
-        # This will succeed in adding the field, but then we'll test if it can work with decay reranker
-        # The conflict: add_collection_field only supports nullable fields, but decay reranker needs non-nullable fields
         self.add_collection_field(client, collection_name, field_name=ct.default_reranker_field_name,
                                   data_type=DataType.INT64, nullable=True, default_value=0)
 
-        # 4. Insert data with the newly added reranker field
-        # Generate new vectors for the second batch of data
         vectors_batch2 = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
         rows_with_reranker = [
             {default_primary_key_field_name: i, default_vector_field_name: vectors_batch2[i - default_nb],
              default_string_field_name: str(i), ct.default_reranker_field_name: i}
             for i in range(default_nb, default_nb * 2)]
-        results = self.insert(client, collection_name, rows_with_reranker)[0]
-        assert results['insert_count'] == default_nb
+        self.insert(client, collection_name, rows_with_reranker)
 
-        # 5. Try to use the nullable reranker field with decay reranker
-        # This should fail because decay reranker requires non-nullable fields for proper functionality
         from pymilvus import Function, FunctionType
         my_rerank_fn = Function(
             name="my_reranker",
@@ -1085,6 +1297,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
             }
         )
 
-        error = {ct.err_code: 65535, ct.err_msg: "function input field cannot be nullable: field reranker_field"}
         self.search(client, collection_name, [vectors[0]], ranker=my_rerank_fn,
-                    check_task=CheckTasks.err_res, check_items=error)
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": ct.default_limit,
+                                 "pk_name": default_primary_key_field_name})
