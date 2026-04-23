@@ -325,28 +325,37 @@ AsyncSearch(CTraceContext c_trace,
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
+            AssertInfo(phg_ptr != nullptr && !phg_ptr->empty(),
+                       "search requires non-empty placeholder group");
+            const int64_t num_queries = milvus::query::GetNumOfQueries(phg_ptr);
+            auto target_vector_field_id =
+                plan->plan_node_->search_info_.field_id_;
 
-            segment->LazyCheckSchema(plan->schema_);
-
-            auto search_result = segment->Search(plan,
-                                                 phg_ptr,
-                                                 timestamp,
-                                                 cancel_token,
-                                                 consistency_level,
-                                                 collection_ttl,
-                                                 entity_ttl_physical_time_us,
-                                                 filter_only);
-            if (!filter_only &&
+            segment->LazyCheckSchema(plan->schema_);    
+            std::unique_ptr<milvus::SearchResult> ret;
+            if (!segment->FieldAccessable(target_vector_field_id)) {
+                ret = std::make_unique<milvus::SearchResult>(
+                    milvus::make_empty_search_result(num_queries));
+            } else {
+                ret = segment->Search(plan,
+                                      phg_ptr,
+                                      timestamp,
+                                      cancel_token,
+                                      consistency_level,
+                                      collection_ttl,
+                                      entity_ttl_physical_time_us,
+                                      filter_only);
+            }
+            if (!filter_only && 
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
-                for (auto& dis : search_result->distances_) {
+                for (auto& dis : ret->distances_) {
                     dis *= -1;
                 }
             }
             span->End();
             milvus::tracer::CloseRootSpan();
-
-            return search_result.release();
+            return ret.release();
         });
 
     return static_cast<CFuture*>(static_cast<void*>(

@@ -20,6 +20,7 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strconv"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -81,6 +83,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
+	UpdateIndex(ctx context.Context, indexInfo *indexpb.IndexInfo) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -113,6 +116,22 @@ type ShardDelegator interface {
 	CatchingUpStreamingData() bool
 	Start()
 	Close()
+}
+
+// functionState holds immutable snapshots of function runners and their metadata.
+// Stored via atomic.Pointer on shardDelegator for lock-free reads on search hot path.
+type functionState struct {
+	runners   map[UniqueID]function.FunctionRunner
+	fieldType map[UniqueID]schemapb.FunctionType
+	analyzers map[UniqueID]function.Analyzer
+}
+
+func newFunctionState() *functionState {
+	return &functionState{
+		runners:   make(map[UniqueID]function.FunctionRunner),
+		fieldType: make(map[UniqueID]schemapb.FunctionType),
+		analyzers: make(map[UniqueID]function.Analyzer),
+	}
 }
 
 var _ ShardDelegator = (*shardDelegator)(nil)
@@ -154,14 +173,10 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	// outputFieldId -> functionRunner map for search function field
-	functionRunners map[UniqueID]function.FunctionRunner
-
-	// outputFieldId -> function type map
-	functionFieldType map[UniqueID]schemapb.FunctionType
-
-	// analyzerFieldID -> analyzerRunner map for run analyzer.
-	analyzerRunners map[UniqueID]function.Analyzer
+	// funcState holds function runners, field types, and analyzers.
+	// Accessed via atomic.Pointer for lock-free reads on the search hot path.
+	// Writers (updateBM25Functions) build a new snapshot and atomically swap.
+	funcState atomic.Pointer[functionState]
 
 	// current forward policy
 	l0ForwardPolicy string
@@ -336,7 +351,8 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
+	fs := sd.funcState.Load()
+	if fs.fieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
 		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
 			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 		}
@@ -350,7 +366,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
 			return []*internalpb.SearchResults{}, nil
 		}
-	} else if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_MinHash {
+	} else if fs.fieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_MinHash {
 		if req.GetReq().GetMetricType() != metric.MHJACCARD && req.GetReq().GetMetricType() != metric.EMPTY {
 			return nil, merr.WrapErrParameterInvalid("MHJACCARD", req.GetReq().GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
 		}
@@ -1193,6 +1209,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		zap.Int("growingNum", len(growing)),
 	)
 
+	// Update BM25 functions if there are new BM25 output fields
+	sd.updateBM25Functions(schema, ctx)
+
 	tasks, err := organizeSubTask(ctx, &querypb.UpdateSchemaRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -1223,6 +1242,140 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	return err
 }
 
+func (sd *shardDelegator) UpdateIndex(ctx context.Context, indexInfo *indexpb.IndexInfo) error {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	log.Info("delegator received update index event",
+		zap.Int64("collectionID", indexInfo.GetCollectionID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
+		zap.String("indexName", indexInfo.GetIndexName()))
+
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+	defer sd.distribution.Unpin(version)
+
+	log.Info("update index targets...",
+		zap.Int("sealedNum", len(sealed)),
+		zap.Int("growingNum", len(growing)),
+	)
+
+	tasks, err := organizeSubTask(ctx, &querypb.UpdateIndexRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID: indexInfo.GetCollectionID(),
+		Action:       &querypb.UpdateIndexRequest_Action{Op: &querypb.UpdateIndexRequest_Action_AddIndexRequest{AddIndexRequest: &querypb.UpdateIndexRequest_AddIndex{IndexInfo: indexInfo}}},
+	},
+		sealed,
+		growing,
+		sd,
+		false, // don't skip empty
+		func(req *querypb.UpdateIndexRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateIndexRequest {
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = targetID
+			return nodeReq
+		})
+	if err != nil {
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateIndexRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		status, err := worker.UpdateIndex(ctx, req)
+		return (*StatusWrapper)(status), err
+	}, "UpdateIndex", log)
+
+	return err
+}
+
+// updateBM25Functions updates BM25-related runners and IDF oracle based on schema diff
+func (sd *shardDelegator) updateBM25Functions(newSchema *schemapb.CollectionSchema, ctx context.Context) {
+	log := sd.getLogger(ctx)
+	// Get current schema
+	currentSchema := sd.collection.Schema()
+	if currentSchema == nil {
+		log.Warn("current schema is nil, skip BM25 functions update")
+		return
+	}
+
+	// Calculate diff: find new BM25 functions in newSchema that don't exist in currentSchema
+	currentFunctions := currentSchema.GetFunctions()
+	currentOutputFieldSet := make(map[int64]bool)
+	for _, tf := range currentFunctions {
+		if tf.GetType() == schemapb.FunctionType_BM25 && len(tf.GetOutputFieldIds()) > 0 {
+			currentOutputFieldSet[tf.GetOutputFieldIds()[0]] = true
+		}
+	}
+
+	newFunctions := newSchema.GetFunctions()
+	diffFunctions := make([]*schemapb.FunctionSchema, 0)
+	for _, tf := range newFunctions {
+		if tf.GetType() == schemapb.FunctionType_BM25 && len(tf.GetOutputFieldIds()) > 0 {
+			outputFieldID := tf.GetOutputFieldIds()[0]
+			// Only add if it's a new BM25 output field
+			if !currentOutputFieldSet[outputFieldID] {
+				diffFunctions = append(diffFunctions, tf)
+			}
+		}
+	}
+
+	// If there are new BM25 functions, build a new snapshot and atomic swap
+	if len(diffFunctions) > 0 {
+		log.Info("found new BM25 functions, updating runners",
+			zap.Int("newFunctionsCount", len(diffFunctions)))
+
+		old := sd.funcState.Load()
+		fs := &functionState{
+			runners:   maps.Clone(old.runners),
+			fieldType: maps.Clone(old.fieldType),
+			analyzers: maps.Clone(old.analyzers),
+		}
+
+		for _, tf := range diffFunctions {
+			if len(tf.GetOutputFieldIds()) == 0 || len(tf.GetInputFieldIds()) == 0 {
+				log.Warn("BM25 function missing output or input field IDs, skip",
+					zap.Any("function", tf))
+				continue
+			}
+
+			functionRunner, err := function.NewFunctionRunner(newSchema, tf)
+			if err != nil {
+				log.Warn("failed to create function runner for BM25 function",
+					zap.Error(err),
+					zap.Int64("outputFieldID", tf.GetOutputFieldIds()[0]))
+				continue
+			}
+
+			outputFieldID := tf.GetOutputFieldIds()[0]
+			inputFieldID := tf.GetInputFieldIds()[0]
+
+			fs.runners[outputFieldID] = functionRunner
+			fs.analyzers[inputFieldID] = functionRunner.(function.Analyzer)
+			fs.fieldType[outputFieldID] = schemapb.FunctionType_BM25
+
+			log.Info("updated BM25 function runner",
+				zap.Int64("outputFieldID", outputFieldID),
+				zap.Int64("inputFieldID", inputFieldID))
+		}
+
+		sd.funcState.Store(fs)
+
+		// Update IDF oracle if it's nil
+		if sd.idfOracle == nil {
+			log.Info("creating new IDF oracle for BM25 functions")
+			sd.idfOracle = NewIDFOracle(sd.vchannelName, newSchema.GetFunctions())
+			sd.distribution.SetIDFOracle(sd.idfOracle)
+			sd.idfOracle.Start()
+		} else {
+			// Update existing IDF oracle with new functions
+			sd.idfOracle.UpdateCurrent(newSchema.GetFunctions())
+			log.Info("updated existing IDF oracle with new functions")
+		}
+	}
+}
+
 type StatusWrapper commonpb.Status
 
 func (w *StatusWrapper) GetStatus() *commonpb.Status {
@@ -1249,9 +1402,9 @@ func (sd *shardDelegator) Close() {
 		sd.idfOracle.Close()
 	}
 
-	if sd.functionRunners != nil {
-		for _, function := range sd.functionRunners {
-			function.Close()
+	if fs := sd.funcState.Load(); fs != nil {
+		for _, runner := range fs.runners {
+			runner.Close()
 		}
 	}
 
@@ -1354,14 +1507,13 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:               chunkManager,
 		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments:           excludedSegments,
-		functionRunners:            make(map[int64]function.FunctionRunner),
-		analyzerRunners:            make(map[UniqueID]function.Analyzer),
-		functionFieldType:          make(map[int64]schemapb.FunctionType),
 		l0ForwardPolicy:            policy,
 		catchingUpStreamingData:    atomic.NewBool(true),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
+	// Build initial function state snapshot
+	fs := newFunctionState()
 	hasBM25Field := false
 	for _, tf := range collection.Schema().GetFunctions() {
 		if tf.GetType() == schemapb.FunctionType_BM25 {
@@ -1369,33 +1521,31 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 			if err != nil {
 				return nil, err
 			}
-			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
-			// bm25 input field could use same runner between function and analyzer.
-			sd.analyzerRunners[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
-			if tf.GetType() == schemapb.FunctionType_BM25 {
-				sd.functionFieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_BM25
-			}
+			fs.runners[tf.OutputFieldIds[0]] = functionRunner
+			fs.analyzers[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
+			fs.fieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_BM25
 			hasBM25Field = true
 		} else if tf.GetType() == schemapb.FunctionType_MinHash {
 			functionRunner, err := function.NewFunctionRunner(collection.Schema(), tf)
 			if err != nil {
 				return nil, err
 			}
-			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
-			sd.functionFieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_MinHash
+			fs.runners[tf.OutputFieldIds[0]] = functionRunner
+			fs.fieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_MinHash
 		}
 	}
 
 	for _, field := range collection.Schema().GetFields() {
 		helper := typeutil.CreateFieldSchemaHelper(field)
-		if helper.EnableAnalyzer() && sd.analyzerRunners[field.GetFieldID()] == nil {
+		if helper.EnableAnalyzer() && fs.analyzers[field.GetFieldID()] == nil {
 			analyzerRunner, err := function.NewAnalyzerRunner(field)
 			if err != nil {
 				return nil, err
 			}
-			sd.analyzerRunners[field.GetFieldID()] = analyzerRunner
+			fs.analyzers[field.GetFieldID()] = analyzerRunner
 		}
 	}
+	sd.funcState.Store(fs)
 
 	if hasBM25Field {
 		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
@@ -1409,7 +1559,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
+	analyzer, ok := sd.funcState.Load().analyzers[req.GetFieldId()]
 	if !ok {
 		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
 	}

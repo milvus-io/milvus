@@ -3,9 +3,12 @@
 package segments
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	mock "github.com/stretchr/testify/mock"
+
+	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 
 	segcorepb "github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 )
@@ -21,6 +24,53 @@ type MockCollectionManager_Expecter struct {
 
 func (_m *MockCollectionManager) EXPECT() *MockCollectionManager_Expecter {
 	return &MockCollectionManager_Expecter{mock: &_m.Mock}
+}
+
+// AppendIndexMeta provides a mock function with given fields: collectionID, indexInfo
+func (_m *MockCollectionManager) AppendIndexMeta(collectionID int64, indexInfo *indexpb.IndexInfo) error {
+	ret := _m.Called(collectionID, indexInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AppendIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *indexpb.IndexInfo) error); ok {
+		r0 = rf(collectionID, indexInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_AppendIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendIndexMeta'
+type MockCollectionManager_AppendIndexMeta_Call struct {
+	*mock.Call
+}
+
+// AppendIndexMeta is a helper method to define mock.On call
+//   - collectionID int64
+//   - indexInfo *indexpb.IndexInfo
+func (_e *MockCollectionManager_Expecter) AppendIndexMeta(collectionID interface{}, indexInfo interface{}) *MockCollectionManager_AppendIndexMeta_Call {
+	return &MockCollectionManager_AppendIndexMeta_Call{Call: _e.mock.On("AppendIndexMeta", collectionID, indexInfo)}
+}
+
+func (_c *MockCollectionManager_AppendIndexMeta_Call) Run(run func(collectionID int64, indexInfo *indexpb.IndexInfo)) *MockCollectionManager_AppendIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*indexpb.IndexInfo))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_AppendIndexMeta_Call) Return(_a0 error) *MockCollectionManager_AppendIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_AppendIndexMeta_Call) RunAndReturn(run func(int64, *indexpb.IndexInfo) error) *MockCollectionManager_AppendIndexMeta_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // Get provides a mock function with given fields: collectionID
@@ -304,6 +354,53 @@ func (_c *MockCollectionManager_Unref_Call) Return(_a0 bool) *MockCollectionMana
 }
 
 func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32) bool) *MockCollectionManager_Unref_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateIndex provides a mock function with given fields: collectionID, req
+func (_m *MockCollectionManager) UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) error {
+	ret := _m.Called(collectionID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *querypb.UpdateIndexRequest) error); ok {
+		r0 = rf(collectionID, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockCollectionManager_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - collectionID int64
+//   - req *querypb.UpdateIndexRequest
+func (_e *MockCollectionManager_Expecter) UpdateIndex(collectionID interface{}, req interface{}) *MockCollectionManager_UpdateIndex_Call {
+	return &MockCollectionManager_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", collectionID, req)}
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) Run(run func(collectionID int64, req *querypb.UpdateIndexRequest)) *MockCollectionManager_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*querypb.UpdateIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) Return(_a0 error) *MockCollectionManager_UpdateIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndex_Call) RunAndReturn(run func(int64, *querypb.UpdateIndexRequest) error) *MockCollectionManager_UpdateIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -442,6 +442,22 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	return nil
 }
 
+// loadBackfillBM25Stats loads BM25 stats for newly backfilled fields during Reopen.
+// Delegates to idfOracle.LoadBackfillFields which handles download, field-level
+// idempotency, and current stats update.
+func (sd *shardDelegator) loadBackfillBM25Stats(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
+	if sd.idfOracle == nil {
+		return nil
+	}
+
+	for _, info := range req.GetInfos() {
+		if err := sd.idfOracle.LoadBackfillFields(ctx, info.GetSegmentID(), info, sd.chunkManager); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // LoadSegments load segments local or remotely depends on the target node.
 func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	if len(req.GetInfos()) == 0 {
@@ -520,8 +536,14 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	log.Debug("work loads segments done")
 
 	// load index segment need no stream delete and distribution change
-	if req.GetLoadScope() == querypb.LoadScope_Index || req.GetLoadScope() == querypb.LoadScope_Reopen {
+	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return nil
+	}
+
+	// Reopen: after backfill compaction + index build, load any new BM25 stats
+	// into the IDFOracle before returning. No distribution update needed.
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		return sd.loadBackfillBM25Stats(ctx, req)
 	}
 
 	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
@@ -1082,7 +1104,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
+	functionRunner, ok := sd.funcState.Load().runners[req.GetFieldId()]
 	if !ok {
 		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
@@ -1151,7 +1173,7 @@ func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 
 	texts := funcutil.GetVarCharFromPlaceholder(holder)
 	datas := []any{texts}
-	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
+	functionRunner, ok := sd.funcState.Load().runners[req.GetFieldId()]
 	if !ok {
 		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
@@ -1202,7 +1224,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
 			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
-		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
+		analyzer, ok := sd.funcState.Load().analyzers[task.GetFieldId()]
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
 		}

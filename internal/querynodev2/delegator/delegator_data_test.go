@@ -1152,9 +1152,9 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
+		oldState := s.delegator.funcState.Load()
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		s.delegator.funcState.Store(&functionState{runners: map[int64]function.FunctionRunner{101: mockRunner}, fieldType: make(map[int64]schemapb.FunctionType), analyzers: make(map[int64]function.Analyzer)})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1164,7 +1164,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
 		defer func() {
-			s.delegator.functionRunners = oldRunner
+			s.delegator.funcState.Store(oldState)
 		}()
 
 		req := &internalpb.SearchRequest{
@@ -1179,9 +1179,9 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
+		oldState := s.delegator.funcState.Load()
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		s.delegator.funcState.Store(&functionState{runners: map[int64]function.FunctionRunner{101: mockRunner}, fieldType: make(map[int64]schemapb.FunctionType), analyzers: make(map[int64]function.Analyzer)})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1191,7 +1191,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
 		defer func() {
-			s.delegator.functionRunners = oldRunner
+			s.delegator.funcState.Store(oldState)
 		}()
 
 		req := &internalpb.SearchRequest{
@@ -1206,9 +1206,9 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
+		oldState := s.delegator.funcState.Load()
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
+		s.delegator.funcState.Store(&functionState{runners: map[int64]function.FunctionRunner{103: mockRunner}, fieldType: make(map[int64]schemapb.FunctionType), analyzers: make(map[int64]function.Analyzer)})
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1218,7 +1218,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
 		defer func() {
-			s.delegator.functionRunners = oldRunner
+			s.delegator.funcState.Store(oldState)
 		}()
 
 		req := &internalpb.SearchRequest{

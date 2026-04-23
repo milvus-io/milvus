@@ -5,6 +5,7 @@ package delegator
 import (
 	context "context"
 
+	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
@@ -1406,6 +1407,54 @@ func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Co
 	_c.Call.Return(run)
 	return _c
 }
+
+// UpdateIndex provides a mock function with given fields: ctx, indexInfo
+func (_m *MockShardDelegator) UpdateIndex(ctx context.Context, indexInfo *indexpb.IndexInfo) error {
+	ret := _m.Called(ctx, indexInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.IndexInfo) error); ok {
+		r0 = rf(ctx, indexInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockShardDelegator_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - indexInfo *indexpb.IndexInfo
+func (_e *MockShardDelegator_Expecter) UpdateIndex(ctx interface{}, indexInfo interface{}) *MockShardDelegator_UpdateIndex_Call {
+	return &MockShardDelegator_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", ctx, indexInfo)}
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) Run(run func(ctx context.Context, indexInfo *indexpb.IndexInfo)) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.IndexInfo))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) Return(_a0 error) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndex_Call) RunAndReturn(run func(context.Context, *indexpb.IndexInfo) error) *MockShardDelegator_UpdateIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 
 // UpdateTSafe provides a mock function with given fields: ts
 func (_m *MockShardDelegator) UpdateTSafe(ts uint64) {

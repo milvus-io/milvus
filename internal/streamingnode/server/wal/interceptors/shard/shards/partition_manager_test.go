@@ -119,7 +119,7 @@ func TestPartitionManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
-	})
+	}, 0)
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, ErrFencedAssign)
 
@@ -129,7 +129,7 @@ func TestPartitionManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
-	})
+	}, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
@@ -141,19 +141,19 @@ func TestPartitionManager(t *testing.T) {
 		},
 	}
 
-	result, _ = m.AssignSegment(req)
+	result, _ = m.AssignSegment(req, 0)
 	result.Ack()
-	_, err = m.AssignSegment(req)
+	_, err = m.AssignSegment(req, 0)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 
 	<-createSegmentDone
 	// should ready
 	<-m.WaitPendingGrowingSegmentReady()
 
-	_, err = m.AssignSegment(req)
+	_, err = m.AssignSegment(req, 0)
 	assert.ErrorIs(t, err, ErrTimeTickTooOld)
 	req.TimeTick = 210
-	result, err = m.AssignSegment(req)
+	result, err = m.AssignSegment(req, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
@@ -171,12 +171,12 @@ func TestPartitionManager(t *testing.T) {
 	segmentIDs := m.FlushAndFenceSegmentUntil(250)
 	assert.Len(t, segmentIDs, 2)
 
-	_, err = m.AssignSegment(req)
+	_, err = m.AssignSegment(req, 0)
 	assert.ErrorIs(t, err, ErrFencedAssign)
 
 	req.TimeTick = 260
 	msgTimeTick = 300
-	_, err = m.AssignSegment(req)
+	_, err = m.AssignSegment(req, 0)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 
 	<-createSegmentDone

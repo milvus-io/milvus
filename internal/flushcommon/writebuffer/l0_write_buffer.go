@@ -59,13 +59,13 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 	}
 }
 
-func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
 	// buffer insert data and add segment if not exists
 	for _, inData := range insertData {
-		err := wb.bufferInsert(inData, startPos, endPos)
+		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
 		if err != nil {
 			return err
 		}
@@ -91,8 +91,8 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 }
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
-func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
+func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, schemaVersion)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
