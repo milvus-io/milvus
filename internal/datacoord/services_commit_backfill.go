@@ -218,6 +218,17 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			})
 			continue
 		}
+		// Partition-scoped backfills set PartitionID to the target partition;
+		// collection-wide backfills leave it at 0 (no check). When non-zero,
+		// rejecting a mismatching segment prevents writing metadata against
+		// the wrong partition.
+		if result.PartitionID != 0 && segInfo.GetPartitionID() != result.PartitionID {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: inferKind(&entry),
+				Reason: "segment does not belong to the result's partition",
+			})
+			continue
+		}
 		if segInfo.GetState() != commonpb.SegmentState_Flushed {
 			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 				SegmentId: segID, Ok: false, Kind: inferKind(&entry),

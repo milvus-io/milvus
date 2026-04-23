@@ -3758,6 +3758,38 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int64(100), fb.GetBinlogs()[0].GetEntriesNum())
 	})
 
+	// Partition-scoped backfill: result.PartitionID != 0 and segment belongs
+	// to a different partition -> rejected.
+	t.Run("wrong_partition_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 401, CollectionID: 100, PartitionID: 999,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/401", 1),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "partitionId": 42,
+          "segments": {
+            "401": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "does not belong to the result's partition")
+	})
+
 	// V3 entry pointing at a segment whose actual storage version is V2 must
 	// be rejected: UpdateManifestVersion would no-op and the caller would see
 	// a fake committed=true.

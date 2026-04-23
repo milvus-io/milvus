@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	gojson "encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -808,6 +809,30 @@ func (s *ProxyManagementSuite) TestCommitBackfillResult() {
 
 		s.Equal(http.StatusInternalServerError, recorder.Code)
 		s.Contains(recorder.Body.String(), "network broken")
+	})
+
+	// Error strings carrying JSON-special characters (quotes, backslashes)
+	// must not break the response envelope — the body must remain valid JSON.
+	s.Run("error_with_json_special_chars_stays_valid_json", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().CommitBackfillResult(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *datapb.CommitBackfillResultRequest, options ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+				return nil, errors.New(`boom "quoted" \and\ slashed`)
+			})
+
+		req, err := http.NewRequest(http.MethodGet,
+			management.RouteCommitBackfill+"?result_path=s3a%3A%2F%2Fbkt%2Ffoo.json", nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.CommitBackfillResult(recorder, req)
+
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+		var payload map[string]interface{}
+		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload),
+			"response body must remain valid JSON, got: %s", recorder.Body.String())
+		s.Contains(payload["msg"].(string), `boom "quoted" \and\ slashed`)
 	})
 
 	s.Run("downstream_status_error", func() {

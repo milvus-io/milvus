@@ -148,6 +148,11 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		if _, dup := out[fid]; dup {
 			return nil, errors.Newf("duplicate column group for field %d", fid)
 		}
+		// row_count flows into EntriesNum; non-positive values are undefined
+		// (zero collapses presence markers, negatives break accounting).
+		if g.RowCount <= 0 {
+			return nil, errors.Newf("column group for field %d has non-positive row_count %d", fid, g.RowCount)
+		}
 		avg := g.RowCount / n
 		rem := g.RowCount - avg*n
 		binlogs := make([]*datapb.Binlog, 0, n)

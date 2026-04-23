@@ -269,6 +269,19 @@ func TestBuildV2Groups(t *testing.T) {
 		assert.Contains(t, err.Error(), "no binlog files")
 	})
 
+	t.Run("rejects non-positive row_count", func(t *testing.T) {
+		for _, rc := range []int64{0, -1} {
+			seg := &BackfillSegment{
+				ColumnGroups: []BackfillV2ColumnGroup{
+					{FieldIDs: []int64{100}, BinlogFiles: []string{"x"}, RowCount: rc},
+				},
+			}
+			_, err := buildV2Groups("", seg)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "non-positive row_count")
+		}
+	})
+
 	t.Run("rejects duplicate field id groups", func(t *testing.T) {
 		seg := &BackfillSegment{
 			ColumnGroups: []BackfillV2ColumnGroup{
