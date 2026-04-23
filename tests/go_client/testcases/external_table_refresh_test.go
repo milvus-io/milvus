@@ -2771,3 +2771,109 @@ func TestExternalCollectionLoadPerfProfile(t *testing.T) {
 	t.Logf("Raw vector data: %.1f MB", float64(totalRows)*float64(vecDim)*4/1048576.0)
 	t.Logf("Estimated total row size: %d bytes (vec=%d + scalars~30)", vecDim*4+30, vecDim*4)
 }
+
+// TestRefreshExternalCollectionZeroRowParquet covers issue #49225:
+//
+// A zero-row parquet file in the external bucket previously crashed
+// datanode with "integer divide by zero" inside balanceFragmentsToSegments,
+// putting the standalone Milvus pod into CrashLoopBackOff. The fix
+// short-circuits at DataCoord.createTasksForJob, marking the refresh job
+// Failed with a non-retriable reason instead.
+//
+// Pass criteria:
+//  1. refresh_external_collection accepts the request and returns a job_id.
+//  2. The job transitions to a terminal state (Failed expected) within the
+//     poll deadline — i.e. it does NOT hang in Pending forever AND the
+//     datanode does NOT crash mid-poll.
+//  3. The Failed reason mentions zero rows so operators have actionable
+//     signal.
+func TestRefreshExternalCollectionZeroRowParquet(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible (exists=%v, err=%v), skipping",
+			minioCfg.bucket, exists, err)
+	}
+
+	collName := common.GenRandomString("ext_zero_row", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// Upload a single well-formed parquet file with zero rows.
+	data, err := generateParquetBytes(0, 0)
+	require.NoError(t, err, "generate zero-row parquet")
+	require.NotEmpty(t, data, "zero-row parquet must still be a valid file with header/footer")
+
+	objectKey := fmt.Sprintf("%s/empty.parquet", extPath)
+	_, err = minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
+		bytes.NewReader(data), int64(len(data)),
+		miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+	require.NoError(t, err, "upload zero-row parquet to MinIO")
+	t.Logf("Uploaded zero-row parquet %s/%s (%d bytes)",
+		minioCfg.bucket, objectKey, len(data))
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extPath).
+		WithExternalSpec(`{"format":"parquet"}`).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.Greater(t, refreshResult.JobID, int64(0))
+	jobID := refreshResult.JobID
+	t.Logf("Started refresh job: %d", jobID)
+
+	// Must reach a terminal state within 60s. Before the fix this loop hit
+	// the deadline because the datanode CrashLoopBackOff prevented any task
+	// from running to completion.
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var finalState entity.RefreshExternalCollectionState
+	var finalReason string
+	for done := false; !done; {
+		select {
+		case <-deadline:
+			t.Fatalf("Refresh job %d did not reach terminal state within 60s "+
+				"(zero-row parquet likely panicked datanode)", jobID)
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(jobID))
+			require.NoError(t, err)
+			t.Logf("Job %d: state=%s reason=%q", jobID, progress.State, progress.Reason)
+			if progress.State == entity.RefreshStateCompleted ||
+				progress.State == entity.RefreshStateFailed {
+				finalState = progress.State
+				finalReason = progress.Reason
+				done = true
+			}
+		}
+	}
+
+	require.Equal(t, entity.RefreshStateFailed, finalState,
+		"zero-row external source must surface as RefreshFailed, not silent Completed")
+	require.Contains(t, strings.ToLower(finalReason), "zero",
+		"failure reason should mention zero rows so operators can act; got %q", finalReason)
+}
