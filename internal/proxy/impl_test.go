@@ -2999,9 +2999,9 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cases := []struct {
-		name        string
-		src, spec   string
-		wantSubstr  string
+		name       string
+		src, spec  string
+		wantSubstr string
 	}{
 		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
 		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},

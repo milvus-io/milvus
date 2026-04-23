@@ -508,8 +508,10 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 		Fields: []*schemapb.FieldSchema{
 			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
 			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, ExternalField: "ttl"},
-			{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{
+				Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
 		},
 	}
 	schemaBytes, err := proto.Marshal(testSchema)

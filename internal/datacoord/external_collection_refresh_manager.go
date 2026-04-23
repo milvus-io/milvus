@@ -106,6 +106,12 @@ type ExternalCollectionRefreshManager interface {
 
 	// ListJobs returns jobs for the given collection, sorted by start_time descending
 	ListJobs(ctx context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error)
+
+	// GetActiveJobByCollectionID returns the in-progress (Init/InProgress/Retry)
+	// refresh job for the collection if one exists, or nil. Used by the RPC
+	// handler to surface duplicate refresh requests synchronously instead of
+	// allocating a fresh jobID that the WAL ack callback will silently drop.
+	GetActiveJobByCollectionID(collectionID int64) *datapb.ExternalCollectionRefreshJob
 }
 
 var _ ExternalCollectionRefreshManager = (*externalCollectionRefreshManager)(nil)
@@ -784,6 +790,13 @@ func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collect
 	}
 
 	return result, nil
+}
+
+// GetActiveJobByCollectionID delegates to the meta layer. The underlying meta
+// query takes the per-collection job lock, so concurrent AddJob calls observe
+// a consistent view.
+func (m *externalCollectionRefreshManager) GetActiveJobByCollectionID(collectionID int64) *datapb.ExternalCollectionRefreshJob {
+	return m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 }
 
 // exploreExternalFiles calls ExploreFiles once on DataCoord and returns the full file list.
