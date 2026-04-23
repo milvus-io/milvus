@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -300,6 +301,52 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			"non-retriable error must transition job to Failed, not leave in Init")
 		assert.Contains(t, job.GetFailReason(), "zero total rows",
 			"reason must explain why so operators can act")
+	})
+
+	t.Run("ffi_explore_error_marks_job_failed_non_retriable", func(t *testing.T) {
+		// Regression for #49233: any FFI failure during explore (NoSuchBucket,
+		// AccessDenied, DNS NXDOMAIN, malformed URI, ...) is wrapped by the
+		// loon FFI layer as ErrLoonTransient. Without classification this
+		// looped forever as RefreshPending. Treat all FFI explore failures
+		// as terminal so the job transitions to RefreshFailed and the user
+		// gets a clear signal.
+		refreshMeta := createTestRefreshMeta(t)
+		alloc := &stubAllocator{nextID: 1000}
+		scheduler := newStubScheduler()
+
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket-does-not-exist/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		})
+		mt := &meta{collections: collections}
+
+		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
+		defer mockIsExternal.UnPatch()
+
+		ffiErr := errors.Wrap(packed.ErrLoonTransient, "FFI operation failed: AWS Error NO_SUCH_BUCKET during ListObjectsV2")
+		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+			Return(nil, "", ffiErr).Build()
+		defer mockExplore.UnPatch()
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.NoError(t, err)
+
+		manager.Stop()
+
+		job := refreshMeta.GetJob(1)
+		assert.NotNil(t, job)
+		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState(),
+			"FFI explore failure must transition job to Failed, not loop in Init")
+		assert.Contains(t, job.GetFailReason(), "explore external files failed")
+		assert.Contains(t, job.GetFailReason(), "NO_SUCH_BUCKET",
+			"underlying error must be surfaced to operators")
 	})
 
 	t.Run("reject_when_active_job_exists", func(t *testing.T) {
