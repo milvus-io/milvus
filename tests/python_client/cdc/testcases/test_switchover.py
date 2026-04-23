@@ -203,7 +203,15 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     try:
                         start_id = batch_idx * 100
                         data = self.generate_test_data_with_id(100, start_id=start_id)
-                        upstream_client.insert(c_name, data)
+                        # Cap pymilvus's retry loop at 10 (default 75). A batch
+                        # that lands on the old primary after it flips to
+                        # replica returns STREAMING_CODE_REPLICATE_VIOLATION;
+                        # the default retry burns ~213 s per failed batch and
+                        # makes the thread runtime unbounded when the role flip
+                        # takes longer than one batch's cadence. 10 retries
+                        # with the decorator's 3 s backoff cap bound each
+                        # failure to ~16 s.
+                        upstream_client.insert(c_name, data, retry_times=10)
                         with lock:
                             total_inserted += 100
                         logger.info(f"[BACKGROUND] Inserted batch {batch_idx + 1}/10 (total: {total_inserted})")
@@ -220,13 +228,10 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
             logger.info("[SWITCHOVER] Initiating switchover during writes...")
             switchover_helper(target_cluster_id, source_cluster_id)
 
-            # One insert batch can stall for minutes while the switchover is in
-            # flight: pymilvus's retry_on_rpc_failure loops ~75 times (~210s
-            # cap) before giving up on STREAMING_CODE_REPLICATE_VIOLATION, and
-            # the server-side role flip is load-dependent (observed ~70 s in
-            # build #238, ~190 s in #240, ~213 s in #241). Allow 600 s for
-            # the thread to finish all 10 batches at its 2 s cadence.
-            insert_thread.join(timeout=600)
+            # With retry_times=10 each failed batch burns ~16 s (vs ~213 s with
+            # the pymilvus default of 75). Worst case: all 10 batches fail →
+            # ~10 * (16 + 2) = 180 s. 180 s gives ~6x margin.
+            insert_thread.join(timeout=180)
             assert not insert_thread.is_alive(), "Background insert thread did not finish in time"
 
             # Transient STREAMING_CODE_REPLICATE_VIOLATION failures are EXPECTED
