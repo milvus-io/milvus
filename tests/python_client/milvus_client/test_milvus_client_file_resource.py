@@ -1478,3 +1478,212 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         tokens_v2 = set(res_v2.tokens)
         all_stop = v1_only_stop | v2_only_stop
         assert not (all_stop & tokens_v2), f"All stop words (v1+v2) should be filtered after overwrite, got {tokens_v2}"
+
+
+# ---------------------------------------------------------------------------
+# A. Name / Path / Content boundary cases
+# ---------------------------------------------------------------------------
+class TestMilvusClientFileResourceNameBoundary(FileResourceTestBase):
+    """Name-dimension boundary cases.
+
+    Server has no explicit length/charset validation on resource name —
+    we verify observed behavior here (accept or reject) to lock it down.
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_name_long_255_chars(self, file_resource_env):
+        """
+        target: 255-char resource name works end to end
+        method: pad a unique prefix to exactly 255 chars -> add -> list -> remove
+        expected: no error
+        """
+        client = self._client()
+        base = cf.gen_unique_str(prefix)
+        res_name = base + "a" * (255 - len(base))
+        assert len(res_name) == 255
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        res, _ = self.list_file_resources(client)
+        assert res_name in {r.name for r in res}
+        self.remove_file_resource(client, res_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_name_special_characters(self, file_resource_env):
+        """
+        target: non-ASCII and punctuation characters accepted in resource name
+        method: add names with cn chars, dashes, dots, underscores
+        expected: each name treated as distinct, round-trip through list
+        """
+        client = self._client()
+        base = cf.gen_unique_str(prefix)
+        names = [
+            f"{base}-dash",
+            f"{base}.dot",
+            f"{base}_under",
+            f"{base}中文",
+        ]
+        for n in names:
+            self.add_file_resource(client, n, JIEBA_DICT_PATH)
+        res, _ = self.list_file_resources(client)
+        listed = {r.name for r in res}
+        for n in names:
+            assert n in listed, f"{n!r} missing from list {listed}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_name_case_sensitivity(self, file_resource_env):
+        """
+        target: resource names are case-sensitive — upper/lower treated as distinct
+        method: add `Foo` and `foo` separately, both should succeed
+        expected: both exist simultaneously in list
+        """
+        client = self._client()
+        base = cf.gen_unique_str(prefix)
+        lower = f"{base}_case"
+        upper = lower.upper()
+        assert lower != upper
+        self.add_file_resource(client, lower, JIEBA_DICT_PATH)
+        self.add_file_resource(client, upper, JIEBA_DICT_PATH)
+        res, _ = self.list_file_resources(client)
+        listed = {r.name for r in res}
+        assert lower in listed and upper in listed, f"case-sensitive names both missing, listed={listed}"
+
+
+class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
+    """Path-dimension boundary cases.
+
+    Server validates only Exist(path) on MinIO — no ../ stripping,
+    no absolute/relative rules, path is used as raw object key.
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_path_with_dotdot_rejected(self, file_resource_env):
+        """
+        target: path containing `..` is not accepted — server either returns
+                path-not-exist or MinIO rejects the literal key (400 Bad Request)
+        method: add with 'foo/../jieba/jieba_dict.txt'
+        expected: raise Exception (either "path not exist" or "IO failed")
+        """
+        client = self._client()
+        error = {ct.err_code: 1001, ct.err_msg: "IO failed"}
+        self.add_file_resource(
+            client,
+            cf.gen_unique_str(prefix),
+            "foo/../" + JIEBA_DICT_PATH,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_path_deeply_nested(self, file_resource_env):
+        """
+        target: deeply nested path works when object exists at that key
+        method: upload to nested path, add, then remove — verify round-trip
+        expected: no error
+        """
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        nested = "a/b/c/d/e/f/deep_dict.txt"
+        self._minio_objects_to_cleanup.append((bucket, nested))
+        payload = b"deeply nested word 5 n\n"
+        self._minio_client.put_object(bucket, nested, io.BytesIO(payload), len(payload))
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, nested)
+        self.remove_file_resource(client, res_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_path_with_spaces(self, file_resource_env):
+        """
+        target: whitespace in path is preserved as literal object key
+        method: upload to 'with space/dict file.txt', add, remove
+        expected: no error
+        """
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        remote = "with space/dict file.txt"
+        self._minio_objects_to_cleanup.append((bucket, remote))
+        payload = b"word 5 n\n"
+        self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, remote)
+        self.remove_file_resource(client, res_name)
+
+
+class TestMilvusClientFileResourceContent(FileResourceTestBase):
+    """File-content boundary cases (encoding / BOM / empty).
+
+    Server does not read or validate content — add just checks existence.
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_empty_file_accepted(self, file_resource_env):
+        """
+        target: empty file (0 bytes) can be registered as a file resource
+        method: put empty object -> add -> list -> remove
+        expected: add succeeds
+        """
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        remote = "empty/zero.txt"
+        self._minio_objects_to_cleanup.append((bucket, remote))
+        self._minio_client.put_object(bucket, remote, io.BytesIO(b""), 0)
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, remote)
+        res, _ = self.list_file_resources(client)
+        assert res_name in {r.name for r in res}
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_non_utf8_encoded_file_accepted(self, file_resource_env):
+        """
+        target: non-UTF-8 (GBK) bytes are accepted at add time
+        method: upload GBK bytes -> add -> remove
+        expected: add succeeds (server does not validate encoding on add)
+        """
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        remote = "encoding/gbk_stop.txt"
+        self._minio_objects_to_cleanup.append((bucket, remote))
+        payload = "的\n是\n".encode("gbk")
+        self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, remote)
+        self.remove_file_resource(client, res_name)
+
+    @pytest.mark.xfail(
+        reason="Known: UTF-8 BOM is not stripped from first line of stop-words file, "
+        "so the first stop word (`\\ufeff的`) fails to match `的` and leaks through.",
+        strict=False,
+    )
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_file_with_bom_and_crlf(self, file_resource_env):
+        """
+        target: BOM + CRLF line endings are tolerated when used by BM25 analyzer
+        method: upload stop-words with UTF-8 BOM + CRLF, run_analyzer inline
+                (no collection) to verify tokenization skips BOM prefix
+        expected: stop word filter still filters 的/是 (BOM does not leak into dict)
+        """
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        remote = "encoding/bom_crlf_stop.txt"
+        self._minio_objects_to_cleanup.append((bucket, remote))
+        payload = "﻿的\r\n是\r\n".encode()
+        self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, remote)
+
+        analyzer_params = {
+            "tokenizer": "jieba",
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words_file": {
+                        "type": "remote",
+                        "resource_name": res_name,
+                        "file_name": "bom_crlf_stop.txt",
+                    },
+                }
+            ],
+        }
+        res, _ = self.run_analyzer(client, "这是的测试", analyzer_params)
+        tokens = set(res.tokens)
+        assert "的" not in tokens and "是" not in tokens, (
+            f"BOM/CRLF stop words should still be stripped, got tokens={tokens}"
+        )
