@@ -1570,3 +1570,94 @@ class TestQueryAggregationIndependentV2(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
         log.info("test_unsupported_array_type passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_high_cardinality_group_by(self):
+        """
+        target: test GROUP BY on high-cardinality field (>2000 unique values)
+                on both growing segment (before flush) and sealed segment (after flush)
+        method: 1. insert 3000 rows with 2500 unique group keys
+                2. query GROUP BY before flush (growing segment)
+                3. flush, then query GROUP BY again (sealed segment)
+                4. verify correctness in both cases
+        expected: returns correct number of unique groups with correct aggregation values
+        verified fix for: issue #47569 (HashTable slots overflow)
+        Note: Original HashTable had fixed 2048 slots with 7/8 load factor,
+              limiting GROUP BY to at most 1792 unique groups before crash.
+              PR #48174 added dynamic rehash to fix this.
+        """
+        client = self._client()
+
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("high_card", DataType.INT64)
+        schema.add_field("value", DataType.INT64)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=8)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        np.random.seed(19530)
+        nb = 3000
+        num_unique = 2500  # well above the original 1792 limit
+        rows = []
+        for i in range(nb):
+            rows.append({
+                "high_card": int(np.random.randint(0, num_unique)),
+                "value": int(np.random.randint(1, 100)),
+                "vec": [float(x) for x in np.random.random(8)],
+            })
+        self.insert(client, collection_name, data=rows)
+        # NO flush yet — data in growing segment
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vec", metric_type="L2", index_type="FLAT", params={})
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
+        df = pd.DataFrame(rows)
+        expected_groups = df["high_card"].nunique()
+        ground_truth = df.groupby("high_card").agg(
+            count_val=("value", "count"),
+            sum_val=("value", "sum")
+        ).reset_index()
+
+        # Phase 1: query on growing segment (before flush)
+        results, _ = self.query(
+            client, collection_name,
+            filter="", limit=num_unique + 100,
+            group_by_fields=["high_card"],
+            output_fields=["high_card", "count(value)", "sum(value)"]
+        )
+        group_keys = [r["high_card"] for r in results]
+        assert len(group_keys) == len(set(group_keys)), \
+            "Duplicate group keys on growing segment"
+        assert len(results) == expected_groups, \
+            f"Growing segment: expected {expected_groups} groups, got {len(results)}"
+        log.info(f"Growing segment: {len(results)} groups, all unique")
+
+        # Phase 2: flush and query on sealed segment
+        self.flush(client, collection_name)
+        results, _ = self.query(
+            client, collection_name,
+            filter="", limit=num_unique + 100,
+            group_by_fields=["high_card"],
+            output_fields=["high_card", "count(value)", "sum(value)"]
+        )
+        group_keys = [r["high_card"] for r in results]
+        assert len(group_keys) == len(set(group_keys)), \
+            "Duplicate group keys on sealed segment"
+        assert len(results) == expected_groups, \
+            f"Sealed segment: expected {expected_groups} groups, got {len(results)}"
+
+        # Verify aggregation correctness (spot check first 50)
+        for result in results[:50]:
+            hk = result["high_card"]
+            expected = ground_truth[ground_truth["high_card"] == hk].iloc[0]
+            assert result["count(value)"] == expected["count_val"], \
+                f"COUNT mismatch for high_card={hk}"
+            assert result["sum(value)"] == expected["sum_val"], \
+                f"SUM mismatch for high_card={hk}"
+
+        self.drop_collection(client, collection_name)
+        log.info(f"test_high_cardinality_group_by passed: {len(results)} groups verified on both growing and sealed segments")
