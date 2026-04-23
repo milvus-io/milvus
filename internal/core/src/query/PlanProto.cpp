@@ -1304,6 +1304,9 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
         case proto::plan::FunctionTypeRandom:
             return std::make_shared<rescores::RandomScorer>(
                 expr, function.weight(), function.params());
+        case proto::plan::FunctionTypeField:
+            return std::make_shared<rescores::FieldScorer>(
+                expr, function.weight(), function.params());
         default:
             ThrowInfo(UnexpectedError, "unknown function type");
     }

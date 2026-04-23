@@ -358,6 +358,7 @@ message QueryPlanNode {
 enum FunctionType{
   FunctionTypeWeight = 0;
   FunctionTypeRandom = 1;
+  FunctionTypeField = 2;
 }
 
 // FunctionMode decide how to calculate boost score
