@@ -1291,6 +1291,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SetUseTakeForOutputForTesting(bool val) {
         use_take_for_output_ = val;
     }
+
+    // Test-only: direct access to segment_load_info_ for asserting Reopen
+    // preserves runtime-only state (e.g. created_text_indexes_).
+    SegmentLoadInfo&
+    TestGetSegmentLoadInfo() {
+        return segment_load_info_;
+    }
 #endif
 
  private:

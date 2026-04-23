@@ -70,6 +70,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
@@ -2743,4 +2744,66 @@ TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
     // Drop again - should be a no-op (idempotent)
     segment->DropFieldData(pk_id);
     EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+// Reproducer for issue #49076.
+//
+// Reopen on a sealed segment does:
+//     SegmentLoadInfo new_seg_load_info(new_load_info, schema_);
+//     segment_load_info_ = new_seg_load_info;          // <-- Bug 1
+//     diff = current.ComputeDiff(new_seg_load_info);
+//     ApplyLoadDiff(op_ctx, new_seg_load_info, diff);  // <-- Bug 2
+//
+// `created_text_indexes_` is runtime-only (not proto-backed), so the RHS is
+// always empty; the copy-assign wipes the member (Bug 1). And any Create
+// done during this Reopen writes to the local new_seg_load_info, lost on
+// return (Bug 2). A later Reopen's ComputeDiff then re-schedules
+// CreateTextIndex for the same field at the same deterministic path,
+// racing with the still-live holder and causing
+// TantivyError: FileDoesNotExist("meta.json").
+TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("pk", DataType::INT64);  // 100
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);  // 101
+    std::map<std::string, std::string> analyzer_params;
+    schema->AddDebugVarcharField(FieldName("text_field"),
+                                 DataType::VARCHAR,
+                                 /*max_length=*/65535,
+                                 /*nullable=*/false,
+                                 /*enable_match=*/true,
+                                 /*enable_analyzer=*/true,
+                                 analyzer_params,
+                                 std::nullopt);  // 102
+    schema->set_primary_field_id(FieldId(100));
+
+    const FieldId text_fid(102);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(49076);
+    proto.set_num_of_rows(0);
+    sealed->SetLoadInfo(proto);
+
+    // Simulate the state a prior Load would leave behind after running
+    // CreateTextIndex for the enable_match field.
+    sealed->TestGetSegmentLoadInfo().SetTextIndexCreated(text_fid);
+    ASSERT_TRUE(sealed->TestGetSegmentLoadInfo().HasTextIndexCreated(text_fid));
+
+    // Reopen must preserve the runtime-only created_text_indexes_. Before
+    // the fix this fails (member wiped by `segment_load_info_ =
+    // new_seg_load_info`); after the fix it passes. The wipe happens before
+    // ApplyLoadDiff, so even though ApplyLoadDiff throws here (num_rows_ is
+    // unset because no real data was loaded), the state under test is
+    // already settled.
+    milvus::OpContext op_ctx;
+    try {
+        sealed->Reopen(&op_ctx, proto);
+    } catch (...) {
+    }
+
+    EXPECT_TRUE(sealed->TestGetSegmentLoadInfo().HasTextIndexCreated(text_fid));
 }
