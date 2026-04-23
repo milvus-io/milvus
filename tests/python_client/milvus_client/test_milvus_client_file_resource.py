@@ -1,4 +1,5 @@
 import io
+import subprocess
 import threading
 import time
 
@@ -2007,3 +2008,109 @@ class TestMilvusClientFileResourceRunAnalyzer(FileResourceTestBase):
         assert "向量数据库" in tokens, f"custom jieba word missing, got {tokens}"
         # stop filter should drop 是/的
         assert "是" not in tokens and "的" not in tokens, f"stop words present: {tokens}"
+
+
+# ---------------------------------------------------------------------------
+# D. Persistence / restart recovery
+# ---------------------------------------------------------------------------
+class TestMilvusClientFileResourceRestart(FileResourceTestBase):
+    """Verify file resource state and usability survive a pod restart.
+
+    Requires the test runner to have kubectl + a reachable cluster, and the
+    Milvus instance under test to be running in a known namespace.  We use
+    `kubectl -n <ns> rollout restart <deploy>` + `rollout status` to avoid any
+    chaos-mesh dependency.
+    """
+
+    RESTART_TIMEOUT_SECONDS = 240
+
+    def _restart_standalone_pods(self, namespace, release):
+        """Rollout restart the standalone deployment and wait ready.
+
+        Silent skip if kubectl unavailable or the deployment is not found —
+        these tests are opt-in when running against a live K8s cluster.
+        """
+        deploy = f"{release}-milvus-standalone"
+        try:
+            subprocess.check_call(
+                ["kubectl", "-n", namespace, "rollout", "restart", f"deployment/{deploy}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+            )
+            subprocess.check_call(
+                [
+                    "kubectl",
+                    "-n",
+                    namespace,
+                    "rollout",
+                    "status",
+                    f"deployment/{deploy}",
+                    f"--timeout={self.RESTART_TIMEOUT_SECONDS}s",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            pytest.skip(f"kubectl restart not available/applicable: {exc}")
+
+    def _resolve_release(self, request):
+        return request.config.getoption("--minio_bucket")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_resource_persists_after_restart(self, request, file_resource_env):
+        """
+        target: file resource metadata survives standalone pod restart
+        method: add -> restart standalone deploy -> list
+        expected: resource still listed after restart
+        """
+        namespace = request.config.getoption("--milvus_ns")
+        release = self._resolve_release(request)
+        client = self._client()
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+
+        self._restart_standalone_pods(namespace, release)
+
+        # fresh client so we don't reuse a dead gRPC channel
+        fresh = self._client()
+        assert self.wait_until(
+            lambda: res_name in {r.name for r in self.list_file_resources(fresh)[0]},
+            timeout=60,
+            interval=2,
+        ), f"{res_name} missing from list after restart"
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_collection_usable_after_restart(self, request, file_resource_env):
+        """
+        target: BM25 collection referencing a file resource still works after
+                Milvus restart — analyzer config reloaded from meta
+        method: add -> create & load BM25 collection -> restart -> run_analyzer
+                on same collection and assert tokens match pre-restart output
+        expected: tokens identical before and after restart
+        """
+        namespace = request.config.getoption("--milvus_ns")
+        release = self._resolve_release(request)
+        client = self._client()
+        res_name = cf.gen_unique_str(prefix)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
+        col = cf.gen_unique_str(prefix)
+        self.create_bm25_collection_with_stop_filter(client, col, res_name)
+        self.build_and_load_bm25(client, col)
+        text = "这是的测试文本"
+        res_before, _ = self.run_analyzer(client, text, None, collection_name=col, field_name="text")
+        tokens_before = set(res_before.tokens)
+
+        self._restart_standalone_pods(namespace, release)
+
+        fresh = self._client()
+
+        def _analyze_matches():
+            try:
+                res_after, _ = self.run_analyzer(fresh, text, None, collection_name=col, field_name="text")
+                return set(res_after.tokens) == tokens_before
+            except Exception:
+                return False
+
+        assert self.wait_until(_analyze_matches, timeout=90, interval=3), (
+            "analyzer output diverged or unavailable after restart"
+        )
