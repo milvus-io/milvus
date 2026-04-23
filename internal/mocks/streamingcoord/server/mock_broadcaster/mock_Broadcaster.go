@@ -72,6 +72,26 @@ func (_c *MockBroadcaster_Ack_Call) RunAndReturn(run func(context.Context, messa
 	return _c
 }
 
+// GetPendingCreateCollectionResources provides a mock function with no fields
+func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingCreateCollectionResources")
+	}
+
+	var r0 map[int64][]int64
+	if rf, ok := ret.Get(0).(func() map[int64][]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64][]int64)
+		}
+	}
+
+	return r0
+}
+
 // Close provides a mock function with no fields
 func (_m *MockBroadcaster) Close() {
 	_m.Called()

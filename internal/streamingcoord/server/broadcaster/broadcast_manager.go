@@ -364,3 +364,31 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	}
 	return result
 }
+
+// GetPendingCreateCollectionResources returns collection ID → file resource IDs
+// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
+// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
+func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	result := make(map[int64][]int64)
+	for _, task := range bm.tasks {
+		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			continue
+		}
+		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+			continue
+		}
+		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+		if err != nil {
+			continue
+		}
+		body := createMsg.MustBody()
+		ids := body.CollectionSchema.GetFileResourceIds()
+		if len(ids) > 0 {
+			result[createMsg.Header().CollectionId] = ids
+		}
+	}
+	return result
+}
