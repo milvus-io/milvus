@@ -82,25 +82,11 @@ func TestParseExternalSpec_BooleanExtfsValidation(t *testing.T) {
 	assert.Equal(t, "true", spec.Extfs["use_iam"])
 }
 
-func TestBuildExtfsOverrides(t *testing.T) {
-	t.Run("empty_extfs_returns_nil", func(t *testing.T) {
-		spec := &ExternalSpec{Format: "parquet"}
-		assert.Nil(t, spec.BuildExtfsOverrides("extfs.42."))
-	})
-
-	t.Run("prepends_prefix_to_every_key", func(t *testing.T) {
-		spec := &ExternalSpec{
-			Format: "parquet",
-			Extfs: map[string]string{
-				"region":  "us-west-2",
-				"use_ssl": "true",
-			},
-		}
-		out := spec.BuildExtfsOverrides("extfs.42.")
-		assert.Equal(t, "us-west-2", out["extfs.42.region"])
-		assert.Equal(t, "true", out["extfs.42.use_ssl"])
-		assert.Len(t, out, 2)
-	})
+func TestParseExternalSpec_AddressAndBucketExtfsAllowed(t *testing.T) {
+	spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"address":"https://s3.us-west-2.amazonaws.com","bucket_name":"my-bucket"}}`)
+	require.NoError(t, err)
+	assert.Equal(t, "https://s3.us-west-2.amazonaws.com", spec.Extfs["address"])
+	assert.Equal(t, "my-bucket", spec.Extfs["bucket_name"])
 }
 
 func TestValidateExternalSource(t *testing.T) {
@@ -110,8 +96,10 @@ func TestValidateExternalSource(t *testing.T) {
 		assert.Contains(t, err.Error(), "empty")
 	})
 
-	t.Run("relative_path_no_scheme_allowed", func(t *testing.T) {
-		assert.NoError(t, ValidateExternalSource("my-data/parquet/"))
+	t.Run("relative_path_no_scheme_rejected", func(t *testing.T) {
+		err := ValidateExternalSource("my-data/parquet/")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "explicit scheme")
 	})
 
 	t.Run("allowed_schemes", func(t *testing.T) {
@@ -123,6 +111,7 @@ func TestValidateExternalSource(t *testing.T) {
 			"oss://bucket/prefix",
 			"gs://bucket/prefix",
 			"gcs://bucket/prefix",
+			"azure://container/prefix",
 		} {
 			assert.NoError(t, ValidateExternalSource(src), "should accept %s", src)
 		}
@@ -146,8 +135,10 @@ func TestValidateExternalSource(t *testing.T) {
 		assert.Contains(t, err.Error(), "must not embed credentials")
 	})
 
-	t.Run("empty_host_allowed_same_endpoint", func(t *testing.T) {
-		assert.NoError(t, ValidateExternalSource("s3:///bucket/path"))
+	t.Run("empty_host_rejected", func(t *testing.T) {
+		err := ValidateExternalSource("s3:///bucket/path")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-empty host")
 	})
 
 	t.Run("invalid_url_rejected", func(t *testing.T) {
@@ -156,14 +147,20 @@ func TestValidateExternalSource(t *testing.T) {
 	})
 }
 
+// minimalValidSpec returns an extfs block that ValidateExtfsComplete accepts
+// for AWS-family schemes: AK/SK pair + region.
+func minimalValidSpec() string {
+	return `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`
+}
+
 func TestValidateSourceAndSpec(t *testing.T) {
 	t.Run("both_valid", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", minimalValidSpec())
 		assert.NoError(t, err)
 	})
 
 	t.Run("invalid_source", func(t *testing.T) {
-		err := ValidateSourceAndSpec("file:///tmp/x", `{"format":"parquet"}`)
+		err := ValidateSourceAndSpec("file:///tmp/x", minimalValidSpec())
 		require.Error(t, err)
 	})
 
@@ -171,6 +168,102 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "<redacted>")
+	})
+
+	t.Run("missing_credentials_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "<redacted>")
+	})
+
+	t.Run("missing_region_for_aws_scheme_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcs_scheme_does_not_require_region", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("role_arn_mode", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","region":"us-east-1"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("use_iam_alone_mode", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"use_iam":"true","region":"us-east-1"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("anonymous_mode", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ak_without_sk_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","region":"us-east-1"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("anonymous_with_aksk_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"anonymous":"true","access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("multiple_modes_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcp_impersonation_mode", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("gcp_impersonation_with_gcs_scheme", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gcs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com"}}`)
+		assert.NoError(t, err)
+	})
+
+	t.Run("gcp_impersonation_on_aws_scheme_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","region":"us-east-1"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcp_impersonation_malformed_email_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"not-an-email"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcp_impersonation_missing_at_sign_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"saproj.iam.gserviceaccount.com"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcp_impersonation_with_aksk_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","access_key_id":"AK","access_key_value":"SK"}}`)
+		require.Error(t, err)
+	})
+
+	t.Run("gcp_impersonation_with_anonymous_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("gs://bucket/prefix",
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","anonymous":"true"}}`)
+		require.Error(t, err)
 	})
 }
 
@@ -198,22 +291,104 @@ func TestRedactExternalSpec(t *testing.T) {
 	})
 }
 
-func TestBuildFormatProperties(t *testing.T) {
-	t.Run("non_iceberg_empty", func(t *testing.T) {
-		snap := int64(42)
-		spec := &ExternalSpec{Format: FormatParquet, SnapshotID: &snap}
-		assert.Empty(t, spec.BuildFormatProperties())
+func TestParseExternalSpec_ArnKeys(t *testing.T) {
+	t.Run("all_arn_keys_accepted", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{
+			"format":"parquet",
+			"extfs":{
+				"role_arn":"arn:aws:iam::123456789012:role/test-role",
+				"session_name":"my-session",
+				"external_id":"ext-123",
+				"load_frequency":"900"
+			}
+		}`)
+		require.NoError(t, err)
+		assert.Equal(t, "arn:aws:iam::123456789012:role/test-role", spec.Extfs["role_arn"])
+		assert.Equal(t, "my-session", spec.Extfs["session_name"])
+		assert.Equal(t, "ext-123", spec.Extfs["external_id"])
+		assert.Equal(t, "900", spec.Extfs["load_frequency"])
 	})
 
-	t.Run("iceberg_without_snapshot_empty", func(t *testing.T) {
-		spec := &ExternalSpec{Format: FormatIcebergTable}
-		assert.Empty(t, spec.BuildFormatProperties())
+	t.Run("role_arn_with_existing_keys", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{
+			"format":"parquet",
+			"extfs":{
+				"region":"us-west-2",
+				"cloud_provider":"aws",
+				"role_arn":"arn:aws:iam::123456789012:role/cross-account"
+			}
+		}`)
+		require.NoError(t, err)
+		assert.Equal(t, "us-west-2", spec.Extfs["region"])
+		assert.Equal(t, "arn:aws:iam::123456789012:role/cross-account", spec.Extfs["role_arn"])
 	})
 
-	t.Run("iceberg_with_snapshot", func(t *testing.T) {
-		snap := int64(12345)
-		spec := &ExternalSpec{Format: FormatIcebergTable, SnapshotID: &snap}
-		props := spec.BuildFormatProperties()
-		assert.Equal(t, "12345", props[PropertyIcebergSnapshotID])
+	t.Run("arn_keys_preserved_in_extfs_map", func(t *testing.T) {
+		// extfs kv parsing preserves role_arn / load_frequency; downstream
+		// extfs flattening + C++ InjectExternalSpecProperties consume these.
+		spec := &ExternalSpec{
+			Extfs: map[string]string{
+				"role_arn":       "arn:aws:iam::123456789012:role/test",
+				"load_frequency": "3600",
+			},
+		}
+		assert.Equal(t, "arn:aws:iam::123456789012:role/test", spec.Extfs["role_arn"])
+		assert.Equal(t, "3600", spec.Extfs["load_frequency"])
+	})
+}
+
+func TestValidateExtfsComplete_Azure(t *testing.T) {
+	t.Run("azure_shared_key", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "mystorageacct",
+			"access_key_value": "base64key",
+			"cloud_provider":   "azure",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_workload_identity", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"use_iam":        "true",
+			"cloud_provider": "azure",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_no_region_required", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "mystorageacct",
+			"access_key_value": "base64key",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("azure_scheme_with_gcp_provider_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"access_key_id":    "AK",
+			"access_key_value": "SK",
+			"cloud_provider":   "gcp",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scheme=azure requires extfs.cloud_provider")
+	})
+
+	t.Run("azure_provider_with_s3_scheme_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("s3://bucket/path", map[string]string{
+			"access_key_id":    "AK",
+			"access_key_value": "SK",
+			"region":           "us-east-1",
+			"cloud_provider":   "azure",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cloud_provider=azure requires scheme=azure")
+	})
+
+	t.Run("azure_with_gcp_target_service_account_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only valid for GCP")
 	})
 }

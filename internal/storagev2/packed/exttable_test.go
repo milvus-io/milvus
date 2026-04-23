@@ -42,7 +42,7 @@ func TestExploreFiles_EmptyColumns(t *testing.T) {
 	}
 
 	// Empty columns should still work
-	files, _, err := ExploreFilesReturnManifestPath([]string{}, "parquet", "/tmp", "/nonexistent", config, nil)
+	files, _, err := ExploreFilesReturnManifestPath([]string{}, "parquet", "/tmp", "/nonexistent", config, ExternalSpecContext{})
 
 	// Expect error due to nonexistent directory
 	assert.Error(t, err)
@@ -63,7 +63,7 @@ func TestExploreFiles_InvalidDirectory(t *testing.T) {
 		"/nonexistent/base",
 		"/nonexistent/explore",
 		config,
-		nil,
+		ExternalSpecContext{},
 	)
 
 	assert.Error(t, err)
@@ -78,7 +78,7 @@ func TestGetFileInfo_NonexistentFile(t *testing.T) {
 		RootPath:    tmpDir,
 	}
 
-	info, err := GetFileInfo("parquet", "/nonexistent/file.parquet", config, nil)
+	info, err := GetFileInfo("parquet", "/nonexistent/file.parquet", config, ExternalSpecContext{})
 
 	assert.Error(t, err)
 	assert.Nil(t, info)
@@ -97,7 +97,7 @@ func TestGetFileInfo_InvalidFormat(t *testing.T) {
 	err := os.WriteFile(tmpFile, []byte("not a parquet file"), 0o600)
 	require.NoError(t, err)
 
-	info, err := GetFileInfo("parquet", tmpFile, config, nil)
+	info, err := GetFileInfo("parquet", tmpFile, config, ExternalSpecContext{})
 
 	// Should fail because it's not a valid parquet file
 	assert.Error(t, err)
@@ -395,10 +395,10 @@ func TestEnsureHTTPScheme(t *testing.T) {
 			want:    "http://localhost:9000",
 		},
 		{
-			name:    "no scheme, with SSL → keep as-is",
+			name:    "no scheme, with SSL → prepend https://",
 			address: "localhost:9000",
 			useSSL:  true,
-			want:    "localhost:9000",
+			want:    "https://localhost:9000",
 		},
 		{
 			name:    "has http:// scheme, no SSL → keep as-is",
@@ -433,143 +433,22 @@ func TestEnsureHTTPScheme(t *testing.T) {
 	}
 }
 
-func TestBuildExtfsOverrides(t *testing.T) {
-	baseConfig := &indexpb.StorageConfig{
-		Address:    "localhost:9000",
-		BucketName: "a-bucket",
-		UseSSL:     false,
-	}
-	sslConfig := &indexpb.StorageConfig{
-		Address:    "s3.amazonaws.com",
-		BucketName: "a-bucket",
-		UseSSL:     true,
-	}
-
-	tests := []struct {
-		name           string
-		externalSource string
-		config         *indexpb.StorageConfig
-		wantBucket     string
-		wantAddress    string
-	}{
-		{
-			name:           "relative path → baseline from storageConfig",
-			externalSource: "data/files/",
-			config:         baseConfig,
-			wantBucket:     "a-bucket",
-			wantAddress:    "http://localhost:9000",
-		},
-		{
-			name:           "empty string → baseline from storageConfig",
-			externalSource: "",
-			config:         baseConfig,
-			wantBucket:     "a-bucket",
-			wantAddress:    "http://localhost:9000",
-		},
-		{
-			name:           "s3 URI with empty host and bucket",
-			externalSource: "s3:///external-bucket/some/prefix",
-			config:         baseConfig,
-			wantBucket:     "external-bucket",
-			wantAddress:    "",
-		},
-		{
-			name:           "s3 URI with host and bucket",
-			externalSource: "s3://minio:9000/external-bucket/prefix",
-			config:         baseConfig,
-			wantBucket:     "external-bucket",
-			wantAddress:    "http://minio:9000",
-		},
-		{
-			name:           "s3 URI with host and bucket, SSL enabled",
-			externalSource: "s3://s3.amazonaws.com/my-bucket/data",
-			config:         sslConfig,
-			wantBucket:     "my-bucket",
-			wantAddress:    "s3.amazonaws.com",
-		},
-		{
-			name:           "s3 URI with only bucket, no prefix",
-			externalSource: "s3:///just-bucket",
-			config:         baseConfig,
-			wantBucket:     "just-bucket",
-			wantAddress:    "",
-		},
-		{
-			name:           "s3 URI with trailing slash",
-			externalSource: "s3:///external-bucket/prefix/",
-			config:         baseConfig,
-			wantBucket:     "external-bucket",
-			wantAddress:    "",
-		},
-		{
-			name:           "gs URI scheme",
-			externalSource: "gs:///gcs-bucket/data",
-			config:         baseConfig,
-			wantBucket:     "gcs-bucket",
-			wantAddress:    "",
-		},
-		{
-			name:           "host with http:// already in address (no SSL)",
-			externalSource: "s3://http://already-has-scheme/bucket/key",
-			config:         baseConfig,
-			// url.Parse treats "http" as host for s3://http://...
-			// but this is a degenerate case; just verify no panic
-			wantBucket: "",
-		},
-	}
-	prefix := "extfs.42."
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := BuildExtfsOverrides(tt.externalSource, tt.config, prefix, nil)
-			assert.NotNil(t, got)
-			if tt.wantBucket != "" {
-				assert.Equal(t, tt.wantBucket, got[prefix+"bucket_name"])
-			}
-			if tt.wantAddress != "" {
-				assert.Equal(t, tt.wantAddress, got[prefix+"address"])
-			}
-		})
-	}
-}
-
-func TestBuildExtfsOverrides_OverrideKeys(t *testing.T) {
-	prefix := ExtfsPrefixForCollection(99)
-	config := &indexpb.StorageConfig{UseSSL: false, BucketName: "original"}
-	got := BuildExtfsOverrides("s3://host:9000/bucket/path", config, prefix, nil)
-	require.NotNil(t, got)
-
-	assert.Contains(t, got, prefix+"bucket_name")
-	assert.Contains(t, got, prefix+"address")
-	assert.Equal(t, "bucket", got[prefix+"bucket_name"])
-	assert.Equal(t, "http://host:9000", got[prefix+"address"])
-}
-
-func TestBuildExtfsOverrides_SpecExtfsOverrides(t *testing.T) {
-	prefix := ExtfsPrefixForCollection(100)
-	config := &indexpb.StorageConfig{
-		UseSSL:  false,
-		UseIAM:  false,
-		Region:  "us-east-1",
-		Address: "localhost:9000",
-	}
-	specExtfs := map[string]string{
-		prefix + "use_iam": "true",
-		prefix + "region":  "us-west-2",
-	}
-	got := BuildExtfsOverrides("s3:///ext-bucket/data", config, prefix, specExtfs)
-	require.NotNil(t, got)
-
-	// Spec overrides win over storageConfig defaults
-	assert.Equal(t, "true", got[prefix+"use_iam"])
-	assert.Equal(t, "us-west-2", got[prefix+"region"])
-	// URI-derived bucket
-	assert.Equal(t, "ext-bucket", got[prefix+"bucket_name"])
-}
+// The cgo bridge (loon_properties_inject_external_spec) and Tier-1/2 endpoint
+// derivation logic are covered by the C++ gtest suite in test_external_take.cpp.
+// Go-side coverage is exercised indirectly through callers that invoke
+// injectExternalSpecProperties (GetFileInfo, ExploreFilesReturnManifestPath,
+// SampleExternalFieldSizes).
 
 func TestExtfsPrefixForCollection(t *testing.T) {
 	assert.Equal(t, "extfs.42.", ExtfsPrefixForCollection(42))
 	assert.Equal(t, "extfs.0.", ExtfsPrefixForCollection(0))
 }
+
+// NOTE: the Go-side BuildExtfsOverrides / NormalizeExternalSource /
+// effectiveSpecAddress helpers were collapsed into the C++ InjectExternalSpecProperties
+// pipeline. Tier-1/2 endpoint derivation and AWS-form rewriting are covered by
+// the C++ gtest suite in test_external_take.cpp. Go callers exercise the cgo
+// bridge indirectly through the public FFI wrappers.
 
 func TestFilterFileInfosByFormat(t *testing.T) {
 	files := []FileInfo{
@@ -614,80 +493,6 @@ func TestFilterFileInfosByFormat(t *testing.T) {
 	assert.Equal(t, 0, skipped)
 }
 
-func TestCopyStorageConfigToExtfs(t *testing.T) {
-	cfg := &indexpb.StorageConfig{
-		StorageType:       "minio",
-		BucketName:        "test-bucket",
-		Address:           "localhost:9000",
-		RootPath:          "/data",
-		AccessKeyID:       "ak123",
-		SecretAccessKey:   "sk456",
-		CloudProvider:     "aws",
-		IAMEndpoint:       "https://sts.amazonaws.com",
-		Region:            "us-east-1",
-		SslCACert:         "cert-pem",
-		GcpCredentialJSON: "",
-		UseSSL:            true,
-		UseIAM:            false,
-		UseVirtualHost:    true,
-	}
-
-	prefix := "extfs.42."
-	overrides := make(map[string]string)
-	copyStorageConfigToExtfs(overrides, prefix, cfg)
-
-	// String fields
-	assert.Equal(t, "minio", overrides[prefix+"storage_type"])
-	assert.Equal(t, "test-bucket", overrides[prefix+"bucket_name"])
-	assert.Equal(t, "localhost:9000", overrides[prefix+"address"]) // useSSL=true, no http:// prepended
-	assert.Equal(t, "/data", overrides[prefix+"root_path"])
-	assert.Equal(t, "ak123", overrides[prefix+"access_key_id"])
-	assert.Equal(t, "sk456", overrides[prefix+"access_key_value"])
-	assert.Equal(t, "aws", overrides[prefix+"cloud_provider"])
-	assert.Equal(t, "https://sts.amazonaws.com", overrides[prefix+"iam_endpoint"])
-	assert.Equal(t, "us-east-1", overrides[prefix+"region"])
-	assert.Equal(t, "cert-pem", overrides[prefix+"ssl_ca_cert"])
-
-	// Boolean fields
-	assert.Equal(t, "true", overrides[prefix+"use_ssl"])
-	assert.Equal(t, "false", overrides[prefix+"use_iam"])
-	assert.Equal(t, "true", overrides[prefix+"use_virtual_host"])
-
-	// Empty GcpCredentialJSON should not be in overrides
-	_, hasGcp := overrides[prefix+"gcp_credential_json"]
-	assert.False(t, hasGcp)
-}
-
-func TestCopyStorageConfigToExtfs_NoSSL(t *testing.T) {
-	cfg := &indexpb.StorageConfig{
-		Address: "localhost:9000",
-		UseSSL:  false,
-	}
-	overrides := make(map[string]string)
-	copyStorageConfigToExtfs(overrides, "extfs.2.", cfg)
-
-	// UseSSL=false → ensureHTTPScheme prepends "http://"
-	assert.Equal(t, "http://localhost:9000", overrides["extfs.2.address"])
-	assert.Equal(t, "false", overrides["extfs.2.use_ssl"])
-}
-
-func TestCopyStorageConfigToExtfs_EmptyConfig(t *testing.T) {
-	cfg := &indexpb.StorageConfig{}
-	overrides := make(map[string]string)
-	copyStorageConfigToExtfs(overrides, "extfs.1.", cfg)
-
-	// Boolean fields always present (default false)
-	assert.Equal(t, "false", overrides["extfs.1.use_ssl"])
-	assert.Equal(t, "false", overrides["extfs.1.use_iam"])
-	assert.Equal(t, "false", overrides["extfs.1.use_virtual_host"])
-
-	// Empty string fields should not be present
-	_, hasBucket := overrides["extfs.1.bucket_name"]
-	assert.False(t, hasBucket)
-	_, hasAddr := overrides["extfs.1.address"]
-	assert.False(t, hasAddr)
-}
-
 func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	// Test that extraKVs can add per-collection extfs properties
 	config := &indexpb.StorageConfig{
@@ -713,7 +518,7 @@ func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {
 	result, err := SampleExternalFieldSizes(
 		`{"base_path":"/tmp","ver":1}`, 100, 42,
 		"s3://bucket/data/", `{"format":"parquet"}`,
-		nil, nil,
+		nil,
 	)
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -729,7 +534,7 @@ func TestSampleExternalFieldSizes_EmptyManifestPath(t *testing.T) {
 	result, err := SampleExternalFieldSizes(
 		"", 100, 42,
 		"", "",
-		config, nil,
+		config,
 	)
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -746,28 +551,25 @@ func TestSampleExternalFieldSizes_InvalidManifestPath(t *testing.T) {
 	result, err := SampleExternalFieldSizes(
 		`{"base_path":"/nonexistent/path","ver":1}`, 100, 42,
 		"", "",
-		config, nil,
+		config,
 	)
 	assert.Nil(t, result)
 	assert.Error(t, err)
 }
 
-func TestSampleExternalFieldSizes_WithSpecExtfs(t *testing.T) {
+func TestSampleExternalFieldSizes_WithSpec(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
 		RootPath:    "/tmp",
 	}
-	specExtfs := map[string]string{
-		"extfs.42.region":  "us-west-2",
-		"extfs.42.use_ssl": "true",
-	}
 	// Will fail at manifest read (no real file), but validates that
-	// properties construction with specExtfs doesn't panic
+	// properties construction with extfs injection via cgo doesn't panic.
 	result, err := SampleExternalFieldSizes(
 		`{"base_path":"/nonexistent","ver":1}`, 100, 42,
-		"s3://s3.us-west-2.amazonaws.com/ext-bucket/data/", `{"format":"parquet"}`,
-		config, specExtfs,
+		"s3://s3.us-west-2.amazonaws.com/ext-bucket/data/",
+		`{"format":"parquet","extfs":{"region":"us-west-2","use_ssl":"true"}}`,
+		config,
 	)
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -780,7 +582,7 @@ func TestExploreFilesReturnManifestPath_InvalidDir(t *testing.T) {
 	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
 
 	_, _, err := ExploreFilesReturnManifestPath(
-		[]string{"col1"}, "parquet", "/nonexistent/base", "/nonexistent/explore", config, nil,
+		[]string{"col1"}, "parquet", "/nonexistent/base", "/nonexistent/explore", config, ExternalSpecContext{},
 	)
 	assert.Error(t, err)
 }
@@ -790,14 +592,14 @@ func TestExploreFilesReturnManifestPath_EmptyColumns(t *testing.T) {
 	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
 
 	_, _, err := ExploreFilesReturnManifestPath(
-		[]string{}, "parquet", "/nonexistent", "/nonexistent", config, nil,
+		[]string{}, "parquet", "/nonexistent", "/nonexistent", config, ExternalSpecContext{},
 	)
 	assert.Error(t, err)
 }
 
 func TestExploreFilesReturnManifestPath_PropertiesError(t *testing.T) {
 	_, _, err := ExploreFilesReturnManifestPath(
-		[]string{"col1"}, "parquet", "/base", "/explore", nil, nil,
+		[]string{"col1"}, "parquet", "/base", "/explore", nil, ExternalSpecContext{},
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "properties")
@@ -822,7 +624,7 @@ func TestReadFileInfosFromManifestPath_NilConfig(t *testing.T) {
 // ==================== GetFileInfo Additional Tests ====================
 
 func TestGetFileInfo_PropertiesError(t *testing.T) {
-	_, err := GetFileInfo("parquet", "/some/file.parquet", nil, nil)
+	_, err := GetFileInfo("parquet", "/some/file.parquet", nil, ExternalSpecContext{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "properties")
 }
@@ -886,7 +688,7 @@ func TestFetchFragmentsFromExternalSourceWithRange_HappyPath(t *testing.T) {
 	defer mockRead.UnPatch()
 
 	fragments, err := FetchFragmentsFromExternalSourceWithRange(
-		ctx, "parquet", []string{"col1"}, "s3:///bucket/path", config,
+		ctx, "parquet", []string{"col1"}, "s3://endpoint/bucket/path", config,
 		0, 3, "/manifest.json", ExternalFetchOptions{CollectionID: 1, RowLimit: 5000},
 	)
 	assert.NoError(t, err)
@@ -1008,28 +810,6 @@ func TestFetchFragmentsFromExternalSourceWithRange_FileIndexEndClamped(t *testin
 	assert.NotEmpty(t, fragments)
 }
 
-func TestFetchFragmentsFromExternalSourceWithRange_FormatProperties(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
-
-	mockRead := mockey.Mock(ReadFileInfosFromManifestPath).Return([]FileInfo{
-		{FilePath: "f1.parquet", NumRows: 100},
-	}, nil).Build()
-	defer mockRead.UnPatch()
-
-	fragments, err := FetchFragmentsFromExternalSourceWithRange(
-		ctx, "parquet", nil, "", config,
-		0, 1, "/manifest.json", ExternalFetchOptions{
-			CollectionID: 1,
-			SpecExtfs:    map[string]string{"iceberg.snapshot_id": "42"},
-			RowLimit:     1000,
-		},
-	)
-	assert.NoError(t, err)
-	assert.Len(t, fragments, 1)
-}
-
 func TestMakePropertiesFromStorageConfig_WithExtraKVs(t *testing.T) {
 	tmpDir := t.TempDir()
 	config := &indexpb.StorageConfig{
@@ -1069,7 +849,7 @@ func TestRowLimitOrDefault(t *testing.T) {
 func TestFetchRowCountsConcurrently_AllKnownSkipsFFI(t *testing.T) {
 	// All fileInfos already have NumRows > 0 → no GetFileInfo call.
 	mockCalled := int32(0)
-	m := mockey.Mock(GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, kv map[string]string) (*FileInfo, error) {
+	m := mockey.Mock(GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, extfs ExternalSpecContext) (*FileInfo, error) {
 		atomic.AddInt32(&mockCalled, 1)
 		return &FileInfo{FilePath: path, NumRows: 99}, nil
 	}).Build()
@@ -1080,14 +860,14 @@ func TestFetchRowCountsConcurrently_AllKnownSkipsFFI(t *testing.T) {
 		{FilePath: "b", NumRows: 20},
 		{FilePath: "c", NumRows: 30},
 	}
-	got, err := fetchRowCountsConcurrently(context.Background(), "parquet", fileInfos, &indexpb.StorageConfig{}, nil)
+	got, err := fetchRowCountsConcurrently(context.Background(), "parquet", fileInfos, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{10, 20, 30}, got)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&mockCalled))
 }
 
 func TestFetchRowCountsConcurrently_MissingFilled(t *testing.T) {
-	m := mockey.Mock(GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, kv map[string]string) (*FileInfo, error) {
+	m := mockey.Mock(GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, extfs ExternalSpecContext) (*FileInfo, error) {
 		return &FileInfo{FilePath: path, NumRows: 777}, nil
 	}).Build()
 	defer m.UnPatch()
@@ -1097,7 +877,7 @@ func TestFetchRowCountsConcurrently_MissingFilled(t *testing.T) {
 		{FilePath: "b", NumRows: 0},
 		{FilePath: "c", NumRows: -1},
 	}
-	got, err := fetchRowCountsConcurrently(context.Background(), "parquet", fileInfos, &indexpb.StorageConfig{}, nil)
+	got, err := fetchRowCountsConcurrently(context.Background(), "parquet", fileInfos, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{10, 777, 777}, got)
 }
@@ -1107,7 +887,7 @@ func TestFetchRowCountsConcurrently_WorkerErrorPropagated(t *testing.T) {
 	defer m.UnPatch()
 
 	_, err := fetchRowCountsConcurrently(context.Background(), "parquet",
-		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, nil)
+		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get file info")
 }
@@ -1121,7 +901,7 @@ func TestFetchRowCountsConcurrently_CtxPreCancelled(t *testing.T) {
 	cancel()
 
 	_, err := fetchRowCountsConcurrently(ctx, "parquet",
-		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, nil)
+		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
@@ -1134,14 +914,14 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	m := mockey.Mock(GetFileInfo).To(func(_ string, _ string, _ *indexpb.StorageConfig, _ map[string]string) (*FileInfo, error) {
+	m := mockey.Mock(GetFileInfo).To(func(_ string, _ string, _ *indexpb.StorageConfig, _ ExternalSpecContext) (*FileInfo, error) {
 		cancel()
 		return &FileInfo{NumRows: 10}, nil
 	}).Build()
 	defer m.UnPatch()
 
 	_, err := fetchRowCountsConcurrently(ctx, "parquet",
-		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, nil)
+		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
