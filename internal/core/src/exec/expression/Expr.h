@@ -1955,7 +1955,15 @@ class SegmentExpr : public Expr {
         // JSON-specific path compatibility is handled by the separate
         // IsJsonPathCompatible() helper, which also avoids pinning.
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
-        return segment_->HasIndex(field_id_) && !CanUseNgramIndex();
+        //
+        // JSON indexes are tracked separately from scalar/vector/binlog
+        // indexes (see SegmentInterface::HasJsonIndex), so dispatch by
+        // field type to avoid widening HasIndex() semantics -- which
+        // ReorderConjunctExpr and other callers rely on remaining narrow.
+        bool has = (field_type_ == DataType::JSON)
+                       ? segment_->HasJsonIndex(field_id_)
+                       : segment_->HasIndex(field_id_);
+        return has && !CanUseNgramIndex();
     }
 
     // JSON fields only: verify that a JsonFlatIndex exists for the expr's

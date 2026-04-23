@@ -3160,16 +3160,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(
 
 bool
 ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
-    {
-        std::shared_lock lck(mutex_);
-        if (get_bit(index_ready_bitset_, field_id) ||
-            get_bit(binlog_index_bitset_, field_id)) {
-            return true;
-        }
-    }
-    // JSON indexes (flat + cast) live in a separate per-segment vector and
-    // are not tracked in either bitset. Check them last so the fast path for
-    // fields with a scalar/vector/binlog index pays no extra lock cost.
+    std::shared_lock lck(mutex_);
+    return get_bit(index_ready_bitset_, field_id) ||
+           get_bit(binlog_index_bitset_, field_id);
+}
+
+bool
+ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
+    // JSON indexes (JsonFlatIndex + JSON-cast) live in a separate per-segment
+    // vector rather than in either index bitset. Kept as a distinct API so
+    // HasIndex() preserves its narrower "scalar/vector/binlog index exists"
+    // semantics for ReorderConjunctExpr and other consumers.
     return json_indices.withRLock([&](const auto& vec) {
         for (const auto& index : vec) {
             if (index.field_id == field_id) {
