@@ -135,12 +135,18 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 	return nil
 }
 
-func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
+func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, withUnserviceableShards bool) error {
 	percentage := m.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
 		err := merr.WrapErrCollectionNotLoaded(collectionID)
 		log.Ctx(ctx).Warn("failed to GetShardLeaders", zap.Error(err))
 		return err
+	}
+	// When the caller accepts unserviceable shards (e.g. proxy refreshing its
+	// shard-leader cache during replica reconfig), skip the full-load gate so
+	// the caller can route by the per-leader Serviceable flag instead.
+	if withUnserviceableShards {
+		return nil
 	}
 	collection := m.GetCollection(ctx, collectionID)
 	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
@@ -216,8 +222,7 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	// skip check load status if withUnserviceableShards is true
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	if err := checkLoadStatus(ctx, m, collectionID, withUnserviceableShards); err != nil {
 		return nil, err
 	}
 
@@ -255,7 +260,7 @@ func CheckCollectionsQueryable(ctx context.Context, m *meta.Meta, targetMgr meta
 // checkCollectionQueryable check all channels are watched and all segments are loaded for this collection
 func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, coll *meta.Collection) error {
 	collectionID := coll.GetCollectionID()
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+	if err := checkLoadStatus(ctx, m, collectionID, false); err != nil {
 		return err
 	}
 
