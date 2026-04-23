@@ -289,7 +289,7 @@ CreateIndex(CIndex* res_index,
                 ToCStorageConfig(storage_config));
             // For external collections, inject extfs.{collID}.* from build_index_info
             if (!build_index_info->external_source().empty()) {
-                InjectExtfsProperties(*loon_properties,
+                InjectExternalSpecProperties(*loon_properties,
                                       build_index_info->collectionid(),
                                       build_index_info->external_source(),
                                       build_index_info->external_spec());
@@ -405,7 +405,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
                 ToCStorageConfig(storage_config));
             // For external collections, inject extfs.{collID}.* from build_index_info
             if (!build_index_info->external_source().empty()) {
-                InjectExtfsProperties(*loon_properties,
+                InjectExternalSpecProperties(*loon_properties,
                                       build_index_info->collectionid(),
                                       build_index_info->external_source(),
                                       build_index_info->external_spec());

@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -12,7 +13,6 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -68,111 +68,21 @@ const (
 	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
-// ensureHTTPScheme prepends "http://" to address when SSL is disabled and no scheme is present.
-// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+// ensureHTTPScheme prepends http:// or https:// to a bare address so it stays
+// consistent with use_ssl; leaves addresses that already carry a scheme alone.
 func ensureHTTPScheme(address string, useSSL bool) string {
-	if !useSSL && !strings.Contains(address, "://") {
-		return "http://" + address
+	if strings.Contains(address, "://") {
+		return address
 	}
-	return address
+	if useSSL {
+		return "https://" + address
+	}
+	return "http://" + address
 }
 
-// ExtfsPrefixForCollection returns the extfs property prefix for a specific collection.
-// Each external collection uses its own namespace to avoid conflicts.
+// ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
-}
-
-// BuildExtfsOverrides builds a complete set of extfs properties for an external collection.
-// It always copies the baseline from storageConfig so that C++ resolve_config can match
-// the extfs group by address+bucket (even for same-bucket relative paths, because C++
-// explore returns full URIs like aws://host:port/bucket/key).
-// For cross-bucket URIs, it overrides bucket/address from the URI.
-// Finally, user-specified extfs overrides from ExternalSpec take highest priority.
-func BuildExtfsOverrides(externalSource string, storageConfig *indexpb.StorageConfig,
-	extfsPrefix string, specExtfs map[string]string,
-) map[string]string {
-	overrides := make(map[string]string)
-
-	// Always copy baseline from storageConfig so the per-collection extfs group
-	// is self-contained (C++ resolve_config treats each group independently).
-	copyStorageConfigToExtfs(overrides, extfsPrefix, storageConfig)
-
-	// For cross-bucket URIs, override bucket and address from the URI.
-	u, err := url.Parse(externalSource)
-	if err == nil && u.Scheme != "" {
-		// Override bucket from the URI path (first component after leading /).
-		path := strings.TrimPrefix(u.Path, "/")
-		parts := strings.SplitN(path, "/", 2)
-		if len(parts) > 0 && parts[0] != "" {
-			overrides[extfsPrefix+"bucket_name"] = parts[0]
-		}
-
-		// Override address from the URI host.
-		if u.Host != "" {
-			overrides[extfsPrefix+"address"] = ensureHTTPScheme(u.Host, storageConfig.GetUseSSL())
-		}
-	}
-
-	// Apply spec extfs overrides (highest priority, keys already prefixed by caller).
-	for k, v := range specExtfs {
-		overrides[k] = v
-	}
-
-	return overrides
-}
-
-// copyStorageConfigToExtfs copies all relevant storage config fields to the extfs override map.
-func copyStorageConfigToExtfs(overrides map[string]string, prefix string, cfg *indexpb.StorageConfig) {
-	if cfg.GetStorageType() != "" {
-		overrides[prefix+"storage_type"] = cfg.GetStorageType()
-	}
-	if cfg.GetBucketName() != "" {
-		overrides[prefix+"bucket_name"] = cfg.GetBucketName()
-	}
-	if cfg.GetAddress() != "" {
-		overrides[prefix+"address"] = ensureHTTPScheme(cfg.GetAddress(), cfg.GetUseSSL())
-	}
-	if cfg.GetRootPath() != "" {
-		overrides[prefix+"root_path"] = cfg.GetRootPath()
-	}
-	if cfg.GetAccessKeyID() != "" {
-		overrides[prefix+"access_key_id"] = cfg.GetAccessKeyID()
-	}
-	if cfg.GetSecretAccessKey() != "" {
-		overrides[prefix+"access_key_value"] = cfg.GetSecretAccessKey()
-	}
-	if cfg.GetCloudProvider() != "" {
-		overrides[prefix+"cloud_provider"] = cfg.GetCloudProvider()
-	}
-	if cfg.GetIAMEndpoint() != "" {
-		overrides[prefix+"iam_endpoint"] = cfg.GetIAMEndpoint()
-	}
-	if cfg.GetRegion() != "" {
-		overrides[prefix+"region"] = cfg.GetRegion()
-	}
-	if cfg.GetSslCACert() != "" {
-		overrides[prefix+"ssl_ca_cert"] = cfg.GetSslCACert()
-	}
-	if cfg.GetGcpCredentialJSON() != "" {
-		overrides[prefix+"gcp_credential_json"] = cfg.GetGcpCredentialJSON()
-	}
-	if cfg.GetUseSSL() {
-		overrides[prefix+"use_ssl"] = "true"
-	} else {
-		overrides[prefix+"use_ssl"] = "false"
-	}
-	if cfg.GetUseIAM() {
-		overrides[prefix+"use_iam"] = "true"
-	} else {
-		overrides[prefix+"use_iam"] = "false"
-	}
-	if cfg.GetUseVirtualHost() {
-		overrides[prefix+"use_virtual_host"] = "true"
-	} else {
-		overrides[prefix+"use_virtual_host"] = "false"
-	}
 }
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
@@ -281,7 +191,8 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	}
 
 	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are passed via extraKVs by BuildExtfsOverrides.
+	// (extfs.{collectionID}.*) are injected downstream via
+	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -342,6 +253,43 @@ func FreeProperties(props *C.LoonProperties) {
 	if props != nil {
 		C.loon_properties_free(props)
 	}
+}
+
+// ExternalSpecContext carries the raw external-table inputs that C++
+// InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
+// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// from a single external_spec JSON. Zero value (CollectionID=0, Source="")
+// signals an internal (non-external) collection — injectExternalSpecProperties
+// treats it as a no-op.
+type ExternalSpecContext struct {
+	CollectionID int64
+	Source       string
+	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
+}
+
+// injectExternalSpecProperties appends every external_spec-derived property
+// (extfs.<collectionID>.* and format-layer keys) onto an existing
+// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
+// when externalSource is empty.
+func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
+	externalSource, externalSpec string,
+) error {
+	if properties == nil {
+		return fmt.Errorf("injectExternalSpecProperties: properties is nil")
+	}
+	if externalSource == "" {
+		return nil
+	}
+	cSource := C.CString(externalSource)
+	defer C.free(unsafe.Pointer(cSource))
+	var cSpec *C.char
+	if externalSpec != "" {
+		cSpec = C.CString(externalSpec)
+		defer C.free(unsafe.Pointer(cSpec))
+	}
+	result := C.loon_properties_inject_external_spec(
+		properties, C.int64_t(collectionID), cSource, cSpec)
+	return HandleLoonFFIResult(result)
 }
 
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {

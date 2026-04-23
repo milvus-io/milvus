@@ -1528,7 +1528,7 @@ TEST(SchemaExternalColumns, ResolveColumnFieldIdConsistency) {
 }
 
 // ---------------------------------------------------------------------------
-// InjectExtfsProperties allowlist tests (Layer 3 defense-in-depth).
+// InjectExternalSpecProperties allowlist tests (Layer 3 defense-in-depth).
 // The Go side (pkg/util/externalspec) is the primary filter; these tests
 // verify that even if a caller bypasses Go validation, the C++ side drops
 // any non-allowlisted extfs key from external_spec instead of forwarding
@@ -1546,10 +1546,14 @@ TEST(InjectExtfsAllowlist, AllowlistedKeyIsApplied) {
         }
     })";
 
-    ::InjectExtfsProperties(props, coll_id, "s3://bucket/a", spec);
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    EXPECT_EQ(props.count("extfs.42.region"), 1u);
-    EXPECT_EQ(props.count("extfs.42.use_ssl"), 1u);
+    // Layer 0 zero-initializes every field; Layer 2 overwrites the two
+    // spec-provided keys. Verify the values land, not just presence
+    // (presence alone would be trivially satisfied by Layer 0).
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-west-2");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "true");
 }
 
 TEST(InjectExtfsAllowlist, UnknownKeyIsDropped) {
@@ -1566,11 +1570,14 @@ TEST(InjectExtfsAllowlist, UnknownKeyIsDropped) {
         }
     })";
 
-    ::InjectExtfsProperties(props, coll_id, "s3://bucket/a", spec);
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    // Allowed key landed.
-    EXPECT_EQ(props.count("extfs.42.region"), 1u);
-    // Dropped keys must not exist under the extfs namespace at all.
+    // Allowed key landed with the spec-provided value.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-west-2");
+    // Dropped keys must not exist under the extfs namespace at all — Layer 0
+    // only zero-initializes the 14 known fields, so these attacker-supplied
+    // keys should not show up even as empty strings.
     EXPECT_EQ(props.count("extfs.42.http_proxy"), 0u);
     EXPECT_EQ(props.count("extfs.42.ld_preload"), 0u);
 }
@@ -1588,41 +1595,99 @@ TEST(InjectExtfsAllowlist, CaseSensitiveAllowlist) {
         }
     })";
 
-    ::InjectExtfsProperties(props, coll_id, "s3://bucket/a", spec);
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
 
+    // The non-allowlisted upper-case variant must not land under its own
+    // name or be silently case-folded into the lowercase slot.
     EXPECT_EQ(props.count("extfs.42.Access_Key_Id"), 0u);
+    // String fields are NOT Layer-0 zero-initialized (loon rejects empty
+    // enum-constrained values); the case-variant bypass attempt must leave
+    // extfs.42.access_key_id absent from the map entirely.
     EXPECT_EQ(props.count("extfs.42.access_key_id"), 0u);
 }
 
 TEST(InjectExtfsAllowlist, EmptySpecNoExtfsSection) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
-    // Spec without extfs should leave Layer 3 as a no-op.
+    // Spec without extfs makes Layer 2 a no-op. Layer 0 writes the bool-
+    // valued extfs fields as "false". String fields are NOT zero-initialized
+    // (loon would reject empty values on enum-constrained keys), so they
+    // stay absent from the map unless Layer 1 URI-derive or Layer 2 spec
+    // merge provides a value. The namespace is sparsely populated, never
+    // carrying fs.* baseline leakage.
     std::string spec = R"({"format":"parquet"})";
 
-    ::InjectExtfsProperties(props, coll_id, "s3://bucket/a", spec);
+    // Use a full Milvus-form URI so host=endpoint, path[0]=bucket.
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/my-bucket/key", spec);
 
-    // No extfs.* keys should be added by Layer 3 at all.
-    bool has_extfs_from_layer3 = false;
-    for (const auto& [k, _] : props) {
-        if (k.rfind("extfs.42.region", 0) == 0 ||
-            k.rfind("extfs.42.use_ssl", 0) == 0) {
-            has_extfs_from_layer3 = true;
-            break;
-        }
-    }
-    EXPECT_FALSE(has_extfs_from_layer3);
+    // Credential fields absent — spec provides none and Layer 0 does not
+    // zero-init strings.
+    EXPECT_EQ(props.count("extfs.42.access_key_id"), 0u);
+    EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
+    EXPECT_EQ(props.count("extfs.42.region"), 0u);
+    // use_iam stays "false" (the use_iam leak regression guard on C++ side).
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
+
+    // URI-derived values land as expected.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "my-bucket");
+}
+
+// Regression guard for the `use_iam` leak: even when the caller's Properties
+// already contain a populated `fs.use_iam=true` (the Milvus-internal bucket
+// uses IAM), InjectExternalSpecProperties must NOT copy it into extfs.{cid}.use_iam.
+// The fix swaps Layer 1 from "copy fs.* baseline" to "zero-initialize", so
+// extfs.{cid}.use_iam defaults to "false" regardless of what's in fs.*.
+TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
+    milvus_storage::api::Properties props;
+    // Simulate the Properties singleton carrying an IAM-based fs.* baseline.
+    props["fs.use_iam"] = std::string("true");
+    props["fs.access_key_id"] = std::string("MILVUS_INTERNAL_AK");
+    props["fs.access_key_value"] = std::string("MILVUS_INTERNAL_SK");
+    props["fs.region"] = std::string("us-west-2");
+
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"parquet","extfs":{"access_key_id":"USER_AK","access_key_value":"USER_SK","region":"us-east-1"}})";
+
+    ::InjectExternalSpecProperties(props, coll_id, "s3://user-bucket/key", spec);
+
+    // use_iam MUST be false — neither fs.* nor spec sets it.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
+    // extfs credentials come ONLY from spec — never from fs.*.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")),
+              "USER_AK");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_value")),
+              "USER_SK");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-east-1");
+    // fs.* in the input map is left intact so the Milvus-internal bucket
+    // path still authenticates correctly.
+    EXPECT_EQ(std::get<std::string>(props.at("fs.use_iam")), "true");
+    EXPECT_EQ(std::get<std::string>(props.at("fs.access_key_id")),
+              "MILVUS_INTERNAL_AK");
 }
 
 TEST(InjectExtfsAllowlist, InvalidJsonIsHandledGracefully) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
-    // Malformed JSON should not crash InjectExtfsProperties; Layer 1/2
-    // must still run.
+    // Structurally broken JSON (that simdjson lazily reports as an error
+    // state rather than raising): simdjson's iterator pattern only throws
+    // when you try to materialize a value, and `find_field("extfs")`
+    // returning an error is checked before any iteration, so this input
+    // falls through with no throw. Layer 0 and Layer 1 still populate the
+    // extfs namespace. Layer 2 is a no-op. Go-side ParseExternalSpec
+    // catches this kind of broken spec before it reaches C++; this test
+    // just documents the non-throwing fallthrough.
     std::string bad_spec = "not-json{";
 
-    EXPECT_NO_THROW(
-        ::InjectExtfsProperties(props, coll_id, "s3://bucket/a", bad_spec));
+    EXPECT_NO_THROW(::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", bad_spec));
+    // Layer 0 still wrote zero values.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
+    // Layer 1 still derived bucket from URI.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "bucket");
 }
 
 // ============================================================
