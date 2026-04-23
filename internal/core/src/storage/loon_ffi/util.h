@@ -96,10 +96,19 @@ GetLoonManifest(
 /**
  * @brief Inject extfs.{collectionID}.* properties for external collections.
  *
- * Three-layer priority:
- *   1. Copy fs.* baseline to extfs.{collID}.*
- *   2. Override bucket/address from external_source URI (if cross-bucket)
- *   3. Apply extfs overrides from external_spec JSON (highest priority)
+ * Three-layer model (matches Go BuildExtfsOverrides):
+ *   Layer 0: zero-initialize every extfs field. No inheritance from
+ *            `fs.*` baseline — Milvus-internal credentials never leak
+ *            into a user's external-table credential scope.
+ *   Layer 1: derive storage_type / use_ssl / bucket_name / address from
+ *            the external_source URI (Milvus form by default).
+ *   Layer 2: apply external_spec JSON — credentials, region, endpoint.
+ *            Empty values are skipped so serialized absent fields cannot
+ *            clobber Layer-1 derivations. spec.address triggers the
+ *            AWS-form post-process that swaps URI host into bucket_name.
+ *
+ * The caller MUST have run ValidateExternalSource (Go side) first — this
+ * function asserts non-empty scheme and host on external_source.
  */
 void
 InjectExtfsProperties(milvus_storage::api::Properties& properties,

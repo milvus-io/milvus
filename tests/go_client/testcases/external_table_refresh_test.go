@@ -63,6 +63,28 @@ func newMinIOClient(cfg minioConfig) (*miniogo.Client, error) {
 	})
 }
 
+// extTestURI wraps a MinIO-relative object path into a full Milvus-form URI
+// pointing at the configured bucket. External-table tests that used to pass
+// bare relative paths (e.g. "external-e2e-test/foo") must now construct a
+// fully qualified URI because the new validator rejects bare paths — extfs
+// is isolated from the fs.* baseline, so the endpoint+bucket must appear in
+// the URI or explicitly in spec.extfs. This helper keeps the test call-site
+// succinct while staying close to the original dataPath variable.
+func extTestURI(cfg minioConfig, relPath string) string {
+	return fmt.Sprintf("s3://%s/%s/%s", cfg.address, cfg.bucket, relPath)
+}
+
+// extTestSpec returns an ExternalSpec JSON fragment for external-table tests
+// that target Milvus's own MinIO. It carries the real MinIO credentials and
+// region (required by ValidateExtfsComplete for s3-family schemes). No
+// cloud_provider: MinIO is not AWS, and cloud_provider=aws would trigger
+// Tier-2 endpoint derivation that redirects the URI at AWS S3.
+func extTestSpec(cfg minioConfig, format string) string {
+	return fmt.Sprintf(
+		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false"}}`,
+		format, cfg.accessKey, cfg.secretKey)
+}
+
 // cleanupMinIOPrefix removes all objects under a prefix in the given bucket.
 func cleanupMinIOPrefix(ctx context.Context, mc *miniogo.Client, bucket, prefix string) {
 	for obj := range mc.ListObjects(ctx, bucket, miniogo.ListObjectsOptions{
@@ -73,6 +95,15 @@ func cleanupMinIOPrefix(ctx context.Context, mc *miniogo.Client, bucket, prefix 
 			continue
 		}
 		_ = mc.RemoveObject(ctx, bucket, obj.Key, miniogo.RemoveObjectOptions{})
+	}
+}
+
+func skipIfMinIOUnreachable(ctx context.Context, t *testing.T, mc *miniogo.Client, bucket string) {
+	t.Helper()
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := mc.BucketExists(checkCtx, bucket); err != nil {
+		t.Skipf("MinIO unreachable (bucket=%s): %v", bucket, err)
 	}
 }
 
@@ -462,8 +493,8 @@ func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -495,7 +526,7 @@ func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
 	// Verify collection exists with correct external source
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, extPath, coll.Schema.ExternalSource)
+	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
 
 	// ---------------------------------------------------------------
 	// Step 3: Trigger refresh
@@ -670,8 +701,8 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 
 			schema := entity.NewSchema().
 				WithName(collName).
-				WithExternalSource(extPath).
-				WithExternalSpec(`{"format":"parquet"}`).
+				WithExternalSource(extTestURI(minioCfg, extPath)).
+				WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 				WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
 				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding"))
@@ -778,8 +809,8 @@ func TestExternalCollectionLoadAndQuery(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -811,7 +842,7 @@ func TestExternalCollectionLoadAndQuery(t *testing.T) {
 	// Verify collection exists with correct external source
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, extPath, coll.Schema.ExternalSource)
+	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
 
 	// ---------------------------------------------------------------
 	// Step 3: Trigger refresh and poll until complete
@@ -1018,8 +1049,8 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
 		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding"))
@@ -1175,8 +1206,8 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 		WithField(entity.NewField().WithName("bool_val").WithDataType(entity.FieldTypeBool).WithExternalField("bool_val")).
 		WithField(entity.NewField().WithName("int8_val").WithDataType(entity.FieldTypeInt8).WithExternalField("int8_val")).
@@ -1590,8 +1621,8 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"lance-table"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "lance-table")).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -1623,8 +1654,8 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// Verify collection
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, extPath, coll.Schema.ExternalSource)
-	require.Equal(t, `{"format":"lance-table"}`, coll.Schema.ExternalSpec)
+	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
+	require.Equal(t, extTestSpec(minioCfg, "lance-table"), coll.Schema.ExternalSpec)
 
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
@@ -1830,8 +1861,8 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"vortex"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "vortex")).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -1862,8 +1893,8 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
-	require.Equal(t, extPath, coll.Schema.ExternalSource)
-	require.Equal(t, `{"format":"vortex"}`, coll.Schema.ExternalSpec)
+	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
+	require.Equal(t, extTestSpec(minioCfg, "vortex"), coll.Schema.ExternalSpec)
 
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
@@ -2029,7 +2060,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 	formats := []formatCase{
 		{
 			name:     "parquet",
-			specJSON: `{"format":"parquet"}`,
+			specJSON: extTestSpec(minioCfg, "parquet"),
 			setupData: func(t *testing.T, extPath string) {
 				t.Helper()
 				data, genErr := generateParquetBytes(numRows, 0)
@@ -2062,7 +2093,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 			// Step 2: Create external collection
 			schema := entity.NewSchema().
 				WithName(collName).
-				WithExternalSource(extPath).
+				WithExternalSource(extTestURI(minioCfg, extPath)).
 				WithExternalSpec(fc.specJSON).
 				WithField(entity.NewField().
 					WithName("id").
@@ -2224,18 +2255,16 @@ func TestExternalCollectionDifferentBucket(t *testing.T) {
 	// ---------------------------------------------------------------
 	// The key difference: ExternalSource uses a full s3:// URI pointing to
 	// a different bucket than Milvus's own bucket (a-bucket).
-	// URI format: s3://host:port/bucket/path
-	// For MinIO, the host:port must match the endpoint so that resolve_config
-	// can find the correct extfs.* config entry.
-	// Note: we omit the host so the URI becomes s3:///bucket/path (empty address).
-	// resolve_config treats empty address as "match any", so only bucket needs to match.
-	externalSource := fmt.Sprintf("s3:///%s/%s", externalBucket, extPath)
+	// URI format: s3://host:port/bucket/path — post-refactor validator
+	// requires explicit non-empty scheme + host. Empty-host shorthand
+	// (s3:///bucket/path) was dropped.
+	externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, extPath)
 	t.Logf("ExternalSource: %s (Milvus bucket: %s)", externalSource, minioCfg.bucket)
 
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource(externalSource).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -2338,17 +2367,21 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 
 	collName := common.GenRandomString("ext_schema_upd", 6)
 
-	// Prepare two data paths with different parquet files
-	pathV1 := fmt.Sprintf("external-e2e-test/%s/v1", collName)
-	pathV2 := fmt.Sprintf("external-e2e-test/%s/v2", collName)
+	// Prepare two data paths with different parquet files. Validator requires
+	// fully-qualified scheme://host/bucket/key URIs — bare relative paths
+	// are rejected post-refactor.
+	pathV1 := extTestURI(minioCfg, fmt.Sprintf("external-e2e-test/%s/v1", collName))
+	pathV2 := extTestURI(minioCfg, fmt.Sprintf("external-e2e-test/%s/v2", collName))
+	relV1 := fmt.Sprintf("external-e2e-test/%s/v1", collName)
+	relV2 := fmt.Sprintf("external-e2e-test/%s/v2", collName)
 
 	const rowsPerFile = int64(100)
 	for _, p := range []struct {
 		path    string
 		startID int64
 	}{
-		{pathV1, 0},
-		{pathV2, 1000},
+		{relV1, 0},
+		{relV2, 1000},
 	} {
 		data, genErr := generateParquetBytes(rowsPerFile, p.startID)
 		require.NoError(t, genErr)
@@ -2368,7 +2401,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 1: Create external collection with v1 source and parquet spec
 	// ---------------------------------------------------------------
-	specV1 := `{"format":"parquet"}`
+	specV1 := extTestSpec(minioCfg, "parquet")
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource(pathV1).
@@ -2403,7 +2436,7 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Second refresh with NEW source and spec
 	// ---------------------------------------------------------------
-	specV2 := `{"format":"parquet","version":2}`
+	specV2 := extTestSpec(minioCfg, "parquet")
 	refreshResult2, err := mc.RefreshExternalCollection(ctx,
 		client.NewRefreshExternalCollectionOption(collName).
 			WithExternalSource(pathV2).
@@ -2428,11 +2461,16 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	t.Logf("Verified: schema updated — source=%s, spec=%s", coll2.Schema.ExternalSource, coll2.Schema.ExternalSpec)
 }
 
-// TestExternalSourceFormats is a table-driven test covering all 9 combinations of
-// external source path format (same-bucket / cross-bucket / cross-endpoint) x
-// data format (parquet / lance-table / vortex).
+// TestExternalSourceFormats is a table-driven test covering the 3 supported
+// data formats (parquet / lance-table / vortex) against a fully qualified
+// external_source URI (scheme://endpoint/bucket/key).
 //
-// The test verifies that Refresh + count(*) works correctly for each combination.
+// Legacy bare-relative-path and empty-host shorthand forms were removed in
+// the extfs-isolation refactor — the validator now requires an explicit URI
+// with non-empty scheme+host. Bucket-mode variation is therefore collapsed
+// into a single cross-endpoint form targeting a dedicated external bucket
+// (different from Milvus's own bucket) with explicit credentials in
+// spec.extfs. This is the only URI shape the new validator accepts.
 func TestExternalSourceFormats(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2445,10 +2483,10 @@ func TestExternalSourceFormats(t *testing.T) {
 		t.Skipf("MinIO bucket %q not accessible", minioCfg.bucket)
 	}
 
-	// Ensure cross-bucket target exists
-	const crossBucket = "external-bucket"
-	if ok, _ := minioClient.BucketExists(ctx, crossBucket); !ok {
-		require.NoError(t, minioClient.MakeBucket(ctx, crossBucket, miniogo.MakeBucketOptions{}))
+	// Ensure external-bucket target exists
+	const externalBucket = "external-bucket"
+	if ok, _ := minioClient.BucketExists(ctx, externalBucket); !ok {
+		require.NoError(t, minioClient.MakeBucket(ctx, externalBucket, miniogo.MakeBucketOptions{}))
 	}
 
 	// Check Python deps once (skip lance/vortex subtests if unavailable)
@@ -2459,26 +2497,29 @@ func TestExternalSourceFormats(t *testing.T) {
 	const rowsPerFile = int64(100)
 	const numRows = 100
 
+	// Build extfs credentials JSON fragment once — all subtests share the
+	// same MinIO credentials and region. Required by ValidateExtfsComplete.
+	//
+	// Deliberately do NOT set cloud_provider: MinIO is not AWS. Setting
+	// cloud_provider=aws would activate Tier-2 derivation and point
+	// effectiveAddr at `https://s3.us-east-1.amazonaws.com`, which then
+	// causes NormalizeExternalSource to rewrite the localhost MinIO URI
+	// into an AWS S3 URI with localhost:9000 as a path segment. Region is
+	// still required by ValidateExtfsComplete for s3-family schemes, but
+	// the endpoint must come from the URI host (Milvus form).
+	extfsFragment := fmt.Sprintf(
+		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false"}`,
+		minioCfg.accessKey, minioCfg.secretKey)
+
 	type testCase struct {
-		name       string
-		format     string // parquet, lance-table, vortex
-		bucketMode string // same, cross-bucket, cross-endpoint
-		skipReason string // non-empty to skip
+		name   string
+		format string // parquet, lance-table, vortex
 	}
 
 	cases := []testCase{
-		// Same bucket (3 formats)
-		{"same_bucket_parquet", "parquet", "same", ""},
-		{"same_bucket_lance", "lance-table", "same", ""},
-		{"same_bucket_vortex", "vortex", "same", ""},
-		// Cross bucket (3 formats)
-		{"cross_bucket_parquet", "parquet", "cross-bucket", ""},
-		{"cross_bucket_lance", "lance-table", "cross-bucket", ""},
-		{"cross_bucket_vortex", "vortex", "cross-bucket", ""},
-		// Cross endpoint (3 formats) — same MinIO but address explicitly in URI
-		{"cross_endpoint_parquet", "parquet", "cross-endpoint", ""},
-		{"cross_endpoint_lance", "lance-table", "cross-endpoint", ""},
-		{"cross_endpoint_vortex", "vortex", "cross-endpoint", ""},
+		{"parquet", "parquet"},
+		{"lance_table", "lance-table"},
+		{"vortex", "vortex"},
 	}
 
 	for _, tc := range cases {
@@ -2495,22 +2536,10 @@ func TestExternalSourceFormats(t *testing.T) {
 			collName := common.GenRandomString("ext_fmt", 6)
 			dataPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
-			// Determine target bucket and externalSource based on bucket mode
-			var targetBucket string
-			var externalSource string
-			switch tc.bucketMode {
-			case "same":
-				targetBucket = minioCfg.bucket
-				externalSource = dataPath
-			case "cross-bucket":
-				targetBucket = crossBucket
-				// s3:///bucket/path — empty host matches any endpoint
-				externalSource = fmt.Sprintf("s3:///%s/%s", crossBucket, dataPath)
-			case "cross-endpoint":
-				targetBucket = crossBucket
-				// s3://host:port/bucket/path — explicit endpoint
-				externalSource = fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, crossBucket, dataPath)
-			}
+			// Fully qualified URI (scheme://endpoint/bucket/key) targeting
+			// the dedicated external bucket.
+			targetBucket := externalBucket
+			externalSource := fmt.Sprintf("s3://%s/%s/%s", minioCfg.address, externalBucket, dataPath)
 
 			// Generate and upload test data
 			switch tc.format {
@@ -2532,10 +2561,11 @@ func TestExternalSourceFormats(t *testing.T) {
 			})
 
 			// Create external collection
+			specJSON := fmt.Sprintf(`{"format":%q,%s}`, tc.format, extfsFragment)
 			schema := entity.NewSchema().
 				WithName(collName).
 				WithExternalSource(externalSource).
-				WithExternalSpec(fmt.Sprintf(`{"format":"%s"}`, tc.format)).
+				WithExternalSpec(specJSON).
 				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 				WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
 				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding"))
@@ -2733,8 +2763,8 @@ func TestExternalCollectionLoadPerfProfile(t *testing.T) {
 
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeDouble).WithExternalField("score")).
 		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeInt32).WithExternalField("label")).

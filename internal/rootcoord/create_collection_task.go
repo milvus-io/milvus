@@ -207,6 +207,13 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
 			return err
 		}
+		// Intentionally NOT rewriting schema.ExternalSource here. The schema
+		// stores the user's raw URI verbatim; consumers that hand the URI to
+		// C++ InjectExtfsProperties (index build, segment load) MUST call
+		// externalspec.NormalizeExternalSource(source, spec) at the FFI
+		// boundary. Keeping the original input lets Alter re-derive the
+		// canonical form from ground truth and avoids the lossy round-trip
+		// that plagued the eager-normalization design.
 	}
 
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {

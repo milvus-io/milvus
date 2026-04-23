@@ -614,10 +614,14 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     auto column_groups = segment_load_info_.GetColumnGroups();
 
     // External collections: inject extfs.{collectionID}.* derived from
-    // external_source. milvus_storage routes each file URI to the matching
-    // extfs alias by (bucket, address); file URIs in the Iceberg manifest
-    // live under external_source, so the alias always matches — same-bucket
-    // and cross-bucket are handled uniformly.
+    // external_source and external_spec only. InjectExtfsProperties zero-
+    // initializes every extfs field so nothing is inherited from the
+    // cluster's internal fs.* baseline — credentials and endpoint come
+    // exclusively from spec.extfs (see refactor: [ExternalTable] isolate
+    // extfs namespace from fs.* baseline). milvus_storage routes each file
+    // URI to the matching extfs alias by (bucket, address); file URIs in
+    // the Iceberg manifest live under external_source, so the alias always
+    // matches.
     if (schema_->is_external_collection()) {
         InjectExtfsProperties(*properties,
                               segment_load_info_.GetCollectionID(),

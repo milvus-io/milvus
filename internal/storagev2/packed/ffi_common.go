@@ -21,6 +21,7 @@ import (
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 )
 
 // ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
@@ -68,14 +69,21 @@ const (
 	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
-// ensureHTTPScheme prepends "http://" to address when SSL is disabled and no scheme is present.
-// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
-// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+// ensureHTTPScheme prepends an explicit scheme to a bare address so the address
+// and use_ssl flag are always self-consistent. Lance's BuildEndpointUrl defaults
+// to HTTPS when no scheme is present, which silently contradicts use_ssl=false
+// (plaintext MinIO) and leaves the TLS direction underspecified. Normalize:
+//   - address already has "://": leave it (explicit caller scheme wins).
+//   - no scheme + useSSL=true : prepend "https://".
+//   - no scheme + useSSL=false: prepend "http://".
 func ensureHTTPScheme(address string, useSSL bool) string {
-	if !useSSL && !strings.Contains(address, "://") {
-		return "http://" + address
+	if strings.Contains(address, "://") {
+		return address
 	}
-	return address
+	if useSSL {
+		return "https://" + address
+	}
+	return "http://" + address
 }
 
 // ExtfsPrefixForCollection returns the extfs property prefix for a specific collection.
@@ -84,96 +92,216 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
 }
 
-// BuildExtfsOverrides builds a complete set of extfs properties for an external collection.
-// It always copies the baseline from storageConfig so that C++ resolve_config can match
-// the extfs group by address+bucket (even for same-bucket relative paths, because C++
-// explore returns full URIs like aws://host:port/bucket/key).
-// For cross-bucket URIs, it overrides bucket/address from the URI.
-// Finally, user-specified extfs overrides from ExternalSpec take highest priority.
-func BuildExtfsOverrides(externalSource string, storageConfig *indexpb.StorageConfig,
-	extfsPrefix string, specExtfs map[string]string,
+// extfsField describes one per-collection extfs property. The `isBool` flag
+// drives zero-init: string fields default to "", bool-valued fields to "false".
+type extfsField struct {
+	name   string
+	isBool bool
+}
+
+// extfsFields is the complete list of per-collection extfs properties that
+// live under `extfs.<collectionID>.*`. The list is the contract between the
+// Go writer (BuildExtfsOverrides) and the C++ reader (InjectExtfsProperties /
+// resolve_config) — the two sides MUST stay in lock-step.
+//
+// Defaults are zero values: empty string for strings, "false" for bools.
+// Authentication fields intentionally default to empty so an unauthenticated
+// request reaches the storage layer and fails with a clear 403, rather than
+// silently picking up Milvus's internal `fs.*` credentials and widening the
+// credential scope without user intent. Callers MUST provide credentials
+// through spec.extfs explicitly (AK/SK, role_arn, use_iam=true, or
+// anonymous=true — see ValidateExtfsComplete).
+var extfsFields = []extfsField{
+	{"storage_type", false},
+	{"bucket_name", false},
+	{"address", false},
+	{"root_path", false},
+	{"access_key_id", false},
+	{"access_key_value", false},
+	{"cloud_provider", false},
+	{"iam_endpoint", false},
+	{"region", false},
+	{"ssl_ca_cert", false},
+	{"gcp_credential_json", false},
+	{"gcp_target_service_account", false},
+	{"use_ssl", true},
+	{"use_iam", true},
+	{"use_virtual_host", true},
+}
+
+// BuildExtfsOverrides builds the complete extfs.<collectionID>.* property map
+// for an external collection using a three-layer model:
+//
+//	Layer 0: zero-initialize every extfs field. No inheritance from
+//	         storageConfig / `fs.*` — per-collection extfs must be
+//	         self-describing, with credentials declared in spec.extfs.
+//	         This prevents the Milvus-internal auth mode (e.g. useIAM=true
+//	         for the cluster's own bucket) from silently leaking into a
+//	         user's external-table credential scope.
+//
+//	Layer 1: derive bucket / address / storage_type / use_ssl from the
+//	         validated external_source URI. The URI is the single source of
+//	         non-credential identity data.
+//
+//	Layer 2: apply spec.extfs (highest priority) — credentials, region,
+//	         SSL CA, opaque flags. Empty values are skipped so a
+//	         present-but-empty user key cannot clobber a Layer-1 derivation.
+//
+// Two URI shapes are supported:
+//   - Milvus form: scheme://endpoint/bucket/key → URI host is the endpoint,
+//     path[0] is the bucket.
+//   - AWS form: scheme://bucket/key with spec.extfs.address (or Tier-2
+//     derivation from cloud_provider + region) → URI host is the bucket,
+//     endpoint comes from spec.extfs.
+//
+// The caller MUST have run ValidateExternalSource (and ideally
+// ValidateExtfsComplete) before invoking this; by the time BuildExtfsOverrides
+// runs, externalSource is guaranteed to have a non-empty scheme and host.
+// If the invariant is violated (etcd corruption or a code path that bypassed
+// the validator), this function panics — mirrors the C++ AssertInfo on the
+// same invariant in InjectExtfsProperties, so both sides fail loudly at the
+// adjacent site rather than propagating a half-formed config downstream.
+func BuildExtfsOverrides(externalSource string,
+	specExtfs map[string]string, extfsPrefix string,
 ) map[string]string {
-	overrides := make(map[string]string)
+	overrides := make(map[string]string, len(extfsFields)+len(specExtfs))
 
-	// Always copy baseline from storageConfig so the per-collection extfs group
-	// is self-contained (C++ resolve_config treats each group independently).
-	copyStorageConfigToExtfs(overrides, extfsPrefix, storageConfig)
+	// Layer 0: zero-initialize every bool-valued extfs field. String fields
+	// are NOT zero-initialized — milvus-storage rejects empty values for
+	// enum-constrained properties like cloud_provider ("value '' not in
+	// allowed set"). Missing keys are treated as "not set" by loon, which is
+	// the intended semantics; the old `fs.*` baseline inheritance is already
+	// removed in C++ InjectExtfsProperties, so dropping string zero-init does
+	// not re-open the leak — Layer 1 still overwrites the URI-derived fields
+	// and Layer 2 still applies explicit spec overrides.
+	for _, f := range extfsFields {
+		if f.isBool {
+			overrides[extfsPrefix+f.name] = "false"
+		}
+	}
 
-	// For cross-bucket URIs, override bucket and address from the URI.
+	// Layer 1: derive from URI.
 	u, err := url.Parse(externalSource)
-	if err == nil && u.Scheme != "" {
-		// Override bucket from the URI path (first component after leading /).
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		panic(fmt.Sprintf(
+			"BuildExtfsOverrides: external_source failed validator invariant "+
+				"(scheme+host required): %q (parse err=%v); caller must run "+
+				"ValidateExternalSource before invoking",
+			externalSource, err))
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	overrides[extfsPrefix+"storage_type"] = normalizeStorageType(scheme)
+	// Final use_ssl must account for spec-level override before we build the
+	// address URL. Otherwise Layer 2 flips use_ssl=false but Layer 1's
+	// address still carries an `https://` prefix — Lance's object_store uses
+	// that prefixed address as the endpoint verbatim and fails with HTTPS
+	// errors against a plaintext MinIO on :9000.
+	useSSLStr := deriveUseSSL(scheme)
+	if v, ok := specExtfs[extfsPrefix+"use_ssl"]; ok && v != "" {
+		useSSLStr = v
+	}
+	overrides[extfsPrefix+"use_ssl"] = useSSLStr
+	useSSL := useSSLStr == "true"
+
+	effectiveAddr := effectiveSpecAddress(specExtfs, extfsPrefix)
+	// AWS-style activation: user supplied an endpoint via spec.extfs
+	// (explicit address or Tier-2 derivation) AND the URI host is not the
+	// same string as the endpoint (equality guard: user wrote Milvus-form
+	// redundantly).
+	awsStyle := effectiveAddr != "" && u.Host != externalspec.StripURLScheme(effectiveAddr)
+	if awsStyle {
+		overrides[extfsPrefix+"bucket_name"] = u.Host
+		overrides[extfsPrefix+"address"] = effectiveAddr
+	} else {
+		// Milvus form: host is endpoint, path[0] is bucket.
 		path := strings.TrimPrefix(u.Path, "/")
 		parts := strings.SplitN(path, "/", 2)
 		if len(parts) > 0 && parts[0] != "" {
 			overrides[extfsPrefix+"bucket_name"] = parts[0]
 		}
-
-		// Override address from the URI host.
-		if u.Host != "" {
-			overrides[extfsPrefix+"address"] = ensureHTTPScheme(u.Host, storageConfig.GetUseSSL())
-		}
+		overrides[extfsPrefix+"address"] = ensureHTTPScheme(u.Host, useSSL)
 	}
 
-	// Apply spec extfs overrides (highest priority, keys already prefixed by caller).
+	// Layer 2: spec.extfs overrides. Empty values skipped so a present-but-
+	// empty user key cannot clobber the Layer-1 derivation (e.g. the user
+	// provided spec.extfs.address="" — that must not erase the URI-derived
+	// address).
 	for k, v := range specExtfs {
+		if v == "" {
+			continue
+		}
 		overrides[k] = v
 	}
 
 	return overrides
 }
 
-// copyStorageConfigToExtfs copies all relevant storage config fields to the extfs override map.
-func copyStorageConfigToExtfs(overrides map[string]string, prefix string, cfg *indexpb.StorageConfig) {
-	if cfg.GetStorageType() != "" {
-		overrides[prefix+"storage_type"] = cfg.GetStorageType()
-	}
-	if cfg.GetBucketName() != "" {
-		overrides[prefix+"bucket_name"] = cfg.GetBucketName()
-	}
-	if cfg.GetAddress() != "" {
-		overrides[prefix+"address"] = ensureHTTPScheme(cfg.GetAddress(), cfg.GetUseSSL())
-	}
-	if cfg.GetRootPath() != "" {
-		overrides[prefix+"root_path"] = cfg.GetRootPath()
-	}
-	if cfg.GetAccessKeyID() != "" {
-		overrides[prefix+"access_key_id"] = cfg.GetAccessKeyID()
-	}
-	if cfg.GetSecretAccessKey() != "" {
-		overrides[prefix+"access_key_value"] = cfg.GetSecretAccessKey()
-	}
-	if cfg.GetCloudProvider() != "" {
-		overrides[prefix+"cloud_provider"] = cfg.GetCloudProvider()
-	}
-	if cfg.GetIAMEndpoint() != "" {
-		overrides[prefix+"iam_endpoint"] = cfg.GetIAMEndpoint()
-	}
-	if cfg.GetRegion() != "" {
-		overrides[prefix+"region"] = cfg.GetRegion()
-	}
-	if cfg.GetSslCACert() != "" {
-		overrides[prefix+"ssl_ca_cert"] = cfg.GetSslCACert()
-	}
-	if cfg.GetGcpCredentialJSON() != "" {
-		overrides[prefix+"gcp_credential_json"] = cfg.GetGcpCredentialJSON()
-	}
-	if cfg.GetUseSSL() {
-		overrides[prefix+"use_ssl"] = "true"
-	} else {
-		overrides[prefix+"use_ssl"] = "false"
-	}
-	if cfg.GetUseIAM() {
-		overrides[prefix+"use_iam"] = "true"
-	} else {
-		overrides[prefix+"use_iam"] = "false"
-	}
-	if cfg.GetUseVirtualHost() {
-		overrides[prefix+"use_virtual_host"] = "true"
-	} else {
-		overrides[prefix+"use_virtual_host"] = "false"
-	}
+// normalizeStorageType maps a URI scheme to the storage_type string understood
+// by the milvus-storage FFI layer. Every scheme in allowedExternalSourceSchemes
+// is a remote object store; the driver is dispatched inside milvus-storage by
+// scheme prefix rather than storage_type. Local paths go through a different
+// entry point (MakeInternalLocalProperies) and never reach this function.
+// The parameter is accepted for symmetry with the C++ side and to document
+// the "scheme in → storage_type out" contract.
+func normalizeStorageType(scheme string) string {
+	_ = scheme
+	return "remote"
 }
+
+// deriveUseSSL returns the default SSL flag implied by the URI scheme. AWS /
+// public cloud schemes default to TLS; MinIO defaults to plaintext because
+// self-hosted MinIO clusters are commonly deployed without TLS on a private
+// network. Users can always override via spec.extfs.use_ssl.
+func deriveUseSSL(scheme string) string {
+	switch scheme {
+	case "minio":
+		return "false"
+	}
+	return "true"
+}
+
+// effectiveSpecAddress returns the effective endpoint for a prefixed spec
+// extfs map using the 3-tier priority:
+//  1. spec.extfs.<prefix>address (explicit)
+//  2. DeriveEndpoint(<prefix>cloud_provider, <prefix>region) (5 public clouds)
+//  3. "" (defer to URI host — Milvus-form semantics)
+//
+// Mirror of externalspec.EffectiveAddressFromExtfs but adapted to the
+// prefix-per-key layout used at the packed FFI layer.
+func effectiveSpecAddress(specExtfs map[string]string, extfsPrefix string) string {
+	if len(specExtfs) == 0 {
+		return ""
+	}
+	if v, ok := specExtfs[extfsPrefix+"address"]; ok && v != "" {
+		return v
+	}
+	if d, ok := externalspec.DeriveEndpoint(
+		specExtfs[extfsPrefix+"cloud_provider"],
+		specExtfs[extfsPrefix+"region"]); ok {
+		return d
+	}
+	return ""
+}
+
+// NormalizeExternalSource is the prefix-aware entry point on the packed/FFI
+// side. It resolves the effective endpoint from a prefixed spec extfs map and
+// delegates the actual URI rewrite to externalspec.RewriteAWSStyleToMilvusForm
+// so the two entry points (pkg/externalspec JSON variant, packed prefix-map
+// variant) share a single implementation of the safety gates (empty-endpoint,
+// empty/unsafe host, equality guard, url.URL-based reassembly).
+func NormalizeExternalSource(externalSource string, specExtfs map[string]string, extfsPrefix string) string {
+	return externalspec.RewriteAWSStyleToMilvusForm(
+		externalSource,
+		effectiveSpecAddress(specExtfs, extfsPrefix),
+	)
+}
+
+// isSafeURIHost / stripURLScheme kept as local aliases so existing callers and
+// tests in this package continue to compile; both delegate to the exported
+// externalspec helpers, which are the single source of truth.
+func isSafeURIHost(host string) bool       { return externalspec.IsSafeURIHost(host) }
+func stripURLScheme(address string) string { return externalspec.StripURLScheme(address) }
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
 // This function converts a StorageConfig structure into a Properties object by

@@ -130,6 +130,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		delete(newProperties, deleteKey)
 	}
 
+	// Intentionally NOT rewriting udpates.Schema.ExternalSource here. The
+	// schema persists the user's raw URI; consumers at the FFI boundary
+	// (DataCoord task_index, QueryNode NewCollection) call
+	// externalspec.NormalizeExternalSource to derive Milvus form when
+	// handing the URI to C++ InjectExtfsProperties. Not normalizing at the
+	// Alter path means address-only updates no longer corrupt the stored
+	// URI (bug β), at the cost of every FFI entry being responsible for
+	// the form it needs.
+
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {

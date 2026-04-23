@@ -299,7 +299,61 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "ssl_ca_cert",
     "access_key_id",
     "access_key_value",
+    "role_arn",
+    "session_name",
+    "external_id",
+    "load_frequency",
+    "gcp_credential_json",
+    "gcp_target_service_account",
+    "bucket_name",
+    "address",
+    "anonymous",
 };
+
+// kExtfsFields enumerates every extfs.{collID}.* property that the Go writer
+// produces in BuildExtfsOverrides. Zero-initialization writes each of these
+// fields so an extfs group is self-describing with no implicit dependency
+// on `fs.*` baseline: Milvus-internal credentials cannot leak into a user's
+// external-table credential scope. Keep in lock-step with Go extfsFields.
+static const std::vector<std::pair<std::string, bool /*is_bool*/>>
+    kExtfsFields = {
+        {"storage_type", false},
+        {"bucket_name", false},
+        {"address", false},
+        {"root_path", false},
+        {"access_key_id", false},
+        {"access_key_value", false},
+        {"cloud_provider", false},
+        {"iam_endpoint", false},
+        {"region", false},
+        {"ssl_ca_cert", false},
+        {"gcp_credential_json", false},
+        {"gcp_target_service_account", false},
+        {"use_ssl", true},
+        {"use_iam", true},
+        {"use_virtual_host", true},
+};
+
+static std::string
+NormalizeStorageTypeFromScheme(const std::string& scheme) {
+    // The set of schemes the storage layer understands all map to the
+    // "remote" storage_type; the driver is selected inside milvus-storage
+    // via scheme prefix rather than storage_type. Local paths use
+    // MakeInternalLocalProperies and never reach this function.
+    (void)scheme;
+    return "remote";
+}
+
+static std::string
+DeriveUseSSLFromScheme(const std::string& scheme) {
+    // MinIO on self-hosted clusters commonly defaults to plaintext HTTP;
+    // all other allowed schemes default to TLS. The user can always
+    // override via spec.extfs.use_ssl.
+    if (scheme == "minio") {
+        return "false";
+    }
+    return "true";
+}
 
 void
 InjectExtfsProperties(milvus_storage::api::Properties& properties,
@@ -308,88 +362,88 @@ InjectExtfsProperties(milvus_storage::api::Properties& properties,
                       const std::string& external_spec) {
     std::string extfs_prefix = "extfs." + std::to_string(collection_id) + ".";
 
-    // Layer 1: Copy fs.* baseline to extfs.{collID}.*
-    static const std::vector<std::string> prop_names = {
-        "storage_type",
-        "bucket_name",
-        "address",
-        "root_path",
-        "access_key_id",
-        "access_key_value",
-        "cloud_provider",
-        "iam_endpoint",
-        "region",
-        "ssl_ca_cert",
-        "gcp_credential_json",
-        "use_ssl",
-        "use_iam",
-        "use_virtual_host",
-    };
-    for (const auto& prop : prop_names) {
-        auto it = properties.find("fs." + prop);
-        if (it != properties.end()) {
-            // Copy value before inserting: operator[] may rehash the map,
-            // invalidating it->second reference.
-            auto val = it->second;
-            if (auto* b = std::get_if<bool>(&val)) {
-                properties[extfs_prefix + prop] =
-                    std::string(*b ? "true" : "false");
-            } else {
-                properties[extfs_prefix + prop] = std::move(val);
-            }
+    // Layer 0: zero-initialize every BOOL-valued extfs field. String fields
+    // are NOT zero-initialized — milvus-storage rejects empty values for
+    // enum-constrained properties like cloud_provider ("value '' not in
+    // allowed set"). Missing keys are treated as "not set" by loon, which is
+    // the intended semantics; the Layer 1 baseline copy from `fs.*` is
+    // removed, so dropping string zero-init does not re-open the leak.
+    // Layer 1 below still overwrites the URI-derived fields; Layer 2 still
+    // applies explicit spec overrides. Go side mirrors this invariant in
+    // BuildExtfsOverrides.
+    for (const auto& [name, is_bool] : kExtfsFields) {
+        if (is_bool) {
+            properties[extfs_prefix + name] = std::string("false");
         }
     }
 
-    // Layer 2: Override bucket/address from URI (cross-bucket only).
+    // Layer 1: derive bucket / address / storage_type / use_ssl from URI.
     //
     // The caller already validated external_source via ValidateExternalSource
     // on the Go side, so reaching here with a malformed URI means either
     // etcd corruption or a bypass of the validation path. We treat both as
-    // hard errors: returning silently with empty bucket/host would leave the
-    // caller's properties pointing at the wrong bucket (the "fs.*" baseline
-    // copied in Layer 1) and produce a confusing S3 403/404 deep inside the
-    // Reader. AssertInfo here keeps the failure adjacent to the bad input.
+    // hard errors: returning silently with empty bucket would point the
+    // caller's properties at the zero-initialized bucket and produce a
+    // confusing S3 403/404 deep inside the Reader. AssertInfo here keeps
+    // the failure adjacent to the bad input.
     auto scheme_end = external_source.find("://");
-    if (scheme_end != std::string::npos) {
-        auto rest = external_source.substr(scheme_end + 3);
-        auto slash_pos = rest.find('/');
-        std::string host =
-            (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : "";
-        std::string path_part = (slash_pos != std::string::npos)
-                                    ? rest.substr(slash_pos + 1)
-                                    : rest;
-        auto bucket_end = path_part.find('/');
-        std::string bucket = (bucket_end != std::string::npos)
-                                 ? path_part.substr(0, bucket_end)
-                                 : path_part;
+    AssertInfo(scheme_end != std::string::npos,
+               "external_source for collection {} missing scheme: {}",
+               collection_id,
+               external_source);
 
-        // Empty host is valid for same-endpoint cross-bucket URIs like
-        // s3:///external-bucket/path — Go ValidateExternalSource allows this
-        // and BuildExtfsOverrides skips the address override in this case.
-        // Only hard-reject a missing bucket, which is always a logic error.
-        AssertInfo(!bucket.empty(),
-                   "external_source for collection {} has empty bucket: {}",
-                   collection_id,
-                   external_source);
+    std::string scheme = external_source.substr(0, scheme_end);
+    auto rest = external_source.substr(scheme_end + 3);
+    auto slash_pos = rest.find('/');
+    std::string host =
+        (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : "";
+    AssertInfo(!host.empty(),
+               "external_source for collection {} has empty host: {}",
+               collection_id,
+               external_source);
 
-        milvus_storage::api::SetValue(
-            properties, (extfs_prefix + "bucket_name").c_str(), bucket.c_str());
+    std::string path_part =
+        (slash_pos != std::string::npos) ? rest.substr(slash_pos + 1) : "";
+    auto bucket_end = path_part.find('/');
+    std::string path_bucket = (bucket_end != std::string::npos)
+                                  ? path_part.substr(0, bucket_end)
+                                  : path_part;
 
-        // Only override address when host is non-empty (mirrors Go behaviour).
-        // For s3:///bucket/path (empty host), we keep the baseline address from
-        // Layer 1 so the request is sent to Milvus's own storage endpoint.
-        if (!host.empty()) {
-            std::string address = host;
-            if (address.find("://") == std::string::npos) {
-                address = "http://" + address;
-            }
-            milvus_storage::api::SetValue(properties,
-                                          (extfs_prefix + "address").c_str(),
-                                          address.c_str());
+    milvus_storage::api::SetValue(
+        properties,
+        (extfs_prefix + "storage_type").c_str(),
+        NormalizeStorageTypeFromScheme(scheme).c_str());
+    milvus_storage::api::SetValue(
+        properties,
+        (extfs_prefix + "use_ssl").c_str(),
+        DeriveUseSSLFromScheme(scheme).c_str());
+
+    // Default to Milvus-form interpretation: URI host is endpoint, path[0]
+    // is bucket. If spec.extfs provides an `address` (or derivable via
+    // cloud_provider + region in Go — for C++, only explicit `address`
+    // drives the AWS-form flip), Layer 2 below will replace these with
+    // host-as-bucket / spec.address-as-endpoint. Since C++ sees the spec
+    // JSON raw, the Layer 2 rewrite happens after the per-field merge by
+    // re-reading whatever final `address` landed in properties.
+    std::string address = host;
+    if (address.find("://") == std::string::npos) {
+        // Mirror Go's ensureHTTPScheme: only prepend http:// for plaintext;
+        // use_ssl=true leaves the address as bare host:port (the FFI /
+        // Lance layer infers https://).
+        if (DeriveUseSSLFromScheme(scheme) == "false") {
+            address = "http://" + address;
         }
     }
+    milvus_storage::api::SetValue(properties,
+                                  (extfs_prefix + "address").c_str(),
+                                  address.c_str());
+    if (!path_bucket.empty()) {
+        milvus_storage::api::SetValue(properties,
+                                      (extfs_prefix + "bucket_name").c_str(),
+                                      path_bucket.c_str());
+    }
 
-    // Layer 3: Apply extfs overrides from external_spec JSON
+    // Layer 2: Apply extfs overrides from external_spec JSON.
     //
     // Security: gate every key through kAllowedExtfsSpecKeys. Keys outside
     // the allowlist are dropped with a warning rather than written into
@@ -398,6 +452,11 @@ InjectExtfsProperties(milvus_storage::api::Properties& properties,
     // entry point (proxy, rootcoord, datanode task); this check exists so a
     // future caller that forgets to run that validation cannot turn
     // external_spec into an arbitrary property-injection point.
+    //
+    // Track whether spec provided an `address` — if so, Layer 1 wrote the
+    // URI host into `address` (Milvus-form default) but the user actually
+    // meant AWS form (host is the bucket). We re-interpret after the merge.
+    bool spec_has_address = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
@@ -429,6 +488,15 @@ InjectExtfsProperties(milvus_storage::api::Properties& properties,
                         }
                         auto val =
                             std::string(field.value().get_string().value());
+                        // Skip present-but-empty values so a serialized empty
+                        // field cannot clobber the Layer-1 derivation (mirror
+                        // of Go's `if v == "" { continue }`).
+                        if (val.empty()) {
+                            continue;
+                        }
+                        if (key == "address") {
+                            spec_has_address = true;
+                        }
                         milvus_storage::api::SetValue(
                             properties,
                             (extfs_prefix + key).c_str(),
@@ -447,8 +515,8 @@ InjectExtfsProperties(milvus_storage::api::Properties& properties,
             // Top-level JSON parse failure means the spec is structurally
             // broken; the Go side validates this at every entry point so
             // reaching here implies etcd corruption or a bypass. Promote to
-            // ERROR (not WARN) and fail fast — silently using the Layer 1+2
-            // baseline would authenticate against a partially-overridden
+            // ERROR (not WARN) and fail fast — silently using the Layer 1
+            // derivation would authenticate against a partially-overridden
             // config that the user never asked for.
             LOG_ERROR(
                 "Failed to parse external_spec for extfs overrides "
@@ -460,6 +528,47 @@ InjectExtfsProperties(milvus_storage::api::Properties& properties,
                       collection_id,
                       e.what());
         }
+    }
+
+    // AWS-form post-process: spec.extfs.address signals AWS-style URI
+    // (host is the bucket, path is the key). Layer 1 defaulted to Milvus
+    // form, so if the user supplied `address` in spec we must rewrite the
+    // bucket to be the original URI host and leave `address` at whatever
+    // the spec merge produced.
+    //
+    // Note: C++ does NOT implement Tier-2 (cloud_provider + region)
+    // derivation here. Tier-2 rewriting happens on the Go side via
+    // NormalizeExternalSource, which folds the URI into canonical
+    // Milvus form BEFORE it reaches this function. So by the time C++
+    // sees the URI, it is already Milvus-form unless the user supplied
+    // an explicit `address`.
+    if (spec_has_address) {
+        milvus_storage::api::SetValue(properties,
+                                      (extfs_prefix + "bucket_name").c_str(),
+                                      host.c_str());
+    }
+
+    // Address/use_ssl reconciliation: Layer 1 chose whether to prepend a
+    // scheme based on the URI's default use_ssl. If Layer 2 flipped use_ssl
+    // via spec.extfs, or if the user supplied spec.extfs.address as a bare
+    // host (no scheme), the address scheme may now contradict or under-
+    // specify the final use_ssl. Re-derive based on the final use_ssl:
+    //   - no scheme + final use_ssl=false → prepend `http://`.
+    //   - no scheme + final use_ssl=true  → prepend `https://`.
+    // Addresses that already carry a scheme are left alone — callers with
+    // an explicit `https://host` or `http://host` in spec.extfs.address win.
+    auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
+        properties, (extfs_prefix + "use_ssl").c_str());
+    auto final_address = milvus_storage::api::GetValue<std::string>(
+        properties, (extfs_prefix + "address").c_str());
+    if (final_use_ssl.ok() && final_address.ok() &&
+        final_address->find("://") == std::string::npos) {
+        const char* scheme =
+            (*final_use_ssl == "true") ? "https://" : "http://";
+        milvus_storage::api::SetValue(
+            properties,
+            (extfs_prefix + "address").c_str(),
+            (scheme + *final_address).c_str());
     }
 }
 

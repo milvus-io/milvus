@@ -752,7 +752,11 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	storageConfig := createStorageConfig()
 	extfsPrefix := packed.ExtfsPrefixForCollection(job.GetCollectionId())
 	specExtfs := spec.BuildExtfsOverrides(extfsPrefix)
-	extfsOverrides := packed.BuildExtfsOverrides(job.GetExternalSource(), storageConfig, extfsPrefix, specExtfs)
+	// Normalize AWS-style URIs into the canonical Milvus form so the URI passed
+	// to FFI (and hence persisted into the manifest) always carries the endpoint.
+	// No-op for Milvus-form or relative-path inputs.
+	normalizedSource := packed.NormalizeExternalSource(job.GetExternalSource(), specExtfs, extfsPrefix)
+	extfsOverrides := packed.BuildExtfsOverrides(normalizedSource, specExtfs, extfsPrefix)
 	for k, v := range spec.BuildFormatProperties() {
 		extfsOverrides[k] = v
 	}
@@ -762,7 +766,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		columns,
 		spec.Format,
 		exploreBaseDir,
-		job.GetExternalSource(),
+		normalizedSource,
 		storageConfig,
 		extfsOverrides,
 	)

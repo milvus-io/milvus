@@ -112,7 +112,9 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource(externalSource).
-		WithExternalSpec(fmt.Sprintf(`{"format":"iceberg-table","snapshot_id":%d}`, tableInfo.SnapshotID)).
+		// Pass the full spec (with credentials) at CreateCollection too —
+		// ValidateExtfsComplete requires an explicit credential mode.
+		WithExternalSpec(externalSpec).
 		WithField(entity.NewField().WithName("pk").WithDataType(entity.FieldTypeInt64).WithExternalField("pk")).
 		WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256).WithExternalField("label")).
 		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(tableInfo.Dim)).WithExternalField("vector"))

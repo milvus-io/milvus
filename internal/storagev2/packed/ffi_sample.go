@@ -54,7 +54,8 @@ func SampleExternalFieldSizes(
 	// Build properties the same way as explore/manifest calls:
 	// base from StorageConfig + extfs overrides for cross-bucket resolution
 	extfsPrefix := ExtfsPrefixForCollection(collectionID)
-	extfsOverrides := BuildExtfsOverrides(externalSource, storageConfig, extfsPrefix, specExtfs)
+	normalizedSource := NormalizeExternalSource(externalSource, specExtfs, extfsPrefix)
+	extfsOverrides := BuildExtfsOverrides(normalizedSource, specExtfs, extfsPrefix)
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extfsOverrides)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)

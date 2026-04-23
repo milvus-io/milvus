@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -331,8 +332,13 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
-		ExternalSource:            schema.GetExternalSource(),
-		ExternalSpec:              schema.GetExternalSpec(),
+		// Normalize at the FFI boundary: C++ InjectExtfsProperties in
+		// index_c.cpp parses this URI as Milvus form. Schema stores the
+		// user-supplied URI verbatim, so rewrite it here using the spec
+		// extfs context before it crosses into C++ territory.
+		ExternalSource: externalspec.NormalizeExternalSource(
+			schema.GetExternalSource(), schema.GetExternalSpec()),
+		ExternalSpec: schema.GetExternalSpec(),
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

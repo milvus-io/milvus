@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -89,6 +90,16 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 }
 
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
+	// Normalize external_source at the FFI boundary. Schema persists the
+	// user's raw URI; both the schema-version-bump (UpdateSchema) and the
+	// first-create (NewCollection) paths below hand the schema to segcore,
+	// which parses external_source as Milvus form. Clone first so the
+	// caller's schema stays untouched.
+	if schema.GetExternalSource() != "" {
+		schema = typeutil.Clone(schema)
+		schema.ExternalSource = externalspec.NormalizeExternalSource(
+			schema.GetExternalSource(), schema.GetExternalSpec())
+	}
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
@@ -287,6 +298,15 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	var loadFieldIDs typeutil.Set[int64]
 	loadSchema := typeutil.Clone(schema)
+	// Normalize at the FFI boundary: C++ InjectExtfsProperties in
+	// ChunkedSegmentSealedImpl reads schema_->get_external_source() and
+	// parses it as Milvus form. Schema persists the user's raw URI, so
+	// rewrite it here using the spec extfs context before handing the
+	// clone to segcore.
+	if loadSchema.GetExternalSource() != "" {
+		loadSchema.ExternalSource = externalspec.NormalizeExternalSource(
+			loadSchema.GetExternalSource(), loadSchema.GetExternalSpec())
+	}
 	// if load fields is specified, do filtering logic
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {

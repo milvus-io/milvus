@@ -189,7 +189,10 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	extfsPrefix := ExtfsPrefixForCollection(opts.CollectionID)
-	extfsOverrides := BuildExtfsOverrides(externalSource, storageConfig, extfsPrefix, opts.SpecExtfs)
+	// Keep URI interpretation consistent with the DataCoord explore side:
+	// flip to AWS-style parsing when spec.extfs.address was provided.
+	normalizedSource := NormalizeExternalSource(externalSource, opts.SpecExtfs, extfsPrefix)
+	extfsOverrides := BuildExtfsOverrides(normalizedSource, opts.SpecExtfs, extfsPrefix)
 	for k, v := range opts.FormatProperties {
 		extfsOverrides[k] = v
 	}
