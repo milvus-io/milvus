@@ -263,46 +263,6 @@ func (v *ReplicateConfigValidator) validateConfigComparison() error {
 		// If cluster doesn't exist in current config, it's a new cluster, which is allowed
 	}
 
-	// When pchannels are increasing, enforce stricter rules
-	if v.isPChannelIncreasing {
-		if err := v.validatePChannelIncreasingConstraints(currentClusterMap); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validatePChannelIncreasingConstraints enforces that when pchannels grow,
-// only pchannel lists can change — cluster set and topology must remain identical.
-func (v *ReplicateConfigValidator) validatePChannelIncreasingConstraints(currentClusterMap map[string]*commonpb.MilvusCluster) error {
-	// Cluster set must be identical (no new or removed clusters)
-	if len(currentClusterMap) != len(v.clusterMap) {
-		return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: current has %d clusters, incoming has %d",
-			len(currentClusterMap), len(v.clusterMap))
-	}
-	for clusterID := range currentClusterMap {
-		if _, ok := v.clusterMap[clusterID]; !ok {
-			return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: cluster '%s' missing from incoming config", clusterID)
-		}
-	}
-
-	// Topology must be identical
-	currentTopos := v.currentConfig.GetCrossClusterTopology()
-	incomingTopos := v.incomingConfig.GetCrossClusterTopology()
-	if len(currentTopos) != len(incomingTopos) {
-		return fmt.Errorf("when pchannels are increasing, topology must remain identical: current has %d edges, incoming has %d",
-			len(currentTopos), len(incomingTopos))
-	}
-	currentEdges := make(map[string]struct{})
-	for _, topo := range currentTopos {
-		currentEdges[topo.GetSourceClusterId()+"->"+topo.GetTargetClusterId()] = struct{}{}
-	}
-	for _, topo := range incomingTopos {
-		edge := topo.GetSourceClusterId() + "->" + topo.GetTargetClusterId()
-		if _, ok := currentEdges[edge]; !ok {
-			return fmt.Errorf("when pchannels are increasing, topology must remain identical: edge '%s' not in current config", edge)
-		}
-	}
 	return nil
 }
 
