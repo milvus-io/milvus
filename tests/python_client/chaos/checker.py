@@ -3111,8 +3111,7 @@ class NullVectorQueryChecker(Checker):
                 non_null_pks = [r[self.int64_field_name] for r in res if r.get(field_name) is not None]
                 samples[field_name] = non_null_pks[:sample_size]
                 log.info(
-                    f"[NullVectorQueryChecker] field='{field_name}': "
-                    f"sampled {len(samples[field_name])} non-null PKs"
+                    f"[NullVectorQueryChecker] field='{field_name}': sampled {len(samples[field_name])} non-null PKs"
                 )
             except Exception as e:
                 log.warning(f"[NullVectorQueryChecker] failed to sample non-null PKs for '{field_name}': {e}")
@@ -3138,9 +3137,7 @@ class NullVectorQueryChecker(Checker):
                 )
                 non_null = [r for r in res if r.get(vec_field) is not None]
                 if res and not non_null:
-                    return (
-                        f"all {len(res)} rows have null '{vec_field}', possible data corruption"
-                    ), False
+                    return (f"all {len(res)} rows have null '{vec_field}', possible data corruption"), False
                 log.debug(f"[NullVectorQueryChecker] fallback: '{vec_field}' {len(non_null)}/{len(res)} non-null")
                 return res, True
 
@@ -3161,8 +3158,7 @@ class NullVectorQueryChecker(Checker):
                     f"despite being queried by known non-null PKs"
                 ), False
             log.debug(
-                f"[NullVectorQueryChecker] field='{vec_field}': "
-                f"{len(res)}/{len(sample_pks)} non-null rows verified"
+                f"[NullVectorQueryChecker] field='{vec_field}': {len(res)}/{len(sample_pks)} non-null rows verified"
             )
             return res, True
         except Exception as e:
