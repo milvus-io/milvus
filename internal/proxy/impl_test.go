@@ -2606,3 +2606,36 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 		})
 	})
 }
+
+func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cases := []struct {
+		name      string
+		src, spec string
+		wantErr   bool
+	}{
+		{"source only rejected", "s3://bucket/p", "", true},
+		{"spec only rejected", "", `{"format":"parquet"}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "any_collection",
+				ExternalSource: tc.src,
+				ExternalSpec:   tc.spec,
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				assert.Contains(t, resp.GetStatus().GetReason(), "both provided or both omitted")
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+		})
+	}
+}
