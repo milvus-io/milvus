@@ -5243,6 +5243,34 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("duplicate external_field rejected different types", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "dup_int",
+			DataType:      schemapb.DataType_Int64,
+			ExternalField: "text_col",
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_col")
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("duplicate external_field rejected same type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "text_alias",
+			DataType:      schemapb.DataType_VarChar,
+			ExternalField: "text_col",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "32"},
+			},
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
 	t.Run("unsupported field types rejected", func(t *testing.T) {
 		unsupportedTypes := []schemapb.DataType{
 			schemapb.DataType_SparseFloatVector,
