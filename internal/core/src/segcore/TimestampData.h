@@ -80,8 +80,28 @@ class TimestampData {
         vcid_to_cid_arr_.assign(1, 0);
     }
 
+    // Constant mode: all timestamps are the same value (e.g. 0 for external
+    // tables). No data is materialized — operator[] returns constant_value_.
+    // This saves ~8 GB for 1B-row external tables.
+    void
+    InitConstant(int64_t num_rows, Timestamp value = 0) {
+        total_size_ = num_rows;
+        is_constant_ = true;
+        const_val_ = value;
+        // Set up a single virtual chunk pointing to nullptr.
+        // chunk_data_ stays empty — is_constant_ bypasses it.
+        num_rows_until_chunk_.push_back(0);
+        num_rows_until_chunk_.push_back(total_size_);
+        virt_chunk_order_ = 0;
+        vcid_to_cid_arr_.assign(1, 0);
+    }
+
     Timestamp
     operator[](int64_t i) const {
+        // Constant mode: all timestamps are the same value
+        if (is_constant_) {
+            return const_val_;
+        }
         // Fast path: single chunk
         if (chunk_data_.size() == 1) {
             return chunk_data_[0][i];
@@ -127,6 +147,11 @@ class TimestampData {
         return num_rows_until_chunk_[chunk_id];
     }
 
+    bool
+    is_constant_mode() const {
+        return is_constant_;
+    }
+
     void
     clear() {
         chunk_data_.clear();
@@ -134,6 +159,8 @@ class TimestampData {
         vcid_to_cid_arr_.clear();
         virt_chunk_order_ = 0;
         total_size_ = 0;
+        is_constant_ = false;
+        const_val_ = 0;
         column_.reset();
         pins_.clear();
         owned_.clear();
@@ -160,6 +187,9 @@ class TimestampData {
     int64_t virt_chunk_order_ = 0;
     std::vector<int64_t> vcid_to_cid_arr_;
     int64_t total_size_ = 0;
+    // Constant mode: all timestamps return const_val_
+    bool is_constant_ = false;
+    Timestamp const_val_ = 0;
 
     // Pin mode: hold column reference and pins to prevent eviction
     std::shared_ptr<ChunkedColumnInterface> column_;

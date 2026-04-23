@@ -373,14 +373,6 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.Equal(t, int64(0), ver)
 }
 
-func TestCreateSegmentManifest_CanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-
-	_, err := CreateSegmentManifest(ctx, 1, 1, "parquet", []string{"col1"}, nil, nil)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -713,6 +705,72 @@ func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
+}
+
+// ==================== SampleExternalFieldSizes Tests ====================
+
+func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {
+	result, err := SampleExternalFieldSizes(
+		`{"base_path":"/tmp","ver":1}`, 100, 42,
+		"s3://bucket/data/", `{"format":"parquet"}`,
+		nil, nil,
+	)
+	assert.Nil(t, result)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "storageConfig is required")
+}
+
+func TestSampleExternalFieldSizes_EmptyManifestPath(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	result, err := SampleExternalFieldSizes(
+		"", 100, 42,
+		"", "",
+		config, nil,
+	)
+	assert.Nil(t, result)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "manifest_path is empty")
+}
+
+func TestSampleExternalFieldSizes_InvalidManifestPath(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	// Valid JSON but manifest file doesn't exist
+	result, err := SampleExternalFieldSizes(
+		`{"base_path":"/nonexistent/path","ver":1}`, 100, 42,
+		"", "",
+		config, nil,
+	)
+	assert.Nil(t, result)
+	assert.Error(t, err)
+}
+
+func TestSampleExternalFieldSizes_WithSpecExtfs(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	specExtfs := map[string]string{
+		"extfs.42.region":  "us-west-2",
+		"extfs.42.use_ssl": "true",
+	}
+	// Will fail at manifest read (no real file), but validates that
+	// properties construction with specExtfs doesn't panic
+	result, err := SampleExternalFieldSizes(
+		`{"base_path":"/nonexistent","ver":1}`, 100, 42,
+		"s3://s3.us-west-2.amazonaws.com/ext-bucket/data/", `{"format":"parquet"}`,
+		config, specExtfs,
+	)
+	assert.Nil(t, result)
+	assert.Error(t, err)
 }
 
 // ==================== ExploreFilesReturnManifestPath Tests ====================

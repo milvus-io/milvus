@@ -21,7 +21,7 @@ package external
 //
 // SEGMENT ID ALLOCATION WORKFLOW:
 // - DataCoord pre-allocates a batch of segment IDs (default 1000) via allocator.AllocN()
-// - Pre-allocated ID range is passed to DataNode via UpdateExternalCollectionRequest.PreAllocatedSegmentIds
+// - Pre-allocated ID range is passed to DataNode via RefreshExternalCollectionTaskRequest.PreAllocatedSegmentIds
 // - DataNode extracts the IDRange and uses pre-allocated IDs sequentially for each new segment
 // - Manifest files are written directly to final paths: external/{collectionID}/segments/{realID}/manifest
 //
@@ -47,7 +47,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -70,75 +72,6 @@ func ensureContext(ctx context.Context) error {
 	}
 }
 
-// FragmentRowRange represents the row index range for a fragment within a segment
-type FragmentRowRange struct {
-	FragmentID int64
-	StartRow   int64 // inclusive
-	EndRow     int64 // exclusive
-}
-
-// SegmentRowMapping holds the row index mapping for all fragments in a segment
-type SegmentRowMapping struct {
-	SegmentID int64
-	TotalRows int64
-	Ranges    []FragmentRowRange
-	Fragments []packed.Fragment
-}
-
-// NewSegmentRowMapping creates a row mapping from fragments
-// Fragments are mapped sequentially: fragment1 gets [0, rowCount1), fragment2 gets [rowCount1, rowCount1+rowCount2), etc.
-func NewSegmentRowMapping(segmentID int64, fragments []packed.Fragment) *SegmentRowMapping {
-	mapping := &SegmentRowMapping{
-		SegmentID: segmentID,
-		Fragments: fragments,
-		Ranges:    make([]FragmentRowRange, len(fragments)),
-	}
-
-	var offset int64
-	for i, f := range fragments {
-		mapping.Ranges[i] = FragmentRowRange{
-			FragmentID: f.FragmentID,
-			StartRow:   offset,
-			EndRow:     offset + f.RowCount,
-		}
-		offset += f.RowCount
-	}
-	mapping.TotalRows = offset
-
-	return mapping
-}
-
-// GetFragmentByRowIndex returns the fragment range that contains the given row index
-// Returns nil if rowIndex is out of range
-// To get local index within fragment: rowIndex - range.StartRow
-func (m *SegmentRowMapping) GetFragmentByRowIndex(rowIndex int64) *FragmentRowRange {
-	if rowIndex < 0 || rowIndex >= m.TotalRows {
-		return nil
-	}
-
-	// Binary search for efficiency
-	left, right := 0, len(m.Ranges)-1
-	for left <= right {
-		mid := (left + right) / 2
-		r := &m.Ranges[mid]
-		if rowIndex >= r.StartRow && rowIndex < r.EndRow {
-			return r
-		} else if rowIndex < r.StartRow {
-			right = mid - 1
-		} else {
-			left = mid + 1
-		}
-	}
-	return nil
-}
-
-// SegmentResult holds a segment and its fragment row mapping
-type SegmentResult struct {
-	Segment    *datapb.SegmentInfo
-	RowMapping *SegmentRowMapping
-	IsNew      bool // true if this is a newly created segment requiring ID allocation
-}
-
 // RefreshExternalCollectionTask handles updating external collection segments
 type RefreshExternalCollectionTask struct {
 	ctx context.Context
@@ -154,27 +87,27 @@ type RefreshExternalCollectionTask struct {
 	columns    []string
 
 	// Result after execution — tracked separately for correct response building
-	keptSegmentIDs  []int64                      // IDs of current segments that were kept unchanged
-	newSegments     []*datapb.SegmentInfo        // newly created segments (from orphan fragments)
-	updatedSegments []*datapb.SegmentInfo        // all segments (kept + new), for GetSegmentResults
-	segmentMappings map[int64]*SegmentRowMapping // segmentID -> row mapping
+	keptSegmentIDs  []int64               // IDs of current segments that were kept unchanged
+	newSegments     []*datapb.SegmentInfo // newly created segments (from orphan fragments)
+	updatedSegments []*datapb.SegmentInfo // all segments (kept + new), retained for logging counts
 
 	// Pre-allocated segment IDs
 	preallocatedIDRange *datapb.IDRange // pre-allocated segment ID range (begin, end)
 	nextAllocID         int64           // next available segment ID from pre-allocated range
 }
 
-// NewRefreshExternalCollectionTask creates a new update external task
+// NewRefreshExternalCollectionTask creates a new refresh-external-collection task.
+// ctx owns the task lifetime; cancellation is driven by the caller's context
+// (typically the manager's worker-pool closure).
 func NewRefreshExternalCollectionTask(
 	ctx context.Context,
 	req *datapb.RefreshExternalCollectionTaskRequest,
 ) *RefreshExternalCollectionTask {
 	return &RefreshExternalCollectionTask{
-		ctx:             ctx,
-		req:             req,
-		tr:              timerecord.NewTimeRecorder(fmt.Sprintf("RefreshExternalCollectionTask: %d", req.GetTaskID())),
-		state:           indexpb.JobState_JobStateInit,
-		segmentMappings: make(map[int64]*SegmentRowMapping),
+		ctx:   ctx,
+		req:   req,
+		tr:    timerecord.NewTimeRecorder(fmt.Sprintf("RefreshExternalCollectionTask: %d", req.GetTaskID())),
+		state: indexpb.JobState_JobStateInit,
 	}
 }
 
@@ -214,7 +147,6 @@ func (t *RefreshExternalCollectionTask) Reset() {
 	t.keptSegmentIDs = nil
 	t.newSegments = nil
 	t.updatedSegments = nil
-	t.segmentMappings = nil
 }
 
 func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
@@ -354,32 +286,6 @@ func (t *RefreshExternalCollectionTask) GetNewSegments() []*datapb.SegmentInfo {
 	return t.newSegments
 }
 
-// GetSegmentMappings returns the row mappings for all segments (segmentID -> mapping)
-func (t *RefreshExternalCollectionTask) GetSegmentMappings() map[int64]*SegmentRowMapping {
-	return t.segmentMappings
-}
-
-// GetSegmentResults returns segment results with metadata for DataCoord processing
-func (t *RefreshExternalCollectionTask) GetSegmentResults() []*SegmentResult {
-	var results []*SegmentResult
-
-	// Build a map of current segment IDs for fast lookup
-	currentSegmentIDSet := make(map[int64]bool)
-	for _, seg := range t.req.GetCurrentSegments() {
-		currentSegmentIDSet[seg.GetID()] = true
-	}
-
-	for _, seg := range t.updatedSegments {
-		results = append(results, &SegmentResult{
-			Segment:    seg,
-			RowMapping: t.segmentMappings[seg.GetID()],
-			IsNew:      !currentSegmentIDSet[seg.GetID()], // New if not in original current segments
-		})
-	}
-
-	return results
-}
-
 // fragmentKey generates a unique key for a fragment using its FilePath and row range
 // This composite key ensures fragments from the same file with different row ranges
 // are treated as distinct entities, which is critical for correct data mapping
@@ -448,8 +354,6 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				key := fragmentKey(f)
 				usedFragments[key] = true
 			}
-			// Compute row mapping for kept segment
-			t.segmentMappings[seg.GetID()] = NewSegmentRowMapping(seg.GetID(), fragments)
 			log.Debug("Segment kept unchanged",
 				zap.Int64("segmentID", seg.GetID()))
 		} else {
@@ -565,27 +469,31 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 
 	// Phase 1: Allocate segment IDs (sequential, lightweight)
 	type segmentWork struct {
-		segmentID int64
-		rowCount  int64
-		fragments []packed.Fragment
+		segmentID   int64
+		binlogLogID int64
+		rowCount    int64
+		fragments   []packed.Fragment
 	}
 	var works []segmentWork
 	for _, bin := range bins {
 		if len(bin.fragments) == 0 {
 			continue
 		}
-		if t.nextAllocID >= t.preallocatedIDRange.End {
-			return nil, fmt.Errorf("insufficient pre-allocated segment IDs: need more but only have %d IDs in range [%d, %d)",
-				t.preallocatedIDRange.End-t.preallocatedIDRange.Begin,
+		// Each segment needs 2 IDs: one for segment, one for fake binlog logID
+		if t.nextAllocID+1 >= t.preallocatedIDRange.End {
+			return nil, fmt.Errorf("insufficient pre-allocated IDs: need 2 more but only have %d IDs in range [%d, %d)",
+				t.preallocatedIDRange.End-t.nextAllocID,
 				t.preallocatedIDRange.Begin,
 				t.preallocatedIDRange.End)
 		}
 		segmentID := t.nextAllocID
-		t.nextAllocID++
+		binlogLogID := t.nextAllocID + 1
+		t.nextAllocID += 2
 		works = append(works, segmentWork{
-			segmentID: segmentID,
-			rowCount:  bin.rowCount,
-			fragments: bin.fragments,
+			segmentID:   segmentID,
+			binlogLogID: binlogLogID,
+			rowCount:    bin.rowCount,
+			fragments:   bin.fragments,
 		})
 	}
 
@@ -593,9 +501,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		zap.Int("numSegments", len(works)))
 
 	// Phase 2: Create manifests concurrently with a fixed-size worker pool.
-	// Same concurrency model as fetchRowCountsConcurrently in storagev2/packed:
-	// conc.Pool + AwaitAll gives built-in first-error propagation and goroutine
-	// lifetime management, so we don't reinvent it with channels + WaitGroup.
 	const createManifestWorkers = 16
 	manifestStart := time.Now()
 
@@ -603,32 +508,39 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	if workers > len(works) {
 		workers = len(works)
 	}
-	pool := conc.NewPool[struct{}](workers)
+	pool := conc.NewPool[string](workers)
 	defer pool.Release()
 
 	manifestPaths := make([]string, len(works))
-	futures := make([]*conc.Future[struct{}], len(works))
-	for i, work := range works {
-		i, work := i, work
-		futures[i] = pool.Submit(func() (struct{}, error) {
+	futures := make([]*conc.Future[string], len(works))
+	for i := range works {
+		i, work := i, works[i]
+		futures[i] = pool.Submit(func() (string, error) {
+			// Honor ctx cancellation so workers bail out quickly once the
+			// caller gives up instead of running createManifestForSegment
+			// for every still-queued segment.
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			manifestPath, err := t.createManifestForSegment(ctx, work.segmentID, work.fragments)
 			if err != nil {
-				return struct{}{}, fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
+				return "", fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
 			}
-			manifestPaths[i] = manifestPath
-			return struct{}{}, nil
+			return manifestPath, nil
 		})
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
-		return nil, err
-	}
-	// Guard against ctx canceled during the pool run: conc.AwaitAll waits
-	// for every submitted future to settle, so a canceled ctx whose workers
-	// happened to return nil (e.g. a mock that ignores ctx) would otherwise
-	// slip past the error check above and we'd build result from half-done
-	// work. Mirrors the pre-conc.Pool behavior.
-	if err := ctx.Err(); err != nil {
-		return nil, err
+
+	// Wait for all futures; record the first error (if any) but still wait
+	// for every future to finish so no goroutine is left running.
+	var firstErr error
+	for i, f := range futures {
+		path, err := f.Await()
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if err == nil {
+			manifestPaths[i] = path
+		}
 	}
 
 	manifestDuration := time.Since(manifestStart)
@@ -637,18 +549,128 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		zap.Int("workers", workers),
 		zap.Duration("duration", manifestDuration))
 
-	// Phase 3: Build result and mappings (sequential, lightweight)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Phase 3: Sample field sizes so that downstream code (QueryNode memory
+	// estimation) can use Binlog.MemorySize directly, eliminating the need
+	// for a separate Take-sampling step at load time. Two modes:
+	//   - samplePerSegment=false (default): sample only the first segment
+	//     and reuse that average for all segments in this task. Cheap, but
+	//     can be off when row density varies across files.
+	//   - samplePerSegment=true: sample each segment independently. More
+	//     I/O, but per-segment MemorySize is accurate.
+	//
+	// If a later segment's sampling fails, we fall back to the first
+	// successful avgBytesPerRow so MemorySize is never written as 0 — a
+	// zero MemorySize would make QueryNode's memory estimation collapse
+	// and risk OOM on load. If ALL samples fail (or return a 0 sum because
+	// the schema has no ExternalField-mapped fields, or the sampled rows
+	// somehow evaluate to 0 bytes), we fail the task rather than silently
+	// producing zero-sized segments that would skew QN's resource estimator
+	// and risk OOM on load.
+	samplePerSegment := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.GetAsBool()
+	sampleRows := paramtable.Get().QueryNodeCfg.ExternalCollectionSampleRows.GetAsInt()
+	segmentAvgBytes := make([]int64, len(works))
+	var fallbackAvg int64
+
+	extfsPrefix := packed.ExtfsPrefixForCollection(t.req.GetCollectionID())
+	specExtfs := t.parsedSpec.BuildExtfsOverrides(extfsPrefix)
+
+	sampleOne := func(manifestPath string) (int64, bool) {
+		fieldSizes, err := packed.SampleExternalFieldSizes(
+			manifestPath, sampleRows,
+			t.req.GetCollectionID(),
+			t.req.GetExternalSource(),
+			t.req.GetExternalSpec(),
+			t.req.GetStorageConfig(),
+			specExtfs,
+		)
+		if err != nil {
+			log.Warn("failed to sample external field sizes",
+				zap.String("manifestPath", manifestPath),
+				zap.Error(err))
+			return 0, false
+		}
+		total := sumFieldSizes(fieldSizes, t.req.GetSchema())
+		if total <= 0 {
+			// A non-positive total is treated as a sample failure so the
+			// caller can decide whether to fall back or fail the task. The
+			// zero can come from (a) a schema with no ExternalField-mapped
+			// fields, or (b) a Parquet file whose sampled rows really are
+			// empty — both are degenerate and must not feed QN a zero.
+			log.Warn("external field size sample produced non-positive total",
+				zap.String("manifestPath", manifestPath),
+				zap.Int64("total", total))
+			return 0, false
+		}
+		return total, true
+	}
+
+	if len(manifestPaths) > 0 {
+		if samplePerSegment {
+			for i, mp := range manifestPaths {
+				if avg, ok := sampleOne(mp); ok {
+					segmentAvgBytes[i] = avg
+					if fallbackAvg == 0 {
+						fallbackAvg = avg
+					}
+				}
+			}
+			log.Info("per-segment sampling complete",
+				zap.Int("numSegments", len(manifestPaths)),
+				zap.Int64("fallbackAvgBytesPerRow", fallbackAvg))
+		} else {
+			if avg, ok := sampleOne(manifestPaths[0]); ok {
+				fallbackAvg = avg
+				for i := range segmentAvgBytes {
+					segmentAvgBytes[i] = avg
+				}
+			}
+			log.Info("single-sample complete",
+				zap.Int64("avgBytesPerRow", fallbackAvg))
+		}
+		// If every sample failed, fail the task rather than emitting
+		// zero-MemorySize fake binlogs that would collapse QueryNode's
+		// resource estimator and risk OOM on load. We prefer a loud
+		// failure (retry-eligible via the task state machine) over a
+		// silent success that corrupts downstream accounting.
+		if fallbackAvg == 0 {
+			return nil, fmt.Errorf(
+				"external field size sampling failed for all %d segment(s); "+
+					"refusing to emit segments with MemorySize=0 (would risk QueryNode OOM on load). "+
+					"check sample logs above for the root cause",
+				len(manifestPaths))
+		}
+		// Fill any zero slots (sampling failed mid-loop) with the first
+		// successful average so every segment gets a non-zero MemorySize.
+		for i, v := range segmentAvgBytes {
+			if v == 0 {
+				segmentAvgBytes[i] = fallbackAvg
+			}
+		}
+	}
+
+	// Phase 4: Build result and mappings (sequential, lightweight)
 	result := make([]*datapb.SegmentInfo, 0, len(works))
 	for i, work := range works {
+		memorySize := segmentAvgBytes[i] * work.rowCount
 		seg := &datapb.SegmentInfo{
 			ID:             work.segmentID,
 			CollectionID:   t.req.GetCollectionID(),
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
+			// Fake binlog so downstream treats external segments like normal
+			// StorageV3 segments. MemorySize is pre-computed from Take sampling
+			// so QueryNode skips the external-specific sampling path.
+			Binlogs: buildFakeBinlogs(work.binlogLogID, work.rowCount, memorySize, t.req.GetSchema()),
 		}
 		result = append(result, seg)
-		t.segmentMappings[work.segmentID] = NewSegmentRowMapping(work.segmentID, work.fragments)
 	}
 
 	return result, nil
@@ -676,4 +698,56 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		fragments,
 		t.req.GetStorageConfig(),
 	)
+}
+
+// buildFakeBinlogs creates a synthetic FieldBinlog slice for an external segment.
+// It uses DefaultShortColumnGroupID (0) to match StorageV3 convention, so that
+// downstream code (row count calculation, index association, memory estimation)
+// treats external segments the same as normal packed segments.
+// ChildFields must list all field IDs so that QueryNode can resolve field schemas.
+func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.CollectionSchema) []*datapb.FieldBinlog {
+	var childFields []int64
+	if schema != nil {
+		for _, field := range schema.GetFields() {
+			childFields = append(childFields, field.GetFieldID())
+		}
+	}
+	return []*datapb.FieldBinlog{
+		{
+			FieldID:     int64(storagecommon.DefaultShortColumnGroupID),
+			ChildFields: childFields,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:      logID,
+					EntriesNum: numRows,
+					MemorySize: memorySize,
+					LogSize:    memorySize, // conservative: assume no compression
+				},
+			},
+		},
+	}
+}
+
+// sumFieldSizes computes total avgBytesPerRow from per-field sampling results.
+// Only external fields (those with ExternalField set) are counted to match
+// the QueryNode estimation logic.
+func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchema) int64 {
+	if schema == nil {
+		var total int64
+		for _, v := range fieldSizes {
+			total += v
+		}
+		return total
+	}
+	var total int64
+	for _, field := range schema.GetFields() {
+		extName := field.GetExternalField()
+		if extName == "" {
+			continue
+		}
+		if avgBytes, ok := fieldSizes[extName]; ok && avgBytes > 0 {
+			total += avgBytes
+		}
+	}
+	return total
 }
