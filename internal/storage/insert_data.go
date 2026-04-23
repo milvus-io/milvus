@@ -569,7 +569,25 @@ type VectorArrayFieldData struct {
 	Data        []*schemapb.VectorField
 	ValidData   []bool
 	Nullable    bool
-	L2PMapping  LogicalToPhysicalMapping
+}
+
+// emptyPerRowVectorField builds a placeholder VectorField with zero vectors,
+// used as the Data entry for null rows in Plan B dense layout.
+func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
+	vf := &schemapb.VectorField{Dim: dim}
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		vf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}
+	case schemapb.DataType_BinaryVector:
+		vf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}}
+	case schemapb.DataType_Float16Vector:
+		vf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}}
+	case schemapb.DataType_BFloat16Vector:
+		vf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}}
+	case schemapb.DataType_Int8Vector:
+		vf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}}
+	}
+	return vf
 }
 
 func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
@@ -646,9 +664,6 @@ func (data *Int8VectorFieldData) RowNum() int {
 }
 
 func (data *VectorArrayFieldData) RowNum() int {
-	if data.Nullable {
-		return len(data.ValidData)
-	}
 	return len(data.Data)
 }
 
@@ -788,9 +803,6 @@ func (data *Int8VectorFieldData) GetRow(i int) interface{} {
 func (data *VectorArrayFieldData) GetRow(i int) interface{} {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
-	}
-	if data.GetNullable() {
-		i = data.L2PMapping.GetPhysicalOffset(i)
 	}
 	return data.Data[i]
 }
@@ -1140,7 +1152,7 @@ func (data *Int8VectorFieldData) AppendRow(row interface{}) error {
 
 func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
-		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
+		data.Data = append(data.Data, emptyPerRowVectorField(data.Dim, data.ElementType))
 		data.ValidData = append(data.ValidData, false)
 		return nil
 	}
@@ -1150,7 +1162,6 @@ func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
 	}
 	data.Data = append(data.Data, v)
 	if data.GetNullable() {
-		data.L2PMapping.Build([]bool{true}, len(data.ValidData), 1)
 		data.ValidData = append(data.ValidData, true)
 	}
 	return nil
@@ -1676,7 +1687,6 @@ func (data *VectorArrayFieldData) AppendValidDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
 	}
-	data.L2PMapping.Build(v, len(data.ValidData), len(v))
 	data.ValidData = append(data.ValidData, v...)
 	return nil
 }
@@ -1835,7 +1845,7 @@ func (data *VectorArrayFieldData) GetMemorySize() int {
 	for _, val := range data.Data {
 		size += GetVectorSize(val, data.ElementType)
 	}
-	size += binary.Size(data.ValidData) + 1 + data.L2PMapping.GetMemorySize()
+	size += binary.Size(data.ValidData) + 1
 	return size
 }
 

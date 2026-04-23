@@ -2840,10 +2840,15 @@ func TestMergeVectorArrayField(t *testing.T) {
 	t.Run("nullable merge", func(t *testing.T) {
 		data := &InsertData{Data: make(map[FieldID]FieldData)}
 
+		// Plan B: dense layout — Data length equals ValidData length; null rows hold empty placeholders.
+		nullPlaceholder := &schemapb.VectorField{
+			Dim:  4,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+		}
 		field1 := &VectorArrayFieldData{
 			Dim:         4,
 			ElementType: schemapb.DataType_FloatVector,
-			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+			Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4), nullPlaceholder},
 			ValidData:   []bool{true, false},
 			Nullable:    true,
 		}
@@ -2851,7 +2856,7 @@ func TestMergeVectorArrayField(t *testing.T) {
 		field2 := &VectorArrayFieldData{
 			Dim:         4,
 			ElementType: schemapb.DataType_FloatVector,
-			Data:        []*schemapb.VectorField{makeFloatVec(4, 5, 6, 7, 8)},
+			Data:        []*schemapb.VectorField{nullPlaceholder, makeFloatVec(4, 5, 6, 7, 8)},
 			ValidData:   []bool{false, true},
 			Nullable:    true,
 		}
@@ -2860,14 +2865,9 @@ func TestMergeVectorArrayField(t *testing.T) {
 		MergeFieldData(data, 100, field2)
 
 		merged := data.Data[100].(*VectorArrayFieldData)
-		assert.Equal(t, 2, len(merged.Data))
+		assert.Equal(t, 4, len(merged.Data))
 		assert.Equal(t, []bool{true, false, false, true}, merged.ValidData)
 		assert.True(t, merged.Nullable)
-
-		assert.Equal(t, 0, merged.L2PMapping.GetPhysicalOffset(0))
-		assert.Equal(t, -1, merged.L2PMapping.GetPhysicalOffset(1))
-		assert.Equal(t, -1, merged.L2PMapping.GetPhysicalOffset(2))
-		assert.Equal(t, 1, merged.L2PMapping.GetPhysicalOffset(3))
 	})
 
 	t.Run("non-nullable merge", func(t *testing.T) {
@@ -2890,12 +2890,16 @@ func TestMergeVectorArrayField(t *testing.T) {
 
 func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	nullPlaceholder := &schemapb.VectorField{
+		Dim:  4,
+		Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+	}
 	insertData := &InsertData{
 		Data: map[FieldID]FieldData{
 			100: &VectorArrayFieldData{
 				Dim:         4,
 				ElementType: schemapb.DataType_FloatVector,
-				Data:        []*schemapb.VectorField{vec0},
+				Data:        []*schemapb.VectorField{vec0, nullPlaceholder},
 				ValidData:   []bool{true, false},
 				Nullable:    true,
 			},
@@ -2911,7 +2915,7 @@ func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 			found = true
 			assert.Equal(t, []bool{true, false}, fd.GetValidData())
 			assert.NotNil(t, fd.GetVectors().GetVectorArray())
-			assert.Equal(t, 1, len(fd.GetVectors().GetVectorArray().GetData()))
+			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))
 		}
 	}
 	assert.True(t, found)

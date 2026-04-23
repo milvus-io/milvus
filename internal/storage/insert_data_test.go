@@ -133,15 +133,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(161+9, s.iDataEmpty.GetMemorySize())
+		s.Equal(161+1, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(535+9, s.iDataOneRow.GetMemorySize())
+		s.Equal(535+1, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(734+9, s.iDataTwoRows.GetMemorySize())
+		s.Equal(734+1, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -173,8 +173,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0+9)
 	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 1)
-	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
-	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+9)
+	// +1 byte: Nullable flag (VectorArrayFieldData has no L2PMapping under Plan B)
+	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+1)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 9)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 9)
@@ -196,7 +196,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28+9)
 	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8+9)
 	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+1)
-	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+9)
+	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+1)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 17)
@@ -217,7 +217,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54+9)
 	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12+9)
 	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+1)
-	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4+9)
+	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4+1)
 }
 
 func (s *InsertDataSuite) TestGetRowSize() {
@@ -505,13 +505,13 @@ func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
 	require.NoError(t, fd.AppendRow(nil))
 	require.NoError(t, fd.AppendRow(vec2))
 
-	assert.Equal(t, 3, fd.RowNum(), "RowNum should count logical rows including nulls")
-	assert.Equal(t, 2, len(fd.Data), "Data should only contain valid rows (compact)")
+	assert.Equal(t, 3, fd.RowNum(), "RowNum should count all rows including null placeholders")
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense; null rows hold empty placeholders")
 	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
 	assert.True(t, fd.GetNullable())
 
 	assert.Equal(t, vec0, fd.GetRow(0))
-	assert.Nil(t, fd.GetRow(1), "null row should return nil")
+	assert.Nil(t, fd.GetRow(1), "null row should return nil despite placeholder in Data")
 	assert.Equal(t, vec2, fd.GetRow(2))
 }
 
@@ -547,9 +547,6 @@ func TestVectorArrayFieldData_AppendValidDataRows(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
-	assert.Equal(t, 0, fd.L2PMapping.GetPhysicalOffset(0))
-	assert.Equal(t, -1, fd.L2PMapping.GetPhysicalOffset(1))
-	assert.Equal(t, 1, fd.L2PMapping.GetPhysicalOffset(2))
 
 	assert.NoError(t, fd.AppendValidDataRows(nil))
 	assert.Error(t, fd.AppendValidDataRows("bad"))
@@ -581,7 +578,7 @@ func TestVectorArrayFieldData_AllNull(t *testing.T) {
 	}
 
 	assert.Equal(t, 3, fd.RowNum())
-	assert.Equal(t, 0, len(fd.Data))
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense, null rows hold placeholders")
 	for i := 0; i < 3; i++ {
 		assert.Nil(t, fd.GetRow(i))
 	}

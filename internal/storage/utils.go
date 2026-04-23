@@ -808,17 +808,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			vectorArray := srcField.GetVectors().GetVectorArray()
 			validData := srcField.GetValidData()
 
-			fd := &VectorArrayFieldData{
+			fieldData = &VectorArrayFieldData{
 				ElementType: field.GetElementType(),
 				Data:        vectorArray.GetData(),
 				Dim:         vectorArray.GetDim(),
 				ValidData:   validData,
 				Nullable:    field.GetNullable(),
 			}
-			if len(validData) > 0 {
-				fd.L2PMapping.Build(validData, 0, len(validData))
-			}
-			fieldData = fd
 		case schemapb.DataType_Geometry:
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
 			validData := srcField.GetValidData()
@@ -1136,9 +1132,6 @@ func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFiel
 	}
 	fieldData := data.Data[fid].(*VectorArrayFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	if len(field.ValidData) > 0 {
-		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
-	}
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
