@@ -2615,12 +2615,17 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	cases := []struct {
-		name      string
-		src, spec string
-		wantErr   bool
+		name        string
+		src, spec   string
+		wantSubstr  string
 	}{
-		{"source only rejected", "s3://bucket/p", "", true},
-		{"spec only rejected", "", `{"format":"parquet"}`, true},
+		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
+		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2630,11 +2635,9 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 				ExternalSpec:   tc.spec,
 			})
 			require.NoError(t, err)
-			if tc.wantErr {
-				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
-				assert.Contains(t, resp.GetStatus().GetReason(), "both provided or both omitted")
-			} else {
-				require.NoError(t, merr.Error(resp.GetStatus()))
+			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+			if tc.wantSubstr != "" {
+				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
 			}
 		})
 	}
