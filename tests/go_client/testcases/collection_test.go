@@ -48,6 +48,8 @@ func TestCreateCollection(t *testing.T) {
 
 // fast: create -> index -> load
 func TestCreateCollectionFast(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -80,6 +82,8 @@ func TestCreateCollectionFast(t *testing.T) {
 }
 
 func TestCreateCollectionFastOption(t *testing.T) {
+	t.Parallel()
+
 	// test create collection fast with option: ConsistencyLevel, varcharPk, indexOption
 	// Collection AutoID not works !!!, please set it on the field side~
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -121,6 +125,8 @@ func TestCreateCollectionFastOption(t *testing.T) {
 }
 
 func TestCreateAutoIdCollectionField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -152,6 +158,8 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 
 // create collection and specify shard num
 func TestCreateCollectionShards(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -179,6 +187,8 @@ func TestCreateCollectionShards(t *testing.T) {
 
 // test create auto collection with schema
 func TestCreateAutoIdCollectionSchema(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("waiting for valid AutoId from schema params")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -211,6 +221,8 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 
 // test create auto collection with collection option
 func TestCreateAutoIdCollection(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("https://github.com/milvus-io/milvus/issues/39523")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -242,6 +254,8 @@ func TestCreateAutoIdCollection(t *testing.T) {
 }
 
 func TestCreateJsonCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -265,6 +279,8 @@ func TestCreateJsonCollection(t *testing.T) {
 }
 
 func TestCreateArrayCollections(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -297,6 +313,8 @@ func TestCreateArrayCollections(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -359,6 +377,8 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 }
 
 func TestCreateCollectionDynamicSchema(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -393,6 +413,8 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 }
 
 func TestCreateCollectionDynamic(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("waiting for dynamicField alignment")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -429,6 +451,8 @@ func TestCreateCollectionDynamic(t *testing.T) {
 }
 
 func TestCreateCollectionAllFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -455,6 +479,8 @@ func TestCreateCollectionAllFields(t *testing.T) {
 }
 
 func TestCreateCollectionSparseVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -584,6 +610,8 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 
 // create collection missing pk field or vector field
 func TestCreateCollectionInvalidFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -620,6 +648,8 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 
 // create autoID or not collection with non-int64 and non-varchar field
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -640,6 +670,8 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 
 // test create collection with duplicate field name
 func TestCreateCollectionDuplicateField(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -662,6 +694,8 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 
 // test create collection with partition key not supported field type
 func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -683,6 +717,8 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 
 // partition key field cannot be primary field, d can only be one partition key field
 func TestCreateCollectionPartitionKeyPk(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -697,6 +733,8 @@ func TestCreateCollectionPartitionKeyPk(t *testing.T) {
 
 // can only be one partition key field
 func TestCreateCollectionPartitionKeyNum(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -713,6 +751,8 @@ func TestCreateCollectionPartitionKeyNum(t *testing.T) {
 }
 
 func TestPartitionKeyInvalidNumPartition(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("Waiting for num partition")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -741,6 +781,8 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 
 // test create collection with multi auto id
 func TestCreateCollectionMultiAutoId(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -756,6 +798,8 @@ func TestCreateCollectionMultiAutoId(t *testing.T) {
 
 // test create collection with different autoId between pk field and schema
 func TestCreateCollectionInconsistentAutoId(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -789,6 +833,8 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 
 // create collection with field or schema description
 func TestCreateCollectionDescription(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -891,6 +937,8 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 }
 
 func TestCreateVectorWithoutDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
@@ -907,6 +955,8 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 
 // specify dim for sparse vector -> error
 func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
@@ -922,6 +972,8 @@ func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
 }
 
 func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -946,6 +998,8 @@ func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
 
 // test create collection varchar array with invalid max length
 func TestCreateVarcharArrayInvalidLength(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -969,6 +1023,8 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 
 // test create collection varchar array with invalid max length
 func TestCreateVarcharInvalidLength(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -990,6 +1046,8 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 }
 
 func TestCreateArrayNotSupportedFieldType(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1007,6 +1065,8 @@ func TestCreateArrayNotSupportedFieldType(t *testing.T) {
 
 // the num of vector fields > default limit=4
 func TestCreateMultiVectorExceed(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1023,6 +1083,8 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 
 // func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1038,6 +1100,8 @@ func TestCreateCollectionInvalidShards(t *testing.T) {
 }
 
 func TestCreateCollectionInvalid(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1062,6 +1126,8 @@ func TestCreateCollectionInvalid(t *testing.T) {
 
 // test rename collection
 func TestRenameCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1098,6 +1164,8 @@ func TestRenameCollection(t *testing.T) {
 
 // There are collections with the same name in different db. Rename one of them.
 func TestRenameCollectionDb(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1136,6 +1204,8 @@ func TestRenameCollectionDb(t *testing.T) {
 }
 
 func TestRenameCollectionInvalidName(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1160,6 +1230,8 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 }
 
 func TestRenameCollectionAdvanced(t *testing.T) {
+	t.Parallel()
+
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1191,6 +1263,8 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 
 // alter collection ttl property
 func TestCollectionPropertyTtl(t *testing.T) {
+	t.Parallel()
+
 	// test collection property ttl
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1224,6 +1298,8 @@ func TestCollectionPropertyTtl(t *testing.T) {
 
 // create collection with property -> alter property -> writing and reading
 func TestCollectionWithPropertyAlterMmap(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1253,6 +1329,8 @@ func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 }
 
 func TestCollectionPropertyMmap(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1288,6 +1366,8 @@ func TestCollectionPropertyMmap(t *testing.T) {
 }
 
 func TestCollectionFakeProperties(t *testing.T) {
+	t.Parallel()
+
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

@@ -414,6 +414,8 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 //  4. Wait for refresh to complete
 //  5. Verify the generated segment count and total row count
 func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -728,6 +730,8 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 //  7. Query with filter and output fields
 //  8. Search with vector
 func TestExternalCollectionLoadAndQuery(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -976,6 +980,8 @@ indexAndLoad:
 //  2. Remove data1, add data2 (ids 2000-2299) → 800 rows
 //  3. Verify: data0 intact, data1 gone, data2 present
 func TestExternalCollectionIncrementalRefresh(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for two refresh+load cycles
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1134,6 +1140,8 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 // TestExternalCollectionMultipleDataTypes tests external collections with various data types:
 // Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, FloatVector
 func TestExternalCollectionMultipleDataTypes(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1543,6 +1551,8 @@ func findPython3ForVortex() (string, error) {
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionLanceFormat(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for lance operations
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1778,6 +1788,8 @@ func generateVortexDataOnMinIO(t *testing.T, pythonBin, outputPath string, numRo
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionVortexFormat(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -1991,6 +2003,8 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 // types regardless of the output schema.  Vortex and Lance require schema-level
 // changes to support float32 list vectors (tracked separately).
 func TestExternalCollectionFloat32ListVector(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 

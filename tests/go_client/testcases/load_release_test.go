@@ -19,6 +19,8 @@ import (
 
 // test load collection
 func TestLoadCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -48,6 +50,8 @@ func TestLoadCollection(t *testing.T) {
 
 // test load not existed collection
 func TestLoadCollectionNotExist(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	// connect
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -59,6 +63,8 @@ func TestLoadCollectionNotExist(t *testing.T) {
 
 // test load collection async
 func TestLoadCollectionAsync(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -81,6 +87,8 @@ func TestLoadCollectionAsync(t *testing.T) {
 
 // load collection without index
 func TestLoadCollectionWithoutIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -99,6 +107,8 @@ func TestLoadCollectionWithoutIndex(t *testing.T) {
 
 // load collection with multi partitions
 func TestLoadCollectionMultiPartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -157,6 +167,8 @@ func TestLoadCollectionMultiPartitions(t *testing.T) {
 
 // test load repeated partition names
 func TestLoadPartitionsRepeatedly(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -191,6 +203,8 @@ func TestLoadPartitionsRepeatedly(t *testing.T) {
 }
 
 func TestLoadMultiVectorsIndex(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -210,6 +224,8 @@ func TestLoadMultiVectorsIndex(t *testing.T) {
 }
 
 func TestLoadCollectionAllFields(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -233,6 +249,8 @@ func TestLoadCollectionAllFields(t *testing.T) {
 }
 
 func TestLoadCollectionSparse(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -256,6 +274,8 @@ func TestLoadCollectionSparse(t *testing.T) {
 }
 
 func TestLoadPartialFields(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1.  verify the collection loaded successfully
 		2.  verify the loaded fields can be searched in expr and output_fields
@@ -322,6 +342,8 @@ func TestLoadPartialFields(t *testing.T) {
 }
 
 func TestLoadPartialFieldsExpr(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1.  verify the collection loaded successfully
 		2.  verify the loaded / not-loaded fields can be searched in expr
@@ -371,6 +393,8 @@ func TestLoadPartialFieldsExpr(t *testing.T) {
 }
 
 func TestLoadSkipDynamicField(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1. load -> search output dynamic field
 		2. reload and skip dynamic field
@@ -411,6 +435,8 @@ func TestLoadSkipDynamicField(t *testing.T) {
 }
 
 func TestLoadPartialHybridSearch(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1.  load partial vector fields
 		2.  hybrid search with loaded and not-loaded fields
@@ -448,6 +474,8 @@ func TestLoadPartialHybridSearch(t *testing.T) {
 }
 
 func TestLoadPartialFieldsPartitions(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1. insert data into default partition and parName partition
 		2. load default partition with partial fields -> succ & query
@@ -507,6 +535,8 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 }
 
 func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
+	t.Parallel()
+
 	/*
 		code fields: pk, clustering key, partition key, part dynamic fields, non-vector fields -> error
 		not index: error
@@ -545,6 +575,8 @@ func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
 }
 
 func TestLoadPartialFieldsRepeated(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1. repeated Load with different LoadFields -> hint loaded
 	*/
@@ -577,6 +609,8 @@ func TestLoadPartialFieldsRepeated(t *testing.T) {
 }
 
 func TestLoadPartialFieldsRelease(t *testing.T) {
+	t.Parallel()
+
 	/*
 		1. release collection after loading partial fields -> ok
 	*/
@@ -604,6 +638,8 @@ func TestLoadPartialFieldsRelease(t *testing.T) {
 }
 
 func TestReleaseCollection(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -624,6 +660,8 @@ func TestReleaseCollection(t *testing.T) {
 }
 
 func TestReleaseCollectionNotExist(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	// connect
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -634,6 +672,8 @@ func TestReleaseCollectionNotExist(t *testing.T) {
 }
 
 func TestReleasePartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -664,6 +704,8 @@ func TestReleasePartitions(t *testing.T) {
 }
 
 func TestReleasePartitionsNotExist(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	// connect
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

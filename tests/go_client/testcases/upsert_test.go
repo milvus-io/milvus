@@ -254,6 +254,8 @@ func TestUpsertSparse(t *testing.T) {
 }
 
 func TestUpsertVarcharPk(t *testing.T) {
+	t.Parallel()
+
 	/*
 		test upsert varchar pks
 		upsert after query
@@ -308,6 +310,8 @@ func TestUpsertVarcharPk(t *testing.T) {
 
 // test upsert with partition
 func TestUpsertMultiPartitions(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -344,6 +348,8 @@ func TestUpsertMultiPartitions(t *testing.T) {
 }
 
 func TestUpsertSamePksManyTimes(t *testing.T) {
+	t.Parallel()
+
 	// upsert pks [0, 1000) many times with different vector
 	// query -> gets last upsert entities
 
@@ -385,6 +391,8 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 
 // test upsert autoId collection
 func TestUpsertAutoID(t *testing.T) {
+	t.Parallel()
+
 	/*
 		prepare autoID collection
 		upsert not exist pk -> error
@@ -441,6 +449,8 @@ func TestUpsertAutoID(t *testing.T) {
 
 // test upsert autoId collection
 func TestUpsertAutoIDRows(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("https://github.com/milvus-io/milvus/issues/40816")
 	/*
 		prepare autoID collection
@@ -512,6 +522,8 @@ func TestUpsertAutoIDRows(t *testing.T) {
 
 // test upsert with invalid collection / partition name
 func TestUpsertNotExistCollectionPartition(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -534,6 +546,8 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 
 // test upsert with invalid column data
 func TestUpsertInvalidColumnData(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -584,6 +598,8 @@ func TestUpsertInvalidColumnData(t *testing.T) {
 }
 
 func TestUpsertDynamicField(t *testing.T) {
+	t.Parallel()
+
 	// enable dynamic field and insert dynamic column
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -626,6 +642,8 @@ func TestUpsertDynamicField(t *testing.T) {
 }
 
 func TestUpsertWithoutLoading(t *testing.T) {
+	t.Parallel()
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -652,10 +670,14 @@ func TestUpsertWithoutLoading(t *testing.T) {
 }
 
 func TestUpsertPartitionKeyCollection(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("waiting gen partition key field")
 }
 
 func TestUpsertNullableFieldBehavior(t *testing.T) {
+	t.Parallel()
+
 	/*
 		Test nullable field behavior for Upsert operation:
 		1. Insert data with nullable field having a value
