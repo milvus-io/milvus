@@ -775,25 +775,21 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     }
 
     // 1. VirtualPKChunkedColumn for the synthetic primary key
+    //    This is lazy — data is only materialized if DataOfChunk/Span is called.
     auto pk_field_id = schema_->get_primary_field_id().value();
     auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
     fields_.wlock()->emplace(pk_field_id, virtual_pk);
     set_bit(field_data_ready_bitset_, pk_field_id, true);
 
-    // 2. PK→offset index for filter expressions
-    insert_record_.insert_pks(DataType::INT64, virtual_pk.get());
-    insert_record_.seal_pks();
+    // 2. PK→offset index using VirtualPKOffsetMap (zero storage).
+    //    Virtual PK = (seg_id << 32) | offset, so pk→offset is a simple
+    //    bit-extract. This replaces the OffsetOrderedArray that would
+    //    otherwise store num_rows (pk, offset) pairs (~17 GB for 1B rows).
+    insert_record_.set_virtual_pk_offset_map(id_, num_rows);
 
-    // 3. Synthetic timestamps (all 0 — rows always visible)
-    std::vector<Timestamp> timestamps(num_rows, 0);
-    TimestampIndex index;
-    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
-    auto meta =
-        GenerateFakeSlices(timestamps.data(), num_rows, min_slice_length);
-    index.set_length_meta(std::move(meta));
-    index.build_with(timestamps.data(), num_rows);
-    insert_record_.init_timestamps_from_owned(std::move(timestamps),
-                                              std::move(index));
+    // 3. Synthetic timestamps: constant mode (all 0 — rows always visible).
+    //    No data is materialized, saving ~8 GB for 1B-row external tables.
+    insert_record_.init_timestamps_constant(num_rows, 0);
 
     // 4. Row count + readiness
     {
@@ -4434,7 +4430,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info_.GetPriority(),
             eager_load,
             warmup_policy,
-            cache_key_suffix);
+            cache_key_suffix,
+            segment_load_info_.GetEstimatedBytesPerRow());
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

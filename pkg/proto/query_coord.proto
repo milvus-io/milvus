@@ -407,6 +407,7 @@ message SegmentLoadInfo {
     string manifest_path = 24;
     int32 data_version = 25;
     bool use_take_for_output = 26;
+    int64 estimated_bytes_per_row = 27;
 }
 
 message FieldIndexInfo {
