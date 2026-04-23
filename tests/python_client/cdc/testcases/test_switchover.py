@@ -244,7 +244,11 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                     f"Background inserts had {len(write_error)} transient failure(s) during switchover: {write_error}"
                 )
 
-            upstream_client.flush(c_name)
+            # After switchover, downstream is the new primary. Flushing the
+            # old primary (upstream) hits the replica-role rate limiter
+            # (rate=0.1/s) and exhausts pymilvus's 75 retries. Flush the
+            # current primary instead.
+            downstream_client.flush(c_name)
 
             expected = total_inserted
             logger.info(f"[INFO] Total inserted: {expected}")
