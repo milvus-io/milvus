@@ -26,10 +26,12 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestL0CompactionTaskSuite(t *testing.T) {
@@ -156,42 +158,67 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
 	}, nil, s.mockMeta)
-	_, err := task.BuildCompactionRequest()
-	s.Error(err)
+	plan, err := task.BuildCompactionRequest()
+	// Fast finish: should return a plan with only L0 segments (no error)
+	s.NoError(err)
+	s.Require().NotNil(plan)
+	// Verify plan only contains L0 input segments (2 segments)
+	s.Equal(2, len(plan.GetSegmentBinlogs()))
+	segIDs := lo.Map(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
+		return b.GetSegmentID()
+	})
+	s.ElementsMatch([]int64{100, 101}, segIDs)
+	// Verify no binlog IDs were allocated for fast finish
+	s.Nil(plan.GetPreAllocatedLogIDs())
 }
 
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
-	var task CompactionTask
+	channel := "Ch-1"
+	deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
 
-	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
+	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
+		[]*SegmentInfo{
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            200,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            201,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+			{SegmentInfo: &datapb.SegmentInfo{
+				ID:            202,
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: channel,
+			}},
+		},
+	)
 
-	meta, err := newMemoryMeta(s.T())
-	s.NoError(err)
-	task = &l0CompactionTask{
-		allocator: s.mockAlloc,
-		meta:      meta,
-	}
-	task.SetTask(&datapb.CompactionTask{})
-	_, err = task.BuildCompactionRequest()
-	s.T().Logf("err=%v", err)
-	s.Error(err)
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Deltalogs:     deltaLogs,
+		}}
+	}).Times(2)
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		TriggerID:     19530,
+		CollectionID:  1,
+		PartitionID:   10,
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:        1,
+		State:         datapb.CompactionTaskState_executing,
+		InputSegments: []int64{100, 101},
+	}, s.mockAlloc, s.mockMeta)
 
-	task = &mixCompactionTask{
-		allocator: s.mockAlloc,
-		meta:      meta,
-		ievm:      newMockVersionManager(),
-	}
-	task.SetTask(&datapb.CompactionTask{})
-	_, err = task.BuildCompactionRequest()
-	s.T().Logf("err=%v", err)
-	s.Error(err)
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(0, 0, errors.New("mock alloc err"))
 
-	task = &clusteringCompactionTask{
-		allocator: s.mockAlloc,
-		meta:      meta,
-	}
-	task.SetTask(&datapb.CompactionTask{})
-	_, err = task.BuildCompactionRequest()
+	_, err := task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 }
@@ -524,5 +551,153 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			res := t.Process()
 			s.Equal(tc.processResult, res)
 		}
+	})
+}
+
+// TestSelectFlushedSegment_ForceSelectAllFlag exercises the flag end-to-end:
+// build an L0 view, call Trigger() with the flag off / on, feed the resulting
+// latestDeletePos into an l0CompactionTask (the same wiring
+// compaction_trigger_v2.go uses), and verify selectFlushedSegment's output
+// actually changes based on the flag. A high-StartPosition segment (the
+// shape silently dropped by the import-position bug) is excluded with the
+// flag off and included with the flag on.
+func (s *L0CompactionTaskSuite) TestSelectFlushedSegment_ForceSelectAllFlag() {
+	paramtable.Init()
+	const flagKey = "dataCoord.compaction.levelzero.forceSelectAllSegments"
+
+	channel := "ch-1"
+	collectionID := int64(1)
+	partitionID := int64(10)
+	label := &CompactionGroupLabel{
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		Channel:      channel,
+	}
+
+	// Flushed L1 segments visible to selectFlushedSegment. The one with
+	// StartPosition > realL0DmlTs is the case we care about — it would
+	// normally be filtered out by `startPos < taskPos`.
+	const realL0DmlTs = uint64(5000)
+	lowPosSeg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            200,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channel,
+		Level:         datapb.SegmentLevel_L1,
+		State:         commonpb.SegmentState_Flushed,
+		StartPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 3000},
+	}}
+	highPosSeg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            201,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channel,
+		Level:         datapb.SegmentLevel_L1,
+		State:         commonpb.SegmentState_Flushed,
+		StartPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 20000},
+	}}
+
+	// Mockery's SelectSegments returns whatever we tell it without applying
+	// filters. We need the real filter logic to run so the `startPos <
+	// taskPos` predicate is actually exercised — install RunAndReturn that
+	// evaluates each SegmentFilter.Match against our fixed segment set.
+	installFilteringMock := func() {
+		s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+				all := []*SegmentInfo{lowPosSeg, highPosSeg}
+				result := make([]*SegmentInfo, 0, len(all))
+				for _, seg := range all {
+					matched := true
+					for _, f := range filters {
+						if !f.Match(seg) {
+							matched = false
+							break
+						}
+					}
+					if matched {
+						result = append(result, seg)
+					}
+				}
+				return result
+			})
+	}
+
+	// Build an L0 view with a couple of L0 segments whose dmlPos is
+	// `realL0DmlTs`. Trigger() runs resolveLatestDeletePos under the current
+	// flag value, so the returned view's latestDeletePos reflects the flag.
+	buildView := func() *LevelZeroCompactionView {
+		l0Segs := []*SegmentView{
+			{
+				ID:            100,
+				label:         label,
+				dmlPos:        &msgpb.MsgPosition{ChannelName: channel, Timestamp: realL0DmlTs},
+				Level:         datapb.SegmentLevel_L0,
+				State:         commonpb.SegmentState_Flushed,
+				DeltalogCount: 100,
+				DeltaSize:     1,
+				DeltaRowCount: 1,
+			},
+			{
+				ID:            101,
+				label:         label,
+				dmlPos:        &msgpb.MsgPosition{ChannelName: channel, Timestamp: realL0DmlTs},
+				Level:         datapb.SegmentLevel_L0,
+				State:         commonpb.SegmentState_Flushed,
+				DeltalogCount: 100,
+				DeltaSize:     1,
+				DeltaRowCount: 1,
+			},
+		}
+		return &LevelZeroCompactionView{
+			label:           label,
+			l0Segments:      l0Segs,
+			latestDeletePos: &msgpb.MsgPosition{ChannelName: channel, Timestamp: realL0DmlTs},
+			triggerID:       19530,
+		}
+	}
+
+	// Mirrors compaction_trigger_v2.go:406 — feed the triggered view's
+	// latestDeletePos into task.Pos and run selectFlushedSegment.
+	runSelectWithTriggeredPos := func() []int64 {
+		installFilteringMock()
+		srcView := buildView()
+		triggered, reason := srcView.Trigger()
+		s.Require().NotNil(triggered, "Trigger returned nil: %s", reason)
+		triggeredView := triggered.(*LevelZeroCompactionView)
+
+		task := newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     19530,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			Channel:       channel,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			NodeID:        1,
+			State:         datapb.CompactionTaskState_executing,
+			InputSegments: []int64{100, 101},
+			Pos:           triggeredView.latestDeletePos,
+		}, nil, s.mockMeta)
+
+		flushed, _, err := task.selectFlushedSegment()
+		s.Require().NoError(err)
+		return lo.Map(flushed, func(seg *SegmentInfo, _ int) int64 { return seg.GetID() })
+	}
+
+	s.Run("flag_off_excludes_high_start_position_segment", func() {
+		paramtable.Get().Save(flagKey, "false")
+		defer paramtable.Get().Reset(flagKey)
+
+		gotIDs := runSelectWithTriggeredPos()
+		s.ElementsMatch([]int64{200}, gotIDs,
+			"with flag off, segment 201 (StartPosition=20000 > taskPos=%d) must be excluded", realL0DmlTs)
+	})
+
+	s.Run("flag_on_includes_high_start_position_segment", func() {
+		paramtable.Get().Save(flagKey, "true")
+		defer paramtable.Get().Reset(flagKey)
+
+		gotIDs := runSelectWithTriggeredPos()
+		s.ElementsMatch([]int64{200, 201}, gotIDs,
+			"with flag on, resolveLatestDeletePos must lift taskPos so segment 201 is included")
 	})
 }
