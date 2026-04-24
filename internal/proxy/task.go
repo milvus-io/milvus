@@ -468,6 +468,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Reject reserved system field names supplied by the user before any
+	// server-side injection runs. __virtual_pk__ is the internal PK name
+	// auto-injected for external collections; RowID and Timestamp are
+	// segcore-internal columns. Allowing a user field under these names
+	// would create a namespace trap for any tooling that assumes they are
+	// system-owned (issue #49314). Must run before
+	// injectVirtualPKForExternalCollection so the check only sees
+	// user-supplied fields.
+	if err := validateReservedFieldNames(t.schema); err != nil {
+		return err
+	}
+
 	// For external collections, inject virtual PK field if no PK exists
 	if isExternalCollection {
 		if err := injectVirtualPKForExternalCollection(t.schema); err != nil {
@@ -700,7 +712,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
-	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, newFieldSchema.GetName()) {
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
 	}
 	if newFieldSchema.GetIsPrimaryKey() {

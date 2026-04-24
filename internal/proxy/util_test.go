@@ -188,6 +188,52 @@ func TestValidateFieldName(t *testing.T) {
 	}
 }
 
+// Regression for #49314: user-supplied field named __virtual_pk__ (or
+// RowID / Timestamp) must be rejected at CreateCollection to keep the
+// system namespace clean. Covers regular fields and struct-array
+// fields (both the struct name and its inner fields).
+func TestValidateReservedFieldNames(t *testing.T) {
+	// Accepts non-reserved names.
+	ok := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id"},
+			{Name: "embedding"},
+		},
+	}
+	assert.NoError(t, validateReservedFieldNames(ok))
+
+	for _, reserved := range []string{
+		common.VirtualPKFieldName,
+		common.RowIDFieldName,
+		common.TimeStampFieldName,
+	} {
+		s := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: reserved, DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := validateReservedFieldNames(s)
+		assert.Error(t, err, "reserved name %q must be rejected", reserved)
+		assert.Contains(t, err.Error(), "reserved")
+	}
+
+	// Struct-array field name collision.
+	s := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{Name: common.VirtualPKFieldName, Fields: []*schemapb.FieldSchema{{Name: "a"}}},
+		},
+	}
+	assert.Error(t, validateReservedFieldNames(s))
+
+	// Struct-array inner field name collision.
+	s2 := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{Name: "ok_struct", Fields: []*schemapb.FieldSchema{{Name: common.RowIDFieldName}}},
+		},
+	}
+	assert.Error(t, validateReservedFieldNames(s2))
+}
+
 func TestValidateDimension(t *testing.T) {
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,

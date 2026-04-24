@@ -584,6 +584,39 @@ func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 	}
 }
 
+// Regression for #49314: field names reserved by the server
+// (__virtual_pk__ auto-injected for external collections; RowID and
+// Timestamp segcore-internal columns) must be rejected at
+// CreateCollection for both regular and external collections.
+func TestCreateCollectionRejectsReservedFieldNames(t *testing.T) {
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	reserved := []string{"__virtual_pk__", "RowID", "Timestamp"}
+
+	for _, name := range reserved {
+		name := name
+		t.Run(name+"_as_pk", func(t *testing.T) {
+			collName := common.GenRandomString("reserved", 6)
+			pk := entity.NewField().WithName(name).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+			vec := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
+			schema := entity.NewSchema().WithName(collName).WithField(pk).WithField(vec)
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+			common.CheckErr(t, err, false, "reserved")
+		})
+		t.Run(name+"_as_scalar", func(t *testing.T) {
+			collName := common.GenRandomString("reserved", 6)
+			pk := entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+			scalar := entity.NewField().WithName(name).WithDataType(entity.FieldTypeInt64)
+			vec := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
+			schema := entity.NewSchema().WithName(collName).WithField(pk).WithField(scalar).WithField(vec)
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+			common.CheckErr(t, err, false, "reserved")
+		})
+	}
+}
+
 // create collection with invalid collection name: invalid str, schemaName isn't equal to collectionName, schema name is empty
 func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 	t.Parallel()
