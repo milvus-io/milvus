@@ -89,6 +89,7 @@ const (
 
 const (
 	ContextRequest                = "request"
+	ContextResponse               = "response"
 	ContextUsername               = "username"
 	ContextToken                  = "token"
 	VectorCollectionsPath         = "/vector/collections"
