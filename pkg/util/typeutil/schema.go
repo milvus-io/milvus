@@ -2253,6 +2253,17 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		return nil
 	}
 
+	// External source and spec form an atomic tuple. They must be both
+	// empty (deferred to a later refresh) or both non-empty (ready to
+	// load). One-without-the-other leaves the collection in a half-
+	// initialized state that no refresh path can recover from cleanly.
+	srcSet := schema.GetExternalSource() != ""
+	specSet := schema.GetExternalSpec() != ""
+	if srcSet != specSet {
+		return fmt.Errorf("external collection %s requires external_source and external_spec to be both set or both empty (got source=%q, spec=%q)",
+			schema.GetName(), schema.GetExternalSource(), schema.GetExternalSpec())
+	}
+
 	if len(schema.GetFunctions()) > 0 {
 		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
 	}
@@ -2267,6 +2278,7 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 
 	// Pass 1: validate all user fields. No mutation here so a failure at any
 	// field leaves the input schema untouched.
+	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
 		if isExternalSystemOrVirtualField(field.GetName()) {
 			continue
@@ -2298,6 +2310,24 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			return fmt.Errorf("external collection %s does not support field type %s on field %s",
 				schema.GetName(), field.GetDataType().String(), field.GetName())
 		}
+
+		ext := field.GetExternalField()
+		externalFieldOwners[ext] = append(externalFieldOwners[ext], field)
+	}
+
+	// Each external_field column must back at most one user field. A single
+	// physical column cannot satisfy two distinct type bindings, and even
+	// same-type aliasing has no semantic value here.
+	for ext, owners := range externalFieldOwners {
+		if len(owners) <= 1 {
+			continue
+		}
+		parts := make([]string, 0, len(owners))
+		for _, f := range owners {
+			parts = append(parts, fmt.Sprintf("%s (%s)", f.GetName(), f.GetDataType().String()))
+		}
+		return fmt.Errorf("external_field %q is mapped by multiple fields: %s; each external_field must be referenced by at most one user field",
+			ext, strings.Join(parts, ", "))
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.

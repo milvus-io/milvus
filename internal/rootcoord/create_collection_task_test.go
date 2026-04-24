@@ -914,6 +914,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -948,6 +949,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "pk",
@@ -980,6 +982,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -2003,6 +2006,7 @@ func TestNamespaceProperty(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:            collectionName,
 			ExternalSource:  "s3://bucket/path",
+			ExternalSpec:    `{"format":"parquet"}`,
 			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{

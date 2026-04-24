@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -37,6 +38,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// nonRetriableJobError marks a refresh-job submission failure that must NOT
+// be retried by the checker tick (e.g. empty source, zero-row source, bucket
+// not found). ensureTasksForInitJob recognizes it and transitions the job
+// straight to Failed instead of leaving it in Init for endless retry.
+type nonRetriableJobError struct {
+	reason string
+}
+
+func (e *nonRetriableJobError) Error() string { return e.reason }
+
+func newNonRetriableJobError(format string, args ...interface{}) error {
+	return &nonRetriableJobError{reason: fmt.Sprintf(format, args...)}
+}
 
 // exploreTempDirForJob returns the per-job explore temp directory path used
 // both when datacoord writes the explore manifest and when cleanupExploreTempForJob
@@ -91,6 +106,12 @@ type ExternalCollectionRefreshManager interface {
 
 	// ListJobs returns jobs for the given collection, sorted by start_time descending
 	ListJobs(ctx context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error)
+
+	// GetActiveJobByCollectionID returns the in-progress (Init/InProgress/Retry)
+	// refresh job for the collection if one exists, or nil. Used by the RPC
+	// handler to surface duplicate refresh requests synchronously instead of
+	// allocating a fresh jobID that the WAL ack callback will silently drop.
+	GetActiveJobByCollectionID(collectionID int64) *datapb.ExternalCollectionRefreshJob
 }
 
 var _ ExternalCollectionRefreshManager = (*externalCollectionRefreshManager)(nil)
@@ -577,10 +598,23 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 
 		tasks, err := m.createTasksForJob(ctx, freshJob)
 		if err != nil {
-			// Leave the job in Init state so the checker tick / WAL redelivery
-			// path retries on the next cycle. Do not transition to Failed here:
-			// transient S3 blips should not trip a one-shot failure. The
-			// tryTimeoutJob path bounds how long a stuck job can linger.
+			// Non-retriable failures (empty source, zero-row source, etc.)
+			// must transition the job to Failed immediately. Otherwise the
+			// checker tick keeps re-running the same explore that will fail
+			// the same way forever, giving operators no signal to act on.
+			var perm *nonRetriableJobError
+			if errors.As(err, &perm) {
+				log.Warn("non-retriable error in task creation, marking job failed",
+					zap.Error(err))
+				if _, uerr := m.refreshMeta.UpdateJobState(jobID,
+					indexpb.JobState_JobStateFailed, perm.Error()); uerr != nil {
+					log.Warn("failed to mark job failed", zap.Error(uerr))
+				}
+				return
+			}
+			// Transient failures (e.g. S3 blip) — leave in Init so the
+			// checker tick / WAL redelivery path retries. tryTimeoutJob
+			// bounds how long a stuck job can linger.
 			log.Warn("async task creation failed, will retry on next checker tick",
 				zap.Error(err))
 			return
@@ -614,10 +648,35 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// Manifest is written to S3 so DataNodes can read file info by range.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
+		// Any FFI failure during explore is terminal for this job: the
+		// source is unreachable, denied, malformed, or absent and no
+		// amount of in-loop retrying can change that. Surface as
+		// non-retriable so the user gets a clear RefreshFailed signal
+		// (with the underlying error attached) and can re-issue refresh
+		// after fixing the source. Pure in-process errors (ctx cancel,
+		// etcd unavailable, etc.) keep the existing transient path so
+		// a real outage still gets retried.
+		if errors.Is(err, packed.ErrLoonTransient) {
+			return nil, newNonRetriableJobError("explore external files failed: %v", err)
+		}
 		return nil, fmt.Errorf("failed to explore external files: %w", err)
 	}
 	if len(allFiles) == 0 {
-		return nil, fmt.Errorf("no files found in external source: %s", job.GetExternalSource())
+		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
+	}
+	// Reject zero-total-rows sources up front: a non-empty file list whose
+	// rows sum to zero (e.g. user-supplied empty parquet) would otherwise
+	// reach datanode's balanceFragmentsToSegments which divides by zero
+	// and crashes the process. Treat as non-retriable so the operator gets
+	// a clear failure signal instead of a CrashLoopBackOff. Fix for #49225.
+	var totalRows int64
+	for _, f := range allFiles {
+		totalRows += f.NumRows
+	}
+	if totalRows == 0 {
+		return nil, newNonRetriableJobError(
+			"external source %s has %d files but zero total rows; nothing to refresh",
+			job.GetExternalSource(), len(allFiles))
 	}
 	log.Info("explored external files for task splitting",
 		zap.Int("totalFiles", len(allFiles)),
@@ -731,6 +790,13 @@ func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collect
 	}
 
 	return result, nil
+}
+
+// GetActiveJobByCollectionID delegates to the meta layer. The underlying meta
+// query takes the per-collection job lock, so concurrent AddJob calls observe
+// a consistent view.
+func (m *externalCollectionRefreshManager) GetActiveJobByCollectionID(collectionID int64) *datapb.ExternalCollectionRefreshJob {
+	return m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 }
 
 // exploreExternalFiles calls ExploreFiles once on DataCoord and returns the full file list.

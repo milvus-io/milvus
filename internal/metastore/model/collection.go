@@ -198,8 +198,17 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.ExternalSpec = updates.Schema.ExternalSpec
 			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		case message.FieldMaskCollectionExternalSpec:
-			c.ExternalSource = updates.Schema.ExternalSource
-			c.ExternalSpec = updates.Schema.ExternalSpec
+			// Defensive: only overwrite when the update carries a value.
+			// Legacy WAL messages from before the atomic-tuple invariant may
+			// arrive with one half empty; preserving the existing field in
+			// that case avoids silently clearing a previously persisted
+			// source or spec on replay.
+			if v := updates.Schema.GetExternalSource(); v != "" {
+				c.ExternalSource = v
+			}
+			if v := updates.Schema.GetExternalSpec(); v != "" {
+				c.ExternalSpec = v
+			}
 		}
 	}
 }
