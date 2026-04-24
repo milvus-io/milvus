@@ -335,7 +335,11 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRaw
 
 	msgLength := 100
 	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("true")
-	defer paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+	initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	defer func() {
+		paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+		initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	}()
 
 	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
@@ -396,7 +400,11 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 
 	msgLength := 100
 	oldPreferFieldData := paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue("false")
-	defer paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+	initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	defer func() {
+		paramtable.Get().QueryNodeCfg.PreferFieldDataWhenIndexHasRawData.SwapTempValue(oldPreferFieldData)
+		initcore.SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
+	}()
 
 	for i := 0; i < suite.segmentNum; i++ {
 		segmentID := suite.segmentID + int64(i)
