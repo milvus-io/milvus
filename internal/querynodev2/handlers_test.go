@@ -125,9 +125,22 @@ func (suite *HandlersSuite) TestLoadGrowingSegments() {
 	suite.NoError(err)
 	suite.Equal(0, len(loadSegmetns))
 
-	// normal load
+	// V3 storage: binlog is empty but ManifestPath is set, should load
+	req.SegmentInfos[suite.segmentID] = &datapb.SegmentInfo{
+		ID:           suite.segmentID,
+		CollectionID: suite.collectionID,
+		Binlogs:      make([]*datapb.FieldBinlog, 0),
+		ManifestPath: "files/binlogs/1/2/1000/manifest_0",
+	}
+	err = loadGrowingSegments(ctx, delegator, req)
+	suite.NoError(err)
+	suite.Equal(1, len(loadSegmetns))
+
+	// normal load with binlogs
+	loadSegmetns = loadSegmetns[:0]
 	binlog := &datapb.FieldBinlog{}
 	req.SegmentInfos[suite.segmentID].Binlogs = append(req.SegmentInfos[suite.segmentID].Binlogs, binlog)
+	req.SegmentInfos[suite.segmentID].ManifestPath = ""
 	err = loadGrowingSegments(ctx, delegator, req)
 	suite.NoError(err)
 	suite.Equal(1, len(loadSegmetns))

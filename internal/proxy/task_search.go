@@ -429,6 +429,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
+	// TEXT type output fields need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
@@ -451,7 +455,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = true
 	case "outputvector":
 		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
-		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
+		// TEXT fields also need requery since data is stored as LOB references
+		t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
 	case "outputfields":
 		fallthrough
 	default:
@@ -745,6 +750,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
+	// TEXT type output fields need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
 	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
 	case "always":
 		t.needRequery = true
@@ -753,7 +762,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	case "outputvector":
 		fallthrough
 	default:
-		t.needRequery = len(vectorOutputFields) > 0
+		t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
 	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
@@ -1194,12 +1203,16 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 			}
 		}
 	}
-	// Currently, we get vectors by requery. Once we support getting vectors from search,
+	// TEXT type output fields also need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
+	// Currently, we get vectors and TEXT by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
-	if len(vectorOutputFields) > 0 {
+	if len(vectorOutputFields) > 0 || len(textOutputFields) > 0 {
 		return math.MaxInt64, nil
 	}
-	// If no vector field as output, no need to requery.
+	// If no vector or TEXT field as output, no need to requery.
 	return 0, nil
 
 	//outputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {

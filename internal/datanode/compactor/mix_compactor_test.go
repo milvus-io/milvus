@@ -71,7 +71,7 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 	s.meta = genTestCollectionMeta()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}
@@ -105,7 +105,7 @@ func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
 func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}

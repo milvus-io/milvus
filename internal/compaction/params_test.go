@@ -28,7 +28,7 @@ import (
 
 func TestGetJSONParams(t *testing.T) {
 	paramtable.Init()
-	jsonStr, err := GenerateJSONParams()
+	jsonStr, err := GenerateJSONParams(nil)
 	assert.NoError(t, err)
 
 	storageVersion := storage.StorageV2
@@ -48,6 +48,10 @@ func TestGetJSONParams(t *testing.T) {
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
 		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:       getTextInlineThreshold(),
+		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}, result)
 }
 

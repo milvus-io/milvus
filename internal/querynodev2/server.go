@@ -32,6 +32,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -143,6 +146,9 @@ type QueryNode struct {
 	lastModifyTs   int64
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// binlogSaver for TEXT collection growing segment flush
+	binlogSaver segments.BinlogSaver
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -418,6 +424,8 @@ func (node *QueryNode) Init() error {
 		}
 		node.RegisterSegcoreConfigWatcher()
 
+		cleanupOrphanedSpilloverFiles(node.GetNodeID())
+
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
@@ -567,6 +575,11 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
+// SetBinlogSaver sets the BinlogSaver for TEXT collection growing segment flush.
+func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
+	node.binlogSaver = saver
+}
+
 func (node *QueryNode) GetAddress() string {
 	return node.address
 }
@@ -627,4 +640,28 @@ func (node *QueryNode) handleQueryHookEvent() {
 	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
 
 	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+}
+
+// cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files
+// from previous QueryNode runs
+func cleanupOrphanedSpilloverFiles(nodeID int64) {
+	mmapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
+	spilloverDir := filepath.Join(mmapDir, "growing_lob")
+
+	if _, err := os.Stat(spilloverDir); os.IsNotExist(err) {
+		return
+	}
+
+	log.Info("cleaning up orphaned TEXT LOB spillover files",
+		zap.String("path", spilloverDir))
+
+	if err := os.RemoveAll(spilloverDir); err != nil {
+		log.Warn("failed to clean up orphaned TEXT LOB spillover files",
+			zap.String("path", spilloverDir),
+			zap.Error(err))
+		return
+	}
+
+	log.Info("orphaned TEXT LOB spillover files cleaned up",
+		zap.String("path", spilloverDir))
 }

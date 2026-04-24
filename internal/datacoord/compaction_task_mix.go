@@ -363,12 +363,12 @@ func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 }
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	compactionParams, err := compaction.GenerateJSONParams()
+	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
+	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
-	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
@@ -419,7 +419,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segments = append(segments, segInfo)
 	}
 
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}

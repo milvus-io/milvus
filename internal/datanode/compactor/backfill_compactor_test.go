@@ -69,7 +69,7 @@ func (s *BackfillCompactionTaskSuite) setupTest() {
 
 	s.meta = genTestCollectionMetaWithBM25()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}
@@ -500,7 +500,7 @@ func TestBackfillCompactionTaskBasic(t *testing.T) {
 	ctx := context.Background()
 
 	meta := genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(meta.GetSchema())
 	assert.NoError(t, err)
 
 	plan := &datapb.CompactionPlan{

@@ -149,6 +149,16 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
 		return nil
+	case commonpb.MsgType_ManualFlush:
+		// Handle ManualFlush message for TEXT collections
+		// This triggers immediate flush of Growing Segment data
+		manualFlushMsg := msg.(*adaptor.ManualFlushMessageBody)
+		header := manualFlushMsg.ManualFlushMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		// Trigger flush via delegator
+		return fNode.delegator.ProcessManualFlush(context.Background(), header.GetFlushTs())
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

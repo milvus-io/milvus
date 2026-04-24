@@ -129,6 +129,10 @@ func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
 
+func (s *L0Segment) IsLazyLoad() bool {
+	return false
+}
+
 func (s *L0Segment) ResetIndexesLazyLoad(lazyState bool) {
 }
 
@@ -207,4 +211,10 @@ func (s *L0Segment) RemoveUnusedFieldFiles() error {
 
 func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return nil
+}
+
+// FlushData is not supported for L0 segments.
+// L0 segments contain only delete data, not insert data.
+func (s *L0Segment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+	return nil, merr.WrapErrServiceInternal("FlushData not supported for L0 segment")
 }

@@ -889,17 +889,7 @@ func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema
 		return merr.WrapErrParameterInvalid("need text array", msg)
 	}
 
-	if v.checkMaxLen {
-		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
-		if err != nil {
-			return err
-		}
-
-		if i, ok := verifyLengthPerRow(strArr, maxLength); !ok {
-			return merr.WrapErrParameterInvalidMsg("length of text field %s exceeds max length, row number: %d, length: %d, max length: %d",
-				fieldSchema.GetName(), i, len(strArr[i]), maxLength)
-		}
-	}
+	// Text type does not require max_length validation
 	return nil
 }
 

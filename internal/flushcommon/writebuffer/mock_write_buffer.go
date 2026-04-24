@@ -223,6 +223,51 @@ func (_c *MockWriteBuffer_EvictBuffer_Call) RunAndReturn(run func(...SyncPolicy)
 	return _c
 }
 
+// HasTextFields provides a mock function with no fields
+func (_m *MockWriteBuffer) HasTextFields() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasTextFields")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_HasTextFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasTextFields'
+type MockWriteBuffer_HasTextFields_Call struct {
+	*mock.Call
+}
+
+// HasTextFields is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) HasTextFields() *MockWriteBuffer_HasTextFields_Call {
+	return &MockWriteBuffer_HasTextFields_Call{Call: _e.mock.On("HasTextFields")}
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) Run(run func()) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) Return(_a0 bool) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) RunAndReturn(run func() bool) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCheckpoint provides a mock function with no fields
 func (_m *MockWriteBuffer) GetCheckpoint() *msgpb.MsgPosition {
 	ret := _m.Called()

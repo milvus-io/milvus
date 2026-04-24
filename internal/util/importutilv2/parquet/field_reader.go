@@ -161,11 +161,12 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			return nil, nil, nil
 		}
 		return data, nil, typeutil.VerifyFloats64(data.([]float64))
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableStringData(c, count)
 		}
-		data, err := ReadStringData(c, count, true)
+		isVarcharField := c.field.GetDataType() != schemapb.DataType_Text
+		data, err := ReadStringData(c, count, isVarcharField)
 		return data, nil, err
 	case schemapb.DataType_JSON:
 		// json has not support default_value
@@ -605,7 +606,7 @@ func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bo
 	data := make([]string, 0, count)
 	validData := make([]bool, 0, count)
 	var maxLength int64
-	isVarcharField := typeutil.IsStringType(dataType)
+	isVarcharField := typeutil.IsStringType(dataType) && !typeutil.IsTextType(dataType)
 	if isVarcharField {
 		maxLength, err = parameterutil.GetMaxLength(pcr.field)
 		if err != nil {

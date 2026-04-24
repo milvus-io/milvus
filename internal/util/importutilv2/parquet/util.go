@@ -365,7 +365,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.Float32Type{}, nil
 	case schemapb.DataType_Double:
 		return &arrow.Float64Type{}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text, schemapb.DataType_Timestamptz:
 		return &arrow.StringType{}, nil
 	case schemapb.DataType_JSON:
 		return &arrow.StringType{}, nil

@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -41,6 +42,9 @@ import (
 type SegmentFiles struct {
 	// From manifest (when storage_version >= StorageV3) or pb (when < StorageV3)
 	InsertBinlogs []string
+
+	// LOB files at partition level (only for StorageV3+ with TEXT fields)
+	LobFiles []string
 
 	// Always from pb
 	DeltaBinlogs      []string
@@ -232,6 +236,26 @@ func collectSegmentFiles(
 			zap.String("basePath", basePath),
 			zap.Int("fileCount", len(allFiles)),
 			zap.Int64("storageVersion", source.GetStorageVersion()))
+
+		// Collect LOB files owned by THIS segment from the manifest.
+		// LOB files live at partition level ({root}/insert_log/{coll}/{part}/lobs/),
+		// but multiple segments share that directory. We must only copy the files
+		// referenced by this segment's manifest to preserve the invariant that
+		// each LOB file belongs to exactly one segment.
+		storageConfig := compaction.CreateStorageConfig()
+		lobFileInfos, lobErr := packed.GetManifestLobFiles(manifestPath, storageConfig)
+		if lobErr != nil {
+			log.Debug("no LOB files found in manifest (may not have TEXT fields)",
+				zap.String("manifestPath", manifestPath),
+				zap.Error(lobErr))
+		} else if len(lobFileInfos) > 0 {
+			// GetManifestLobFiles returns absolute paths (the manifest
+			// deserializer calls ToAbsolute internally), so use them directly.
+			files.LobFiles = lobFileInfosToPaths(lobFileInfos)
+			log.Info("collected LOB files from segment manifest",
+				zap.String("manifestPath", manifestPath),
+				zap.Int("lobFileCount", len(files.LobFiles)))
+		}
 	} else {
 		// StorageV1/V2: use pb paths (traditional non-packed format)
 		files.InsertBinlogs = extractFromPb(source.GetInsertBinlogs())
@@ -276,6 +300,8 @@ func generateMappingsFromFiles(
 			switch fileType {
 			case IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
 				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType)
+			case FileTypeLOB:
+				dstPath, err = generateTargetLOBPath(srcPath, source, target)
 			default:
 				dstPath, err = generateTargetPath(srcPath, source, target)
 			}
@@ -311,6 +337,9 @@ func generateMappingsFromFiles(
 		return nil, err
 	}
 	if err := addMappings(files.JSONStats, IndexTypeJSONStats); err != nil {
+		return nil, err
+	}
+	if err := addMappings(files.LobFiles, FileTypeLOB); err != nil {
 		return nil, err
 	}
 
@@ -598,6 +627,32 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	return path.Join(parts...), nil
 }
 
+// generateTargetLOBPath replaces collection and partition IDs in a LOB file path.
+// LOB path structure: {root}/insert_log/{coll}/{part}/lobs/{field}/_data/{file}.vx
+// Unlike segment paths, LOB paths have no segment ID component.
+func generateTargetLOBPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	parts := strings.Split(sourcePath, "/")
+
+	logTypeIndex := -1
+	for i, part := range parts {
+		if part == BinlogTypeInsert {
+			logTypeIndex = i
+			break
+		}
+	}
+
+	// Path: .../{insert_log}/{coll}/{part}/lobs/...
+	// Need at least logTypeIndex + 2 (coll and part) after insert_log
+	if logTypeIndex == -1 || logTypeIndex+2 >= len(parts) {
+		return "", fmt.Errorf("invalid LOB path structure: %s", sourcePath)
+	}
+
+	parts[logTypeIndex+1] = strconv.FormatInt(target.GetCollectionId(), 10)
+	parts[logTypeIndex+2] = strconv.FormatInt(target.GetPartitionId(), 10)
+
+	return path.Join(parts...), nil
+}
+
 // buildIndexInfoFromSource builds complete index metadata from source information.
 //
 // This function extracts and transforms all index metadata (vector/scalar, text, JSON)
@@ -727,6 +782,18 @@ func buildIndexInfoFromSource(
 // File Type Constants
 // ============================================================================
 
+// lobFileInfosToPaths extracts absolute file paths from LobFileInfo structs.
+// GetManifestLobFiles returns paths that have already been resolved to absolute
+// form by the C++ manifest deserializer (Manifest::ToAbsolutePaths), so we use
+// them directly without any path concatenation.
+func lobFileInfosToPaths(infos []packed.LobFileInfo) []string {
+	paths := make([]string, 0, len(infos))
+	for _, info := range infos {
+		paths = append(paths, info.Path)
+	}
+	return paths
+}
+
 // File type constants used for path identification and generation.
 // These constants match the directory names in Milvus storage paths.
 const (
@@ -738,6 +805,7 @@ const (
 	IndexTypeText         = "text_log"
 	IndexTypeJSONKey      = "json_key_index_log" // Legacy: JSON Key Inverted Index
 	IndexTypeJSONStats    = "json_stats"         // New: JSON Stats with Shredding Design
+	FileTypeLOB           = "lob"                // LOB files at partition level for TEXT fields
 )
 
 // generateTargetIndexPath is the unified function for generating target paths for all index types

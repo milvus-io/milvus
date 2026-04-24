@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -99,6 +100,159 @@ func TestGenerateTargetPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateTargetLOBPath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	tests := []struct {
+		name       string
+		sourcePath string
+		wantPath   string
+		wantErr    bool
+	}{
+		{
+			name:       "standard LOB file path",
+			sourcePath: "files/insert_log/111/222/lobs/100/_data/abc123.vx",
+			wantPath:   "files/insert_log/444/555/lobs/100/_data/abc123.vx",
+			wantErr:    false,
+		},
+		{
+			name:       "LOB file with nested field path",
+			sourcePath: "root/data/insert_log/111/222/lobs/200/_data/xyz.vx",
+			wantPath:   "root/data/insert_log/444/555/lobs/200/_data/xyz.vx",
+			wantErr:    false,
+		},
+		{
+			name:       "invalid path - no insert_log",
+			sourcePath: "files/other/111/222/lobs/100/_data/abc.vx",
+			wantPath:   "",
+			wantErr:    true,
+		},
+		{
+			name:       "invalid path - too short after insert_log",
+			sourcePath: "files/insert_log/111",
+			wantPath:   "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath, err := generateTargetLOBPath(tt.sourcePath, source, target)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantPath, gotPath)
+			}
+		})
+	}
+}
+
+func TestLobFileInfosToPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		infos    []packed.LobFileInfo
+		expected []string
+	}{
+		{
+			name:     "empty input",
+			infos:    nil,
+			expected: []string{},
+		},
+		{
+			name: "single LOB file - absolute path preserved",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/abc.vx", FieldID: 300, TotalRows: 1000, ValidRows: 900},
+			},
+			expected: []string{"root/insert_log/100/200/lobs/300/_data/abc.vx"},
+		},
+		{
+			name: "multiple LOB files from same segment",
+			infos: []packed.LobFileInfo{
+				{Path: "root/insert_log/100/200/lobs/300/_data/file1.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+				{Path: "root/insert_log/100/200/lobs/300/_data/file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 400},
+				{Path: "root/insert_log/100/200/lobs/301/_data/file3.vx", FieldID: 301, TotalRows: 200, ValidRows: 200},
+			},
+			expected: []string{
+				"root/insert_log/100/200/lobs/300/_data/file1.vx",
+				"root/insert_log/100/200/lobs/300/_data/file2.vx",
+				"root/insert_log/100/200/lobs/301/_data/file3.vx",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := lobFileInfosToPaths(tt.infos)
+			if len(tt.expected) == 0 {
+				assert.Empty(t, result)
+			} else {
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestCollectSegmentFiles_LOBFromManifest verifies that LOB file collection
+// reads from the segment manifest (not the partition directory), ensuring
+// only this segment's LOB files are collected.
+func TestCollectSegmentFiles_LOBFromManifest(t *testing.T) {
+	// This segment owns only 2 LOB files
+	segmentLobFiles := []packed.LobFileInfo{
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", FieldID: 300, TotalRows: 1000, ValidRows: 1000},
+		{Path: "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
+	}
+
+	// Mock CreateStorageConfig to avoid paramtable dependency
+	mocker0 := mockey.Mock(compaction.CreateStorageConfig).Return(&indexpb.StorageConfig{}).Build()
+	defer mocker0.UnPatch()
+
+	// Mock GetManifestLobFiles to return only this segment's LOB files
+	mocker1 := mockey.Mock(packed.GetManifestLobFiles).Return(segmentLobFiles, nil).Build()
+	defer mocker1.UnPatch()
+
+	// Mock UnmarshalManifestPath
+	mocker2 := mockey.Mock(packed.UnmarshalManifestPath).Return("root/insert_log/100/200/1001", int64(1), nil).Build()
+	defer mocker2.UnPatch()
+
+	// Mock listAllFiles for insert binlogs (via WalkWithPrefix)
+	mocker3 := mockey.Mock(listAllFiles).Return(
+		[]string{"root/insert_log/100/200/1001/_data/cg0.parquet"}, nil).Build()
+	defer mocker3.UnPatch()
+
+	source := &datapb.CopySegmentSource{
+		SegmentId:      1001,
+		CollectionId:   100,
+		PartitionId:    200,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   `{"basePath":"root/insert_log/100/200/1001","version":1}`,
+	}
+
+	files, err := collectSegmentFiles(context.Background(), nil, source)
+	assert.NoError(t, err)
+	assert.NotNil(t, files)
+
+	// Verify LOB files come from manifest, not from directory listing.
+	// GetManifestLobFiles returns absolute paths (after ToAbsolutePaths in C++),
+	// so lobFileInfosToPaths uses them directly.
+	assert.Equal(t, 2, len(files.LobFiles))
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file1.vx", files.LobFiles[0])
+	assert.Equal(t, "root/insert_log/100/200/lobs/300/_data/seg1_file2.vx", files.LobFiles[1])
+
+	// Key invariant: only this segment's files are returned.
+	// The old code used listAllFiles(partition/lobs/) which would have also
+	// returned seg2_file3.vx, seg2_file4.vx from other segments.
 }
 
 func TestGenerateTargetIndexPath(t *testing.T) {

@@ -141,16 +141,12 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 }
 
 // ReadNext reads the next record batch from the reader
-func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
+func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 	if r.recordReader == nil {
 		return nil, io.EOF
 	}
 
-	// no need to manual release
-	// stream reader will release previous one
-
-	// Read next record from the stream
-	rec, err := r.recordReader.Read()
+	rec, err = r.recordReader.Read()
 	if err != nil {
 		if err == io.EOF {
 			return nil, io.EOF

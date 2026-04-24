@@ -566,6 +566,12 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			vec[i] = int8(num)
 		}
 		return vec, nil
+	case schemapb.DataType_Text:
+		value, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		return value, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		value, ok := obj.(string)
 		if !ok {

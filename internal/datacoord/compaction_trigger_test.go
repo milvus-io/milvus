@@ -524,7 +524,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(nil)
 	if err != nil {
 		panic(err)
 	}

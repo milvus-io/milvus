@@ -136,6 +136,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		}
 		growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
+		// record batch info for checkpoint tracking (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			endOffset := growing.RowNum()
+			sd.checkpointTracker.RecordBatch(
+				growing.ID(),
+				endOffset,
+				insertData.StartPosition,
+			)
+		}
+
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
 			// Forbid create growing segment in excluded segment
@@ -224,6 +234,73 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
+}
+
+// ProcessManualFlush handles manual flush request for TEXT collections.
+// It triggers immediate flush of all unflushed data in Growing Segments.
+// This is called when user explicitly requests flush via collection.flush().
+func (sd *shardDelegator) ProcessManualFlush(ctx context.Context, flushTs uint64) error {
+	// Only process for TEXT collections that have GrowingFlushManager
+	if sd.growingFlushManager == nil || sd.checkpointTracker == nil {
+		return nil
+	}
+
+	log := sd.getLogger(ctx).With(zap.Uint64("flushTs", flushTs))
+	log.Info("processing manual flush for TEXT collection")
+
+	// Get all tracked segment IDs
+	segmentIDs := sd.checkpointTracker.GetSegmentIDs()
+	if len(segmentIDs) == 0 {
+		log.Debug("no segments to flush")
+		return nil
+	}
+
+	// Submit to the dynamic CGO pool to reuse the same concurrency control
+	// as other CGO operations (pool size = CPU cores).
+	pool := segments.GetDynamicPool()
+	futures := make([]*conc.Future[any], 0, len(segmentIDs))
+	for _, segID := range segmentIDs {
+		segment := sd.segmentManager.GetGrowing(segID)
+		if segment == nil {
+			continue
+		}
+
+		id := segID
+		future := pool.Submit(func() (any, error) {
+			if err := sd.growingFlushManager.ForceSyncAndSeal(ctx, id); err != nil {
+				log.Warn("failed to ForceSyncAndSeal during manual flush",
+					zap.Int64("segmentID", id),
+					zap.Error(err))
+				return nil, err
+			}
+			log.Info("ForceSyncAndSeal completed during manual flush",
+				zap.Int64("segmentID", id))
+			return nil, nil
+		})
+		futures = append(futures, future)
+	}
+
+	// wait for all flush tasks to complete and collect errors
+	conc.AwaitAll(futures...)
+	var firstErr error
+	failCount := 0
+	for _, f := range futures {
+		if _, err := f.Await(); err != nil {
+			failCount++
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if failCount > 0 {
+		log.Warn("manual flush completed with errors",
+			zap.Int("segmentCount", len(segmentIDs)),
+			zap.Int("failCount", failCount),
+			zap.Error(firstErr))
+		return fmt.Errorf("manual flush failed for %d/%d segments: %w", failCount, len(segmentIDs), firstErr)
+	}
+	log.Info("manual flush completed", zap.Int("segmentCount", len(segmentIDs)))
+	return nil
 }
 
 type BatchApplyRet = struct {
@@ -390,6 +467,23 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+
+	// initialize checkpoint tracking for recovered growing segments (TEXT collections only)
+	if sd.checkpointTracker != nil {
+		for _, segment := range loaded {
+			// the segment was recovered from binlog, so the current row count is the flushed offset
+			flushedOffset := segment.RowNum()
+			manifest := segment.LoadInfo().GetManifestPath()
+			if manifest == "" && flushedOffset > 0 {
+				return fmt.Errorf("recovered growing segment %d has %d flushed rows but no manifest path, cannot safely resume flush", segment.ID(), flushedOffset)
+			}
+			sd.checkpointTracker.InitSegmentWithManifest(segment.ID(), flushedOffset, manifest)
+			log.Info("initialized checkpoint tracker for recovered growing segment",
+				zap.Int64("segmentID", segment.ID()),
+				zap.Int64("flushedOffset", flushedOffset),
+				zap.String("manifest", manifest))
+		}
+	}
 
 	for _, segment := range loaded {
 		if sd.idfOracle != nil {
@@ -985,6 +1079,52 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	// Note: Candidate cleanup is handled by RemoveDistributions above
 	// - Sealed segment candidates (BloomFilterSet) are refunded in RemoveDistributions
 	// - Growing segment candidates (LocalSegment) are managed by segmentManager.Release()
+	if len(growing) > 0 {
+		// For TEXT collections: best-effort flush before releasing growing segments.
+		// Flush failure does NOT block release because:
+		// 1. Data is still in WAL — channel checkpoint clamping ensures WAL won't
+		//    be truncated beyond unflushed growing segment data.
+		// 2. On recovery, WAL replays from the clamped checkpoint, restoring data.
+		// 3. Blocking release on flush failure would prevent QueryCoord balance
+		//    and QueryNode graceful shutdown.
+		if sd.growingFlushManager != nil && sd.checkpointTracker != nil {
+			for _, entry := range growing {
+				segID := entry.SegmentID
+				segment := sd.segmentManager.GetGrowing(segID)
+				if segment == nil {
+					continue
+				}
+
+				flushedOffset := sd.checkpointTracker.GetFlushedOffset(segID)
+				currentOffset := segment.RowNum()
+				if flushedOffset >= currentOffset {
+					continue
+				}
+
+				log := sd.getLogger(ctx).With(zap.Int64("segmentID", segID))
+				log.Info("best-effort flush before release",
+					zap.Int64("unflushedRows", currentOffset-flushedOffset))
+
+				if err := sd.growingFlushManager.ForceSync(ctx, segID); err != nil {
+					log.Warn("best-effort flush failed before release, data will be recovered from WAL",
+						zap.Error(err))
+				}
+			}
+		}
+
+		// clean up checkpoint tracking for released growing segments (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			for _, entry := range growing {
+				sd.checkpointTracker.RemoveSegment(entry.SegmentID)
+			}
+		}
+		// clean up sealed segment tracking to prevent memory leak (TEXT collections only)
+		if sd.growingFlushManager != nil {
+			for _, entry := range growing {
+				sd.growingFlushManager.RemoveSealedSegment(entry.SegmentID)
+			}
+		}
+	}
 
 	var releaseErr error
 	if !force {

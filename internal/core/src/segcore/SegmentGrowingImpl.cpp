@@ -17,6 +17,7 @@
 #include <future>
 #include <iosfwd>
 #include <map>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -79,6 +80,11 @@
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/lob_column/lob_column_reader.h"
+#include "segcore/TextColumnCache.h"
 
 namespace milvus::segcore {
 
@@ -448,6 +454,13 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
         }
     }
 
+    // 4b. TEXT LOB spillover disk usage
+    for (const auto& [field_id, spillover] : text_lob_spillovers_) {
+        if (spillover) {
+            disk_bytes += static_cast<int64_t>(spillover->GetDiskUsage());
+        }
+    }
+
     // 5. Deleted records overhead
     memory_bytes += deleted_record_.mem_size();
 
@@ -551,11 +564,35 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
         if (!indexing_record_.HasRawData(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
+            // special handling for TEXT fields with spillover
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                auto spillover = GetTextLobSpillover(field_id);
+                AssertInfo(spillover != nullptr,
+                           "TEXT field must have spillover");
+                const auto& field_data =
+                    insert_record_proto->fields_data(data_offset);
+                const auto& string_data = field_data.scalars().string_data();
+
+                std::vector<std::string> ref_strings(num_rows);
+                for (int64_t i = 0; i < num_rows; i++) {
+                    const auto& text = string_data.data(i);
+                    ref_strings[i] = spillover->WriteAndEncode(text);
+                }
+
+                auto* vec_base = insert_record_.get_data_base(field_id);
+                auto* string_vec =
+                    dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
+                AssertInfo(string_vec != nullptr,
+                           "TEXT field must use ConcurrentVector<std::string>");
+                string_vec->set_data_raw(
+                    reserved_offset, ref_strings.data(), num_rows);
+            } else {
+                insert_record_.get_data_base(field_id)->set_data_raw(
+                    reserved_offset,
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
 
         //insert vector data into index
@@ -833,6 +870,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
+    text_loaded_row_count_ = num_rows;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
@@ -1144,6 +1182,79 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                            output);
 }
 
+template <typename SetOutput>
+void
+SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
+                                             const VectorBase* vec_ptr,
+                                             const int64_t* seg_offsets,
+                                             int64_t count,
+                                             SetOutput set_output) const {
+    auto vec = dynamic_cast<const ConcurrentVector<std::string>*>(vec_ptr);
+    AssertInfo(vec != nullptr,
+               "TEXT field must use ConcurrentVector<std::string>");
+    auto& src = *vec;
+    auto spillover = GetTextLobSpillover(field_id);
+    AssertInfo(spillover != nullptr, "TEXT field must have spillover");
+
+    std::vector<int64_t> loaded_indices;
+    std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
+    std::vector<int64_t> spillover_indices;
+    std::vector<std::string_view> spillover_refs;
+
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset == INVALID_SEG_OFFSET) {
+            set_output(i, std::string());
+            continue;
+        }
+        if (offset < text_loaded_row_count_) {
+            auto ref_str = src.view_element(offset);
+            auto ptr = reinterpret_cast<const uint8_t*>(ref_str.data());
+            if (milvus_storage::lob_column::IsInlineData(ptr)) {
+                set_output(i,
+                           milvus_storage::lob_column::DecodeInlineText(
+                               ptr, ref_str.size()));
+            } else {
+                encoded_refs.push_back({ptr, ref_str.size()});
+                loaded_indices.push_back(i);
+            }
+        } else {
+            auto ref_str = src.view_element(offset);
+            spillover_refs.push_back(ref_str);
+            spillover_indices.push_back(i);
+        }
+    }
+
+    if (!spillover_refs.empty()) {
+        auto texts = spillover->DecodeAndReadBatch(spillover_refs);
+        for (size_t j = 0; j < spillover_indices.size(); ++j) {
+            set_output(spillover_indices[j], std::move(texts[j]));
+        }
+    }
+
+    if (!encoded_refs.empty()) {
+        auto properties =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetProperties();
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        google::protobuf::RepeatedPtrField<std::string> resolved;
+        resolved.Reserve(encoded_refs.size());
+        for (size_t j = 0; j < encoded_refs.size(); ++j) {
+            resolved.Add();
+        }
+        auto& cache = GetGlobalTextColumnCache();
+        cache.ReadBatchInto(text_lob_paths_.at(field_id),
+                            fs,
+                            *properties,
+                            encoded_refs,
+                            &resolved);
+        for (size_t j = 0; j < loaded_indices.size(); ++j) {
+            set_output(loaded_indices[j], std::move(*resolved.Mutable(j)));
+        }
+    }
+}
+
 std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(
     milvus::OpContext* op_ctx,
@@ -1373,8 +1484,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
                                                  seg_offsets,
@@ -1382,6 +1492,19 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                  result->mutable_scalars()
                                                      ->mutable_string_data()
                                                      ->mutable_data());
+            break;
+        }
+        case DataType::TEXT: {
+            auto dst = result->mutable_scalars()
+                           ->mutable_string_data()
+                           ->mutable_data();
+            bulk_subscript_text_impl(field_id,
+                                     vec_ptr,
+                                     seg_offsets,
+                                     count,
+                                     [dst](int64_t i, std::string val) {
+                                         dst->at(i) = std::move(val);
+                                     });
             break;
         }
         case DataType::JSON: {
@@ -1713,10 +1836,19 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                         static_cast<double*>(data));
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::TEXT: {
+            auto dst = static_cast<std::string*>(data);
+            bulk_subscript_text_impl(
+                field_id,
+                vec_ptr,
+                seg_offsets,
+                count,
+                [dst](int64_t i, std::string val) { dst[i] = std::move(val); });
             break;
         }
         case DataType::JSON: {
@@ -1835,6 +1967,68 @@ SegmentGrowingImpl::CreateTextIndexes() {
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
         }
+    }
+}
+
+void
+SegmentGrowingImpl::InitializeTextLobSpillovers() {
+    // get base path from MmapManager config
+    std::string base_path;
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    base_path = mmap_config.GetMmapPath();
+    AssertInfo(!base_path.empty(), "Mmap path is empty");
+
+    // create spillover for each TEXT field
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_meta.get_data_type() == DataType::TEXT) {
+            text_lob_spillovers_[field_id] =
+                std::make_unique<TextLobSpillover>(id_, field_id, base_path);
+            LOG_INFO("Created TEXT LOB spillover for segment {} field {} at {}",
+                     id_,
+                     field_id.get(),
+                     text_lob_spillovers_[field_id]->GetPath());
+        }
+    }
+}
+
+void
+SegmentGrowingImpl::InitTextLobPaths(const std::string& manifest_path) {
+    std::vector<FieldId> text_field_ids;
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_meta.get_data_type() == DataType::TEXT) {
+            text_field_ids.push_back(field_id);
+        }
+    }
+
+    if (text_field_ids.empty()) {
+        return;
+    }
+
+    std::string segment_base_path;
+    try {
+        nlohmann::json j = nlohmann::json::parse(manifest_path);
+        segment_base_path = j.at("base_path").get<std::string>();
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to parse manifest path for TEXT columns: {}",
+                  e.what());
+    }
+
+    // segment_base_path format: {root}/{collectionID}/{partitionID}/{segmentID}
+    // lob_base_path format: {root}/{collectionID}/{partitionID}/lobs/{field_id}
+    std::filesystem::path segment_fs_path(segment_base_path);
+    std::filesystem::path partition_path = segment_fs_path.parent_path();
+
+    for (auto field_id : text_field_ids) {
+        std::filesystem::path lob_base_path =
+            partition_path / "lobs" / std::to_string(field_id.get());
+        text_lob_paths_[field_id] = lob_base_path.string();
+        LOG_INFO(
+            "Initialized TEXT LOB path for growing segment {} field {}: {}",
+            id_,
+            field_id.get(),
+            lob_base_path.string());
     }
 }
 
@@ -2050,6 +2244,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     }
 
     auto reserved_offset = PreInsert(num_rows);
+    text_loaded_row_count_ = num_rows;
 
     for (auto& column_group_result : column_group_results) {
         for (auto& [field_id, field_data] : column_group_result) {
@@ -2069,6 +2264,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+
+    // initialize LOB paths for TEXT fields (for query-time LOB resolution)
+    InitTextLobPaths(manifest_path);
 }
 
 std::unordered_map<FieldId, std::vector<FieldDataPtr>>
@@ -2083,9 +2281,11 @@ SegmentGrowingImpl::LoadColumnGroup(
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
     AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}",
+               "get chunk reader failed, segment {}, column group index {}, "
+               "error: {}",
                get_segment_id(),
-               index);
+               index,
+               chunk_reader_result.status().ToString());
 
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
 
@@ -2126,6 +2326,7 @@ SegmentGrowingImpl::LoadColumnGroup(
             auto batch_num_rows = record_batch->num_rows();
             for (auto i = 0; i < column_group->columns.size(); ++i) {
                 auto column = column_group->columns[i];
+
                 auto field_id = FieldId(std::stoll(column));
 
                 auto field = schema_->operator[](field_id);

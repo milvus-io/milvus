@@ -860,6 +860,53 @@ func (_c *MockShardDelegator_ProcessInsert_Call) RunAndReturn(run func(map[int64
 	return _c
 }
 
+// ProcessManualFlush provides a mock function with given fields: ctx, flushTs
+func (_m *MockShardDelegator) ProcessManualFlush(ctx context.Context, flushTs uint64) error {
+	ret := _m.Called(ctx, flushTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessManualFlush")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) error); ok {
+		r0 = rf(ctx, flushTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ProcessManualFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessManualFlush'
+type MockShardDelegator_ProcessManualFlush_Call struct {
+	*mock.Call
+}
+
+// ProcessManualFlush is a helper method to define mock.On call
+//   - ctx context.Context
+//   - flushTs uint64
+func (_e *MockShardDelegator_Expecter) ProcessManualFlush(ctx interface{}, flushTs interface{}) *MockShardDelegator_ProcessManualFlush_Call {
+	return &MockShardDelegator_ProcessManualFlush_Call{Call: _e.mock.On("ProcessManualFlush", ctx, flushTs)}
+}
+
+func (_c *MockShardDelegator_ProcessManualFlush_Call) Run(run func(ctx context.Context, flushTs uint64)) *MockShardDelegator_ProcessManualFlush_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessManualFlush_Call) Return(_a0 error) *MockShardDelegator_ProcessManualFlush_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessManualFlush_Call) RunAndReturn(run func(context.Context, uint64) error) *MockShardDelegator_ProcessManualFlush_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Query provides a mock function with given fields: ctx, req
 func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	ret := _m.Called(ctx, req)

@@ -361,7 +361,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			appender := &nullDefaultAppender[string]{}
 			if defaultVal != nil {
 				v := defaultVal.GetStringData()

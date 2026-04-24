@@ -429,6 +429,8 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return num, typeutil.VerifyFloats64([]float64{num})
+	case schemapb.DataType_Text:
+		return obj, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		maxLength, err := parameterutil.GetMaxLength(field)
 		if err != nil {

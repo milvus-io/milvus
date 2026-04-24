@@ -336,11 +336,11 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	compactionParams, err := compaction.GenerateJSONParams()
+	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:        taskProto.GetPlanID(),
 		StartTime:     taskProto.GetStartTime(),
@@ -387,7 +387,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	}
 
 	segments = append(segments, flushedSegments...)
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, nil)
 	if err != nil {
 		return nil, err
 	}
