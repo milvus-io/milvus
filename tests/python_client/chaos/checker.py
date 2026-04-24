@@ -1428,8 +1428,10 @@ class InsertChecker(Checker):
             )
             return res, True
         except SchemaMismatchRetryableException:
-            # AddVectorFieldChecker can update schema_timestamp while this checker is using
-            # a cached schema. Refresh the SDK schema cache and retry once.
+            # Schema changed concurrently (AddVectorFieldChecker). The server rejected the request
+            # because the schema_timestamp in the request is stale (not a missing-field issue —
+            # new fields are always nullable). Invalidate the SDK schema cache so the next
+            # insert_rows() picks up the new schema_timestamp, then retry once.
             log.debug("[InsertChecker] schema_timestamp stale, invalidating cache and retrying")
             try:
                 self.milvus_client._get_connection()._invalidate_schema(self.c_name)
@@ -1439,10 +1441,12 @@ class InsertChecker(Checker):
             for i in range(len(data)):
                 data[i][self.int64_field_name] = int(time.time() * self.scale)
             try:
-                res = self.milvus_client.insert(collection_name=self.c_name,
-                                               data=data,
-                                               partition_name=self.p_names[0] if self.p_names else None,
-                                               timeout=timeout)
+                res = self.milvus_client.insert(
+                    collection_name=self.c_name,
+                    data=data,
+                    partition_name=self.p_names[0] if self.p_names else None,
+                    timeout=timeout,
+                )
                 return res, True
             except Exception as e:
                 log.info(f"insert error (retry): {e}")
@@ -1580,8 +1584,8 @@ class UpsertChecker(Checker):
             res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
             return res, True
         except SchemaMismatchRetryableException:
-            # AddVectorFieldChecker can update schema_timestamp while this checker is using
-            # a cached schema. Refresh the SDK schema cache and retry once.
+            # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
+            # so the next upsert_rows() fetches the new schema_timestamp, then retry once.
             log.debug("[UpsertChecker] schema_timestamp stale, invalidating cache and retrying")
             try:
                 self.milvus_client._get_connection()._invalidate_schema(self.c_name)
@@ -1589,9 +1593,7 @@ class UpsertChecker(Checker):
                 pass
             self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
             try:
-                res = self.milvus_client.upsert(collection_name=self.c_name,
-                                               data=self.data,
-                                               timeout=timeout)
+                res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
                 return res, True
             except Exception as e:
                 log.info(f"upsert failed (retry): {e}")
