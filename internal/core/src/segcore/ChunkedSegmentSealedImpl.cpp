@@ -4603,8 +4603,8 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     // Try take() for external fields; fills output_fields_data_ for
     // external fields only. Non-external fields still go through
     // bulk_subscript below.
-    bool used_take =
-        TryTakeForSearch(plan, results.seg_offsets_.data(), size, results);
+    bool used_take = TryTakeForSearch(
+        plan, results.seg_offsets_.data(), size, results, op_ctx);
 
     std::unique_ptr<DataArray> field_data;
     // Per-call OpContext keeps storage_usage scoped to this segment;
@@ -4880,7 +4880,14 @@ ChunkedSegmentSealedImpl::ExecuteTake(
     const std::vector<int64_t>& unique_offsets,
     const std::shared_ptr<std::vector<std::string>>& needed_columns,
     const char* caller_tag,
-    double& elapsed_ms) const {
+    double& elapsed_ms,
+    milvus::OpContext* op_ctx) const {
+    // reader_->take() issues remote reads and can take seconds under slow
+    // object storage. Bail out if the upstream reduce has already been
+    // cancelled so we don't waste IO on a doomed request.
+    segcore::CheckCancellation(
+        op_ctx, id_, fmt::format("ExecuteTake({})", caller_tag));
+
     // reader_->take() is NOT thread-safe — concurrent retrieve and search
     // workers may hit the same segment simultaneously under load. Also,
     // Reopen/ApplyLoadDiff can reassign reader_ under reader_mutex_ while a
@@ -4916,7 +4923,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     const int64_t* offsets,
     int64_t size,
     bool ignore_non_pk,
-    bool fill_ids) const {
+    bool fill_ids,
+    milvus::OpContext* op_ctx) const {
     if (!schema_->is_external_collection() || size == 0 ||
         !use_take_for_output_) {
         return false;
@@ -4953,11 +4961,20 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     auto ctx = BuildTakeContext(offsets, size);
 
     double take_elapsed_ms = 0;
-    auto table = ExecuteTake(
-        ctx.unique_offsets, needed_columns, "retrieve", take_elapsed_ms);
+    auto table = ExecuteTake(ctx.unique_offsets,
+                             needed_columns,
+                             "retrieve",
+                             take_elapsed_ms,
+                             op_ctx);
     if (!table) {
         return false;
     }
+
+    // Cancellation can become observable between reader_->take() returning
+    // and the Arrow Concatenate/NormalizeExternalArrow pass below, which
+    // can itself be expensive on wide result sets.
+    segcore::CheckCancellation(
+        op_ctx, id_, "TryTakeForRetrieve(pre-arrow-convert)");
 
     // Convert Arrow Table columns to DataArray results
     auto fields_data = results->mutable_fields_data();
@@ -5090,7 +5107,8 @@ bool
 ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                                            const int64_t* seg_offsets,
                                            int64_t size,
-                                           SearchResult& results) const {
+                                           SearchResult& results,
+                                           milvus::OpContext* op_ctx) const {
     if (!schema_->is_external_collection() || size == 0 ||
         !use_take_for_output_) {
         return false;
@@ -5117,10 +5135,16 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
 
     double take_elapsed_ms = 0;
     auto table = ExecuteTake(
-        ctx.unique_offsets, needed_columns, "search", take_elapsed_ms);
+        ctx.unique_offsets, needed_columns, "search", take_elapsed_ms, op_ctx);
     if (!table) {
         return false;
     }
+
+    // Cancellation can become observable between reader_->take() returning
+    // and the Arrow Concatenate/NormalizeExternalArrow pass below, which
+    // can itself be expensive on wide result sets.
+    segcore::CheckCancellation(
+        op_ctx, id_, "TryTakeForSearch(pre-arrow-convert)");
 
     // Convert Arrow Table columns to DataArray and store in SearchResult
     for (size_t fi = 0; fi < take_field_ids.size(); fi++) {

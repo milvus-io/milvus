@@ -350,7 +350,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* offsets,
         int64_t size,
         bool ignore_non_pk,
-        bool fill_ids) const;
+        bool fill_ids,
+        milvus::OpContext* op_ctx = nullptr) const;
 
     // count of chunk that has raw data
     int64_t
@@ -490,7 +491,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     TryTakeForSearch(const query::Plan* plan,
                      const int64_t* seg_offsets,
                      int64_t size,
-                     SearchResult& results) const;
+                     SearchResult& results,
+                     milvus::OpContext* op_ctx = nullptr) const;
 
     // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
     struct TakeContext {
@@ -510,12 +512,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      int64_t size);
 
     // Calls reader_->take() with timing. Returns the table on success,
-    // or nullptr on failure (logs a warning).
+    // or nullptr on failure (logs a warning). Checks op_ctx for cancellation
+    // before invoking reader_->take(), which can do remote reads.
     std::shared_ptr<arrow::Table>
     ExecuteTake(const std::vector<int64_t>& unique_offsets,
                 const std::shared_ptr<std::vector<std::string>>& needed_columns,
                 const char* caller_tag,
-                double& elapsed_ms) const;
+                double& elapsed_ms,
+                milvus::OpContext* op_ctx = nullptr) const;
 
     void
     check_search(const query::Plan* plan) const override;
