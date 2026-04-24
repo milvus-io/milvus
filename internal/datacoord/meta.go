@@ -1191,7 +1191,11 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 		}
 
 		// Strip incoming child fields from any other existing group, then drop
-		// in-place groups that the request is replacing.
+		// in-place groups that the request is replacing. Also drop groups that
+		// become empty (all ChildFields claimed by incoming groups) and record
+		// their FieldIDs so the catalog removes the orphan etcd KV -- otherwise
+		// listBinlogs' prefix scan will resurrect the zombie on restart.
+		var droppedFieldIDs []int64
 		kept := segment.Binlogs[:0]
 		for _, existing := range segment.Binlogs {
 			if _, replaced := groups[existing.GetFieldID()]; replaced {
@@ -1201,6 +1205,10 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 				existing.ChildFields = lo.Filter(existing.GetChildFields(), func(fid int64, _ int) bool {
 					return !incomingChildFields.Contain(fid)
 				})
+				if len(existing.ChildFields) == 0 {
+					droppedFieldIDs = append(droppedFieldIDs, existing.GetFieldID())
+					continue
+				}
 			}
 			kept = append(kept, existing)
 		}
@@ -1215,7 +1223,8 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 		segment.DataVersion++
 
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
-			Segment: segment.SegmentInfo,
+			Segment:               segment.SegmentInfo,
+			DroppedBinlogFieldIDs: droppedFieldIDs,
 		}
 		return true
 	}
@@ -1343,7 +1352,18 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 				zap.Int64("segmentID", segmentID), zap.Error(err))
 			return false
 		}
-		if currentVer == manifestVersion {
+		// Guard against version rollback. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but a concurrent compaction may
+		// advance ManifestPath between pre-check and this apply (compaction
+		// commits use a different serialization path than this broadcaster).
+		// Only accept strictly forward motion; equality is a no-op.
+		if currentVer >= manifestVersion {
+			if currentVer > manifestVersion {
+				log.Ctx(context.TODO()).Warn("meta update: update manifest version rejected - would regress",
+					zap.Int64("segmentID", segmentID),
+					zap.Int64("currentVer", currentVer),
+					zap.Int64("incomingVer", manifestVersion))
+			}
 			return false
 		}
 		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)

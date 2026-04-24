@@ -2547,6 +2547,38 @@ func TestUpdateManifestVersion(t *testing.T) {
 		assert.Equal(t, "/data/segments/1", basePath)
 		assert.Equal(t, int64(5), version)
 	})
+
+	t.Run("rollback rejected - currentVer > incomingVer is a no-op", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Current version = 10. A stale broadcast carrying version = 5 must
+		// not regress the pointer. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but concurrent compaction may have
+		// advanced ManifestPath between pre-check and this apply -- the
+		// operator-level guard is the last line of defense.
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 5)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+
+		// Confirm the stored manifest path was not mutated in the pack.
+		got := pack.Get(1)
+		_, currentVer, err := packed.UnmarshalManifestPath(got.ManifestPath)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), currentVer)
+	})
 }
 
 func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
@@ -2677,6 +2709,60 @@ func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
 				assert.Equal(t, int64(999), fb.GetBinlogs()[0].GetLogID())
 			}
 		}
+	})
+
+	t.Run("drops empty-children existing group and records DroppedBinlogFieldIDs", func(t *testing.T) {
+		// Pre-existing single-child group (fieldID=100 owns child 200) whose
+		// only child is claimed by a new backfill group (fieldID=200). After
+		// stripping, group 100's ChildFields is empty -- the operator must
+		// drop it from segment.Binlogs AND record 100 in DroppedBinlogFieldIDs
+		// so the catalog removes the orphan etcd KV (without it, listBinlogs'
+		// prefix scan would resurrect the zombie on restart).
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		m.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   1000,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     100,
+						ChildFields: []int64{200}, // single child
+						Binlogs:     []*datapb.Binlog{{LogID: 1}},
+					},
+					{
+						FieldID:     300,
+						ChildFields: []int64{301, 302},
+						Binlogs:     []*datapb.Binlog{{LogID: 2}},
+					},
+				},
+			},
+		})
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			200: {FieldID: 200, ChildFields: []int64{200}, Binlogs: []*datapb.Binlog{{LogID: 99}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		// Group 100 must be gone from in-memory binlogs; 300 (unaffected) plus
+		// new 200 remain.
+		assert.Len(t, got.Binlogs, 2)
+		fids := lo.Map(got.Binlogs, func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() })
+		assert.ElementsMatch(t, []int64{200, 300}, fids)
+
+		// Increment carries the orphan FieldID so AlterSegments can remove
+		// the persisted KV.
+		inc, ok := pack.increments[1]
+		assert.True(t, ok)
+		assert.ElementsMatch(t, []int64{100}, inc.DroppedBinlogFieldIDs)
 	})
 
 	t.Run("DataVersion monotonic across reruns", func(t *testing.T) {

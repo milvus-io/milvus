@@ -174,11 +174,19 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 			if int64(idx) == n-1 {
 				rows += rem
 			}
-			logID, _ := parseLogIDFromKey(key)
+			logID, ok := parseLogIDFromKey(key)
+			if !ok {
+				return nil, errors.Newf("column group for field %d has binlog file %q with non-numeric trailing segment", fid, p)
+			}
+			// LogPath must be empty at persistence time -- catalog.checkLogID
+			// rejects any Binlog with LogPath != "" (see
+			// internal/metastore/kv/datacoord/util.go). Canonical on-disk
+			// form is {LogID, LogPath:""}; DecompressBinLog reconstructs the
+			// path from LogID + (collection, partition, segment, field) at
+			// load time.
 			binlogs = append(binlogs, &datapb.Binlog{
 				EntriesNum: rows,
 				LogID:      logID,
-				LogPath:    key,
 			})
 		}
 		out[fid] = &datapb.FieldBinlog{

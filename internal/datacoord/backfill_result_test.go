@@ -221,7 +221,20 @@ func TestBuildV2Groups(t *testing.T) {
 		assert.Len(t, fb.GetBinlogs(), 1)
 		assert.Equal(t, int64(1000), fb.GetBinlogs()[0].GetEntriesNum())
 		assert.Equal(t, int64(7), fb.GetBinlogs()[0].GetLogID())
-		assert.Equal(t, "seg/1/100/7", fb.GetBinlogs()[0].GetLogPath())
+		// LogPath must be empty at persistence -- catalog.checkLogID
+		// rejects non-empty LogPath. DecompressBinLog rebuilds it on load.
+		assert.Equal(t, "", fb.GetBinlogs()[0].GetLogPath())
+	})
+
+	t.Run("rejects binlog file with non-numeric trailing segment", func(t *testing.T) {
+		seg := &BackfillSegment{
+			ColumnGroups: []BackfillV2ColumnGroup{
+				{FieldIDs: []int64{100}, BinlogFiles: []string{"s3a://bkt/seg/1/100/7.parquet"}, RowCount: 1},
+			},
+		}
+		_, err := buildV2Groups("bkt", seg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "non-numeric trailing segment")
 	})
 
 	t.Run("multi file splits row_count evenly with remainder on last", func(t *testing.T) {
@@ -289,8 +302,8 @@ func TestBuildV2Groups(t *testing.T) {
 	t.Run("rejects duplicate field id groups", func(t *testing.T) {
 		seg := &BackfillSegment{
 			ColumnGroups: []BackfillV2ColumnGroup{
-				{FieldIDs: []int64{100}, BinlogFiles: []string{"a"}, RowCount: 1},
-				{FieldIDs: []int64{100}, BinlogFiles: []string{"b"}, RowCount: 1},
+				{FieldIDs: []int64{100}, BinlogFiles: []string{"path/100/1"}, RowCount: 1},
+				{FieldIDs: []int64{100}, BinlogFiles: []string{"path/100/2"}, RowCount: 1},
 			},
 		}
 		_, err := buildV2Groups("", seg)
@@ -301,7 +314,7 @@ func TestBuildV2Groups(t *testing.T) {
 	t.Run("bucket mismatch bubbles up", func(t *testing.T) {
 		seg := &BackfillSegment{
 			ColumnGroups: []BackfillV2ColumnGroup{
-				{FieldIDs: []int64{100}, BinlogFiles: []string{"s3a://other/foo"}, RowCount: 1},
+				{FieldIDs: []int64{100}, BinlogFiles: []string{"s3a://other/foo/7"}, RowCount: 1},
 			},
 		}
 		_, err := buildV2Groups("expected", seg)

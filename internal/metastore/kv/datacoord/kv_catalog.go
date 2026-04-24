@@ -316,6 +316,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		kvs[k] = v
 	}
 
+	var removals []string
 	for _, b := range binlogs {
 		segment := b.Segment
 
@@ -332,9 +333,32 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		}
 
 		maps.Copy(kvs, binlogKvs)
+
+		for _, fid := range b.DroppedBinlogFieldIDs {
+			removals = append(removals,
+				buildFieldBinlogPath(
+					segment.GetCollectionID(),
+					segment.GetPartitionID(),
+					segment.GetID(),
+					fid))
+		}
 	}
 
-	return kc.SaveByBatch(ctx, kvs)
+	if err := kc.SaveByBatch(ctx, kvs); err != nil {
+		return err
+	}
+	// Explicit removal is required: AlterSegments persists binlogs as
+	// independent per-FieldID KVs and listBinlogs rebuilds them via a prefix
+	// scan on restart. An operator that structurally drops a FieldBinlog
+	// from segment.Binlogs (e.g. when all ChildFields of a column group are
+	// claimed by a backfill commit) must also delete the orphan KV, otherwise
+	// the stripped group resurrects on the next datacoord start.
+	if len(removals) > 0 {
+		if err := kc.MetaKv.MultiSaveAndRemove(ctx, nil, removals); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (kc *Catalog) handleDroppedSegment(ctx context.Context, segment *datapb.SegmentInfo) (kvs map[string]string, err error) {
