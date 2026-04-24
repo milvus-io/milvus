@@ -92,6 +92,7 @@ all_scalar_data_types = [
     DataType.ARRAY,
     DataType.JSON,
     DataType.GEOMETRY,
+    DataType.TIMESTAMPTZ,
 ]
 
 default_field_name_map = {
