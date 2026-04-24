@@ -662,7 +662,8 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 			Name: collectionName,
 			StructArrayFields: []*schemapb.StructArrayFieldSchema{
 				{
-					Name: "struct_field",
+					Name:     "struct_field",
+					Nullable: true,
 					Fields: []*schemapb.FieldSchema{
 						{
 							Name:        "vector_array_field",

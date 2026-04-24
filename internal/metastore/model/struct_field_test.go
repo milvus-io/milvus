@@ -210,6 +210,26 @@ func TestStructArrayField_Equal(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "different Nullable",
+			args: args{
+				structArrayFieldA: StructArrayField{
+					FieldID:     1,
+					Name:        "struct_field",
+					Description: "test struct field",
+					Fields:      []*Field{field1},
+					Nullable:    true,
+				},
+				structArrayFieldB: StructArrayField{
+					FieldID:     1,
+					Name:        "struct_field",
+					Description: "test struct field",
+					Fields:      []*Field{field1},
+					Nullable:    false,
+				},
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,4 +239,45 @@ func TestStructArrayField_Equal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStructArrayField_NullableMarshalRoundTrip(t *testing.T) {
+	model := &StructArrayField{
+		FieldID:     100,
+		Name:        "nullable_struct",
+		Description: "test",
+		Nullable:    true,
+		Fields: []*Field{
+			{
+				FieldID:  101,
+				Name:     "sub_a",
+				DataType: schemapb.DataType_Array,
+			},
+		},
+	}
+
+	// Marshal → Unmarshal round-trip
+	pb := MarshalStructArrayFieldModel(model)
+	assert.True(t, pb.GetNullable())
+
+	roundTripped := UnmarshalStructArrayFieldModel(pb)
+	assert.True(t, roundTripped.Nullable)
+	assert.True(t, model.Equal(*roundTripped))
+}
+
+func TestStructArrayField_NullableClone(t *testing.T) {
+	model := &StructArrayField{
+		FieldID:  100,
+		Name:     "test",
+		Nullable: true,
+		Fields:   []*Field{{FieldID: 101, Name: "sub"}},
+	}
+
+	cloned := model.Clone()
+	assert.True(t, cloned.Nullable)
+	assert.True(t, model.Equal(*cloned))
+
+	// Mutating clone should not affect original
+	cloned.Nullable = false
+	assert.True(t, model.Nullable)
 }

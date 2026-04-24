@@ -688,11 +688,6 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		}
 	}
 
-	// todo(SpadeA): make nullable field in struct array supported
-	if field.GetNullable() {
-		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
-	}
-
 	// Validate warmup policy if specified in field TypeParams
 	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
 		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
@@ -703,6 +698,8 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	return nil
 }
 
+// ValidateStructArrayField validates the struct array field schema.
+// When the struct is nullable, sub-field schemas are mutated in-place to set Nullable=true.
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
@@ -720,6 +717,22 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 			return err
 		}
 	}
+
+	// If struct is nullable, propagate nullable to all sub-fields
+	if structArrayField.GetNullable() {
+		for _, subField := range structArrayField.Fields {
+			subField.Nullable = true
+		}
+	} else {
+		// If struct is not nullable, sub-fields must not be individually nullable
+		for _, subField := range structArrayField.Fields {
+			if subField.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
+					structArrayField.Name, subField.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -1966,6 +1979,20 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 	return nil
 }
 
+// subFieldHasData checks whether a struct sub-field contains actual data content,
+// not just a protobuf-initialized empty wrapper (e.g. some SDKs may initialize the
+// Vectors oneof by accessing .vectors.dim, making Field non-nil without real data).
+func subFieldHasData(subField *schemapb.FieldData) bool {
+	switch fd := subField.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		return fd.Scalars.GetData() != nil
+	case *schemapb.FieldData_Vectors:
+		return fd.Vectors.GetData() != nil
+	default:
+		return false
+	}
+}
+
 // checkAndFlattenStructFieldData verifies the array length of the struct array field data in the insert message
 // and then flattens the data so that data node and query node have not to handle the struct array field data.
 func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
@@ -2007,6 +2034,63 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				structName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
 		}
 
+		// Check sub-field data consistency: within the same struct, all sub-fields must
+		// either have data or all be empty. Partial presence is invalid.
+		hasDataCount := 0
+		for _, subField := range structArrays.StructArrays.Fields {
+			if subFieldHasData(subField) {
+				hasDataCount++
+			}
+		}
+		totalSubFields := len(structArrays.StructArrays.Fields)
+		if hasDataCount == 0 {
+			// All sub-fields have empty payload — equivalent to the struct being
+			// omitted entirely. Reject illegal ValidData first: when no payload is
+			// provided, any ValidData[i]==true contradicts itself.
+			for _, subField := range structArrays.StructArrays.Fields {
+				for j, v := range subField.ValidData {
+					if v {
+						return fmt.Errorf("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
+							subField.FieldName, structName, j)
+					}
+				}
+			}
+			// Skip flatten and let checkFieldsDataBySchema backfill missing sub-fields
+			// uniformly, so scenario "struct omitted" and scenario "struct present but
+			// empty" share one code path downstream.
+			continue
+		}
+		if hasDataCount != totalSubFields {
+			return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
+				structName, hasDataCount, totalSubFields)
+		}
+
+		// Validate that all sub-fields share the same ValidData mask.
+		// Nullable is a struct-level concept: a row is either entirely null or entirely present.
+		if structSchema.GetNullable() {
+			var refValidData []bool
+			var refFieldName string
+			refInitialized := false
+			for _, subField := range structArrays.StructArrays.Fields {
+				if !refInitialized {
+					refValidData = subField.ValidData
+					refFieldName = subField.FieldName
+					refInitialized = true
+					continue
+				}
+				if len(subField.ValidData) != len(refValidData) {
+					return fmt.Errorf("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
+						structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
+				}
+				for j := range refValidData {
+					if subField.ValidData[j] != refValidData[j] {
+						return fmt.Errorf("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
+							structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
+					}
+				}
+			}
+		}
+
 		// Check the array length of the struct array field data
 		expectedArrayLen := -1
 		for _, subField := range structArrays.StructArrays.Fields {
@@ -2045,15 +2129,24 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				Type:      subField.Type,
 				Field:     subField.Field,
 				IsDynamic: subField.IsDynamic,
+				ValidData: subField.ValidData,
 			}
 
 			flattenedFields = append(flattenedFields, subFieldCopy)
 		}
 	}
 
-	if len(schema.GetStructArrayFields()) != structFieldCount {
-		return fmt.Errorf("the number of struct array fields is not the same as needed, expected: %d, actual: %d",
-			len(schema.GetStructArrayFields()), structFieldCount)
+	// Verify all required (non-nullable) struct array fields are provided
+	seenStructs := make(map[string]bool, structFieldCount)
+	for _, fieldData := range insertMsg.GetFieldsData() {
+		if _, ok := structSchemaMap[fieldData.FieldName]; ok {
+			seenStructs[fieldData.FieldName] = true
+		}
+	}
+	for _, sf := range schema.GetStructArrayFields() {
+		if !sf.GetNullable() && !seenStructs[sf.Name] {
+			return fmt.Errorf("required struct array field '%s' is missing in insert data", sf.Name)
+		}
 	}
 
 	insertMsg.FieldsData = flattenedFields

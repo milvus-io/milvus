@@ -4,7 +4,7 @@ go 1.25.8
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260323081523-53649783989c
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260420040138-28760e7d66ed
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
 	github.com/minio/minio-go/v7 v7.0.73
@@ -14,6 +14,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
+	go.etcd.io/etcd/client/v3 v3.5.5
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.79.3
 )
@@ -105,7 +106,6 @@ require (
 	go.etcd.io/etcd/api/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
-	go.etcd.io/etcd/client/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/raft/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/server/v3 v3.5.5 // indirect
