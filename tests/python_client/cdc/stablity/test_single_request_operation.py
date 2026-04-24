@@ -34,22 +34,39 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from delayed_assert import assert_expectations
-from pymilvus import FunctionType, connections, utility
+from pymilvus import DataType, FunctionType, connections, utility
 from utils.util_k8s import get_milvus_instance_name, wait_pods_ready
 from utils.util_log import test_log as log
 
+_VECTOR_DTYPES = {
+    DataType.FLOAT_VECTOR,
+    DataType.FLOAT16_VECTOR,
+    DataType.BFLOAT16_VECTOR,
+    DataType.BINARY_VECTOR,
+    DataType.SPARSE_FLOAT_VECTOR,
+    DataType.INT8_VECTOR,
+}
+
 
 def _build_checker_schema(dim=8):
-    """Build the shared all-datatype schema minus the MinHash function.
+    """Build the shared all-datatype schema, stripped for the 2.6-latest image.
 
-    The deployed chaos-test image (2.6-latest) rejects FunctionType.MINHASH
-    with "unknown function type". Mutate the schema returned by the shared
-    helper to drop the MinHash function and its output field so every
-    Checker can create its collection.
+    The chaos-test image used by milvus_cdc_chaos_test/verify_test rejects
+    two things the shared gen_all_datatype_collection_schema includes by
+    default:
+      - FunctionType.MINHASH (error: "check function params with unknown
+        function type")
+      - nullable=True on FLOAT_VECTOR (error: "vector type not support null")
+
+    Drop the MinHash function and its output field, and force nullable=False
+    on every vector field so the server accepts the schema.
     """
     schema = cf.gen_all_datatype_collection_schema(dim=dim)
     schema.functions[:] = [f for f in schema.functions if f.type != FunctionType.MINHASH]
     schema.fields[:] = [f for f in schema.fields if f.name != "minhash_emb"]
+    for f in schema.fields:
+        if f.dtype in _VECTOR_DTYPES:
+            f.nullable = False
     return schema
 
 
