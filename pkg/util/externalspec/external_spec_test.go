@@ -82,11 +82,16 @@ func TestParseExternalSpec_BooleanExtfsValidation(t *testing.T) {
 	assert.Equal(t, "true", spec.Extfs["use_iam"])
 }
 
-func TestParseExternalSpec_AddressAndBucketExtfsAllowed(t *testing.T) {
-	spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"address":"https://s3.us-west-2.amazonaws.com","bucket_name":"my-bucket"}}`)
+func TestParseExternalSpec_BucketExtfsAllowed(t *testing.T) {
+	spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"bucket_name":"my-bucket"}}`)
 	require.NoError(t, err)
-	assert.Equal(t, "https://s3.us-west-2.amazonaws.com", spec.Extfs["address"])
 	assert.Equal(t, "my-bucket", spec.Extfs["bucket_name"])
+}
+
+func TestParseExternalSpec_AddressRejected(t *testing.T) {
+	_, err := ParseExternalSpec(`{"format":"parquet","extfs":{"address":"https://s3.us-west-2.amazonaws.com"}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not allowed")
 }
 
 func TestValidateExternalSource(t *testing.T) {
@@ -339,7 +344,7 @@ func TestParseExternalSpec_ArnKeys(t *testing.T) {
 
 func TestValidateExtfsComplete_Azure(t *testing.T) {
 	t.Run("azure_shared_key", func(t *testing.T) {
-		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"access_key_id":    "mystorageacct",
 			"access_key_value": "base64key",
 			"cloud_provider":   "azure",
@@ -348,7 +353,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	})
 
 	t.Run("azure_workload_identity", func(t *testing.T) {
-		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"use_iam":        "true",
 			"cloud_provider": "azure",
 		})
@@ -356,7 +361,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	})
 
 	t.Run("azure_no_region_required", func(t *testing.T) {
-		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"access_key_id":    "mystorageacct",
 			"access_key_value": "base64key",
 		})
@@ -364,7 +369,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	})
 
 	t.Run("azure_scheme_with_gcp_provider_rejected", func(t *testing.T) {
-		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"access_key_id":    "AK",
 			"access_key_value": "SK",
 			"cloud_provider":   "gcp",
@@ -385,7 +390,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	})
 
 	t.Run("azure_with_gcp_target_service_account_rejected", func(t *testing.T) {
-		err := ValidateExtfsComplete("azure://container/path", map[string]string{
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
 		})
 		require.Error(t, err)

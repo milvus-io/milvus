@@ -804,6 +804,15 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
 ) ([]*datapb.ExternalFileInfo, string, error) {
+	// Revalidate source+spec at refresh time: etcd is not a trusted boundary,
+	// and validation rules may have tightened since the collection was created.
+	// Empty source is legal (see typeutil.IsExternalCollection); only validate
+	// when both present.
+	if job.GetExternalSource() != "" {
+		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+			return nil, "", fmt.Errorf("external source/spec failed revalidation: %w", err)
+		}
+	}
 	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to parse external spec: %w", err)

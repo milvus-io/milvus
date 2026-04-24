@@ -1670,16 +1670,15 @@ TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
               "MILVUS_INTERNAL_AK");
 }
 
-// Azure endpoint derivation: when extfs supplies cloud_provider=azure but
-// omits extfs.address, DeriveEndpoint fills in the bare sovereign-cloud
-// authority. The swap then relocates the URI host (container) into
-// bucket_name. AzureFileSystemProducer requires address to stay schemeless
-// so its `.blob.` / `.dfs.` concatenation produces a valid authority.
-TEST(InjectExtfsAllowlist, AzureDefaultEndpoint) {
+// Azure endpoint derivation: AWS-form URI with cp=azure + region resolves via
+// DeriveEndpoint to the sovereign-cloud bare authority. Swap relocates URI
+// host (container) into bucket_name. AzureFileSystemProducer requires
+// address to stay schemeless so its `.blob.`/`.dfs.` concatenation works.
+TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec =
-        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure"}})";
+        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure","region":"eastus"}})";
 
     ::InjectExternalSpecProperties(
         props, coll_id, "azure://mycontainer/data", spec);
@@ -1704,7 +1703,6 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
         {"usdodcentral", "core.usgovcloudapi.net"},
         {"germanynortheast", "core.cloudapi.de"},
         {"eastus", "core.windows.net"},
-        {"", "core.windows.net"},
     };
     for (const auto& c : cases) {
         milvus_storage::api::Properties props;
@@ -1722,18 +1720,21 @@ TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
     }
 }
 
-TEST(InjectExtfsAllowlist, AzureExplicitAddressOverridesDerivation) {
+TEST(InjectExtfsAllowlist, AzuriteMilvusFormURIUsesHostAsEndpoint) {
+    // Azurite / Azure Stack Hub: custom endpoint expressed via Milvus-form URI
+    // (path has ≥2 segments). URI.host is authoritative; cp+region are
+    // signing metadata only.
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec =
-        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure","address":"custom.blob.endpoint"}})";
+        R"({"format":"parquet","extfs":{"access_key_id":"myacct","access_key_value":"KEY","cloud_provider":"azure"}})";
 
     ::InjectExternalSpecProperties(
-        props, coll_id, "azure://mycontainer/data", spec);
+        props, coll_id, "azure://127.0.0.1:10000/mycontainer/data", spec);
 
-    // Explicit extfs.address wins over DeriveEndpoint fallback.
+    // Milvus-form: URI.host wins, no swap.
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
-              "custom.blob.endpoint");
+              "127.0.0.1:10000");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
               "mycontainer");
 }
@@ -1758,6 +1759,40 @@ TEST(InjectExtfsAllowlist, InvalidJsonIsHandledGracefully) {
     // Layer 1 still derived bucket from URI.
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
               "bucket");
+}
+
+// Regression: URIs without a trailing slash (e.g. "s3://mybucket") must not
+// crash via empty-host AssertInfo. The entire authority is the host when no
+// path separator exists.
+TEST(InjectExtfsAllowlist, URIWithoutTrailingSlashParsed) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}})";
+
+    EXPECT_NO_THROW(
+        ::InjectExternalSpecProperties(props, coll_id, "s3://mybucket", spec));
+    // AWS-form path: URI.host=bucket, derived endpoint=regional S3.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "mybucket");
+}
+
+// Regression: anonymous is a bool field and must be zero-initialized by
+// Layer 0 so stale Properties reuse cannot leak anonymous=true across
+// collections.
+TEST(InjectExtfsAllowlist, AnonymousIsZeroInitialized) {
+    milvus_storage::api::Properties props;
+    // Pre-seed the slot to simulate stale reuse.
+    props["extfs.42.anonymous"] = std::string("true");
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    // Layer 0 must overwrite the stale value with "false".
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "false");
 }
 
 // ============================================================
