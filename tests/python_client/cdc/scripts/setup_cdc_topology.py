@@ -1,7 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from cdc.conftest import CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS
 from pymilvus import MilvusClient
+
+# Kept in sync with cdc/conftest.py's CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS.
+# Inlined because this file is executed standalone from tests/python_client/cdc/scripts/,
+# where the cdc package is not on sys.path.
+CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS = 600
 
 
 def setup_cdc_topology(
