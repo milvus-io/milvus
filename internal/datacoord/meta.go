@@ -1222,8 +1222,16 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 		// ManifestPath is intentionally not moved here (see segment_checker.isSegmentUpdate).
 		segment.DataVersion++
 
+		// Backfill column-group commit only mutates segment.Binlogs; skipping
+		// Deltalogs / Statslogs / Bm25Statslogs avoids rewriting their KVs on
+		// every call and the write amplification that comes with it.
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
-			Segment:               segment.SegmentInfo,
+			Segment: segment.SegmentInfo,
+			UpdateMask: metastore.BinlogsUpdateMask{
+				WithoutDeltalogs:     true,
+				WithoutStatslogs:     true,
+				WithoutBm25Statslogs: true,
+			},
 			DroppedBinlogFieldIDs: droppedFieldIDs,
 		}
 		return true

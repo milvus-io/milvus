@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -3453,6 +3454,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// chunk manager that always returns the supplied JSON bytes.
 	newServerForCommit := func(t *testing.T, m *meta, b broker.Broker, jsonBytes []byte) *Server {
 		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(len(jsonBytes)), nil).Maybe()
 		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(jsonBytes, nil).Maybe()
 		m.chunkManager = cm
 		s := &Server{
@@ -3911,6 +3913,102 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.Len(t, resp.GetSegmentStatuses(), 1)
 		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
 		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "no existing manifest path")
+	})
+
+	// A result JSON that exceeds the hard-cap must be rejected before Read
+	// so an oversized or malicious file cannot OOM DataCoord.
+	t.Run("oversized_result_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		cm := mock_storage.NewMockChunkManager(t)
+		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(maxBackfillResultBytes+1), nil)
+		// Read must not be called -- assert by omitting the expectation.
+		m.chunkManager = cm
+
+		s := &Server{meta: m}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := s.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "exceeds limit")
+	})
+
+	// More items than maxItemsPerBroadcast must be split across several
+	// broadcast messages so the payload stays under typical MQ limits.
+	t.Run("items_split_across_broadcast_batches", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segIDs := make([]int64, 0, maxItemsPerBroadcast+5)
+		for i := int64(1); i <= int64(maxItemsPerBroadcast+5); i++ {
+			segIDs = append(segIDs, 10000+i)
+			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 10000 + i, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/seg/"+strconv.FormatInt(10000+i, 10), 1),
+			}})
+		}
+		// Build a JSON result referencing every segment.
+		var b strings.Builder
+		b.WriteString(`{"success": true, "collectionId": 100, "segments": {`)
+		for i, id := range segIDs {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(`"` + strconv.FormatInt(id, 10) + `": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}`)
+		}
+		b.WriteString(`}}`)
+
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil)
+
+		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+		var broadcastCalls int
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalls++
+				return &types2.BroadcastAppendResult{
+					BroadcastID: uint64(broadcastCalls),
+					AppendResults: map[string]*types2.AppendResult{
+						"by-dev-rootcoord-dml_0": {
+							MessageID:              rmq.NewRmqID(1),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+							LastConfirmedMessageID: rmq.NewRmqID(1),
+						},
+					},
+				}, nil
+			})
+		bapi.EXPECT().Close().Return()
+		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return bapi, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/result.json",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(len(segIDs)), resp.GetCommittedSegments())
+		assert.Equal(t, int32(0), resp.GetFailedSegments())
+		// 517 items split across batches of 512 = 2 broadcasts.
+		assert.Equal(t, 2, broadcastCalls)
 	})
 }
 

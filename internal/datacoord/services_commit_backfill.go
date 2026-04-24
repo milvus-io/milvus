@@ -85,51 +85,36 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 	defer broadcaster.Close()
 
-	if _, err := broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
-		WithHeader(&message.BatchUpdateManifestMessageHeader{
-			CollectionId: result.CollectionID,
-		}).
-		WithBody(&message.BatchUpdateManifestMessageBody{
-			Items: items,
-		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-		MustBuildBroadcast(),
-	); err != nil {
-		log.Error("CommitBackfillResult broadcast failed", zap.Error(err))
-		// Mark every broadcast item as failed; pre-validation failures keep their
-		// recorded reason.
-		itemIDs := make(map[int64]string, len(items))
-		for _, it := range items {
-			kind := "v3"
-			if it.GetV2ColumnGroups() != nil {
-				kind = "v2"
-			}
-			itemIDs[it.GetSegmentId()] = kind
+	// Split items across multiple broadcast messages so a single
+	// BatchUpdateManifestMessageBody never exceeds the broker's message size
+	// limit (Pulsar defaults to 5MiB). Each batch is an independent broadcast
+	// message; failure of one batch does not cancel subsequent batches, and
+	// per-segment statuses reflect batch-level outcomes.
+	channels := []string{streaming.WAL().ControlChannel()}
+	var lastErr error
+	for start := 0; start < len(items); start += maxItemsPerBroadcast {
+		end := start + maxItemsPerBroadcast
+		if end > len(items) {
+			end = len(items)
 		}
-		for segID, kind := range itemIDs {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: kind, Reason: err.Error(),
-			})
+		batch := items[start:end]
+		if _, err := broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
+			WithHeader(&message.BatchUpdateManifestMessageHeader{
+				CollectionId: result.CollectionID,
+			}).
+			WithBody(&message.BatchUpdateManifestMessageBody{
+				Items: batch,
+			}).
+			WithBroadcast(channels).
+			MustBuildBroadcast(),
+		); err != nil {
+			log.Error("CommitBackfillResult broadcast batch failed",
+				zap.Error(err), zap.Int("batchStart", start), zap.Int("batchEnd", end))
+			lastErr = err
+			appendItemStatuses(&statuses, batch, false, err.Error())
+			continue
 		}
-		return &datapb.CommitBackfillResultResponse{
-			Status:          merr.Status(err),
-			TotalSegments:   total,
-			FailedSegments:  int32(len(statuses)),
-			SegmentStatuses: sortStatuses(statuses),
-		}, nil
-	}
-
-	// Broadcast accepted. All broadcast items are considered committed from the
-	// caller's perspective -- the ack callback applies the operators and any
-	// failure there surfaces through datacoord's internal retry / critical log.
-	for _, it := range items {
-		kind := "v3"
-		if it.GetV2ColumnGroups() != nil {
-			kind = "v2"
-		}
-		statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-			SegmentId: it.GetSegmentId(), Ok: true, Kind: kind,
-		})
+		appendItemStatuses(&statuses, batch, true, "")
 	}
 
 	committed, failed := countStatuses(statuses)
@@ -138,14 +123,46 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		zap.Int32("committed", committed),
 		zap.Int32("failed", failed))
 
+	// Top-level Success unless every broadcast failed -- partial failures are
+	// surfaced through per-segment statuses.
+	respStatus := merr.Success()
+	if committed == 0 && lastErr != nil {
+		respStatus = merr.Status(lastErr)
+	}
+
 	return &datapb.CommitBackfillResultResponse{
-		Status:            merr.Success(),
+		Status:            respStatus,
 		TotalSegments:     total,
 		CommittedSegments: committed,
 		FailedSegments:    failed,
 		SegmentStatuses:   sortStatuses(statuses),
 	}, nil
 }
+
+// maxItemsPerBroadcast caps the number of BatchUpdateManifestItem entries
+// packed into a single broadcast message. With item payloads in the
+// ~1-2KiB range for V2 column groups this stays well under Pulsar's default
+// 5MiB maxMessageSize while keeping broadcast overhead low.
+const maxItemsPerBroadcast = 512
+
+func appendItemStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []*messagespb.BatchUpdateManifestItem, ok bool, reason string) {
+	for _, it := range batch {
+		kind := "v3"
+		if it.GetV2ColumnGroups() != nil {
+			kind = "v2"
+		}
+		*out = append(*out, &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: it.GetSegmentId(), Ok: ok, Kind: kind, Reason: reason,
+		})
+	}
+}
+
+// maxBackfillResultBytes caps the size of the result JSON read from object
+// storage. The JSON is produced by an external system (Spark) and loaded into
+// memory in one shot; a hard cap protects DataCoord from OOM on an oversized
+// or malicious input. Real-world backfill results for collections in the
+// hundreds of thousands of segments comfortably fit within this limit.
+const maxBackfillResultBytes int64 = 64 * 1024 * 1024 // 64MiB
 
 // loadBackfillResult reads and decodes the result JSON. The bucket is inferred
 // from the configured chunk manager (if it exposes BucketName()) and used to
@@ -158,6 +175,17 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 	key, err := normalizeObjectKey(rawPath, bucket)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	// Pre-check the object size so an untrusted external caller cannot force
+	// an unbounded in-memory Read.
+	size, err := s.meta.chunkManager.Size(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if size > maxBackfillResultBytes {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"backfill result JSON " + strconv.FormatInt(size, 10) +
+				" bytes exceeds limit " + strconv.FormatInt(maxBackfillResultBytes, 10))
 	}
 	raw, err := s.meta.chunkManager.Read(ctx, key)
 	if err != nil {
