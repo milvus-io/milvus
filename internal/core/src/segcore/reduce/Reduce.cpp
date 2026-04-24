@@ -760,7 +760,12 @@ ReduceHelper::FillEntryData() {
                 if (f.valid()) {
                     try {
                         f.get();
+                    } catch (const std::exception& e) {
+                        LOG_WARN("FillEntryData drain swallowed exception: {}",
+                                 e.what());
                     } catch (...) {
+                        LOG_WARN(
+                            "FillEntryData drain swallowed unknown exception");
                     }
                 }
             }
