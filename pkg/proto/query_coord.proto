@@ -425,6 +425,7 @@ message FieldIndexInfo {
     int32 current_index_version = 11;
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
+    index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message JsonStatsInfo {

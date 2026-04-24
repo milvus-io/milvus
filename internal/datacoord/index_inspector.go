@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -254,15 +255,16 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	}
 
 	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-		IndexType:      indexType,
+		SegmentID:             segment.ID,
+		CollectionID:          segment.CollectionID,
+		PartitionID:           segment.PartitionID,
+		NumRows:               segment.NumOfRows,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		CreatedUTCTime:        uint64(time.Now().Unix()),
+		WriteHandoff:          false,
+		IndexType:             indexType,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -349,6 +350,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleUnusedIndexFilesV1(ctx)
 		})
 	}()
 	go func() {
@@ -1161,7 +1163,18 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
-			// buildID no longer exists in meta. Orphan buildID walk: no collection context,
+			// parsedID not found as a buildID — could be:
+			// 1. Orphan legacy buildID dir (should be removed)
+			// 2. CollectionID dir from v1 path format (should NOT be removed)
+			if gc.meta.indexMeta.HasCollectionWithPathVersion(buildID, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+				// This is a collectionID dir for v1 format — skip here,
+				// v1 cleanup is handled by recycleUnusedIndexFilesV1.
+				logger.Info("skip collectionID dir, handled by v1 recycler",
+					zap.Int64("collectionID", buildID))
+				return true
+			}
+
+			// Orphan buildID walk: no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
 				logger.Info("skip GC index files since buildID is protected by snapshot",
@@ -1242,13 +1255,55 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 
 // getAllIndexFilesOfIndex returns the all index files of index.
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
+	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
+		segmentIndex.PartitionID, segmentIndex.SegmentID,
+		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
-		filepath := metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segmentIndex.BuildID, segmentIndex.IndexVersion,
-			segmentIndex.PartitionID, segmentIndex.SegmentID, fileID)
-		filesMap[filepath] = struct{}{}
+		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
 	}
 	return filesMap
+}
+
+// recycleUnusedIndexFilesV1 cleans index files for v1 format entries (collection-partitioned paths).
+// V1 first-level dirs are collectionIDs, so the walk-based approach in recycleUnusedIndexFiles can't
+// discover individual builds. Instead, iterate over deleted metadata entries and remove by full path.
+func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexFilesV1"))
+
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithPathVersion(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)
+	if len(deletedIndexes) == 0 {
+		return
+	}
+
+	log.Info("start recycleUnusedIndexFilesV1", zap.Int("deletedCount", len(deletedIndexes)))
+	for _, segIdx := range deletedIndexes {
+		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+			log.Info("skip GC v1 index files since buildID is protected by snapshot",
+				zap.Int64("collectionID", segIdx.CollectionID),
+				zap.Int64("buildID", segIdx.BuildID))
+			continue
+		}
+
+		builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+			segIdx.IndexStorePathVersion, segIdx.CollectionID,
+			segIdx.PartitionID, segIdx.SegmentID,
+			segIdx.BuildID, segIdx.IndexVersion)
+		prefix := builder.BuildPrefix() + "/"
+
+		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
+			log.Warn("recycleUnusedIndexFilesV1 remove failed",
+				zap.Int64("buildID", segIdx.BuildID),
+				zap.Int64("collectionID", segIdx.CollectionID),
+				zap.Error(err))
+			continue
+		}
+		log.Info("recycleUnusedIndexFilesV1 removed index files",
+			zap.Int64("buildID", segIdx.BuildID),
+			zap.Int64("collectionID", segIdx.CollectionID))
+	}
 }
 
 // recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.

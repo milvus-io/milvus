@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -221,17 +222,18 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 			CompactionFrom: []int64{8001, 8002},
 			IndexInfos: []*querypb.FieldIndexInfo{
 				{
-					FieldID:             100,
-					EnableIndex:         true,
-					IndexName:           "test_index",
-					IndexID:             7001,
-					BuildID:             7002,
-					IndexParams:         []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}},
-					IndexFilePaths:      []string{"/path/to/index"},
-					IndexSize:           4096,
-					IndexVersion:        1,
-					NumRows:             1000,
-					CurrentIndexVersion: 2,
+					FieldID:               100,
+					EnableIndex:           true,
+					IndexName:             "test_index",
+					IndexID:               7001,
+					BuildID:               7002,
+					IndexParams:           []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}},
+					IndexFilePaths:        []string{"/path/to/index"},
+					IndexSize:             4096,
+					IndexVersion:          1,
+					NumRows:               1000,
+					CurrentIndexVersion:   2,
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 				},
 			},
 			SegmentSize:     8192,
@@ -332,6 +334,7 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, src.IndexInfos[0].IndexVersion, result.IndexInfos[0].IndexVersion)
 		assert.Equal(t, src.IndexInfos[0].NumRows, result.IndexInfos[0].NumRows)
 		assert.Equal(t, src.IndexInfos[0].CurrentIndexVersion, result.IndexInfos[0].CurrentIndexVersion)
+		assert.Equal(t, src.IndexInfos[0].IndexStorePathVersion, result.IndexInfos[0].IndexStorePathVersion)
 
 		// Validate TextStatsLogs conversion
 		assert.Equal(t, len(src.TextStatsLogs), len(result.TextStatsLogs))
