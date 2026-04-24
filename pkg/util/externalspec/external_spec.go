@@ -49,7 +49,6 @@ const (
 	ExtfsKeyGCPTargetServiceAccount = "gcp_target_service_account"
 	ExtfsKeyRegion                  = "region"
 	ExtfsKeyCloudProvider           = "cloud_provider"
-	ExtfsKeyAddress                 = "address"
 	ExtfsKeyBucketName              = "bucket_name"
 	ExtfsKeyIAMEndpoint             = "iam_endpoint"
 	ExtfsKeyStorageType             = "storage_type"
@@ -116,7 +115,6 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeySessionName:             true,
 	ExtfsKeyExternalID:              true,
 	ExtfsKeyLoadFrequency:           true,
-	ExtfsKeyAddress:                 true,
 	ExtfsKeyBucketName:              true,
 	ExtfsKeyGCPTargetServiceAccount: true,
 	ExtfsKeyAnonymous:               true,
@@ -146,6 +144,8 @@ var allowedExternalSourceSchemes = map[string]bool{
 	SchemeAWS:   true,
 	SchemeMinIO: true,
 	SchemeOSS:   true,
+	SchemeCOS:   true,
+	SchemeOBS:   true,
 	SchemeGS:    true,
 	SchemeGCS:   true,
 	SchemeAzure: true,
@@ -219,7 +219,7 @@ func ValidateExternalSource(source string) error {
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {
-		return fmt.Errorf("external_source must have an explicit scheme (e.g. s3://, aws://, gs://); bare relative paths are no longer supported — write the full URI so credentials and endpoint flow through spec.extfs")
+		return fmt.Errorf("external_source must have an explicit scheme (e.g. s3://, aws://, gs://)")
 	}
 	if !allowedExternalSourceSchemes[scheme] {
 		return fmt.Errorf("external_source scheme %q is not allowed; allowed schemes: %s",
@@ -229,7 +229,7 @@ func ValidateExternalSource(source string) error {
 		return fmt.Errorf("external_source must not embed credentials in the URL (use extfs.access_key_id / extfs.access_key_value instead)")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("external_source must have a non-empty host; write the full URI (e.g. s3://bucket/key with spec.extfs.address, or s3://endpoint/bucket/key) — shorthand like s3:///bucket/key is no longer supported")
+		return fmt.Errorf("external_source must have a non-empty host (e.g. s3://bucket/key or s3://endpoint/bucket/key)")
 	}
 	return nil
 }
@@ -312,7 +312,133 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	if cpLower == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
 		return fmt.Errorf("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
 	}
+
+	// Two-form URI contract: Milvus-form (scheme://endpoint/bucket/key) has
+	// URI.host either a cloud-family endpoint (e.g. *.amazonaws.com,
+	// *.aliyuncs.com) or a custom endpoint containing path-segment count
+	// >= 2. AWS-form (scheme://bucket/key) has a bucket-like URI.host (not
+	// cloud-family) and endpoint must be derivable from cloud_provider +
+	// region. Reject AWS-form configurations whose DeriveEndpoint returns
+	// empty — the endpoint would resolve to the URI host (= bucket) at
+	// runtime and fail opaquely.
+	if u != nil {
+		// Cloud-family URI.host → Milvus-form, URI is authoritative.
+		// Covers global/accelerate/dualstack/FIPS/VPC/sovereign endpoint
+		// variants that DeriveEndpoint does not produce verbatim.
+		if IsCloudEndpointHost(u.Host) {
+			return nil
+		}
+		pathSegs := len(strings.Split(strings.Trim(u.Path, "/"), "/"))
+		if strings.Trim(u.Path, "/") == "" {
+			pathSegs = 0
+		}
+		if pathSegs <= 1 {
+			// AWS-form: endpoint must be derivable. Infer cloud_provider
+			// from scheme when omitted (conventional mapping). minio stays
+			// empty — it has no canonical cp and must use Milvus-form URI.
+			effectiveCP := cpLower
+			if effectiveCP == "" {
+				switch scheme {
+				case SchemeS3, SchemeS3A, SchemeAWS:
+					effectiveCP = CloudProviderAWS
+				case SchemeGS, SchemeGCS:
+					effectiveCP = CloudProviderGCP
+				case SchemeOSS:
+					effectiveCP = CloudProviderAliyun
+				case SchemeCOS:
+					effectiveCP = CloudProviderTencent
+				case SchemeOBS:
+					effectiveCP = CloudProviderHuawei
+				}
+			}
+			if DeriveEndpoint(effectiveCP, extfs[ExtfsKeyRegion]) == "" {
+				return fmt.Errorf("cannot resolve endpoint for %q: set extfs.cloud_provider + extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource)
+			}
+		}
+	}
 	return nil
+}
+
+// IsCloudEndpointHost returns true when host matches a known cloud provider
+// domain family (AWS / GCP / Aliyun / Tencent / Huawei / Azure — all
+// endpoint variants including global, accelerate, dualstack, FIPS, VPC,
+// sovereign). Used by AWS-form disambiguation: when URI.host belongs to a
+// cloud family, the URI is treated as Milvus-form regardless of whether
+// DeriveEndpoint(cp, region) string-matches.
+// Keep list in sync with C++ IsCloudEndpointHost in loon_ffi/util.cpp.
+func IsCloudEndpointHost(host string) bool {
+	h := strings.ToLower(host)
+	suffixes := []string{
+		".amazonaws.com", ".amazonaws.com.cn",
+		".googleapis.com",
+		".aliyuncs.com",
+		".myqcloud.com",
+		".myhuaweicloud.com",
+		".core.windows.net", ".core.chinacloudapi.cn",
+		".core.usgovcloudapi.net", ".core.cloudapi.de",
+	}
+	for _, s := range suffixes {
+		if strings.HasSuffix(h, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// DeriveEndpoint mirrors C++ externalspec::DeriveEndpoint in
+// internal/core/src/storage/loon_ffi/util.cpp. Keep the two in lockstep.
+// Returns empty string when the (cloud_provider, region) pair does not
+// resolve to a concrete endpoint; callers must treat empty as "not derivable"
+// and require the user to supply a Milvus-form URI instead.
+func DeriveEndpoint(cloudProvider, region string) string {
+	cp := strings.ToLower(cloudProvider)
+	switch cp {
+	case CloudProviderAWS:
+		if region == "" {
+			return ""
+		}
+		if strings.HasPrefix(region, "cn-") {
+			return "https://s3." + region + ".amazonaws.com.cn"
+		}
+		return "https://s3." + region + ".amazonaws.com"
+	case CloudProviderGCP:
+		return "https://storage.googleapis.com"
+	case CloudProviderAliyun:
+		if region == "" {
+			return ""
+		}
+		return "https://oss-" + region + ".aliyuncs.com"
+	case CloudProviderTencent:
+		if region == "" {
+			return ""
+		}
+		return "https://cos." + region + ".myqcloud.com"
+	case CloudProviderHuawei:
+		if region == "" {
+			return ""
+		}
+		return "https://obs." + region + ".myhuaweicloud.com"
+	case CloudProviderAzure:
+		// Empty region returns empty — Milvus-form URI is required for
+		// non-public Azure deployments. Public cloud callers can pass an
+		// explicit region prefix ("public" etc.) or just use Milvus-form
+		// URI azure://core.windows.net/<container>/<blob>.
+		r := strings.ToLower(region)
+		if r == "" {
+			return ""
+		}
+		if strings.HasPrefix(r, "china") {
+			return "core.chinacloudapi.cn"
+		}
+		if strings.HasPrefix(r, "usgov") || strings.HasPrefix(r, "usdod") {
+			return "core.usgovcloudapi.net"
+		}
+		if strings.HasPrefix(r, "germany") {
+			return "core.cloudapi.de"
+		}
+		return "core.windows.net"
+	}
+	return ""
 }
 
 // awsFamilyScheme lists schemes that use AWS SigV4 signing (region required).

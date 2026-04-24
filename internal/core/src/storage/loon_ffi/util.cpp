@@ -307,7 +307,6 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "load_frequency",
     "gcp_target_service_account",
     "bucket_name",
-    "address",
     "anonymous",
 };
 
@@ -329,6 +328,7 @@ static const std::vector<std::pair<std::string, bool /*is_bool*/>>
         {"use_ssl", true},
         {"use_iam", true},
         {"use_virtual_host", true},
+        {"anonymous", true},
 };
 
 static std::string
@@ -377,22 +377,20 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         return "https://obs." + region + ".myhuaweicloud.com";
     }
     if (cp == "azure") {
-        // Azure endpoint derivation differs from S3-family: the "region" slot
-        // selects the sovereign cloud (4 fixed suffixes), not a geographic
-        // region. AzureFileSystemProducer concatenates ".blob."/".dfs." onto
-        // config_.address verbatim, so the returned value is a bare authority
-        // (no scheme, no account) — the scheme reconciliation block below
-        // skips azure to preserve this shape.
+        // Azure endpoint derivation: "region" slot selects sovereign cloud.
+        // AzureFileSystemProducer concatenates ".blob."/".dfs." onto
+        // config_.address verbatim, so the returned value is a bare authority.
         //
-        // Azure Stack Hub (customer-domain) and Azurite (127.0.0.1:10000) do
-        // not match any fixed suffix; callers must supply extfs.address
-        // explicitly for those cases.
+        // Azurite / Azure Stack Hub: use Milvus-form URI
+        // (azure://<custom-host>/<container>/<blob>) instead of derive.
         std::string r = region;
         std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c) {
             return std::tolower(c);
         });
-        // Real Azure region names have no hyphen prefix: chinanorth2,
-        // usgovvirginia, germanynortheast. Prefix match is enough.
+        if (r.empty()) {
+            // Empty region → not derivable. Caller must supply Milvus-form URI.
+            return "";
+        }
         if (r.rfind("china", 0) == 0) {
             return "core.chinacloudapi.cn";
         }
@@ -402,8 +400,6 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         if (r.rfind("germany", 0) == 0) {
             return "core.cloudapi.de";
         }
-        // Default / public / unknown → public cloud. Empty region is also
-        // valid (public-cloud-only deployments commonly omit it).
         return "core.windows.net";
     }
     return "";
@@ -413,6 +409,52 @@ static std::string
 StripURIScheme(const std::string& addr) {
     auto pos = addr.find("://");
     return (pos != std::string::npos) ? addr.substr(pos + 3) : addr;
+}
+
+// IsCloudEndpointHost returns true when `host` matches a known cloud provider
+// domain family. Used to identify Milvus-form URIs whose host is an endpoint
+// variant (global / accelerate / dual-stack / VPC / FIPS / sovereign) that
+// DeriveEndpoint does not produce verbatim. When the host belongs to a cloud
+// family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
+// region) equals the host string. Keep list in sync with Go
+// externalspec.IsCloudEndpointHost.
+static bool
+IsCloudEndpointHost(const std::string& host) {
+    std::string h = host;
+    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    auto ends_with = [&](const std::string& suffix) {
+        return h.size() >= suffix.size() &&
+               h.compare(h.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    // AWS (global, regional, accelerate, dualstack, FIPS, VPC, China).
+    if (ends_with(".amazonaws.com") || ends_with(".amazonaws.com.cn")) {
+        return true;
+    }
+    // GCP Cloud Storage.
+    if (ends_with(".googleapis.com")) {
+        return true;
+    }
+    // Aliyun OSS (public, internal, accelerate, VPC).
+    if (ends_with(".aliyuncs.com")) {
+        return true;
+    }
+    // Tencent Cloud COS.
+    if (ends_with(".myqcloud.com")) {
+        return true;
+    }
+    // Huawei Cloud OBS.
+    if (ends_with(".myhuaweicloud.com")) {
+        return true;
+    }
+    // Azure Blob Storage (public, China, US Gov, Germany).
+    if (ends_with(".core.windows.net") || ends_with(".core.chinacloudapi.cn") ||
+        ends_with(".core.usgovcloudapi.net") ||
+        ends_with(".core.cloudapi.de")) {
+        return true;
+    }
+    return false;
 }
 
 void
@@ -442,8 +484,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
     auto slash_pos = rest.find('/');
+    // No slash after authority (e.g. "s3://mybucket"): entire rest is host,
+    // path is empty. Only assert against the pathological "scheme://" case
+    // where rest itself is empty.
     std::string host =
-        (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : "";
+        (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : rest;
     AssertInfo(!host.empty(),
                "external_source for collection {} has empty host: {}",
                collection_id,
@@ -462,8 +507,8 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                                   (extfs_prefix + "use_ssl").c_str(),
                                   DeriveUseSSLFromScheme(scheme).c_str());
 
-    // Default to Milvus-form; AWS-form swap happens in the post-merge
-    // block when spec.extfs supplied an explicit address.
+    // Default to Milvus-form (URI.host as endpoint). Layer 3 may rewrite
+    // to AWS-form when DeriveEndpoint(cp, region) differs from URI.host.
     std::string address = host;
     if (address.find("://") == std::string::npos &&
         DeriveUseSSLFromScheme(scheme) == "false") {
@@ -479,8 +524,8 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
 
     // Layer 2: apply spec.extfs JSON. Gate every key through
     // kAllowedExtfsSpecKeys — defense-in-depth against property injection
-    // if a caller bypasses Go ParseExternalSpec.
-    std::string spec_address;
+    // if a caller bypasses Go ParseExternalSpec. Note: "address" is NOT in
+    // the allowlist; user-facing endpoint override must use Milvus-form URI.
     std::string spec_cloud_provider;
     std::string spec_region;
     if (!external_spec.empty()) {
@@ -491,8 +536,6 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
             auto extfs_obj = doc.find_field("extfs");
             if (extfs_obj.error() == simdjson::SUCCESS) {
                 for (auto field : extfs_obj.get_object()) {
-                    // Per-field try/catch so one malformed value does not
-                    // abort iteration and drop subsequent allowlisted keys.
                     try {
                         auto key = std::string(field.unescaped_key().value());
                         if (kAllowedExtfsSpecKeys.find(key) ==
@@ -507,13 +550,10 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                         }
                         auto val =
                             std::string(field.value().get_string().value());
-                        // Skip empty — must not clobber Layer-1 derivation.
                         if (val.empty()) {
                             continue;
                         }
-                        if (key == "address") {
-                            spec_address = val;
-                        } else if (key == "cloud_provider") {
+                        if (key == "cloud_provider") {
                             spec_cloud_provider = val;
                         } else if (key == "region") {
                             spec_region = val;
@@ -533,8 +573,6 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                 }
             }
         } catch (const simdjson::simdjson_error& e) {
-            // Top-level parse failure = etcd corruption / Go bypass; fail
-            // fast so we don't authenticate against a partial config.
             LOG_ERROR(
                 "Failed to parse external_spec for extfs overrides "
                 "(collection_id={}): {}",
@@ -547,24 +585,49 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         }
     }
 
-    // AWS-form post-process: compute effective endpoint via Tier-1/2.
-    //   Tier-1: explicit spec.extfs.address
-    //   Tier-2: DeriveEndpoint(spec.cloud_provider, spec.region)
-    // When URI host != effective endpoint host, the source is AWS-form
-    // (`scheme://bucket/key`) — swap bucket_name to URI host and set
-    // address to the derived endpoint. Milvus-form sources (URI host == endpoint)
-    // fall through untouched.
-    std::string effective_address = spec_address;
-    if (effective_address.empty()) {
-        effective_address = DeriveEndpoint(spec_cloud_provider, spec_region);
+    // Layer 3: AWS-form disambiguation via derived-endpoint vs URI.host.
+    //   Compute DeriveEndpoint(cp, region). If non-empty and different from
+    //   URI.host, source is AWS-form (scheme://bucket/key) — swap URI.host
+    //   into bucket_name and write derived endpoint as address. Otherwise
+    //   Milvus-form (URI.host == endpoint) or unresolvable — keep Layer1
+    //   values.
+    //
+    //   Path-segment heuristics are unreliable: AWS-form S3 keys may contain
+    //   '/' (`s3://bucket/deep/key.parquet`) and Milvus-form URIs may omit
+    //   keys (`s3://endpoint/bucket`). Comparing derive result with host
+    //   handles both cases correctly — the derived endpoint string is a
+    //   stable cloud-provider identifier, not dependent on path structure.
+    // Infer cloud_provider from scheme when spec omits it. Mirror of Go
+    // externalspec.ValidateExtfsComplete; keep lists in lockstep.
+    std::string effective_cp = spec_cloud_provider;
+    if (effective_cp.empty()) {
+        if (scheme == "s3" || scheme == "s3a" || scheme == "aws") {
+            effective_cp = "aws";
+        } else if (scheme == "gs" || scheme == "gcs") {
+            effective_cp = "gcp";
+        } else if (scheme == "oss") {
+            effective_cp = "aliyun";
+        } else if (scheme == "cos") {
+            effective_cp = "tencent";
+        } else if (scheme == "obs") {
+            effective_cp = "huawei";
+        }
     }
-    if (!effective_address.empty() &&
-        StripURIScheme(effective_address) != host) {
+    std::string derived = DeriveEndpoint(effective_cp, spec_region);
+    // Cloud-family host suffix check: if URI.host ends with a known cloud
+    // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
+    // endpoint variants including global/accelerate/dualstack/FIPS/VPC), the
+    // URI is Milvus-form and URI.host is authoritative. Skip swap regardless
+    // of whether DeriveEndpoint string-matches. This prevents misclassifying
+    // `s3://s3.amazonaws.com/bucket/key` as AWS-form when spec.region is a
+    // regional value.
+    bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
+    if (!uri_host_is_cloud_endpoint && !derived.empty() &&
+        StripURIScheme(derived) != host) {
         milvus_storage::api::SetValue(
             properties, (extfs_prefix + "bucket_name").c_str(), host.c_str());
-        milvus_storage::api::SetValue(properties,
-                                      (extfs_prefix + "address").c_str(),
-                                      effective_address.c_str());
+        milvus_storage::api::SetValue(
+            properties, (extfs_prefix + "address").c_str(), derived.c_str());
     }
 
     // Reconcile bare address with final use_ssl. Addresses that already
