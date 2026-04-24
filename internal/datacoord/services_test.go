@@ -3923,7 +3923,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 
 		cm := mock_storage.NewMockChunkManager(t)
-		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(maxBackfillResultBytes+1), nil)
+		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(maxBackfillResultBytes+1, nil)
 		// Read must not be called -- assert by omitting the expectation.
 		m.chunkManager = cm
 
