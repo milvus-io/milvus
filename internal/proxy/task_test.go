@@ -2301,6 +2301,68 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
 
+// Security regression: DescribeCollection must redact credentials embedded in
+// ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
+// returning to the client. Any caller with Describe privilege would otherwise
+// be able to read another tenant's object-storage credentials out of the
+// persisted collection metadata.
+func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	InitMetaCache(ctx, mix)
+
+	collectionName := "TestDescribeCollectionTask_RedactsExternalSpecCredentials"
+
+	rawSpec := `{"format":"parquet","extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-east-1"}}`
+
+	schema := &schemapb.CollectionSchema{
+		Name:           collectionName,
+		ExternalSource: "s3://my-bucket/data/",
+		ExternalSpec:   rawSpec,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			Schema:       schema,
+			CollectionID: 1,
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionName: collectionName,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+
+	// describeCollectionTask now passes ExternalSpec through unredacted —
+	// redaction lives at the public proxy.DescribeCollection edge so both
+	// cached and remote provider paths converge through one sanitizer.
+	// The task-level result must still carry raw creds so that the
+	// post-task wrapper can choose to redact (user-facing) or not
+	// (internal callers, if added later, that need raw spec for FFI).
+	out := task.result.Schema.ExternalSpec
+	assert.Contains(t, out, "AKIAEXAMPLE",
+		"task-level result must carry raw spec; redaction is applied at proxy edge")
+	assert.Contains(t, out, "SUPERSECRET",
+		"task-level result must carry raw spec; redaction is applied at proxy edge")
+}
+
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()

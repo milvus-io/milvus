@@ -1247,6 +1247,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
 	t.result.Schema.ExternalSource = result.Schema.ExternalSource
+	// Pass spec through unredacted; the public proxy.DescribeCollection
+	// entry point applies RedactExternalSpec uniformly across cached and
+	// remote provider paths so internal-only callers of this task path
+	// (if any) still observe raw creds for FFI auth.
 	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
 	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
 	t.result.CollectionID = result.CollectionID
