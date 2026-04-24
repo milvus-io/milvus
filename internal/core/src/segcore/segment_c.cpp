@@ -466,7 +466,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
             auto retrieve_result =
-                segment->Retrieve(&trace_ctx, plan, offsets, len);
+                segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
 
             return CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));

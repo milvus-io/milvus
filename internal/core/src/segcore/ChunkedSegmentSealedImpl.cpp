@@ -5170,9 +5170,10 @@ ChunkedSegmentSealedImpl::ExecuteTake(
     milvus::OpContext* op_ctx) const {
     // reader_->take() issues remote reads and can take seconds under slow
     // object storage. Bail out if the upstream reduce has already been
-    // cancelled so we don't waste IO on a doomed request.
-    segcore::CheckCancellation(
-        op_ctx, id_, fmt::format("ExecuteTake({})", caller_tag));
+    // cancelled so we don't waste IO on a doomed request. caller_tag is a
+    // short static string ("search" / "retrieve"); pass it directly to
+    // avoid an extra fmt::format allocation on every call.
+    segcore::CheckCancellation(op_ctx, id_, caller_tag);
 
     // reader_->take() is NOT thread-safe — concurrent retrieve and search
     // workers may hit the same segment simultaneously under load. Also,
