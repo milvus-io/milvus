@@ -288,6 +288,16 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
 		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
 			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
+		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
+			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
+			log.Info("queryNode.segcore.storageV2.cellTargetSizeBytes updated",
+				zap.Int64("bytes", newBytes))
+		}))
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
