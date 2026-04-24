@@ -2146,7 +2146,7 @@ func (c *Client) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.CommitBackfillResultResponse, error) {
-		return client.CommitBackfillResult(ctx, req)
+		return client.CommitBackfillResult(ctx, req, opts...)
 	})
 }
 

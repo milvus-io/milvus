@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -75,21 +76,13 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewSharedCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
-	)
-	if err != nil {
-		log.Warn("CommitBackfillResult failed to start broadcast", zap.Error(err))
-		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
-	}
-	defer broadcaster.Close()
-
 	// Split items across multiple broadcast messages so a single
 	// BatchUpdateManifestMessageBody never exceeds the broker's message size
-	// limit (Pulsar defaults to 5MiB). Each batch is an independent broadcast
-	// message; failure of one batch does not cancel subsequent batches, and
-	// per-segment statuses reflect batch-level outcomes.
+	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
+	// because broadcasterWithRK consumes its resource-key guards on the first
+	// Broadcast call and would panic on any subsequent call. Failure of one
+	// batch does not cancel subsequent batches; per-segment statuses reflect
+	// batch-level outcomes.
 	channels := []string{streaming.WAL().ControlChannel()}
 	var lastErr error
 	for start := 0; start < len(items); start += maxItemsPerBroadcast {
@@ -98,16 +91,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			end = len(items)
 		}
 		batch := items[start:end]
-		if _, err := broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
-			WithHeader(&message.BatchUpdateManifestMessageHeader{
-				CollectionId: result.CollectionID,
-			}).
-			WithBody(&message.BatchUpdateManifestMessageBody{
-				Items: batch,
-			}).
-			WithBroadcast(channels).
-			MustBuildBroadcast(),
-		); err != nil {
+		if err := broadcastBackfillBatch(ctx, coll, result.CollectionID, channels, batch); err != nil {
 			log.Error("CommitBackfillResult broadcast batch failed",
 				zap.Error(err), zap.Int("batchStart", start), zap.Int("batchEnd", end))
 			lastErr = err
@@ -144,6 +128,39 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 // ~1-2KiB range for V2 column groups this stays well under Pulsar's default
 // 5MiB maxMessageSize while keeping broadcast overhead low.
 const maxItemsPerBroadcast = 512
+
+// broadcastBackfillBatch acquires a fresh broadcaster bound to the
+// collection's shared resource keys and issues exactly one broadcast for the
+// given items. broadcasterWithRK nils out its lock guards on the first
+// Broadcast call, so each batch needs its own broadcaster.
+func broadcastBackfillBatch(
+	ctx context.Context,
+	coll *milvuspb.DescribeCollectionResponse,
+	collectionID int64,
+	channels []string,
+	items []*messagespb.BatchUpdateManifestItem,
+) error {
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(coll.GetDbName()),
+		message.NewSharedCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
+	)
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	_, err = broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
+		WithHeader(&message.BatchUpdateManifestMessageHeader{
+			CollectionId: collectionID,
+		}).
+		WithBody(&message.BatchUpdateManifestMessageBody{
+			Items: items,
+		}).
+		WithBroadcast(channels).
+		MustBuildBroadcast(),
+	)
+	return err
+}
 
 func appendItemStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []*messagespb.BatchUpdateManifestItem, ok bool, reason string) {
 	for _, it := range batch {
