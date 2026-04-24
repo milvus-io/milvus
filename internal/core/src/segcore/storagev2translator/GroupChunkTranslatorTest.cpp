@@ -142,12 +142,18 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                "[StorageV2] Failed to create file row group reader: " +
                    reader_result.status().ToString());
     auto fr = reader_result.ValueOrDie();
-    auto expected_num_cells =
-        (fr->file_metadata()->GetRowGroupMetadataVector().size() +
-         kRowGroupsPerCell - 1) /
-        kRowGroupsPerCell;
     auto row_group_metadata_vector =
         fr->file_metadata()->GetRowGroupMetadataVector();
+    std::vector<int64_t> row_group_sizes;
+    row_group_sizes.reserve(row_group_metadata_vector.size());
+    for (int i = 0; i < row_group_metadata_vector.size(); ++i) {
+        row_group_sizes.push_back(static_cast<int64_t>(
+            row_group_metadata_vector.Get(i).memory_size()));
+    }
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, GetCellTargetSizeBytes());
+    auto expected_num_cells =
+        (row_group_metadata_vector.size() + rgs_per_cell - 1) / rgs_per_cell;
     auto status = fr->Close();
     AssertInfo(status.ok(), "failed to close file reader");
     EXPECT_EQ(translator->num_cells(), expected_num_cells);
@@ -297,11 +303,27 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         /* warmup_policy */ "");
 
     // Test total number of cells across all files
-    // Cells never span files, so count per-file ceil
+    // Cells never span files, so count per-file ceil. The cell-per-count is
+    // derived from the average row-group size (kDefaultCellTargetSizeBytes)
+    // across the same aggregated sizes the translator sees.
+    std::vector<int64_t> all_row_group_sizes;
+    for (const auto& file_path : multi_file_paths) {
+        auto fr_result =
+            milvus_storage::FileRowGroupReader::Make(fs_, file_path);
+        ASSERT_TRUE(fr_result.ok());
+        auto fr = fr_result.ValueOrDie();
+        auto rgmv = fr->file_metadata()->GetRowGroupMetadataVector();
+        for (int i = 0; i < rgmv.size(); ++i) {
+            all_row_group_sizes.push_back(
+                static_cast<int64_t>(rgmv.Get(i).memory_size()));
+        }
+        ASSERT_TRUE(fr->Close().ok());
+    }
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(all_row_group_sizes, GetCellTargetSizeBytes());
     int64_t expected_total_cells = 0;
     for (auto row_groups : expected_row_groups_per_file) {
-        expected_total_cells +=
-            (row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
+        expected_total_cells += (row_groups + rgs_per_cell - 1) / rgs_per_cell;
     }
     EXPECT_EQ(translator->num_cells(), expected_total_cells);
 
@@ -402,3 +424,59 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
 INSTANTIATE_TEST_SUITE_P(GroupChunkTranslatorTest,
                          GroupChunkTranslatorTest,
                          testing::Bool());
+
+// Pins ComputeRowGroupsPerCell behavior with hardcoded inputs so a regression
+// in the helper fails here independently of the integration tests above,
+// which feed the helper's own output into their expectations.
+TEST(ComputeRowGroupsPerCellTest, EmptyReturnsOne) {
+    std::vector<int64_t> sizes;
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 2 * 1024 * 1024), 1u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, SingleRowGroup) {
+    std::vector<int64_t> sizes{512 * 1024};
+    // target much larger than rg, but n is floored by rg count semantics -
+    // helper itself returns target/avg; caller clamps by rg count.
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 4 * 1024 * 1024), 8u);
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 512 * 1024), 1u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, TargetEqualToAverage) {
+    std::vector<int64_t> sizes{1024 * 1024, 1024 * 1024, 1024 * 1024};
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 1024 * 1024), 1u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, TargetMultipleOfAverage) {
+    std::vector<int64_t> sizes{1024 * 1024, 1024 * 1024, 1024 * 1024};
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 4 * 1024 * 1024), 4u);
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 8 * 1024 * 1024), 8u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, TargetSmallerThanAverageClampsToOne) {
+    std::vector<int64_t> sizes{4 * 1024 * 1024, 4 * 1024 * 1024};
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 1024 * 1024), 1u);
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 0), 1u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, ZeroSizeRowGroups) {
+    std::vector<int64_t> sizes{0, 0, 0};
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 4 * 1024 * 1024), 1u);
+}
+
+TEST(ComputeRowGroupsPerCellTest, UsesGlobalAverage) {
+    // Documents current behavior: helper uses a single average across the
+    // input vector. Mixing small (128 KiB) and large (4 MiB) row groups
+    // yields avg ~2 MiB and therefore 2 rgs/cell at the 4 MiB target -
+    // callers that want per-file sizing must split the vector themselves.
+    std::vector<int64_t> sizes{
+        128 * 1024, 128 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024};
+    int64_t total = 128 * 1024 * 2 + 4 * 1024 * 1024 * 2;
+    int64_t avg = total / 4;
+    size_t expected = static_cast<size_t>((4 * 1024 * 1024) / avg);
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 4 * 1024 * 1024), expected);
+}
+
+TEST(ComputeRowGroupsPerCellTest, AcceptsUnsignedSizes) {
+    std::vector<uint64_t> sizes{1024 * 1024, 1024 * 1024};
+    EXPECT_EQ(ComputeRowGroupsPerCell(sizes, 4 * 1024 * 1024), 4u);
+}

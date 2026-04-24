@@ -25,6 +25,7 @@
 #include "common/init_c.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -125,6 +126,11 @@ SetArrowIOThreadPoolCapacity(int threads) {
         return;
     }
     LOG_INFO("arrow io thread pool capacity set to {}", threads);
+}
+
+void
+SetStorageV2CellTargetSizeBytes(int64_t bytes) {
+    milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
 void

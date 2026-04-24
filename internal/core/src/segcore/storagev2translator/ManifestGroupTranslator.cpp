@@ -132,17 +132,21 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
 
-    // Merge row groups into group chunks(cache cells)
+    // Merge row groups into group chunks(cache cells). Derive row-groups-
+    // per-cell from the runtime-configurable target byte size so avg cell
+    // byte size ≈ target.
+    const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     size_t total_row_groups = row_group_sizes.size();
     meta_.total_row_groups_ = total_row_groups;
-    size_t num_cells =
-        (total_row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
+    const size_t rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
+    size_t num_cells = (total_row_groups + rgs_per_cell - 1) / rgs_per_cell;
 
     // Populate cell_row_group_ranges_ (single data source, no multi-file)
     meta_.cell_row_group_ranges_.reserve(num_cells);
     for (size_t cid = 0; cid < num_cells; ++cid) {
-        size_t start = cid * kRowGroupsPerCell;
-        size_t end = std::min(start + kRowGroupsPerCell, total_row_groups);
+        size_t start = cid * rgs_per_cell;
+        size_t end = std::min(start + rgs_per_cell, total_row_groups);
         meta_.cell_row_group_ranges_.push_back({start, end});
     }
 
@@ -164,12 +168,12 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     }
 
     LOG_INFO(
-        "[StorageV2] translator {} merged {} row groups into {} cells ({} "
-        "row groups per cell)",
+        "[StorageV2] translator {} merged {} row groups into {} cells "
+        "(cell_target_size_bytes={})",
         key_,
         total_row_groups,
         num_cells,
-        kRowGroupsPerCell);
+        cell_target_size_bytes);
 
     // Set loading overhead config to cap total overhead reservation.
     if (!meta_.chunk_memory_size_.empty()) {
