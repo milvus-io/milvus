@@ -168,7 +168,11 @@ def request_duration(request):
 
 @pytest.fixture(scope="session")
 def is_check(request):
-    return request.config.getoption("--is-check").lower() == "true"
+    # The root tests/python_client/conftest.py registers --is_check (underscore)
+    # with type=bool, which argparse maps to the same dest (is_check) as our
+    # --is-check (hyphen). The root's bool wins in chaos runs, so accept either.
+    val = request.config.getoption("--is-check")
+    return val if isinstance(val, bool) else str(val).lower() == "true"
 
 
 @pytest.fixture(scope="session")
