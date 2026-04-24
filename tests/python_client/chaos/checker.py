@@ -1,7 +1,6 @@
+import functools
+import json
 import math
-import pytest
-import unittest
-from enum import Enum
 import random
 import re
 import threading
@@ -12,11 +11,10 @@ from collections import Counter
 from datetime import datetime
 from enum import Enum
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections, LexicalHighlighter
-from pymilvus.milvus_client.index import IndexParams
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
-from pymilvus.client.embedding_list import EmbeddingList
-from pymilvus.exceptions import SchemaMismatchRetryableException
+
+import pandas as pd
+import pytest
+from chaos import constants
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CheckTasks
@@ -34,6 +32,7 @@ from pymilvus import (
 )
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
 from pymilvus.client.embedding_list import EmbeddingList
+from pymilvus.exceptions import SchemaMismatchRetryableException
 from pymilvus.milvus_client.index import IndexParams
 from utils.api_request import Error
 from utils.util_log import test_log as log
@@ -269,50 +268,50 @@ class ResultAnalyzer:
 
 
 class Op(Enum):
-    create = 'create'  # short name for create collection
-    create_db = 'create_db'
-    create_collection = 'create_collection'
-    create_partition = 'create_partition'
-    insert = 'insert'
-    insert_freshness = 'insert_freshness'
-    upsert = 'upsert'
-    upsert_freshness = 'upsert_freshness'
-    partial_update = 'partial_update'
-    flush = 'flush'
-    index = 'index'
-    create_index = 'create_index'
-    drop_index = 'drop_index'
-    load = 'load'
-    load_collection = 'load_collection'
-    load_partition = 'load_partition'
-    release = 'release'
-    release_collection = 'release_collection'
-    release_partition = 'release_partition'
-    search = 'search'
-    tensor_search = 'tensor_search'
-    full_text_search = 'full_text_search'
-    hybrid_search = 'hybrid_search'
-    query = 'query'
-    text_match = 'text_match'
-    phrase_match = 'phrase_match'
-    json_query = 'json_query'
-    geo_query = 'geo_query'
-    delete = 'delete'
-    delete_freshness = 'delete_freshness'
-    compact = 'compact'
-    drop = 'drop'  # short name for drop collection
-    drop_db = 'drop_db'
-    drop_collection = 'drop_collection'
-    drop_partition = 'drop_partition'
-    load_balance = 'load_balance'
-    bulk_insert = 'bulk_insert'
-    alter_collection = 'alter_collection'
-    add_field = 'add_field'
-    add_vector_field = 'add_vector_field'
-    null_vector_search = 'null_vector_search'
-    null_vector_query = 'null_vector_query'
-    rename_collection = 'rename_collection'
-    unknown = 'unknown'
+    create = "create"  # short name for create collection
+    create_db = "create_db"
+    create_collection = "create_collection"
+    create_partition = "create_partition"
+    insert = "insert"
+    insert_freshness = "insert_freshness"
+    upsert = "upsert"
+    upsert_freshness = "upsert_freshness"
+    partial_update = "partial_update"
+    flush = "flush"
+    index = "index"
+    create_index = "create_index"
+    drop_index = "drop_index"
+    load = "load"
+    load_collection = "load_collection"
+    load_partition = "load_partition"
+    release = "release"
+    release_collection = "release_collection"
+    release_partition = "release_partition"
+    search = "search"
+    tensor_search = "tensor_search"
+    full_text_search = "full_text_search"
+    hybrid_search = "hybrid_search"
+    query = "query"
+    text_match = "text_match"
+    phrase_match = "phrase_match"
+    json_query = "json_query"
+    geo_query = "geo_query"
+    delete = "delete"
+    delete_freshness = "delete_freshness"
+    compact = "compact"
+    drop = "drop"  # short name for drop collection
+    drop_db = "drop_db"
+    drop_collection = "drop_collection"
+    drop_partition = "drop_partition"
+    load_balance = "load_balance"
+    bulk_insert = "bulk_insert"
+    alter_collection = "alter_collection"
+    add_field = "add_field"
+    add_vector_field = "add_vector_field"
+    null_vector_search = "null_vector_search"
+    null_vector_query = "null_vector_query"
+    rename_collection = "rename_collection"
+    unknown = "unknown"
 
 
 timeout = 120
@@ -1489,7 +1488,6 @@ class InsertChecker(Checker):
             limit=len(data_in_client) * 2,
             timeout=timeout,
         )
-
         data_in_server = []
         for r in res:
             d = r[f"{ct.default_int64_field_name}"]
@@ -1698,18 +1696,17 @@ class PartialUpdateChecker(Checker):
             )
             return res, True
         except SchemaMismatchRetryableException:
-            # AddVectorFieldChecker can update schema_timestamp while this checker is using
-            # a cached schema. Refresh the SDK schema cache and retry once.
+            # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
+            # so the next upsert_rows() fetches the new schema_timestamp, then retry once.
             log.debug("[PartialUpdateChecker] schema_timestamp stale, invalidating cache and retrying")
             try:
                 self.milvus_client._get_connection()._invalidate_schema(self.c_name)
             except Exception:
                 pass
             try:
-                res = self.milvus_client.upsert(collection_name=self.c_name,
-                                               data=self.data,
-                                               partial_update=True,
-                                               timeout=timeout)
+                res = self.milvus_client.upsert(
+                    collection_name=self.c_name, data=self.data, partial_update=True, timeout=timeout
+                )
                 return res, True
             except Exception as e:
                 log.info(f"partial update failed (retry): {e}")
@@ -2721,9 +2718,7 @@ class SnapshotChecker(Checker):
 
             # 2. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
-            job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection
-            )
+            job_id = self.milvus_client.restore_snapshot(self.snapshot_name, self.restored_collection)
             log.info(f"[SnapshotChecker] Started restore job {job_id}")
 
             # 3. Wait for restore completion
@@ -2733,7 +2728,7 @@ class SnapshotChecker(Checker):
                 state = self.milvus_client.get_restore_snapshot_state(job_id)
                 log.debug(f"[SnapshotChecker] Restore state: {state.state}")
                 if state.state == "RestoreSnapshotCompleted":
-                    log.info(f"[SnapshotChecker] Restore completed in {time.time()-start_time:.1f}s")
+                    log.info(f"[SnapshotChecker] Restore completed in {time.time() - start_time:.1f}s")
                     return None, True
                 if state.state == "RestoreSnapshotFailed":
                     return f"Restore failed: {state.reason}", False
@@ -2812,7 +2807,7 @@ class SnapshotRestoreChecker(Checker):
             collection_name=self.c_name,
             filter=f"{self.int64_field_name} >= 0",
             output_fields=[self.int64_field_name],
-            limit=nb
+            limit=nb,
         )
         if not res:
             return
@@ -2825,11 +2820,7 @@ class SnapshotRestoreChecker(Checker):
 
     def _do_delete(self, nb=5):
         """Delete rows from the checker's own collection, keeping at least 100 rows."""
-        count_res = self.milvus_client.query(
-            collection_name=self.c_name,
-            filter="",
-            output_fields=["count(*)"]
-        )
+        count_res = self.milvus_client.query(collection_name=self.c_name, filter="", output_fields=["count(*)"])
         row_count = count_res[0]["count(*)"] if count_res else 0
         if row_count <= 100:
             return
@@ -2837,7 +2828,7 @@ class SnapshotRestoreChecker(Checker):
             collection_name=self.c_name,
             filter=f"{self.int64_field_name} >= 0",
             output_fields=[self.int64_field_name],
-            limit=nb
+            limit=nb,
         )
         if not res:
             return
@@ -2848,13 +2839,13 @@ class SnapshotRestoreChecker(Checker):
 
     def _do_dml_operations(self):
         """Execute a random DML operation on the checker's own collection."""
-        op = random.choice(['insert', 'upsert', 'delete'])
+        op = random.choice(["insert", "upsert", "delete"])
         try:
-            if op == 'insert':
+            if op == "insert":
                 self._do_insert(nb=10)
-            elif op == 'upsert':
+            elif op == "upsert":
                 self._do_upsert(nb=5)
-            elif op == 'delete':
+            elif op == "delete":
                 self._do_delete(nb=5)
         except Exception as e:
             log.warning(f"[SnapshotRestoreChecker] DML operation {op} failed: {e}")
@@ -2863,10 +2854,7 @@ class SnapshotRestoreChecker(Checker):
         """Capture current collection state after flush."""
         try:
             res = self.milvus_client.query(
-                collection_name=self.c_name,
-                filter="",
-                output_fields=["count(*)"],
-                consistency_level="Strong"
+                collection_name=self.c_name, filter="", output_fields=["count(*)"], consistency_level="Strong"
             )
             self.snapshot_row_count = res[0]["count(*)"] if res else 0
 
@@ -2877,13 +2865,15 @@ class SnapshotRestoreChecker(Checker):
                     filter=f"{self.int64_field_name} >= 0",
                     output_fields=[self.int64_field_name],
                     limit=sample_size,
-                    consistency_level="Strong"
+                    consistency_level="Strong",
                 )
                 self.snapshot_sample_pks = [r[self.int64_field_name] for r in res]
             else:
                 self.snapshot_sample_pks = []
 
-            log.info(f"[SnapshotRestoreChecker] Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}")
+            log.info(
+                f"[SnapshotRestoreChecker] Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}"
+            )
         except Exception as e:
             log.warning(f"Failed to capture snapshot state: {e}")
             self.snapshot_row_count = 0
@@ -2899,14 +2889,13 @@ class SnapshotRestoreChecker(Checker):
 
         try:
             res = self.milvus_client.query(
-                collection_name=restored_name,
-                filter="",
-                output_fields=["count(*)"],
-                consistency_level="Strong"
+                collection_name=restored_name, filter="", output_fields=["count(*)"], consistency_level="Strong"
             )
             actual_count = res[0]["count(*)"] if res else 0
 
-            log.info(f"[SnapshotRestoreChecker] Verify restored data: expected={self.snapshot_row_count}, actual={actual_count}")
+            log.info(
+                f"[SnapshotRestoreChecker] Verify restored data: expected={self.snapshot_row_count}, actual={actual_count}"
+            )
 
             if actual_count != self.snapshot_row_count:
                 return False, f"Row count mismatch: expected {self.snapshot_row_count}, got {actual_count}"
@@ -2917,7 +2906,7 @@ class SnapshotRestoreChecker(Checker):
                     collection_name=restored_name,
                     filter=filter_expr,
                     output_fields=[self.int64_field_name],
-                    consistency_level="Strong"
+                    consistency_level="Strong",
                 )
                 found_pks = {r[self.int64_field_name] for r in res}
                 expected_pks = set(self.snapshot_sample_pks)
@@ -2954,9 +2943,7 @@ class SnapshotRestoreChecker(Checker):
 
             # 4. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
-            job_id = self.milvus_client.restore_snapshot(
-                self.snapshot_name, self.restored_collection
-            )
+            job_id = self.milvus_client.restore_snapshot(self.snapshot_name, self.restored_collection)
             log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
 
             # 5. Wait for restore completion
@@ -2966,7 +2953,7 @@ class SnapshotRestoreChecker(Checker):
                 state = self.milvus_client.get_restore_snapshot_state(job_id)
                 log.debug(f"Restore state: {state.state}")
                 if state.state == "RestoreSnapshotCompleted":
-                    log.info(f"Restore job {job_id} completed in {time.time()-start_time:.1f}s")
+                    log.info(f"Restore job {job_id} completed in {time.time() - start_time:.1f}s")
                     break
                 if state.state == "RestoreSnapshotFailed":
                     return f"Restore failed: {state.reason}", False
@@ -3029,12 +3016,10 @@ class NullVectorSearchChecker(Checker):
         # Collect nullable dense vector fields
         self.nullable_vector_fields = []
         for field in self.schema.fields:
-            if field.dtype in ct.all_dense_vector_types and getattr(field, 'nullable', False):
-                self.nullable_vector_fields.append({
-                    "name": field.name,
-                    "dim": getattr(field, 'dim', ct.default_dim),
-                    "dtype": field.dtype
-                })
+            if field.dtype in ct.all_dense_vector_types and getattr(field, "nullable", False):
+                self.nullable_vector_fields.append(
+                    {"name": field.name, "dim": getattr(field, "dim", ct.default_dim), "dtype": field.dtype}
+                )
         self.data = None
         self.anns_field_name = None
         self.search_param = None
@@ -3050,7 +3035,7 @@ class NullVectorSearchChecker(Checker):
                 search_params=self.search_param,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
             )
             return res, True
         except Exception as e:
@@ -3083,7 +3068,7 @@ class NullVectorSearchChecker(Checker):
         try:
             for hits in res:
                 for hit in hits:
-                    if math.isnan(hit.get('distance', 0)):
+                    if math.isnan(hit.get("distance", 0)):
                         has_nan = True
                         break
                 if has_nan:
@@ -3093,8 +3078,10 @@ class NullVectorSearchChecker(Checker):
 
         if has_nan:
             self._nan_consecutive += 1
-            log.warning(f"[NullVectorSearchChecker] NaN distance on '{self.anns_field_name}' "
-                        f"(consecutive={self._nan_consecutive}/{self.NAN_THRESHOLD})")
+            log.warning(
+                f"[NullVectorSearchChecker] NaN distance on '{self.anns_field_name}' "
+                f"(consecutive={self._nan_consecutive}/{self.NAN_THRESHOLD})"
+            )
             if self._nan_consecutive >= self.NAN_THRESHOLD:
                 self._nan_consecutive = 0
                 return "null vector leaked into search index (NaN distance)", False
@@ -3129,7 +3116,7 @@ class NullVectorQueryChecker(Checker):
         # Collect nullable dense vector field names from the original schema.
         self.nullable_vector_fields = []
         for field in self.schema.fields:
-            if field.dtype in ct.all_dense_vector_types and getattr(field, 'nullable', False):
+            if field.dtype in ct.all_dense_vector_types and getattr(field, "nullable", False):
                 if not field.name.startswith("new_vec_"):
                     self.nullable_vector_fields.append(field.name)
         self.term_expr = f"{self.int64_field_name} > 0"
@@ -3144,12 +3131,13 @@ class NullVectorQueryChecker(Checker):
                     filter=self.term_expr,
                     output_fields=[self.int64_field_name, field_name],
                     limit=500,
-                    timeout=query_timeout
+                    timeout=query_timeout,
                 )
                 non_null_pks = [r[self.int64_field_name] for r in res if r.get(field_name) is not None]
                 samples[field_name] = non_null_pks[:sample_size]
-                log.info(f"[NullVectorQueryChecker] field='{field_name}': sampled "
-                         f"{len(samples[field_name])} non-null PKs")
+                log.info(
+                    f"[NullVectorQueryChecker] field='{field_name}': sampled {len(samples[field_name])} non-null PKs"
+                )
             except Exception as e:
                 log.warning(f"[NullVectorQueryChecker] failed to sample non-null PKs for '{field_name}': {e}")
                 samples[field_name] = []
@@ -3167,20 +3155,28 @@ class NullVectorQueryChecker(Checker):
                     collection_name=self.c_name,
                     filter=f"{self.int64_field_name} in {sample_pks}",
                     output_fields=[self.int64_field_name, vec_field],
-                    timeout=query_timeout
+                    timeout=query_timeout,
                 )
                 if not res:
                     # Empty result: sampled PKs may have been deleted by concurrent DeleteChecker.
                     self._non_null_pk_samples = self._collect_non_null_pk_samples()
-                    log.debug(f"[NullVectorQueryChecker] field='{vec_field}': no sampled PKs returned; "
-                              f"sample refreshed")
+                    log.debug(
+                        f"[NullVectorQueryChecker] field='{vec_field}': no sampled PKs returned; sample refreshed"
+                    )
                     return res, True
                 null_rows = [r for r in res if r.get(vec_field) is None]
                 if null_rows:
-                    return (f"{len(null_rows)}/{len(res)} rows returned null for field '{vec_field}' "
-                            f"despite known non-null PKs"), False
-                log.debug(f"[NullVectorQueryChecker] field='{vec_field}': "
-                          f"{len(res)}/{len(sample_pks)} non-null rows verified")
+                    # UpsertChecker can legitimately overwrite sampled rows with null vector
+                    # values. Treat the sample as stale, refresh, and continue.
+                    self._non_null_pk_samples = self._collect_non_null_pk_samples()
+                    log.debug(
+                        f"[NullVectorQueryChecker] field='{vec_field}': "
+                        f"{len(null_rows)}/{len(res)} sampled rows are now null; sample refreshed"
+                    )
+                    return res, True
+                log.debug(
+                    f"[NullVectorQueryChecker] field='{vec_field}': {len(res)}/{len(sample_pks)} non-null rows verified"
+                )
                 return res, True
 
             res = self.milvus_client.query(
@@ -3188,14 +3184,14 @@ class NullVectorQueryChecker(Checker):
                 filter=self.term_expr,
                 output_fields=[self.int64_field_name, vec_field],
                 limit=50,
-                timeout=query_timeout
+                timeout=query_timeout,
             )
             non_null_rows = [r for r in res if r.get(vec_field) is not None]
-            log.debug(f"[NullVectorQueryChecker] fallback field='{vec_field}': "
-                      f"{len(non_null_rows)}/{len(res)} non-null")
+            log.debug(
+                f"[NullVectorQueryChecker] fallback field='{vec_field}': {len(non_null_rows)}/{len(res)} non-null"
+            )
             if res and not non_null_rows:
-                return (f"all {len(res)} vectors are null for field '{vec_field}', "
-                        f"possible data corruption"), False
+                return (f"all {len(res)} vectors are null for field '{vec_field}', possible data corruption"), False
             return res, True
         except Exception as e:
             log.info(f"[NullVectorQueryChecker] query error: {e}")
@@ -3233,15 +3229,23 @@ class AddVectorFieldChecker(Checker):
             schema_info = self.milvus_client.describe_collection(self.c_name)
             fields = schema_info.get("fields", [])
             current_vector_fields = sum(
-                1 for f in fields if f.get("type") in (
-                    DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
-                    DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                    DataType.INT8_VECTOR, DataType.SPARSE_FLOAT_VECTOR
+                1
+                for f in fields
+                if f.get("type")
+                in (
+                    DataType.FLOAT_VECTOR,
+                    DataType.BINARY_VECTOR,
+                    DataType.FLOAT16_VECTOR,
+                    DataType.BFLOAT16_VECTOR,
+                    DataType.INT8_VECTOR,
+                    DataType.SPARSE_FLOAT_VECTOR,
                 )
             )
             if current_vector_fields >= 10:
-                log.info(f"[AddVectorFieldChecker] vector field limit reached "
-                         f"({current_vector_fields}), fallback to insert only")
+                log.info(
+                    f"[AddVectorFieldChecker] vector field limit reached "
+                    f"({current_vector_fields}), fallback to insert only"
+                )
                 _, insert_result = self.insert_data()
                 return None, insert_result
 
@@ -3252,15 +3256,19 @@ class AddVectorFieldChecker(Checker):
                 field_name=new_vec_field,
                 data_type=DataType.FLOAT_VECTOR,
                 dim=dim,
-                nullable=True)
+                nullable=True,
+            )
             log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
             time.sleep(1)
 
             # Create HNSW index for new vector field
             index_params = IndexParams()
-            index_params.add_index(field_name=new_vec_field, index_type="HNSW",
-                                   metric_type="COSINE",
-                                   params={"M": 16, "efConstruction": 200})
+            index_params.add_index(
+                field_name=new_vec_field,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 16, "efConstruction": 200},
+            )
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
 
@@ -3275,7 +3283,7 @@ class AddVectorFieldChecker(Checker):
                 filter=f"{self.int64_field_name} > 0",
                 output_fields=[new_vec_field],
                 limit=10,
-                timeout=query_timeout
+                timeout=query_timeout,
             )
             if len(res) == 0:
                 return "query returned 0 rows after add vector field", False
