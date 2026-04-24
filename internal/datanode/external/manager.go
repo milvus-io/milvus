@@ -18,6 +18,8 @@ package external
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"go.uber.org/zap"
@@ -242,8 +244,24 @@ func (m *ExternalCollectionManager) SubmitTask(
 	}
 
 	// Submit to pool
-	m.pool.Submit(func() (any, error) {
+	m.pool.Submit(func() (_ any, retErr error) {
 		defer cancel()
+		// Defense-in-depth: isolate panics in a single task so a buggy
+		// external source cannot crash the whole datanode process (e.g.
+		// divide-by-zero from a zero-row parquet, fix for #49225).
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				log.Error("external collection task panicked",
+					zap.Int64("taskID", taskID),
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Any("panic", r),
+					zap.ByteString("stack", stack))
+				reason := fmt.Sprintf("task panicked: %v", r)
+				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
+				retErr = fmt.Errorf("%s", reason)
+			}
+		}()
 		log.Info("executing external collection task in pool",
 			zap.Int64("taskID", taskID),
 			zap.Int64("collectionID", req.GetCollectionID()))

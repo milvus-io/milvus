@@ -256,53 +256,6 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Empty(t, job.GetTaskIds(), "no tasks should be persisted after async failure")
 	})
 
-	t.Run("zero_total_rows_marks_job_failed_non_retriable", func(t *testing.T) {
-		// Regression for #49225: a non-empty file list whose row counts sum
-		// to zero (e.g. user-supplied empty parquet) used to make datanode
-		// crash with "integer divide by zero". Now createTasksForJob must
-		// reject this case as a non-retriable error and Phase B must
-		// transition the job to JobStateFailed instead of leaving it in
-		// Init for the checker tick to retry forever.
-		refreshMeta := createTestRefreshMeta(t)
-		alloc := &stubAllocator{nextID: 1000}
-		scheduler := newStubScheduler()
-
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{
-			ID: 100,
-			Schema: &schemapb.CollectionSchema{
-				Name:           "test_collection",
-				ExternalSource: "s3://bucket/empty",
-				ExternalSpec:   `{"format":"parquet"}`,
-			},
-		})
-		mt := &meta{collections: collections}
-
-		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
-		defer mockIsExternal.UnPatch()
-
-		// One file, zero rows — passes the existing len()==0 check but
-		// must trip the new totalRows==0 guard.
-		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-			Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/empty/empty.parquet", NumRows: 0}}, "s3://bucket/empty/manifest", nil).Build()
-		defer mockExplore.UnPatch()
-
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
-
-		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
-		assert.NoError(t, err)
-
-		// Wait for Phase B to finish.
-		manager.Stop()
-
-		job := refreshMeta.GetJob(1)
-		assert.NotNil(t, job)
-		assert.Equal(t, indexpb.JobState_JobStateFailed, job.GetState(),
-			"non-retriable error must transition job to Failed, not leave in Init")
-		assert.Contains(t, job.GetFailReason(), "zero total rows",
-			"reason must explain why so operators can act")
-	})
-
 	t.Run("ffi_explore_error_marks_job_failed_non_retriable", func(t *testing.T) {
 		// Regression for #49233: any FFI failure during explore (NoSuchBucket,
 		// AccessDenied, DNS NXDOMAIN, malformed URI, ...) is wrapped by the

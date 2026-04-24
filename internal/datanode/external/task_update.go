@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -413,6 +414,14 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			return nil, err
 		}
 		totalRows += f.RowCount
+	}
+
+	// Guard against zero-row parquet files that would cause divide-by-zero below.
+	// Fragment-level RowCount comes from manifest (endRow - startRow) and reflects real row counts,
+	// unlike datacoord's pre-split FileInfo.NumRows which carries a -1 sentinel from PlainFormat::explore.
+	if totalRows == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("external source has %d fragments but zero total rows", len(fragments)))
 	}
 
 	// Get target rows per segment from configuration

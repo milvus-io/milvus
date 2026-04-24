@@ -59,7 +59,13 @@ func filterFileInfosByFormat(fileInfos []FileInfo, format string) ([]FileInfo, i
 	return filtered, len(fileInfos) - len(filtered)
 }
 
-// FileInfo represents information about an external file
+// FileInfo represents information about an external file.
+//
+// WARNING: When produced by ExploreFiles (which calls loon_exttable_explore),
+// NumRows is the Loon end_index sentinel (-1 for parquet via PlainFormat::explore)
+// rather than a real row count. Do NOT compare NumRows against 0 or treat it as
+// a row total at this layer. Real row counts are only available after manifest
+// construction where Fragment.RowCount = endRow - startRow.
 type FileInfo struct {
 	FilePath string
 	NumRows  int64

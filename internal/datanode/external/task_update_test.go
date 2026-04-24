@@ -172,6 +172,32 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 	s.Nil(result)
 }
 
+// Regression for #49225: zero-row parquet produces fragments whose RowCount
+// sums to 0 and previously triggered divide-by-zero panic in
+// balanceFragmentsToSegments. Must return error, never panic.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ZeroTotalRowsWithFragments() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID,
+		TaskID:       s.taskID,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 0, FilePath: "s3://bucket/zero.parquet"},
+		{FragmentID: 2, RowCount: 0, FilePath: "s3://bucket/zero2.parquet"},
+	}
+	s.NotPanics(func() {
+		result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+		s.Error(err)
+		s.Nil(result)
+		s.Contains(err.Error(), "zero total rows")
+	})
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
 	paramtable.Init()
 
