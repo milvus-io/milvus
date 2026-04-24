@@ -112,6 +112,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, place
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
 	defer runtime.KeepAlive(searchResults)
+	defer runtime.KeepAlive(cSearchResults)
 	defer runtime.KeepAlive(sliceNQs)
 	defer runtime.KeepAlive(sliceTopKs)
 

@@ -318,14 +318,14 @@ func (suite *ReduceSuite) TestReduceAsyncSuccess() {
 	segcore.DeleteSearchResultDataBlobs(blobs)
 }
 
-func (suite *ReduceSuite) TestReduceAsyncCancelled() {
+func (suite *ReduceSuite) TestReduceAsyncPreCancelled() {
 	nq := int64(10)
 	searchReq, searchResult := suite.buildSearchResult(nq)
 	defer searchReq.Delete()
 
-	// Pre-cancel the context; cgo.Async's future manager should request
-	// cancellation on the folly token before the reduce runner commits,
-	// surfacing a context.Canceled-marked error from BlockAndLeakyGet.
+	// Context is already canceled when ReduceSearchResultsAndFillData is
+	// entered, so the early ctx.Err() check returns without dispatching to
+	// cgo.Async. This exercises the pre-dispatch bail-out path.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
