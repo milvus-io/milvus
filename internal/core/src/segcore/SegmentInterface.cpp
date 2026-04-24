@@ -250,6 +250,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
+    // Carry the upstream cancel_token down into FillTargetEntry so the
+    // take()/Arrow-convert path can short-circuit on abort.
+    milvus::OpContext fte_op_ctx;
+    fte_op_ctx.cancellation_token = cancel_token;
     if (retrieve_results.field_data_.empty()) {
         FillTargetEntry(trace_ctx,
                         plan,
@@ -257,7 +261,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                         retrieve_results.result_offsets_.data(),
                         retrieve_results.result_offsets_.size(),
                         ignore_non_pk,
-                        true);
+                        true,
+                        &fte_op_ctx);
     } else if (!plan->plan_node_->pipeline_field_ids_.empty()) {
         // Non-aggregation ORDER BY (single-project or two-project mode):
         // Pipeline output contains [pk, sort_cols, ..., SegmentOffsetFieldID].
@@ -436,15 +441,21 @@ SegmentInternalInterface::FillTargetEntry(
     const int64_t* offsets,
     int64_t size,
     bool ignore_non_pk,
-    bool fill_ids) const {
+    bool fill_ids,
+    milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     // Fast path: use take() API for external tables with small result sets.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
     if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
-        if (chunked->TryTakeForRetrieve(
-                plan, results, offsets, size, ignore_non_pk, fill_ids)) {
+        if (chunked->TryTakeForRetrieve(plan,
+                                        results,
+                                        offsets,
+                                        size,
+                                        ignore_non_pk,
+                                        fill_ids,
+                                        op_ctx)) {
             return;
         }
     }
@@ -457,14 +468,23 @@ SegmentInternalInterface::FillTargetEntry(
         return pk_field_id.has_value() && pk_field_id.value() == field_id;
     };
 
-    milvus::OpContext op_ctx;
+    // Per-call OpContext keeps storage_usage scoped to this segment;
+    // sharing the caller's op_ctx across segments would double-count
+    // bytes. Inherit the caller's cancellation_token and load priority so
+    // in-loop cancellation still propagates.
+    milvus::OpContext local_ctx;
+    if (op_ctx != nullptr) {
+        local_ctx.cancellation_token = op_ctx->cancellation_token;
+        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+    }
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
 
             FixedVector<int64_t> output(size);
-            bulk_subscript(&op_ctx, system_type, offsets, size, output.data());
+            bulk_subscript(
+                &local_ctx, system_type, offsets, size, output.data());
 
             auto data_array = std::make_unique<DataArray>();
             data_array->set_field_id(field_id.get());
@@ -487,7 +507,7 @@ SegmentInternalInterface::FillTargetEntry(
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             auto col = bulk_subscript(
-                &op_ctx, field_id, offsets, size, target_dynamic_fields);
+                &local_ctx, field_id, offsets, size, target_dynamic_fields);
             fields_data->AddAllocated(col.release());
             continue;
         }
@@ -496,7 +516,7 @@ SegmentInternalInterface::FillTargetEntry(
         if (!is_field_exist(field_id)) {
             col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            col = bulk_subscript(&op_ctx, field_id, offsets, size);
+            col = bulk_subscript(&local_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -543,23 +563,30 @@ SegmentInternalInterface::FillTargetEntry(
     // Add retrieve_storage_cost to results
     results->set_scanned_remote_bytes(
         results->scanned_remote_bytes() +
-        op_ctx.storage_usage.scanned_cold_bytes.load());
+        local_ctx.storage_usage.scanned_cold_bytes.load());
     results->set_scanned_total_bytes(
         results->scanned_total_bytes() +
-        op_ctx.storage_usage.scanned_total_bytes.load());
+        local_ctx.storage_usage.scanned_total_bytes.load());
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
-                                   const query::RetrievePlan* Plan,
-                                   const int64_t* offsets,
-                                   int64_t size) const {
+SegmentInternalInterface::Retrieve(
+    tracer::TraceContext* trace_ctx,
+    const query::RetrievePlan* Plan,
+    const int64_t* offsets,
+    int64_t size,
+    const folly::CancellationToken& cancel_token) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
-    FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
+    // Carry the upstream cancel_token down into the take() + Arrow-convert
+    // path so RetrieveByOffsets on external fields can short-circuit.
+    milvus::OpContext fte_op_ctx;
+    fte_op_ctx.cancellation_token = cancel_token;
+    FillTargetEntry(
+        trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(
