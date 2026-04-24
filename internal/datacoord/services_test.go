@@ -3780,6 +3780,15 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
+		// Bypass startBroadcast (broker not wired in test) and the new
+		// duplicate-active-job pre-check (refreshMeta is nil here).
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&struct{ broadcaster.BroadcastAPI }{}, nil).Build()
+		defer mockStartBroadcast.UnPatch()
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(nil).Build()
+		defer mockGetActive.UnPatch()
+
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
 			CollectionId:   100,
 			CollectionName: "test_collection",
@@ -3789,17 +3798,46 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
+	t.Run("rejects_when_active_job_in_progress", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&struct{ broadcaster.BroadcastAPI }{}, nil).Build()
+		defer mockStartBroadcast.UnPatch()
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(&datapb.ExternalCollectionRefreshJob{
+			JobId:        12345,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInProgress,
+		}).Build()
+		defer mockGetActive.UnPatch()
+
+		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   100,
+			CollectionName: "test_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrTaskDuplicate)
+		assert.Equal(t, int64(12345), resp.GetJobId(),
+			"existing jobID must be returned so the client can poll it")
+		assert.Contains(t, resp.GetStatus().GetReason(), "12345")
+	})
+
 	t.Run("start_broadcaster_failed", func(t *testing.T) {
 		ctx := context.Background()
 
-		mockAllocator := allocator.NewMockAllocator(t)
-		mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(123), nil)
-
-		// Create a mock refresh manager (non-nil)
+		// startBroadcast now runs before AllocID, so AllocID should never
+		// be reached when the broadcaster fails to start.
 		mockRefreshMgr := &externalCollectionRefreshManager{}
 
 		server := &Server{
-			allocator:                        mockAllocator,
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)

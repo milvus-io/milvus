@@ -2606,3 +2606,93 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 		})
 	})
 }
+
+func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	cases := []struct {
+		name       string
+		src, spec  string
+		wantSubstr string
+	}{
+		{"source only rejected", "s3://bucket/p", "", "both provided or both omitted"},
+		{"spec only rejected", "", `{"format":"parquet"}`, "both provided or both omitted"},
+		{"http scheme rejected", "http://169.254.169.254/metadata", `{"format":"parquet"}`, "scheme"},
+		{"file scheme rejected", "file:///etc/passwd", `{"format":"parquet"}`, "scheme"},
+		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "scheme"},
+		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "scheme"},
+		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "any_collection",
+				ExternalSource: tc.src,
+				ExternalSpec:   tc.spec,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+			if tc.wantSubstr != "" {
+				assert.Contains(t, resp.GetStatus().GetReason(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	mkInfo := func(src, spec string) *collectionInfo {
+		schema := &schemapb.CollectionSchema{
+			Name:           "demo",
+			ExternalSource: src,
+			ExternalSpec:   spec,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			},
+		}
+		return &collectionInfo{
+			collID: 1,
+			schema: &schemaInfo{CollectionSchema: schema},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		persisted *collectionInfo
+		wantErr   bool
+	}{
+		{"persisted both empty rejected", mkInfo("", ""), true},
+		{"persisted source empty rejected", mkInfo("", `{"format":"parquet"}`), true},
+		{"persisted spec empty rejected", mkInfo("s3://bucket/p", ""), true},
+	}
+	cacheBak := globalMetaCache
+	defer func() { globalMetaCache = cacheBak }()
+	globalMetaCache = &MetaCache{}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockey.Mock((*MetaCache).GetCollectionInfo).Return(tc.persisted, nil).Build()
+			defer m.UnPatch()
+
+			resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+				CollectionName: "demo",
+			})
+			require.NoError(t, err)
+			if tc.wantErr {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				assert.Contains(t, resp.GetStatus().GetReason(), "no persisted external_source")
+			} else {
+				require.NoError(t, merr.Error(resp.GetStatus()))
+			}
+		})
+	}
+}

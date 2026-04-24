@@ -66,6 +66,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -7505,6 +7506,31 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
+	// External source and spec form an atomic tuple. Either omit both
+	// (reuse the persisted pair) or pass both (atomic override). Passing
+	// only one would silently use the empty value for the other downstream.
+	srcSet := req.GetExternalSource() != ""
+	specSet := req.GetExternalSpec() != ""
+	if srcSet != specSet {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
+				req.GetExternalSource(), req.GetExternalSpec())),
+		}, nil
+	}
+
+	// Defense in depth: refresh is the only post-create mutation path for
+	// (source, spec); enforce the same scheme allowlist and spec validation
+	// that CreateCollection runs, otherwise alter-bypass via refresh would
+	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
+	if srcSet {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	}
+
 	// Get collection info from cache (includes schema for validation)
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
@@ -7520,6 +7546,25 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 		}, nil
+	}
+
+	// Reuse path: caller did not provide override. The persisted
+	// (source, spec) on the collection must both be non-empty, otherwise
+	// downstream would look for files at "" and the job would fail with
+	// "no files found" after enqueue. Reject early so the user gets
+	// InvalidArgument instead of a stuck-then-failed job. Both halves are
+	// checked to defensively reassert the atomic-tuple invariant in case
+	// any legacy collection holds a half-initialized pair.
+	if !srcSet {
+		persistedSrc := collectionInfo.schema.GetExternalSource()
+		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		if persistedSrc == "" || persistedSpec == "" {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"collection %s has no persisted external_source/external_spec; provide both in the refresh request to initialize",
+					req.GetCollectionName())),
+			}, nil
+		}
 	}
 
 	collectionID := collectionInfo.collID

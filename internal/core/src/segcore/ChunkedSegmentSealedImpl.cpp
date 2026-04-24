@@ -2833,6 +2833,13 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::ARRAY: {
+            // Carry the element type into the response so the caller (and
+            // SDK) can dispatch on it. Without this, callers parse a
+            // headless ScalarField_ArrayData and reject it with
+            // "unsupported element type None". Regression fix for #48619.
+            ret->mutable_scalars()->mutable_array_data()->set_element_type(
+                static_cast<milvus::proto::schema::DataType>(
+                    field_meta.get_element_type()));
             bulk_subscript_array_impl(
                 op_ctx,
                 column.get(),
@@ -4769,6 +4776,10 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
         case DataType::ARRAY: {
             // NormalizeExternalArrow already converted List→Binary(protobuf).
             auto obj = data_array->mutable_scalars()->mutable_array_data();
+            // Same element_type carry-through as the chunked sealed path
+            // above; without it the SDK rejects the response. Fix for #48619.
+            obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
+                field_meta.get_element_type()));
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
                 auto val = typed->Value(result_mapping[i]);

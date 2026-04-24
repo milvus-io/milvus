@@ -5137,6 +5137,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		return &schemapb.CollectionSchema{
 			Name:           "external",
 			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text",
@@ -5243,6 +5244,68 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("source set without spec rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("spec set without source rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("both empty allowed deferred refresh", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("both set allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("duplicate external_field rejected different types", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "dup_int",
+			DataType:      schemapb.DataType_Int64,
+			ExternalField: "text_col",
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_col")
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("duplicate external_field rejected same type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "text_alias",
+			DataType:      schemapb.DataType_VarChar,
+			ExternalField: "text_col",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "32"},
+			},
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
 	t.Run("unsupported field types rejected", func(t *testing.T) {
 		unsupportedTypes := []schemapb.DataType{
 			schemapb.DataType_SparseFloatVector,
@@ -5289,6 +5352,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			schema := &schemapb.CollectionSchema{
 				Name:           "external",
 				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
 				Fields: []*schemapb.FieldSchema{
 					{
 						Name:          "vec",
