@@ -390,6 +390,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
 		})
+		// fieldOpMap resolves per-field FieldPartialUpdateOp directives
+		// attached to UpsertRequest.field_ops. Empty / missing entries
+		// fall back to REPLACE.
+		fieldOpMap := buildFieldOpMap(it.req)
 
 		// Build mapping from existing primary keys to their positions in query result
 		// This ensures we can correctly locate data even if query results are not in the same order as request
@@ -460,8 +464,25 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 					for i := range dstIndices {
 						dstIndices[i] = int64(i)
 					}
-					if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
-						return err
+					// Resolve the field-level op; REPLACE is the default
+					// and is equivalent to the legacy merge path.
+					op := schemapb.FieldPartialUpdateOp_REPLACE
+					if fieldOpMap != nil {
+						if resolved, ok := fieldOpMap[existField.GetFieldName()]; ok {
+							op = resolved
+						}
+					}
+					if op == schemapb.FieldPartialUpdateOp_REPLACE {
+						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
+							return err
+						}
+					} else {
+						maxCap := readMaxCapacity(fieldSchema)
+						if err := typeutil.UpdateArrayFieldByColumnWithOp(
+							dstField, upsertField, dstIndices, upsertSrcIndices, op, maxCap,
+						); err != nil {
+							return err
+						}
 					}
 				}
 			} else {
@@ -1275,6 +1296,18 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
+
+	// Validate any FieldPartialUpdateOp directives attached to FieldData.
+	// A non-REPLACE op implicitly promotes the request to partial_update=true
+	// so users do not need to set both fields explicitly.
+	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	if err != nil {
+		log.Warn("validate field partial update ops failed", zap.Error(err))
+		return err
+	}
+	if nonReplaceSeen && !it.req.GetPartialUpdate() {
+		it.req.PartialUpdate = true
+	}
 
 	err = common.CheckNamespace(schema.CollectionSchema, it.req.Namespace)
 	if err != nil {
