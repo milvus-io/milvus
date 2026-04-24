@@ -504,7 +504,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 		Description:    "description",
 		AutoID:         false,
 		ExternalSource: "s3://bucket/ttl-path",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1"}}`,
 		Fields: []*schemapb.FieldSchema{
 			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
 			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, ExternalField: "ttl"},
@@ -526,7 +526,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1"}}`)
 
 	// Alter TTL field only — must preserve previously persisted external source/spec.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
@@ -538,7 +538,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1"}}`)
 
 	// TTL with invalid field name still rejected.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
