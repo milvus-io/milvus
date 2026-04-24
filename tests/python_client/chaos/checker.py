@@ -3027,7 +3027,11 @@ class NullVectorQueryChecker(Checker):
                     timeout=query_timeout
                 )
                 if not res:
-                    return f"no rows found for known non-null PKs of field '{vec_field}'", False
+                    # Empty result: sampled PKs may have been deleted by concurrent DeleteChecker.
+                    self._non_null_pk_samples = self._collect_non_null_pk_samples()
+                    log.debug(f"[NullVectorQueryChecker] field='{vec_field}': no sampled PKs returned; "
+                              f"sample refreshed")
+                    return res, True
                 null_rows = [r for r in res if r.get(vec_field) is None]
                 if null_rows:
                     return (f"{len(null_rows)}/{len(res)} rows returned null for field '{vec_field}' "
