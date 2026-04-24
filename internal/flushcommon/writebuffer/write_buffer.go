@@ -231,21 +231,29 @@ func (wb *writeBufferBase) MemorySize() int64 {
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	log := wb.logger
+
 	wb.mut.Lock()
-	defer wb.mut.Unlock()
 
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
+		wb.mut.Unlock()
 		log.Warn("evict buffer before buffering data")
 		return
 	}
 
 	ts := wb.checkpoint.GetTimestamp()
-
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
+
+	var futures []*conc.Future[struct{}]
 	if len(segmentIDs) > 0 {
 		log.Info("evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
-		conc.AwaitAll(wb.syncSegments(context.Background(), segmentIDs)...)
+		futures = wb.syncSegments(context.Background(), segmentIDs)
+	}
+
+	wb.mut.Unlock()
+
+	if len(futures) > 0 {
+		conc.AwaitAll(futures...)
 	}
 }
 
