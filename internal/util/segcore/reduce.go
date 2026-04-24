@@ -78,7 +78,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, place
 	// cgo.Async starts the C call synchronously and only then registers the
 	// future for ctx-driven cancellation. For a small reduce the C side can
 	// finish in microseconds, well before the future manager propagates
-	// cancellation, so a pre-cancelled ctx otherwise leaks through as a
+	// cancellation, so a pre-canceled ctx otherwise leaks through as a
 	// successful reduce. Honor ctx early -- the standard Go idiom.
 	if err := ctx.Err(); err != nil {
 		return nil, err
