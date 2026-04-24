@@ -1075,6 +1075,12 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 			indexParams[common.WarmupKey] = warmupPolicy
 		}
 	}
+	indexStoreVersion := indexInfo.GetIndexStoreVersion()
+	indexStorePathVersion := indexInfo.GetIndexStorePathVersion()
+	if indexStoreVersion <= 0 {
+		indexStoreVersion = int64(indexStorePathVersion)
+	}
+
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:              loadInfo.GetCollectionID(),
 		PartitionID:               loadInfo.GetPartitionID(),
@@ -1086,6 +1092,8 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexVersion:              indexInfo.GetIndexVersion(),
 		IndexParams:               indexParams,
 		IndexFiles:                indexInfo.GetIndexFilePaths(),
+		IndexStoreVersion:         indexStoreVersion,
+		IndexStorePathVersion:     indexStorePathVersion,
 		IndexEngineVersion:        indexInfo.GetCurrentIndexVersion(),
 		IndexFileSize:             indexInfo.GetIndexSize(),
 		NumRows:                   indexInfo.GetNumRows(),

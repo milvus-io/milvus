@@ -2401,3 +2401,67 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
 }
+
+func TestIndexMeta_HasCollectionWithPathVersion(t *testing.T) {
+	m := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+	}
+
+	// Add a v0 index for collection 100
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1000,
+		CollectionID:          100,
+		IndexStorePathVersion: 0,
+	})
+
+	// Add a v1 index for collection 200
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2000,
+		CollectionID:          200,
+		IndexStorePathVersion: 1,
+	})
+
+	// Collection 100 has no v1 indexes
+	assert.False(t, m.HasCollectionWithPathVersion(100, 1))
+	// Collection 200 has v1 indexes
+	assert.True(t, m.HasCollectionWithPathVersion(200, 1))
+	// Collection 300 doesn't exist
+	assert.False(t, m.HasCollectionWithPathVersion(300, 1))
+	// Collection 100 has v0 indexes (version >= 0)
+	assert.True(t, m.HasCollectionWithPathVersion(100, 0))
+}
+
+func TestIndexMeta_GetDeletedIndexesWithPathVersion(t *testing.T) {
+	m := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+	}
+
+	// Add: deleted v0, deleted v1, not-deleted v1
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1000,
+		CollectionID:          100,
+		IndexStorePathVersion: 0,
+		IsDeleted:             true,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2000,
+		CollectionID:          200,
+		IndexStorePathVersion: 1,
+		IsDeleted:             true,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               3000,
+		CollectionID:          300,
+		IndexStorePathVersion: 1,
+		IsDeleted:             false,
+	})
+
+	// Get deleted with pathVersion >= 1
+	result := m.GetDeletedIndexesWithPathVersion(1)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(2000), result[0].BuildID)
+
+	// Get deleted with pathVersion >= 0 (all deleted)
+	result = m.GetDeletedIndexesWithPathVersion(0)
+	assert.Len(t, result, 2)
+}

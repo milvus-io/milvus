@@ -115,6 +115,9 @@ message CreateJobRequest {
   // External collection fields (empty for regular collections)
   string external_source = 34;
   string external_spec = 35;
+  // Path format version for index files on object storage.
+  // See milvus.proto.index.IndexStorePathVersion for value semantics.
+  index.IndexStorePathVersion index_store_path_version = 36;
 }
 
 message QueryJobsRequest {
