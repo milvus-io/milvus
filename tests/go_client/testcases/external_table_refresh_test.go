@@ -2956,3 +2956,92 @@ func TestRefreshExternalCollectionZeroRowParquet(t *testing.T) {
 	require.Contains(t, strings.ToLower(finalReason), "zero",
 		"failure reason should mention zero rows so operators can act; got %q", finalReason)
 }
+
+// Regression for issue #48637: a typo in external_field mapping (name
+// points to a column that does not exist in the parquet) must surface
+// the C++ "Column 'xxx' not found in schema" root cause in the
+// RefreshFailed reason returned to the client, not the generic
+// "sampling failed for all N segment(s)" message that forces operators
+// to SSH into datanode logs.
+func TestRefreshExternalCollectionWrongExternalField(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_wrong_field", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// Well-formed parquet with real columns id/value/embedding.
+	data, err := generateParquetBytes(8, 0)
+	require.NoError(t, err)
+	_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+		fmt.Sprintf("%s/data.parquet", extPath),
+		bytes.NewReader(data), int64(len(data)),
+		miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+	})
+
+	// Schema maps "embedding" to a column "wrong_col_a" that does not exist.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extPath).
+		WithExternalSpec(`{"format":"parquet"}`).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("wrong_col_a"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	jobID := refreshResult.JobID
+
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var finalState entity.RefreshExternalCollectionState
+	var finalReason string
+	for done := false; !done; {
+		select {
+		case <-deadline:
+			t.Fatalf("Refresh job %d did not reach terminal state within 60s", jobID)
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(jobID))
+			require.NoError(t, err)
+			t.Logf("Job %d: state=%s reason=%q", jobID, progress.State, progress.Reason)
+			if progress.State == entity.RefreshStateCompleted ||
+				progress.State == entity.RefreshStateFailed {
+				finalState = progress.State
+				finalReason = progress.Reason
+				done = true
+			}
+		}
+	}
+
+	require.Equal(t, entity.RefreshStateFailed, finalState,
+		"wrong external_field must surface as RefreshFailed")
+	// Root cause from C++ layer must reach the client.
+	require.Contains(t, finalReason, "wrong_col_a",
+		"reason must name the offending column; got %q", finalReason)
+	require.Contains(t, strings.ToLower(finalReason), "not found",
+		"reason must state the column was not found; got %q", finalReason)
+	require.Contains(t, finalReason, "external_field mappings",
+		"reason must hint at the real fix; got %q", finalReason)
+}
