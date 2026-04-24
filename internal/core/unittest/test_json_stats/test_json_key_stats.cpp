@@ -392,7 +392,7 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     }
 
     void
-    BuildAndUpload() {
+    BuildAndUpload(int64_t lack_binlog_rows = 0) {
         auto field_data =
             storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
         field_data->FillFieldData(data_.data(), data_.size());
@@ -420,6 +420,9 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
 
         Config config;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        if (lack_binlog_rows > 0) {
+            config["lack_binlog_rows"] = lack_binlog_rows;
+        }
 
         build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
         build_index_->Build(config);
@@ -768,5 +771,484 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestMultipleBuildCycles) {
         VerifyPathInShredding("/x");
         VerifyPathInShredding("/y");
         VerifyPathInShredding("/z");
+    }
+}
+
+// Regression test: BuildKeyStats must increment row_id for empty JSON strings.
+// Before the fix, `continue` in the empty-string branch skipped `row_id++`,
+// causing all subsequent shared-data inverted-index entries to record wrong
+// row_ids.  This led to queries reading BSON from wrong parquet rows —
+// producing either silent wrong results or assertion crashes.
+//
+// Scenario simulated: lack_binlog_rows prepends null rows (empty JSON) to a
+// non-nullable JSON field (schema.nullable() == false).
+TEST_F(JsonKeyStatsUploadLoadTest, TestEmptyJsonRowIdNotSkipped) {
+    // 10 valid rows.  "/a" appears in all rows (high hit ratio → shredding).
+    // "/rare" appears in only 1 row (low hit ratio → SHARED), so it goes
+    // through the inverted-index path where the row_id bug manifests.
+    const int64_t kLackRows = 2;  // 2 prepended empty-JSON rows
+    const int kValidRows = 10;
+    const int kTotalRows = kLackRows + kValidRows;
+    const int kRareRowIndex = kTotalRows - 1;  // last row has "/rare"
+
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < kValidRows; i++) {
+        if (i == kValidRows - 1) {
+            // last valid row has an extra "rare" key
+            json_strings.push_back(
+                fmt::format(R"({{"a": {}, "rare": 42}})", i));
+        } else {
+            json_strings.push_back(fmt::format(R"({{"a": {}}})", i));
+        }
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    // Total row count should include lack_binlog_rows
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+
+    // "/a" should be in shredding (high hit ratio)
+    auto a_fields = load_index_->GetShreddingFields("/a");
+    EXPECT_FALSE(a_fields.empty()) << "'/a' should be shredded";
+
+    // "/rare" should be in shared data (low hit ratio < 0.3 threshold)
+    // Verify via ExecuteForSharedData: the ONLY row that should
+    // have "/rare" is row kRareRowIndex (the last row).
+    TargetBitmap exists_bitset(kTotalRows);
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        "/rare",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            exists_bitset[row_id] = true;
+        });
+
+    EXPECT_EQ(exists_bitset.count(), 1)
+        << "Exactly one row should have '/rare' in shared data";
+    EXPECT_TRUE(exists_bitset[kRareRowIndex])
+        << "'/rare' should exist at row " << kRareRowIndex
+        << " (the last row), not at row " << (kRareRowIndex - kLackRows);
+
+    // Double-check: the row_id recorded for "/rare" must NOT be the
+    // off-by-kLackRows wrong position that the old buggy code produced.
+    if (kRareRowIndex >= kLackRows) {
+        EXPECT_FALSE(exists_bitset[kRareRowIndex - kLackRows])
+            << "'/rare' must NOT appear at the wrong (shifted) row_id";
+    }
+}
+
+// ==================== Special Characters Tests ====================
+
+// Test JSON keys containing special characters (dots, spaces, hyphens, etc.)
+TEST_F(JsonKeyStatsUploadLoadTest, TestSpecialCharacterKeys) {
+    std::vector<std::string> json_strings = {
+        R"({"key-with-dash": 1, "key.with.dot": 2, "key with space": 3})",
+        R"({"key-with-dash": 4, "key.with.dot": 5, "key with space": 6})",
+        R"({"key-with-dash": 7, "key.with.dot": 8, "key with space": 9})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/key-with-dash");
+    VerifyPathInShredding("/key.with.dot");
+    VerifyPathInShredding("/key with space");
+}
+
+// Test JSON string values with escape sequences
+TEST_F(JsonKeyStatsUploadLoadTest, TestEscapedStringValues) {
+    std::vector<std::string> json_strings = {
+        R"({"msg": "hello\nworld", "path": "c:\\temp\\file", "quote": "say \"hi\""})",
+        R"({"msg": "line1\tline2", "path": "d:\\data\\log", "quote": "say \"bye\""})",
+        R"({"msg": "foo\bbar", "path": "e:\\usr\\bin", "quote": "say \"ok\""})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/msg");
+    VerifyPathInShredding("/path");
+    VerifyPathInShredding("/quote");
+    VerifyJsonType("/msg_STRING", JSONType::STRING);
+}
+
+// Test JSON with unicode characters in keys and values
+TEST_F(JsonKeyStatsUploadLoadTest, TestUnicodeContent) {
+    std::vector<std::string> json_strings = {
+        R"({"name": "\\u4e16\\u754c", "value": 1})",
+        R"({"name": "\\u0041\\u0042", "value": 2})",
+        R"({"name": "hello", "value": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/name");
+    VerifyPathInShredding("/value");
+}
+
+// Test JSON keys with underscores and numbers
+TEST_F(JsonKeyStatsUploadLoadTest, TestKeysWithUnderscoresAndNumbers) {
+    std::vector<std::string> json_strings = {
+        R"({"field_1": 10, "_private": "a", "123abc": true})",
+        R"({"field_1": 20, "_private": "b", "123abc": false})",
+        R"({"field_1": 30, "_private": "c", "123abc": true})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/field_1");
+    VerifyPathInShredding("/_private");
+    VerifyPathInShredding("/123abc");
+}
+
+// ==================== Corner Case Tests ====================
+
+// Test with a single row
+TEST_F(JsonKeyStatsUploadLoadTest, TestSingleRow) {
+    std::vector<std::string> json_strings = {
+        R"({"only_key": 42, "name": "single"})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), 1);
+    EXPECT_EQ(load_index_->Size(), 1);
+}
+
+// Test with all null values in JSON
+TEST_F(JsonKeyStatsUploadLoadTest, TestNullValues) {
+    std::vector<std::string> json_strings = {R"({"a": null, "b": 1})",
+                                             R"({"a": null, "b": 2})",
+                                             R"({"a": null, "b": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/b");
+}
+
+// Test with empty objects as values
+TEST_F(JsonKeyStatsUploadLoadTest, TestEmptyObjectValues) {
+    std::vector<std::string> json_strings = {R"({"meta": {}, "id": 1})",
+                                             R"({"meta": {}, "id": 2})",
+                                             R"({"meta": {}, "id": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/id");
+}
+
+// Test with empty arrays as values
+TEST_F(JsonKeyStatsUploadLoadTest, TestEmptyArrayValues) {
+    std::vector<std::string> json_strings = {R"({"tags": [], "id": 1})",
+                                             R"({"tags": [], "id": 2})",
+                                             R"({"tags": [], "id": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/id");
+}
+
+// Test with deeply nested JSON (5 levels)
+TEST_F(JsonKeyStatsUploadLoadTest, TestDeeplyNestedJson) {
+    std::vector<std::string> json_strings = {
+        R"({"l1": {"l2": {"l3": {"l4": {"l5": 1}}}}})",
+        R"({"l1": {"l2": {"l3": {"l4": {"l5": 2}}}}})",
+        R"({"l1": {"l2": {"l3": {"l4": {"l5": 3}}}}})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/l1/l2/l3/l4/l5");
+    VerifyJsonType("/l1/l2/l3/l4/l5_INT64", JSONType::INT64);
+}
+
+// Test with heterogeneous schemas across rows (some keys missing in some rows)
+TEST_F(JsonKeyStatsUploadLoadTest, TestHeterogeneousSchemas) {
+    std::vector<std::string> json_strings;
+    // 10 rows: all have "common", only first 3 have "rare_a", only last 3 have "rare_b"
+    for (int i = 0; i < 10; i++) {
+        if (i < 3) {
+            json_strings.push_back(
+                fmt::format(R"({{"common": {}, "rare_a": {}}})", i, i * 10));
+        } else if (i >= 7) {
+            json_strings.push_back(
+                fmt::format(R"({{"common": {}, "rare_b": {}}})", i, i * 10));
+        } else {
+            json_strings.push_back(fmt::format(R"({{"common": {}}})", i));
+        }
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), 10);
+    // "common" appears in all rows -> shredding
+    VerifyPathInShredding("/common");
+    // "rare_a" and "rare_b" appear in only 3/10 rows -> shared
+    VerifyPathInShared("/rare_a");
+    VerifyPathInShared("/rare_b");
+}
+
+// Test mixed type: same key with different types across rows
+// e.g., "val" is int in some rows, string in others
+TEST_F(JsonKeyStatsUploadLoadTest, TestMixedTypeSameKey) {
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < 10; i++) {
+        if (i % 2 == 0) {
+            json_strings.push_back(fmt::format(R"({{"val": {}}})", i));  // int
+        } else {
+            json_strings.push_back(
+                fmt::format(R"({{"val": "str_{}"}})", i));  // string
+        }
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), 10);
+    // Both typed variants should exist
+    auto int_fields = load_index_->GetShreddingFields(
+        "/val", std::vector<JSONType>{JSONType::INT64});
+    auto str_fields = load_index_->GetShreddingFields(
+        "/val", std::vector<JSONType>{JSONType::STRING});
+    // At least one type should be present
+    EXPECT_FALSE(int_fields.empty() && str_fields.empty());
+}
+
+// Test with very long string values
+TEST_F(JsonKeyStatsUploadLoadTest, TestLongStringValues) {
+    std::string long_str(4096, 'x');
+    std::vector<std::string> json_strings = {
+        fmt::format(R"({{"data": "{}", "id": 1}})", long_str),
+        fmt::format(R"({{"data": "{}", "id": 2}})", long_str),
+        fmt::format(R"({{"data": "{}", "id": 3}})", long_str)};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/data");
+    VerifyPathInShredding("/id");
+}
+
+// Test with many keys per row (wide JSON)
+TEST_F(JsonKeyStatsUploadLoadTest, TestWideJson) {
+    std::vector<std::string> json_strings;
+    for (int row = 0; row < 5; row++) {
+        std::string json = "{";
+        for (int k = 0; k < 50; k++) {
+            if (k > 0)
+                json += ",";
+            json += fmt::format(R"("k{}": {})", k, row * 50 + k);
+        }
+        json += "}";
+        json_strings.push_back(json);
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), 5);
+    // Spot-check a few keys
+    VerifyPathInShredding("/k0");
+    VerifyPathInShredding("/k25");
+    VerifyPathInShredding("/k49");
+}
+
+// Test numeric edge cases: large int64, negative numbers, zero, float precision
+TEST_F(JsonKeyStatsUploadLoadTest, TestNumericEdgeCases) {
+    std::vector<std::string> json_strings = {
+        R"({"big": 9223372036854775806, "neg": -999999, "zero": 0, "float": 1.7976931348623157e+308})",
+        R"({"big": 9223372036854775807, "neg": -1, "zero": 0, "float": 2.2250738585072014e-308})",
+        R"({"big": 1, "neg": -9223372036854775807, "zero": 0, "float": 0.0})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/big");
+    VerifyPathInShredding("/neg");
+    VerifyPathInShredding("/zero");
+    VerifyPathInShredding("/float");
+    VerifyJsonType("/big_INT64", JSONType::INT64);
+    VerifyJsonType("/neg_INT64", JSONType::INT64);
+    VerifyJsonType("/float_DOUBLE", JSONType::DOUBLE);
+}
+
+// Test boolean edge cases
+TEST_F(JsonKeyStatsUploadLoadTest, TestBooleanValues) {
+    std::vector<std::string> json_strings = {R"({"flag": true, "id": 1})",
+                                             R"({"flag": false, "id": 2})",
+                                             R"({"flag": true, "id": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/flag");
+    VerifyJsonType("/flag_BOOL", JSONType::BOOL);
+}
+
+// Test nested arrays with different element types
+TEST_F(JsonKeyStatsUploadLoadTest, TestComplexArrayValues) {
+    std::vector<std::string> json_strings = {
+        R"({"arr_int": [1, 2, 3], "arr_str": ["a", "b"], "arr_mixed": [1, "x", true], "id": 1})",
+        R"({"arr_int": [4, 5], "arr_str": ["c"], "arr_mixed": [2, "y", false], "id": 2})",
+        R"({"arr_int": [6], "arr_str": ["d", "e", "f"], "arr_mixed": [3, "z", null], "id": 3})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+    Load();
+
+    VerifyBasicOperations();
+    VerifyPathInShredding("/id");
+}
+
+// ==================== lack_binlog_rows Corner Cases ====================
+
+// Test lack_binlog_rows larger than actual data rows
+TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsLargerThanData) {
+    const int64_t kLackRows = 20;
+    const int kValidRows = 3;
+    const int kTotalRows = kLackRows + kValidRows;
+
+    std::vector<std::string> json_strings = {R"({"a": 1, "b": "x"})",
+                                             R"({"a": 2, "b": "y"})",
+                                             R"({"a": 3, "b": "z"})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+}
+
+// Test lack_binlog_rows = 1 (minimum non-zero)
+TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsSingle) {
+    const int64_t kLackRows = 1;
+    const int kValidRows = 5;
+    const int kTotalRows = kLackRows + kValidRows;
+
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < kValidRows; i++) {
+        json_strings.push_back(fmt::format(R"({{"val": {}}})", i));
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+    VerifyPathInShredding("/val");
+}
+
+// Test lack_binlog_rows with all rows going to shared (low hit ratio)
+TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsAllShared) {
+    const int64_t kLackRows = 50;
+    const int kValidRows = 3;
+    const int kTotalRows = kLackRows + kValidRows;
+
+    // Each row has a unique key -> all will be shared (very low hit ratio)
+    std::vector<std::string> json_strings = {
+        R"({"unique_a": 1, "common": 10})",
+        R"({"unique_b": 2, "common": 20})",
+        R"({"unique_c": 3, "common": 30})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+    // With 50 lack rows + 3 valid rows, "common" has 3/53 hit ratio < 0.3 -> shared
+    VerifyPathInShared("/common");
+    VerifyPathInShared("/unique_a");
+}
+
+// Test lack_binlog_rows with shared data row_id correctness for multiple keys
+TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsMultipleSharedKeys) {
+    const int64_t kLackRows = 5;
+    const int kValidRows = 10;
+    const int kTotalRows = kLackRows + kValidRows;
+
+    std::vector<std::string> json_strings;
+    for (int i = 0; i < kValidRows; i++) {
+        json_strings.push_back(
+            fmt::format(R"({{"always": {}, "id": {}}})", i, i));
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload(kLackRows);
+    Load();
+
+    EXPECT_EQ(load_index_->Count(), kTotalRows);
+
+    // Verify shredding fields exist for high-hit-ratio key
+    auto always_fields = load_index_->GetShreddingFields("/always");
+    EXPECT_FALSE(always_fields.empty());
+
+    // Verify the first kLackRows rows have no data via ExecuteForSharedData
+    // (they are empty/null rows from lack_binlog_rows)
+    TargetBitmap always_exists(kTotalRows);
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    load_index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        "/always",
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            always_exists[row_id] = true;
+        });
+    // The lack rows should NOT have "/always" in shared data
+    for (int i = 0; i < kLackRows; i++) {
+        EXPECT_FALSE(always_exists[i])
+            << "lack_binlog row " << i
+            << " should not have '/always' in shared";
     }
 }

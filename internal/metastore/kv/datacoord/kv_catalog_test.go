@@ -264,6 +264,53 @@ func Test_ListSegments(t *testing.T) {
 	})
 }
 
+func TestCatalogListSegments_ExtractsJsonStatsRelativePaths(t *testing.T) {
+	segment := &datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		PartitionID:  partitionID,
+		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+			100: {
+				FieldID:                100,
+				BuildID:                10,
+				Version:                2,
+				JsonKeyStatsDataFormat: 3,
+				Files: []string{
+					"files/json_stats/3/10/2/2/1/1/100/meta.json",
+					"files/json_stats/3/10/2/2/1/1/100/shared_key_index/.managed.json_0",
+				},
+			},
+			101: {
+				FieldID: 101,
+				Files: []string{
+					"files/insert_log/2/1/1/_stats/json_stats.101/shredding_data/data.parquet",
+				},
+			},
+		},
+	}
+	segBytes, err := proto.Marshal(segment)
+	assert.NoError(t, err)
+
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, paginationSize int, f func([]byte, []byte) error) error {
+			return f([]byte(k5), segBytes)
+		})
+
+	catalog := NewCatalog(metakv, rootPath, "")
+	segments, err := catalog.listSegments(context.Background(), collectionID)
+	assert.NoError(t, err)
+	assert.Len(t, segments, 1)
+
+	assert.Equal(t, []string{
+		"meta.json",
+		"shared_key_index/.managed.json_0",
+	}, segments[0].GetJsonKeyStats()[100].GetFiles())
+	assert.Equal(t, []string{
+		"shredding_data/data.parquet",
+	}, segments[0].GetJsonKeyStats()[101].GetFiles())
+}
+
 func Test_AddSegments(t *testing.T) {
 	t.Run("generate binlog kvs failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)

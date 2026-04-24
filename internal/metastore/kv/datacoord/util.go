@@ -226,8 +226,9 @@ func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.Segmen
 }
 
 func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
-	// Compress TextStatsLogs paths to filenames before marshaling to save etcd space
+	// Keep etcd metadata compact and format-stable. Runtime paths are rebuilt after loading.
 	metautil.ExtractTextLogFilenames(segment.GetTextStatsLogs())
+	metautil.ExtractJSONKeyStatsRelativePaths(segment.GetJsonKeyStats())
 
 	segBytes, err := proto.Marshal(segment)
 	if err != nil {

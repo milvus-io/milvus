@@ -63,7 +63,7 @@ func JSONKeyStatEntries(jsonStats map[int64]*datapb.JsonKeyStats) []StatEntry {
 	entries := make([]StatEntry, 0, len(jsonStats))
 	for fieldID, js := range jsonStats {
 		entries = append(entries, StatEntry{
-			Key:   fmt.Sprintf("json_key_index.%d", fieldID),
+			Key:   fmt.Sprintf("json_stats.%d", fieldID),
 			Files: js.GetFiles(),
 			Metadata: map[string]string{
 				"version":                    fmt.Sprintf("%d", js.GetVersion()),

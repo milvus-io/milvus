@@ -17,7 +17,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -1875,4 +1877,58 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
+}
+
+func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
+	handler := &ServerHandler{
+		s: &Server{
+			meta: &meta{
+				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+			},
+		},
+	}
+
+	t.Run("storage v2 path", func(t *testing.T) {
+		segInfo := &datapb.SegmentInfo{
+			CollectionID: 1,
+			PartitionID:  2,
+			ID:           3,
+		}
+		stats := &datapb.JsonKeyStats{
+			FieldID:                100,
+			BuildID:                10,
+			Version:                2,
+			JsonKeyStatsDataFormat: 3,
+			Files:                  []string{"meta.json", "shared_key_index/.managed.json_0"},
+		}
+
+		got := uncompressJSONStats(handler, segInfo, stats)
+
+		assert.Equal(t, []string{
+			"files/json_stats/3/10/2/1/2/3/100/meta.json",
+			"files/json_stats/3/10/2/1/2/3/100/shared_key_index/.managed.json_0",
+		}, got.GetFiles())
+		assert.Equal(t, []string{"meta.json", "shared_key_index/.managed.json_0"}, stats.GetFiles())
+	})
+
+	t.Run("storage v3 manifest path", func(t *testing.T) {
+		segInfo := &datapb.SegmentInfo{
+			CollectionID: 1,
+			PartitionID:  2,
+			ID:           3,
+			ManifestPath: `{"ver":7,"base_path":"files/insert_log/1/2/3"}`,
+		}
+		stats := &datapb.JsonKeyStats{
+			FieldID: 100,
+			Files:   []string{"meta.json", "shredding_data/data.parquet"},
+		}
+
+		got := uncompressJSONStats(handler, segInfo, stats)
+
+		assert.Equal(t, []string{
+			"files/insert_log/1/2/3/_stats/json_stats.100/meta.json",
+			"files/insert_log/1/2/3/_stats/json_stats.100/shredding_data/data.parquet",
+		}, got.GetFiles())
+		assert.Equal(t, []string{"meta.json", "shredding_data/data.parquet"}, stats.GetFiles())
+	})
 }

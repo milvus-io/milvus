@@ -666,9 +666,8 @@ func Test_Flush(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.Flush(ctx, &datapb.FlushRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -723,9 +722,8 @@ func Test_GetSegmentStates(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -780,9 +778,8 @@ func Test_GetInsertBinlogPaths(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetInsertBinlogPaths(ctx, &datapb.GetInsertBinlogPathsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -837,9 +834,8 @@ func Test_GetCollectionStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCollectionStatistics(ctx, &datapb.GetCollectionStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -894,9 +890,8 @@ func Test_GetPartitionStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetPartitionStatistics(ctx, &datapb.GetPartitionStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -952,9 +947,8 @@ func Test_GetSegmentInfo(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1010,9 +1004,8 @@ func Test_SaveBinlogPaths(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1068,9 +1061,8 @@ func Test_GetRecoveryInfo(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRecoveryInfo(ctx, &datapb.GetRecoveryInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1125,9 +1117,8 @@ func Test_GetRecoveryInfoV2(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRecoveryInfoV2(ctx, &datapb.GetRecoveryInfoRequestV2{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1183,9 +1174,8 @@ func Test_GetFlushedSegments(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1241,9 +1231,8 @@ func Test_GetSegmentsByStates(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1298,9 +1287,8 @@ func Test_ManualCompaction(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1355,9 +1343,8 @@ func Test_GetCompactionState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1412,9 +1399,8 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1469,9 +1455,8 @@ func Test_WatchChannels(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.WatchChannels(ctx, &datapb.WatchChannelsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1526,9 +1511,8 @@ func Test_GetFlushState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushState(ctx, &datapb.GetFlushStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1583,9 +1567,8 @@ func Test_GetFlushAllState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1641,9 +1624,8 @@ func Test_DropVirtualChannel(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1699,9 +1681,8 @@ func Test_SetSegmentState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.SetSegmentState(ctx, &datapb.SetSegmentStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1751,9 +1732,8 @@ func Test_UpdateSegmentStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.UpdateSegmentStatistics(ctx, &datapb.UpdateSegmentStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1803,9 +1783,8 @@ func Test_UpdateChannelCheckpoint(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.UpdateChannelCheckpoint(ctx, &datapb.UpdateChannelCheckpointRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1856,9 +1835,8 @@ func Test_MarkSegmentsDropped(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1908,9 +1886,8 @@ func Test_BroadcastAlteredCollection(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -1961,9 +1938,8 @@ func Test_GcConfirm(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GcConfirm(ctx, &datapb.GcConfirmRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2019,9 +1995,8 @@ func Test_CreateIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2081,9 +2056,8 @@ func Test_GetSegmentIndexState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2142,9 +2116,8 @@ func Test_GetIndexState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexState(ctx, &indexpb.GetIndexStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2204,9 +2177,8 @@ func Test_GetIndexInfos(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2266,9 +2238,8 @@ func Test_DescribeIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2328,9 +2299,8 @@ func Test_GetIndexStatistics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2390,9 +2360,8 @@ func Test_GetIndexBuildProgress(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2449,9 +2418,8 @@ func Test_DropIndex(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.DropIndex(ctx, &indexpb.DropIndexRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2501,9 +2469,8 @@ func Test_ReportDataNodeTtMsgs(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ReportDataNodeTtMsgs(ctx, &datapb.ReportDataNodeTtMsgsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2553,9 +2520,8 @@ func Test_GcControl(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GcControl(ctx, &datapb.GcControlRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2754,9 +2720,8 @@ func Test_FlushAll(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2812,9 +2777,8 @@ func TestClient_TruncateCollection(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2875,9 +2839,8 @@ func TestClient_GetRestoreSnapshotState(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -2936,9 +2899,8 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -3002,9 +2964,8 @@ func TestClient_BatchUpdateManifest(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }

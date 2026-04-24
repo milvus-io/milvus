@@ -110,7 +110,7 @@ func TestJSONKeyStatEntries(t *testing.T) {
 	entries := JSONKeyStatEntries(jsonStats)
 	assert.Len(t, entries, 1)
 	e := entries[0]
-	assert.Equal(t, "json_key_index.20", e.Key)
+	assert.Equal(t, "json_stats.20", e.Key)
 	assert.Equal(t, []string{"json1"}, e.Files)
 	assert.Equal(t, "1", e.Metadata["version"])
 	assert.Equal(t, "99", e.Metadata["build_id"])
