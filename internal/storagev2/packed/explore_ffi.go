@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unsafe"
 
@@ -57,6 +58,25 @@ func filterFileInfosByFormat(fileInfos []FileInfo, format string) ([]FileInfo, i
 		}
 	}
 	return filtered, len(fileInfos) - len(filtered)
+}
+
+// NormalizeFileInfos returns the manifest file list as it must be seen by
+// every consumer of the explore manifest: sorted lexicographically by
+// FilePath, then filtered to the requested format. Sorting is mandatory
+// because the underlying arrow filesystem GetFileInfo gives no ordering
+// guarantee — without it, DataCoord and DataNode would slice the same
+// fileIndex range against different orderings and pick different files
+// (leading to silent data loss or "Invalid parquet magic" task failures
+// when stray Spark `_SUCCESS`/`.crc`/README files land in the picked
+// window). Both DataCoord (when splitting tasks) and DataNode (when
+// resolving fileIndexBegin/End) MUST apply this transform on top of
+// ReadFileInfosFromManifestPath so they observe the same indexed view.
+func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
+	// Sort by path first so lex order is stable across processes.
+	sort.Slice(fileInfos, func(i, j int) bool {
+		return fileInfos[i].FilePath < fileInfos[j].FilePath
+	})
+	return filterFileInfosByFormat(fileInfos, format)
 }
 
 // FileInfo represents information about an external file.
@@ -177,7 +197,10 @@ func ExploreFilesReturnManifestPath(
 		return nil, "", err
 	}
 
-	fileInfos, skipped := filterFileInfosByFormat(fileInfos, format)
+	// Sort + format-filter: produces a deterministic indexed view that
+	// DataNode will reproduce against the same manifest. See
+	// NormalizeFileInfos doc for the index-drift bug this prevents.
+	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	if skipped > 0 {
 		log.Info("Skipped files with non-matching format during explore",
 			zap.Int("skippedCount", skipped),

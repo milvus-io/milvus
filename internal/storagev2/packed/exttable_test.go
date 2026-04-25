@@ -493,6 +493,41 @@ func TestFilterFileInfosByFormat(t *testing.T) {
 	assert.Equal(t, 0, skipped)
 }
 
+// Regression for index-drift bug: DataCoord and DataNode both call
+// NormalizeFileInfos on the same raw manifest and MUST produce the
+// identical indexed view, regardless of input ordering. Without sort,
+// arrow's GetFileInfo can return files in different orders on each
+// process and the [fileIndexBegin, fileIndexEnd) slice picks different
+// files on the two sides, leading to silent data loss or "Invalid
+// parquet magic" failures on Spark `_SUCCESS`/`.crc` strays.
+func TestNormalizeFileInfos_StableSortAndFilter(t *testing.T) {
+	rawA := []FileInfo{
+		{FilePath: "data/_SUCCESS"},
+		{FilePath: "data/part-2.parquet"},
+		{FilePath: "data/.crc"},
+		{FilePath: "data/part-1.parquet"},
+		{FilePath: "data/README.md"},
+	}
+	// Reordered "DataNode side" view (arrow GetFileInfo gives no order).
+	rawB := []FileInfo{
+		{FilePath: "data/part-1.parquet"},
+		{FilePath: "data/README.md"},
+		{FilePath: "data/_SUCCESS"},
+		{FilePath: "data/part-2.parquet"},
+		{FilePath: "data/.crc"},
+	}
+
+	gotA, skippedA := NormalizeFileInfos(rawA, "parquet")
+	gotB, skippedB := NormalizeFileInfos(rawB, "parquet")
+
+	assert.Equal(t, 2, len(gotA))
+	assert.Equal(t, 3, skippedA)
+	assert.Equal(t, gotA, gotB, "two views of same manifest must produce identical indexed slice")
+	assert.Equal(t, "data/part-1.parquet", gotA[0].FilePath)
+	assert.Equal(t, "data/part-2.parquet", gotA[1].FilePath)
+	assert.Equal(t, skippedA, skippedB)
+}
+
 func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	// Test that extraKVs can add per-collection extfs properties
 	config := &indexpb.StorageConfig{

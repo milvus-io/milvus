@@ -3218,3 +3218,104 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *client.Client, j
 		}
 	}
 }
+
+// Regression for the explore-manifest index-drift bug: the source
+// directory is intentionally polluted with non-parquet strays
+// (`_SUCCESS`, `.crc`, `README.md`) interleaved with valid parquet
+// shards. Pre-fix, DataCoord filtered them out before slicing tasks
+// while DataNode read the unfiltered manifest and sliced against the
+// stale index space — picking `_SUCCESS` as a "parquet" file and
+// failing with "Invalid parquet magic" or silently dropping a real
+// shard. Post-fix, both layers normalize (sort + format-filter) the
+// manifest identically, so refresh completes and total row count
+// matches the sum of the parquet shards only.
+func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_strays", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// 3 valid parquet shards, varying sizes to detect index drift.
+	const rowsPerShard = int64(8)
+	const numShards = 3
+	for i := 0; i < numShards; i++ {
+		data, err := generateParquetBytes(rowsPerShard, int64(i)*rowsPerShard)
+		require.NoError(t, err)
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/part-%05d.parquet", extPath, i),
+			bytes.NewReader(data), int64(len(data)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	// Stray non-parquet files interleaved by lex order with the parquets.
+	strays := map[string][]byte{
+		"_SUCCESS":     []byte(""),
+		"_committed":   []byte("xyz"),
+		"part-00.crc":  []byte("crc-checksum-bytes"),
+		"README.md":    []byte("# this dir\n"),
+		"metadata":     []byte(`{"v":1}`),
+	}
+	for name, payload := range strays {
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/%s", extPath, name),
+			bytes.NewReader(payload), int64(len(payload)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extPath).
+		WithExternalSpec(`{"format":"parquet"}`).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	// Load + count to assert no shard was dropped and no stray was read
+	// (a stray would either fail load or — worse — succeed silently with
+	// the wrong row count if the bug let mis-sliced indices slip
+	// through).
+	idxOpt := client.NewCreateIndexOption(collName, "embedding", index.NewAutoIndex(entity.MetricType("L2")))
+	err = mc.CreateIndex(ctx, idxOpt).Wait()
+	common.CheckErr(t, err, true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, loadTask.Wait())
+
+	res, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("").
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Greater(t, len(res.Fields), 0)
+	got := res.Fields[0].FieldData().GetScalars().GetLongData().GetData()
+	require.Len(t, got, 1)
+	expected := rowsPerShard * numShards
+	require.Equal(t, expected, got[0],
+		"row count must equal sum of parquet shards (%d); strays must be filtered, no shard may be dropped",
+		expected)
+}
