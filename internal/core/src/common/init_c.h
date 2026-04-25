@@ -98,6 +98,11 @@ SetExprResCacheCapacityBytes(int64_t bytes);
 void
 SetArrowIOThreadPoolCapacity(int threads);
 
+// Target average byte size of one storage v2 cache cell. Row groups are
+// packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.
+void
+SetStorageV2CellTargetSizeBytes(int64_t bytes);
+
 #ifdef __cplusplus
 };
 #endif
