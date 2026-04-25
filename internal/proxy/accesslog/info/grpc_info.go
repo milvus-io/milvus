@@ -383,3 +383,10 @@ func (i *GrpcAccessInfo) TemplateValueLength() string {
 
 	return fmt.Sprint(m)
 }
+
+func (i *GrpcAccessInfo) PartialUpdate() string {
+	if req, ok := i.req.(*milvuspb.UpsertRequest); ok {
+		return fmt.Sprint(req.GetPartialUpdate())
+	}
+	return NotAny
+}

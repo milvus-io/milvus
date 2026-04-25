@@ -187,6 +187,19 @@ func (s *RestfulAccessInfoSuite) TestOutputFields() {
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
+func (s *RestfulAccessInfoSuite) TestPartialUpdate() {
+	// non-Upsert request -> NotAny
+	s.Equal(NotAny, Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: false})
+	s.info.InitReq()
+	s.Equal("false", Get(s.info, "$partial_update")[0])
+
+	s.ctx.Set(ContextRequest, &milvuspb.UpsertRequest{PartialUpdate: true})
+	s.info.InitReq()
+	s.Equal("true", Get(s.info, "$partial_update")[0])
+}
+
 func (s *RestfulAccessInfoSuite) TestConsistencyLevel() {
 	result := Get(s.info, "$consistency_level")
 	s.Equal(Unknown, result[0])
