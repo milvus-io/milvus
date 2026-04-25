@@ -1692,6 +1692,24 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
 
+	// External source/spec form an atomic tuple bound to the physical data
+	// layout. The only supported way to change them is RefreshExternalCollection,
+	// which applies them atomically and re-runs the data load pipeline.
+	for _, prop := range t.GetProperties() {
+		if prop.GetKey() == common.CollectionExternalSource || prop.GetKey() == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot alter %s via alter_collection_properties; use RefreshExternalCollection instead",
+				prop.GetKey())
+		}
+	}
+	for _, key := range t.GetDeleteKeys() {
+		if key == common.CollectionExternalSource || key == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot delete %s; external source/spec are immutable post-create except via RefreshExternalCollection",
+				key)
+		}
+	}
+
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err

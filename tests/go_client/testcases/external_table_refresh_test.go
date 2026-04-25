@@ -3113,3 +3113,108 @@ func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
 	require.Contains(t, returnedSpec, `"region":"us-east-1"`,
 		"non-secret extfs values must remain readable")
 }
+
+// Regression for issue #49335: a refresh_external_collection call carrying
+// an explicit (external_source, external_spec) override must persist the
+// new tuple back into the collection schema, so that subsequent
+// describe_collection reflects the new source AND a later reuse-path
+// refresh (no override) targets the new source rather than silently
+// reverting to the original one.
+//
+// Pre-fix behavior: the post-completion schema-sync path
+// (server_external_schema_updater.updateExternalSchemaViaWAL) went through
+// AlterCollection, which the atomic-tuple guard introduced in PR #49302
+// rejected — the data load against NEW succeeded but the persisted
+// schema stayed pointing at OLD forever.
+func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_override", 6)
+	pathA := fmt.Sprintf("external-e2e-test/%s/a", collName)
+	pathB := fmt.Sprintf("external-e2e-test/%s/b", collName)
+
+	// Upload distinct parquet payloads to bucket/A and bucket/B.
+	dataA, err := generateParquetBytes(8, 0)
+	require.NoError(t, err)
+	dataB, err := generateParquetBytes(8, 1000)
+	require.NoError(t, err)
+	for _, p := range []struct{ path string; bytes []byte }{{pathA, dataA}, {pathB, dataB}} {
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/data.parquet", p.path),
+			bytes.NewReader(p.bytes), int64(len(p.bytes)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("external-e2e-test/%s/", collName))
+	})
+
+	// Create with SRC_A.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(pathA).
+		WithExternalSpec(`{"format":"parquet"}`).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	// Initial refresh against SRC_A (reuse path).
+	refreshA, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshA.JobID, entity.RefreshStateCompleted)
+
+	// Override refresh to SRC_B with explicit external_source.
+	refreshB, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName).
+			WithExternalSource(pathB).
+			WithExternalSpec(`{"format":"parquet"}`))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshB.JobID, entity.RefreshStateCompleted)
+
+	// Persisted schema must now reflect SRC_B. Pre-fix this still showed pathA.
+	desc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	require.Equal(t, pathB, desc.Schema.ExternalSource,
+		"override refresh must persist new external_source; pre-fix #49335 left it stale")
+}
+
+func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *client.Client, jobID int64, expect entity.RefreshExternalCollectionState) {
+	t.Helper()
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("refresh job %d did not reach terminal state within 60s", jobID)
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(jobID))
+			require.NoError(t, err)
+			t.Logf("Job %d: state=%s reason=%q", jobID, progress.State, progress.Reason)
+			if progress.State == entity.RefreshStateCompleted ||
+				progress.State == entity.RefreshStateFailed {
+				require.Equal(t, expect, progress.State,
+					"refresh terminal state mismatch (reason=%s)", progress.Reason)
+				return
+			}
+		}
+	}
+}

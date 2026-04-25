@@ -7254,3 +7254,54 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		})
 	})
 }
+
+// TestAlterCollection_RejectExternalTupleMutation verifies the proxy-layer
+// guard rejects user alter_collection_properties calls that target the
+// external_source / external_spec tuple. Mutation of this tuple is reserved
+// to RefreshExternalCollection; see issue #49335.
+func TestAlterCollection_RejectExternalTupleMutation(t *testing.T) {
+	ctx := context.Background()
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+			DbName:         dbName,
+			CollectionName: "ext_guard_test",
+		},
+	}
+
+	t.Run("reject properties with external_source", func(t *testing.T) {
+		task.AlterCollectionRequest.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/a/"},
+		}
+		task.AlterCollectionRequest.DeleteKeys = nil
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
+
+	t.Run("reject properties with external_spec", func(t *testing.T) {
+		task.AlterCollectionRequest.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+		}
+		task.AlterCollectionRequest.DeleteKeys = nil
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
+
+	t.Run("reject delete of external_source", func(t *testing.T) {
+		task.AlterCollectionRequest.Properties = nil
+		task.AlterCollectionRequest.DeleteKeys = []string{common.CollectionExternalSource}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "immutable")
+	})
+
+	t.Run("reject delete of external_spec", func(t *testing.T) {
+		task.AlterCollectionRequest.Properties = nil
+		task.AlterCollectionRequest.DeleteKeys = []string{common.CollectionExternalSpec}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "immutable")
+	})
+}
