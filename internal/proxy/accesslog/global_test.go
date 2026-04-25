@@ -72,11 +72,16 @@ func TestAccessLogger_InitFailed(t *testing.T) {
 	assert.False(t, ok)
 
 	// init minio error cause init writter failed
-	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
-	Params.Save(Params.MinioCfg.Address.Key, "")
+	// Use a fresh once and params to avoid the watch registered above from firing on param changes
+	once = sync.Once{}
+	var Params2 paramtable.ComponentParam
+	Params2.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	Params2.Save(Params2.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params2.Save(Params2.ProxyCfg.AccessLog.Filename.Key, "test_access.log")
+	Params2.Save(Params2.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params2.Save(Params2.MinioCfg.Address.Key, "")
 
-	InitAccessLogger(&Params)
+	InitAccessLogger(&Params2)
 	rpcInfo = &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
 	accessInfo = info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
 	ok = _globalL.Write(accessInfo)

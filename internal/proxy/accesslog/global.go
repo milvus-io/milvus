@@ -18,7 +18,6 @@ package accesslog
 
 import (
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
@@ -76,27 +75,36 @@ func (l *AccessLogger) Init(params *paramtable.ComponentParam) error {
 	return nil
 }
 
-func (l *AccessLogger) SetEnable(enable bool) error {
+func (l *AccessLogger) Update(enable bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.enable.Load() == enable {
+	// close logger
+	if !enable {
+		if l.enable.Load() != enable {
+			log.Info("start close access log")
+			if write, ok := l.writer.(*RotateWriter); ok {
+				write.Close()
+			}
+			l.enable.Store(enable)
+		}
 		return nil
 	}
 
-	if enable {
-		log.Info("start enable access log")
-		params := paramtable.Get()
-		err := l.init(params)
-		if err != nil {
-			log.Warn("enable access log failed", zap.Error(err))
-			return err
+	// close old writer before re-init
+	if l.writer != nil {
+		if rw, ok := l.writer.(*RotateWriter); ok {
+			rw.Close()
 		}
-	} else {
-		log.Info("start close access log")
-		if write, ok := l.writer.(*RotateWriter); ok {
-			write.Close()
-		}
+	}
+
+	// update access log params
+	log.Info("start update access log params")
+	params := paramtable.Get()
+	err := l.init(params)
+	if err != nil {
+		log.Warn("enable access log failed", zap.Error(err))
+		return err
 	}
 
 	l.enable.Store(enable)
@@ -128,13 +136,11 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 	once.Do(func() {
 		logger := NewAccessLogger()
 		// support dynamic param
-		params.Watch(params.ProxyCfg.AccessLog.Enable.Key, configEvent.NewHandler("enable accesslog", func(event *configEvent.Event) {
-			value, err := strconv.ParseBool(event.Value)
-			if err != nil {
-				log.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
-				return
+		params.WatchKeyPrefix("proxy.accessLog", configEvent.NewHandler("update accesslog", func(event *configEvent.Event) {
+			enable := params.ProxyCfg.AccessLog.Enable.GetAsBool()
+			if err := logger.Update(enable); err != nil {
+				log.Warn("update access log failed", zap.Error(err))
 			}
-			logger.SetEnable(value)
 		}))
 
 		err := logger.Init(params)
