@@ -23,6 +23,7 @@
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "pb/schema.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -240,6 +241,10 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
 void
 SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
+
     // field id -> binlog group id
     std::map<int64_t, int64_t> current_fields;
     for (int i = 0; i < GetBinlogPathCount(); i++) {
@@ -331,6 +336,10 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Find field data to drop: fields in current but not in new_info
     for (const auto& [field_id, group_id] : current_fields) {
         if (new_binlog_fields.find(field_id) == new_binlog_fields.end()) {
+            if (prefer_field_data && new_info.field_index_has_raw_data_.count(
+                                         FieldId(field_id)) > 0) {
+                continue;
+            }
             diff.field_data_to_drop.emplace(field_id);
         }
     }
@@ -339,6 +348,9 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
 void
 SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
     auto cur_column_group = GetColumnGroups();
     auto new_column_group = new_info.GetColumnGroups();
 
@@ -410,24 +422,24 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool files_changed = cur_iter != cur_field_to_files.end() &&
                                  !same_files(*cur_iter->second, cg->files);
             bool is_replace_field = was_default_filled || files_changed;
+            bool index_has_raw_data =
+                new_info.field_index_has_raw_data_.count(FieldId(field_id)) > 0;
+            // Eager-load when: system field, OR schema says load AND
+            // (we want to keep field data alongside index, OR index can't serve raw).
+            bool should_eager_load =
+                field_id < START_USER_FIELDID ||
+                (schema_->ShouldLoadField(FieldId(field_id)) &&
+                 (prefer_field_data || !index_has_raw_data));
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
-                if (field_id < START_USER_FIELDID ||
-                    (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     new_info.field_index_has_raw_data_.find(
-                         FieldId(field_id)) ==
-                         new_info.field_index_has_raw_data_.end())) {
+                if (should_eager_load) {
                     fields.emplace_back(field_id);
                 } else {
                     lazy_fields.emplace_back(field_id);
                 }
             } else if (is_replace_field) {
                 // Field was default-filled or moved between groups → replace
-                if (field_id < START_USER_FIELDID ||
-                    (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     new_info.field_index_has_raw_data_.find(
-                         FieldId(field_id)) ==
-                         new_info.field_index_has_raw_data_.end())) {
+                if (should_eager_load) {
                     replace_fields.emplace_back(field_id);
                 } else {
                     lazy_replace_fields.emplace_back(field_id);
@@ -435,7 +447,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             } else {
                 // Field at same position — check if needs lazification
                 // (transitioning from no-raw-data-index to raw-data-index)
-                if (new_info.field_index_has_raw_data_.count(
+                if (!prefer_field_data &&
+                    new_info.field_index_has_raw_data_.count(
                         FieldId(field_id)) > 0 &&
                     field_index_has_raw_data_.count(FieldId(field_id)) == 0) {
                     lazy_replace_fields.emplace_back(field_id);
@@ -467,6 +480,10 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     // Find field data to drop: fields in current but not in new
     for (const auto& [field_id, files_ptr] : cur_field_to_files) {
         if (new_seen_field_ids.find(field_id) == new_seen_field_ids.end()) {
+            if (prefer_field_data && new_info.field_index_has_raw_data_.count(
+                                         FieldId(field_id)) > 0) {
+                continue;
+            }
             diff.field_data_to_drop.emplace(field_id);
         }
     }

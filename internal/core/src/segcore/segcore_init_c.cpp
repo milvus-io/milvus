@@ -64,6 +64,13 @@ SegcoreSetVisibilityFilterEnabled(const bool value) {
 }
 
 extern "C" void
+SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_prefer_field_data_when_index_has_raw_data(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
