@@ -2947,19 +2947,23 @@ class SnapshotRestoreChecker(Checker):
                 self._do_dml_operations()
                 time.sleep(0.1)
 
-            # 2. Flush and capture state (no lock needed - this is our own collection)
+            # 2. Flush and create snapshot (no lock needed - this is our own collection)
             self.milvus_client.flush(collection_name=self.c_name)
             log.debug(f"Flushed collection {self.c_name}")
             time.sleep(1)
 
-            self._capture_snapshot_state()
-            row_count_before = self.snapshot_row_count
-            log.info(f"State before snapshot: row_count={row_count_before}, sample_pks={len(self.snapshot_sample_pks)}")
-
-            # 3. Create snapshot
+            # 3. Create snapshot first, then capture state.
+            # Capturing state AFTER snapshot creation ensures the count query's
+            # guarantee timestamp >= snapshot's timestamp, so the count reflects
+            # at least all data the snapshot contains. Since no DML happens between
+            # snapshot creation and the count, they will match exactly.
             self.snapshot_name = cf.gen_unique_str("snapshot_")
             self.milvus_client.create_snapshot(self.snapshot_name, self.c_name)
             log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
+
+            self._capture_snapshot_state()
+            row_count_before = self.snapshot_row_count
+            log.info(f"State after snapshot: row_count={row_count_before}, sample_pks={len(self.snapshot_sample_pks)}")
 
             # 4. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
