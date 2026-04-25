@@ -35,7 +35,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1191,23 +1190,10 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = &schemapb.CollectionSchema{
-		Name:               collInfo.Name,
-		Description:        collInfo.Description,
-		AutoID:             collInfo.AutoID,
-		Fields:             model.MarshalFieldModels(collInfo.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(collInfo.Functions),
-		EnableDynamicField: collInfo.EnableDynamicField,
-		EnableNamespace:    collInfo.EnableNamespace,
-		Properties:         collInfo.Properties,
-		FileResourceIds:    collInfo.FileResourceIds,
-		ExternalSource:     collInfo.ExternalSource,
-		ExternalSpec:       collInfo.ExternalSpec,
-		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
-		Version:            collInfo.SchemaVersion,
-		DoPhysicalBackfill: collInfo.DoPhysicalBackfill,
-	}
+	resp.Schema = collInfo.ToCollectionSchemaPB()
+	// Use the dbName parameter (resolved from the request) for consistency
+	// with resp.DbName; the model's DBName may not always be in sync.
+	resp.Schema.DbName = dbName
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames

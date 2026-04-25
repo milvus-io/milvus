@@ -668,3 +668,46 @@ func TestApplyUpdates_ExternalSpecMaskOnlyOverwriteNonEmpty(t *testing.T) {
 		assert.Equal(t, `{"format":"lance"}`, c.ExternalSpec)
 	})
 }
+
+func TestCollection_ToCollectionSchemaPB(t *testing.T) {
+	// All schema-level fields populated with non-zero values so a future
+	// addition that forgets to wire ToCollectionSchemaPB will trip an
+	// assertion below — this is the tripwire that prevents the historical
+	// "missing ExternalSource on broadcast" class of bugs from recurring.
+	props := []*commonpb.KeyValuePair{{Key: "k", Value: "v"}}
+	coll := &Collection{
+		Name:               "c",
+		DBName:             "db",
+		Description:        "desc",
+		AutoID:             true,
+		Fields:             []*Field{fieldModel},
+		StructArrayFields:  []*StructArrayField{structFieldModel},
+		Functions:          []*Function{functionModel},
+		EnableDynamicField: true,
+		EnableNamespace:    true,
+		Properties:         props,
+		SchemaVersion:      7,
+		FileResourceIds:    []int64{11, 22},
+		ExternalSource:     "s3://bucket/dataset",
+		ExternalSpec:       `{"format":"parquet"}`,
+		DoPhysicalBackfill: true,
+	}
+
+	schema := coll.ToCollectionSchemaPB()
+
+	assert.Equal(t, "c", schema.GetName())
+	assert.Equal(t, "db", schema.GetDbName())
+	assert.Equal(t, "desc", schema.GetDescription())
+	assert.True(t, schema.GetAutoID())
+	assert.Equal(t, MarshalFieldModels(coll.Fields), schema.GetFields())
+	assert.Equal(t, MarshalStructArrayFieldModels(coll.StructArrayFields), schema.GetStructArrayFields())
+	assert.Equal(t, MarshalFunctionModels(coll.Functions), schema.GetFunctions())
+	assert.True(t, schema.GetEnableDynamicField())
+	assert.True(t, schema.GetEnableNamespace())
+	assert.Equal(t, props, schema.GetProperties())
+	assert.Equal(t, int32(7), schema.GetVersion())
+	assert.Equal(t, []int64{11, 22}, schema.GetFileResourceIds())
+	assert.Equal(t, "s3://bucket/dataset", schema.GetExternalSource())
+	assert.Equal(t, `{"format":"parquet"}`, schema.GetExternalSpec())
+	assert.True(t, schema.GetDoPhysicalBackfill())
+}
