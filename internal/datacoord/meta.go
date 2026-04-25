@@ -1167,6 +1167,77 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 	}
 }
 
+// UpdateSegmentColumnGroupsOperator upserts storage-v2 column groups on a
+// segment's FieldBinlogs and removes the listed child fields from any other
+// pre-existing group whose child_fields contained them, so that every field
+// lives in exactly one column group. Idempotent: if a group with the same
+// top-level fieldID already exists, it is replaced in place.
+//
+// The caller must validate up front that:
+//   - the segment exists,
+//   - its storage_version is 2.
+func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update column groups failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		incomingChildFields := typeutil.NewSet[int64]()
+		for _, g := range groups {
+			incomingChildFields.Insert(g.GetChildFields()...)
+		}
+
+		// Strip incoming child fields from any other existing group, then drop
+		// in-place groups that the request is replacing. Also drop groups that
+		// become empty (all ChildFields claimed by incoming groups) and record
+		// their FieldIDs so the catalog removes the orphan etcd KV -- otherwise
+		// listBinlogs' prefix scan will resurrect the zombie on restart.
+		var droppedFieldIDs []int64
+		kept := segment.Binlogs[:0]
+		for _, existing := range segment.Binlogs {
+			if _, replaced := groups[existing.GetFieldID()]; replaced {
+				continue
+			}
+			if len(existing.GetChildFields()) > 0 {
+				existing.ChildFields = lo.Filter(existing.GetChildFields(), func(fid int64, _ int) bool {
+					return !incomingChildFields.Contain(fid)
+				})
+				if len(existing.ChildFields) == 0 {
+					droppedFieldIDs = append(droppedFieldIDs, existing.GetFieldID())
+					continue
+				}
+			}
+			kept = append(kept, existing)
+		}
+		segment.Binlogs = kept
+
+		for _, g := range groups {
+			segment.Binlogs = append(segment.Binlogs, g)
+		}
+
+		// Bump DataVersion so querynodes with the segment already loaded will Reopen;
+		// ManifestPath is intentionally not moved here (see segment_checker.isSegmentUpdate).
+		segment.DataVersion++
+
+		// Backfill column-group commit only mutates segment.Binlogs; skipping
+		// Deltalogs / Statslogs / Bm25Statslogs avoids rewriting their KVs on
+		// every call and the write amplification that comes with it.
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+			UpdateMask: metastore.BinlogsUpdateMask{
+				WithoutDeltalogs:     true,
+				WithoutStatslogs:     true,
+				WithoutBm25Statslogs: true,
+			},
+			DroppedBinlogFieldIDs: droppedFieldIDs,
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -1295,7 +1366,18 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 				zap.Int64("segmentID", segmentID), zap.Error(err))
 			return false
 		}
-		if currentVer == manifestVersion {
+		// Guard against version rollback. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but a concurrent compaction may
+		// advance ManifestPath between pre-check and this apply (compaction
+		// commits use a different serialization path than this broadcaster).
+		// Only accept strictly forward motion; equality is a no-op.
+		if currentVer >= manifestVersion {
+			if currentVer > manifestVersion {
+				log.Ctx(context.TODO()).Warn("meta update: update manifest version rejected - would regress",
+					zap.Int64("segmentID", segmentID),
+					zap.Int64("currentVer", currentVer),
+					zap.Int64("incomingVer", manifestVersion))
+			}
 			return false
 		}
 		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)

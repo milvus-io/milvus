@@ -50,6 +50,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 			HandlerFunc: proxy.ResumeDatacoordGC,
 		})
 		management.Register(&management.Handler{
+			Path:        management.RouteCommitBackfill,
+			HandlerFunc: proxy.CommitBackfillResult,
+		})
+		management.Register(&management.Handler{
 			Path:        management.RouteListQueryNode,
 			HandlerFunc: proxy.ListQueryNode,
 		})
@@ -157,6 +161,58 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
+}
+
+// CommitBackfillResult is the proxy-side handler for the
+// /management/datacoord/backfill/commit endpoint. It forwards the S3 result
+// path to DataCoord.CommitBackfillResult and returns the aggregated
+// per-segment commit status as JSON.
+func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request) {
+	writeJSON := func(status int, payload map[string]interface{}) {
+		w.WriteHeader(status)
+		bs, _ := json.Marshal(payload)
+		w.Write(bs)
+	}
+
+	resultPath := req.URL.Query().Get("result_path")
+	if resultPath == "" {
+		writeJSON(http.StatusBadRequest, map[string]interface{}{
+			"msg": "result_path query parameter is required",
+		})
+		return
+	}
+
+	resp, err := node.mixCoord.CommitBackfillResult(req.Context(), &datapb.CommitBackfillResultRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		ResultPath: resultPath,
+	})
+	if err != nil {
+		// Use json.Marshal so an err.Error() containing quotes or control
+		// characters can't break the JSON response envelope.
+		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+			"msg": fmt.Sprintf("failed to commit backfill result, %s", err.Error()),
+		})
+		return
+	}
+	if !merr.Ok(resp.GetStatus()) {
+		// Even on failure we include the per-segment diagnostics so callers can
+		// see which segments tripped pre-validation.
+		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+			"msg":                fmt.Sprintf("failed to commit backfill result, %s", resp.GetStatus().GetReason()),
+			"total_segments":     resp.GetTotalSegments(),
+			"committed_segments": resp.GetCommittedSegments(),
+			"failed_segments":    resp.GetFailedSegments(),
+			"segment_statuses":   resp.GetSegmentStatuses(),
+		})
+		return
+	}
+	writeJSON(http.StatusOK, map[string]interface{}{
+		"msg":                "OK",
+		"total_segments":     resp.GetTotalSegments(),
+		"committed_segments": resp.GetCommittedSegments(),
+		"failed_segments":    resp.GetFailedSegments(),
+		"segment_statuses":   resp.GetSegmentStatuses(),
+	})
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {

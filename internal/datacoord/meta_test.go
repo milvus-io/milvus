@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -2578,6 +2579,248 @@ func TestUpdateManifestVersion(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "/data/segments/1", basePath)
 		assert.Equal(t, int64(5), version)
+	})
+
+	t.Run("rollback rejected - currentVer > incomingVer is a no-op", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Current version = 10. A stale broadcast carrying version = 5 must
+		// not regress the pointer. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but concurrent compaction may have
+		// advanced ManifestPath between pre-check and this apply -- the
+		// operator-level guard is the last line of defense.
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 5)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+
+		// Confirm the stored manifest path was not mutated in the pack.
+		got := pack.Get(1)
+		_, currentVer, err := packed.UnmarshalManifestPath(got.ManifestPath)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), currentVer)
+	})
+}
+
+func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
+	// Helper: build a segment with two pre-existing column groups, where the
+	// first group owns top-level fieldID=100 and child_fields=[200,201], and
+	// the second group owns top-level fieldID=300.
+	newSegmentWithExistingGroups := func() *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   1000,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				DataVersion:    int32(5),
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     100,
+						ChildFields: []int64{200, 201},
+						Binlogs:     []*datapb.Binlog{{LogID: 1}},
+					},
+					{
+						FieldID: 300,
+						Binlogs: []*datapb.Binlog{{LogID: 2}},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("segment not found returns false", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		op := UpdateSegmentColumnGroupsOperator(999, map[int64]*datapb.FieldBinlog{
+			400: {FieldID: 400},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.False(t, op(pack))
+	})
+
+	t.Run("append new group bumps DataVersion", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 100}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		assert.NotNil(t, got)
+		assert.Equal(t, int32(6), got.DataVersion)
+		// Two pre-existing + one new.
+		assert.Len(t, got.Binlogs, 3)
+		var fids []int64
+		for _, fb := range got.Binlogs {
+			fids = append(fids, fb.GetFieldID())
+		}
+		assert.ElementsMatch(t, []int64{100, 300, 400}, fids)
+		// child_fields on 100 untouched because no child collision.
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.ElementsMatch(t, []int64{200, 201}, fb.GetChildFields())
+			}
+		}
+		_, ok := pack.increments[1]
+		assert.True(t, ok)
+	})
+
+	t.Run("strips child fields from existing group", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		// new group 500 owns child 200 which was held by group 100.
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			500: {FieldID: 500, ChildFields: []int64{200}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.ElementsMatch(t, []int64{201}, fb.GetChildFields(),
+					"child 200 should have been stripped from old group")
+			}
+		}
+	})
+
+	t.Run("replace same fieldID in place", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			100: {FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 999, EntriesNum: 7}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		// 100 replaced, 300 preserved => still 2 groups.
+		assert.Len(t, got.Binlogs, 2)
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.Len(t, fb.GetBinlogs(), 1)
+				assert.Equal(t, int64(999), fb.GetBinlogs()[0].GetLogID())
+			}
+		}
+	})
+
+	t.Run("drops empty-children existing group and records DroppedBinlogFieldIDs", func(t *testing.T) {
+		// Pre-existing single-child group (fieldID=100 owns child 200) whose
+		// only child is claimed by a new backfill group (fieldID=200). After
+		// stripping, group 100's ChildFields is empty -- the operator must
+		// drop it from segment.Binlogs AND record 100 in DroppedBinlogFieldIDs
+		// so the catalog removes the orphan etcd KV (without it, listBinlogs'
+		// prefix scan would resurrect the zombie on restart).
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		m.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   1000,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     100,
+						ChildFields: []int64{200}, // single child
+						Binlogs:     []*datapb.Binlog{{LogID: 1}},
+					},
+					{
+						FieldID:     300,
+						ChildFields: []int64{301, 302},
+						Binlogs:     []*datapb.Binlog{{LogID: 2}},
+					},
+				},
+			},
+		})
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			200: {FieldID: 200, ChildFields: []int64{200}, Binlogs: []*datapb.Binlog{{LogID: 99}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		// Group 100 must be gone from in-memory binlogs; 300 (unaffected) plus
+		// new 200 remain.
+		assert.Len(t, got.Binlogs, 2)
+		fids := lo.Map(got.Binlogs, func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() })
+		assert.ElementsMatch(t, []int64{200, 300}, fids)
+
+		// Increment carries the orphan FieldID so AlterSegments can remove
+		// the persisted KV.
+		inc, ok := pack.increments[1]
+		assert.True(t, ok)
+		assert.ElementsMatch(t, []int64{100}, inc.DroppedBinlogFieldIDs)
+	})
+
+	t.Run("DataVersion monotonic across reruns", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		err = m.UpdateSegmentsInfo(context.Background(),
+			UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+				400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 10}}},
+			}),
+		)
+		assert.NoError(t, err)
+		err = m.UpdateSegmentsInfo(context.Background(),
+			UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+				400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 11}}},
+			}),
+		)
+		assert.NoError(t, err)
+
+		got := m.GetHealthySegment(context.Background(), 1)
+		assert.NotNil(t, got)
+		// Started at 5, two bumps => 7.
+		assert.Equal(t, int32(7), got.DataVersion)
 	})
 }
 

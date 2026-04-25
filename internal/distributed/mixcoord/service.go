@@ -1027,6 +1027,10 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 	return s.mixCoord.BatchUpdateManifest(ctx, req)
 }
 
+func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	return s.mixCoord.CommitBackfillResult(ctx, req)
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	return s.mixCoord.ClientHeartbeat(ctx, req)

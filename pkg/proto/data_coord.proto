@@ -117,6 +117,9 @@ service DataCoord {
   rpc UnpinSnapshotData(UnpinSnapshotDataRequest) returns(common.Status){}
   // batch update manifest
   rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
+  // commit backfill result (reads result JSON from object storage and dispatches
+  // V2/V3 segment updates through the broadcaster)
+  rpc CommitBackfillResult(CommitBackfillResultRequest) returns(CommitBackfillResultResponse){}
 
   // External Table Refresh APIs
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
@@ -1658,6 +1661,34 @@ message BatchUpdateManifestRequest {
 message BatchUpdateManifestItem {
   int64 segment_id = 1;
   int64 manifest_version = 2;
+}
+
+// CommitBackfillResultRequest is sent by the proxy management HTTP endpoint to
+// hand off the path of a BackfillResult JSON file on object storage. DataCoord
+// downloads the JSON, classifies each segment entry (V2/V3), and dispatches
+// the resulting operators through the BatchUpdateManifest broadcast pipeline.
+message CommitBackfillResultRequest {
+  common.MsgBase base = 1;
+  // Accepted forms:
+  //   s3a://<bucket>/<key>   (canonical form produced by Spark)
+  //   s3://<bucket>/<key>
+  //   /<key>                 (bucket implied)
+  string result_path = 2;
+}
+
+message CommitBackfillResultSegmentStatus {
+  int64  segment_id = 1;
+  bool   ok         = 2;
+  string reason     = 3;
+  string kind       = 4;  // "v2" | "v3"
+}
+
+message CommitBackfillResultResponse {
+  common.Status status = 1;
+  int32 total_segments     = 2;
+  int32 committed_segments = 3;
+  int32 failed_segments    = 4;
+  repeated CommitBackfillResultSegmentStatus segment_statuses = 5;
 }
 
 message PinSnapshotDataRequest {
