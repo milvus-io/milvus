@@ -89,6 +89,9 @@ void
 SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
+SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
 SegcoreCloseGlog();
 
 int32_t

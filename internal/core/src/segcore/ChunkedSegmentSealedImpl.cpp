@@ -3260,20 +3260,31 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         return ret;
     }
 
+    // Decide once whether to serve this retrieve from column data instead of
+    // the index-backed raw data. The flag is off by default, so short-circuit
+    // before touching HasFieldData — that call takes a shared_lock and would
+    // otherwise be paid on every retrieve regardless of the flag.
+    bool use_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data() &&
+        HasFieldData(field_id);
+
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // === Scalar field ===
-        // Try index first: if scalar index exists and has raw data, read from index
-        PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
-        auto scalar_indexes = PinIndex(op_ctx, field_id);
-        if (!scalar_indexes.empty()) {
-            pin_scalar_index_ptr = std::move(scalar_indexes[0]);
-            if (IndexHasRawData(field_id)) {
-                return ReverseDataFromIndex(
-                    pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
+        if (!use_field_data) {
+            // Try index first: if scalar index exists and has raw data, read from index
+            PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
+            auto scalar_indexes = PinIndex(op_ctx, field_id);
+            if (!scalar_indexes.empty()) {
+                pin_scalar_index_ptr = std::move(scalar_indexes[0]);
+                if (IndexHasRawData(field_id)) {
+                    return ReverseDataFromIndex(pin_scalar_index_ptr.get(),
+                                                seg_offsets,
+                                                count,
+                                                field_meta);
+                }
             }
         }
-        // Fallback to field data
-        auto [field, exist] = GetFieldDataIfExist(field_id);
         return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
@@ -3283,7 +3294,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
     std::unique_ptr<DataArray> vector{nullptr};
     // Try index first: if vector index exists and has raw data, read from index
-    if (IndexHasRawData(field_id)) {
+    if (!use_field_data && IndexHasRawData(field_id)) {
         if (IsVectorArrayDataType(field_meta.get_data_type())) {
             vector =
                 get_emb_list(op_ctx, field_id, field_meta, seg_offsets, count);
@@ -3291,8 +3302,6 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             vector = get_vector(op_ctx, field_id, seg_offsets, count);
         }
     } else {
-        // Fallback to field data
-        auto [field, exist] = GetFieldDataIfExist(field_id);
         vector = get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
@@ -4732,6 +4741,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
              field_binlog_to_load.size(),
              id_);
 
+    // When the flag is on, the loader must keep the column resident alongside
+    // the index so bulk_subscript can serve retrieve from field data.
+    auto prefer_field_data =
+        SegcoreConfig::default_config()
+            .get_prefer_field_data_when_index_has_raw_data();
+
     std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
     for (auto& [field_ids, field_binlog] : field_binlog_to_load) {
         LoadFieldDataInfo load_field_data_info;
@@ -4792,8 +4807,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         }
 
         auto group_id = field_binlog.fieldid();
-        // Skip if this field has an index with raw data
-        if (index_has_raw_data) {
+        // Normally we skip loading field data when the index already carries
+        // raw data, but prefer_field_data_when_index_has_raw_data opts into
+        // keeping both resident so retrieve can read the column directly.
+        if (index_has_raw_data && !prefer_field_data) {
             LOG_INFO(
                 "Skip loading fielddata for segment {} group {} because "
                 "index "
