@@ -127,7 +127,15 @@ def assert_statistic(
             if error_messages:
                 error_details = "; ".join(error_messages)
                 assert_msg += f", unique errors({len(error_messages)}): [{error_details}]"
-            pytest.assume(
-                succ_rate >= succ_rate_threshold and total > 2,
-                assert_msg,
-            )
+            if total == 0:
+                # Checker never completed any operation. This indicates either the checker
+                # thread failed to start or the service was completely unavailable. Treat
+                # it as a real failure rather than silently skipping.
+                pytest.assume(False, f"{str(k)} never completed any operation (total=0)")
+            else:
+                # total >= 1: at least one operation completed, succ_rate is meaningful.
+                # We no longer require total > 2 because low-frequency checkers (e.g.
+                # AddFieldChecker, AddVectorFieldChecker) legitimately complete only a few
+                # operations within a 10-minute window, and succ_rate=1.0 with total=2 is
+                # a valid passing result.
+                pytest.assume(succ_rate >= succ_rate_threshold, assert_msg)
