@@ -265,17 +265,18 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	// Wait for observer to automatically discover the new segment
-	// The background goroutine should detect segment 13 and update NextTarget
+	// Manually trigger update so the observer discovers the new segment immediately
+	// instead of waiting for the background ticker (default interval 10s, which would
+	// make Eventually flaky when timeout < ticker interval).
+	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
+
+	// Verify the observer picked up segment 13 in NextTarget
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
-
-	// Manually trigger update to ensure NextTarget is ready
-	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
-	suite.NoError(err)
 
 	// Simulate nodes loading the new segment 13
 	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
