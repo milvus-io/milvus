@@ -203,7 +203,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// the JSON spec structure (extfs allowlist + format whitelist) at the
 	// RootCoord side as well — defense in depth in case a request bypasses
 	// proxy-side validation.
-	if typeutil.IsExternalCollection(schema) {
+	// Skip validation for empty ExternalSource — IsExternalCollection allows
+	// it (external fields without a concrete source), so the validator must
+	// too. When a source is eventually supplied via alter/refresh, validation
+	// runs there.
+	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
 		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
 			return err
 		}

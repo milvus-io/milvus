@@ -45,21 +45,22 @@ func SampleExternalFieldSizes(
 	externalSource string,
 	externalSpec string,
 	storageConfig *indexpb.StorageConfig,
-	specExtfs map[string]string,
 ) (map[string]int64, error) {
 	if storageConfig == nil {
 		return nil, fmt.Errorf("storageConfig is required for SampleExternalFieldSizes")
 	}
+	if manifestPath == "" {
+		return nil, fmt.Errorf("manifest_path is empty for SampleExternalFieldSizes")
+	}
 
-	// Build properties the same way as explore/manifest calls:
-	// base from StorageConfig + extfs overrides for cross-bucket resolution
-	extfsPrefix := ExtfsPrefixForCollection(collectionID)
-	extfsOverrides := BuildExtfsOverrides(externalSource, storageConfig, extfsPrefix, specExtfs)
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extfsOverrides)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)
 	}
 	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, collectionID, externalSource, externalSpec); err != nil {
+		return nil, fmt.Errorf("inject extfs: %w", err)
+	}
 
 	cManifestPath := C.CString(manifestPath)
 	defer C.free(unsafe.Pointer(cManifestPath))

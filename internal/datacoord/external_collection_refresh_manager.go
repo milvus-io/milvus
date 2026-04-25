@@ -804,6 +804,15 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
 ) ([]*datapb.ExternalFileInfo, string, error) {
+	// Revalidate source+spec at refresh time: etcd is not a trusted boundary,
+	// and validation rules may have tightened since the collection was created.
+	// Empty source is legal (see typeutil.IsExternalCollection); only validate
+	// when both present.
+	if job.GetExternalSource() != "" {
+		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+			return nil, "", fmt.Errorf("external source/spec failed revalidation: %w", err)
+		}
+	}
 	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to parse external spec: %w", err)
@@ -816,11 +825,10 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 
 	columns := packed.GetColumnNamesFromSchema(collInfo.Schema)
 	storageConfig := createStorageConfig()
-	extfsPrefix := packed.ExtfsPrefixForCollection(job.GetCollectionId())
-	specExtfs := spec.BuildExtfsOverrides(extfsPrefix)
-	extfsOverrides := packed.BuildExtfsOverrides(job.GetExternalSource(), storageConfig, extfsPrefix, specExtfs)
-	for k, v := range spec.BuildFormatProperties() {
-		extfsOverrides[k] = v
+	extfs := packed.ExternalSpecContext{
+		CollectionID: job.GetCollectionId(),
+		Source:       job.GetExternalSource(),
+		Spec:         job.GetExternalSpec(),
 	}
 
 	exploreBaseDir := exploreTempDirForJob(job.GetJobId())
@@ -830,7 +838,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		exploreBaseDir,
 		job.GetExternalSource(),
 		storageConfig,
-		extfsOverrides,
+		extfs,
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("ExploreFilesReturnManifestPath failed: %w", err)

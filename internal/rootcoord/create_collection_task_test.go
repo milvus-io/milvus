@@ -914,7 +914,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
-			ExternalSpec:   `{"format":"parquet"}`,
+			ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-west-2","anonymous":"true"}}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",

@@ -238,9 +238,6 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		zap.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		zap.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	extfsPrefix := packed.ExtfsPrefixForCollection(t.req.GetCollectionID())
-	specExtfs := t.parsedSpec.BuildExtfsOverrides(extfsPrefix)
-
 	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
 
 	return packed.FetchFragmentsFromExternalSourceWithRange(
@@ -253,10 +250,9 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		t.req.GetFileIndexEnd(),
 		manifestPath,
 		packed.ExternalFetchOptions{
-			CollectionID:     t.req.GetCollectionID(),
-			SpecExtfs:        specExtfs,
-			FormatProperties: t.parsedSpec.BuildFormatProperties(),
-			RowLimit:         targetRowsPerSegment,
+			CollectionID: t.req.GetCollectionID(),
+			ExternalSpec: t.req.GetExternalSpec(),
+			RowLimit:     targetRowsPerSegment,
 		},
 	)
 }
@@ -579,9 +575,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	segmentAvgBytes := make([]int64, len(works))
 	var fallbackAvg int64
 
-	extfsPrefix := packed.ExtfsPrefixForCollection(t.req.GetCollectionID())
-	specExtfs := t.parsedSpec.BuildExtfsOverrides(extfsPrefix)
-
 	sampleOne := func(manifestPath string) (int64, bool) {
 		fieldSizes, err := packed.SampleExternalFieldSizes(
 			manifestPath, sampleRows,
@@ -589,7 +582,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			t.req.GetExternalSource(),
 			t.req.GetExternalSpec(),
 			t.req.GetStorageConfig(),
-			specExtfs,
 		)
 		if err != nil {
 			log.Warn("failed to sample external field sizes",
