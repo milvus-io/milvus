@@ -22,6 +22,11 @@ import (
 
 // broadcastAlterCollectionForAddField broadcasts the put collection message for add field.
 func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest) error {
+	// Cluster-wide serialization with broadcastAlterCollectionSchema is provided by
+	// the collection resource key lock acquired inside startBroadcastWithAliasOrCollectionLock.
+	// TODO: also run checkSchemaVersionConsistencyAtRootCoord here once the backfill
+	// compaction part (#48809 series) is merged. It is intentionally omitted for now
+	// because enabling the gate before backfill can complete would block E2E tests.
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err

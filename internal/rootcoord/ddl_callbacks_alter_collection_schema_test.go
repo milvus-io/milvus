@@ -18,15 +18,19 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -316,3 +320,190 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
 }
+
+// addVarcharInputField adds a VARCHAR "text_input" field to the given collection so
+// that subsequent AlterCollectionSchema calls in consistency-gate tests can reference
+// it as a BM25 function input. Must be called BEFORE installMixCoordWithStats because
+// the AddCollectionField broadcast also uses the mixCoord.
+func addVarcharInputField(t *testing.T, ctx context.Context, core *Core, dbName, collectionName string) {
+	fieldBytes, err := proto.Marshal(&schemapb.FieldSchema{
+		Name:     "text_input",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "256"},
+		},
+	})
+	require.NoError(t, err)
+	resp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         fieldBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+}
+
+// installMixCoordWithStats replaces the core's mixCoord with a valid mock that returns
+// the given consistency stats from GetCollectionStatistics. All other default
+// expectations are preserved so the broadcast path still works.
+func installMixCoordWithStats(core *Core, stats []*commonpb.KeyValuePair) {
+	mixc := &mocks.MixCoord{}
+	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
+		&milvuspb.ComponentStates{
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+			Status: merr.Success(),
+		}, nil).Maybe()
+	mixc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	mixc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{Status: merr.Success()}, nil).Maybe()
+	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{Status: merr.Success()}, nil).Maybe()
+	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	mixc.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(
+		&datapb.GetCollectionStatisticsResponse{
+			Status: merr.Success(),
+			Stats:  stats,
+		}, nil).Maybe()
+	core.mixCoord = mixc
+}
+
+// TestDDLCallbacksBroadcastAlterCollectionSchemaConsistencyGate verifies the
+// schema-version consistency re-check added at RootCoord. Cluster-wide mutual
+// exclusion between schema-change DDLs is provided by the existing collection
+// resource key lock in startBroadcastWithAliasOrCollectionLock — this gate only
+// adds the "wait for previous backfill to complete" check on top of it.
+func TestDDLCallbacksBroadcastAlterCollectionSchemaConsistencyGate(t *testing.T) {
+	t.Run("rejects when consistent_count < total_count", func(t *testing.T) {
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+		installMixCoordWithStats(core, []*commonpb.KeyValuePair{
+			{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
+			{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+		})
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_inc", "bm25_inc", false))
+		require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "schema version consistency check failed")
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "retry after backfill completes")
+	})
+
+	t.Run("passes when consistent_count == total_count", func(t *testing.T) {
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+		addVarcharInputField(t, ctx, core, dbName, collectionName)
+
+		installMixCoordWithStats(core, []*commonpb.KeyValuePair{
+			{Key: common.SchemaVersionConsistentSegmentsKey, Value: "10"},
+			{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+		})
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_ok", "bm25_ok", false))
+		require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	})
+
+	t.Run("absent keys treated as trivially consistent", func(t *testing.T) {
+		// Both keys absent → schema version has never been bumped, no backfill
+		// can be in progress, so the gate must pass.
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+		addVarcharInputField(t, ctx, core, dbName, collectionName)
+
+		installMixCoordWithStats(core, nil)
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_noop", "bm25_noop", false))
+		require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	})
+
+	t.Run("invalid consistent_segments value is rejected", func(t *testing.T) {
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+		installMixCoordWithStats(core, []*commonpb.KeyValuePair{
+			{Key: common.SchemaVersionConsistentSegmentsKey, Value: "not-a-number"},
+			{Key: common.SchemaVersionTotalSegmentsKey, Value: "10"},
+		})
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_bad", "bm25_bad", false))
+		require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "invalid schema_version_consistent_segments value")
+	})
+
+	t.Run("only one of two stat keys present is treated as corruption", func(t *testing.T) {
+		// Defensive branch: DataCoord is supposed to emit both keys atomically.
+		// If only one is present, treat as a data-corruption signal and block the DDL.
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+		installMixCoordWithStats(core, []*commonpb.KeyValuePair{
+			{Key: common.SchemaVersionConsistentSegmentsKey, Value: "5"},
+			// SchemaVersionTotalSegmentsKey intentionally omitted
+		})
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_half", "bm25_half", false))
+		require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "incomplete schema version consistency stats")
+	})
+
+	t.Run("DataCoord RPC failure is surfaced", func(t *testing.T) {
+		core := initStreamingSystemAndCore(t)
+
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+		// Install a mock whose GetCollectionStatistics returns an error. Other
+		// methods need default expectations so the broadcast path still works
+		// up to the gate.
+		mixc := &mocks.MixCoord{}
+		mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
+			&milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				Status: merr.Success(),
+			}, nil).Maybe()
+		mixc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+		mixc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+		mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(&datapb.WatchChannelsResponse{Status: merr.Success()}, nil).Maybe()
+		mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(&datapb.FlushResponse{Status: merr.Success()}, nil).Maybe()
+		mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+		mixc.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(
+			nil, errors.New("mock datacoord error"),
+		).Maybe()
+		core.mixCoord = mixc
+
+		resp, err := core.AlterCollectionSchema(ctx,
+			buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_rpcerr", "bm25_rpcerr", false))
+		require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	})
+
+	// NOTE: AddCollectionField does NOT yet run the consistency gate (it's deferred
+	// until the backfill compaction series is merged — enabling the gate before
+	// backfill can complete would block E2E tests). See the TODO in
+	// broadcastAlterCollectionForAddField. A test for that path will be added
+	// together with the call itself in the follow-up PR.
+}
+
