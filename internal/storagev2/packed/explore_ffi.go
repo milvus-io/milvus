@@ -73,7 +73,7 @@ func GetFileInfo(
 	format string,
 	filePath string,
 	storageConfig *indexpb.StorageConfig,
-	extraKVs map[string]string,
+	extfs ExternalSpecContext,
 ) (*FileInfo, error) {
 	cFormat := C.CString(format)
 	defer C.free(unsafe.Pointer(cFormat))
@@ -81,11 +81,14 @@ func GetFileInfo(
 	cFilePath := C.CString(filePath)
 	defer C.free(unsafe.Pointer(cFilePath))
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extraKVs)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)
 	}
 	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, fmt.Errorf("inject extfs: %w", err)
+	}
 
 	var numRows C.uint64_t
 
@@ -112,7 +115,7 @@ func ExploreFilesReturnManifestPath(
 	baseDir string,
 	exploreDir string,
 	storageConfig *indexpb.StorageConfig,
-	extraKVs map[string]string,
+	extfs ExternalSpecContext,
 ) ([]FileInfo, string, error) {
 	cColumns := make([]*C.char, len(columns))
 	for i, col := range columns {
@@ -131,11 +134,14 @@ func ExploreFilesReturnManifestPath(
 	cExploreDir := C.CString(exploreDir)
 	defer C.free(unsafe.Pointer(cExploreDir))
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extraKVs)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create properties: %w", err)
 	}
 	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, "", fmt.Errorf("inject extfs: %w", err)
+	}
 
 	var numFiles C.uint64_t
 	var outColumnGroupsPath *C.char

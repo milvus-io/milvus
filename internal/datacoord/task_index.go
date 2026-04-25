@@ -303,7 +303,9 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
-	// Create the job request
+	// Create the job request.
+	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
+	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	req := &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(it.chunkManager.RootPath(), common.SegmentIndexPath),

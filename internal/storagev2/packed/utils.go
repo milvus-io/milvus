@@ -88,9 +88,8 @@ func SplitFileToFragments(
 // ExternalFetchOptions groups per-collection external table parameters
 // to keep function signatures clean.
 type ExternalFetchOptions struct {
-	CollectionID     int64
-	SpecExtfs        map[string]string // extfs overrides from ExternalSpec (already prefix-keyed)
-	FormatProperties map[string]string // format-specific properties (e.g., "iceberg.snapshot_id")
+	CollectionID int64
+	ExternalSpec string // raw external_spec JSON (C++ derives extfs + format props)
 	// RowLimit caps rows per fragment when splitting large files. Zero (or
 	// negative) falls back to DefaultFragmentRowLimit.
 	RowLimit int64
@@ -118,7 +117,7 @@ func fetchRowCountsConcurrently(
 	format string,
 	fileInfos []FileInfo,
 	storageConfig *indexpb.StorageConfig,
-	extfsOverrides map[string]string,
+	extfs ExternalSpecContext,
 ) ([]int64, error) {
 	rowCounts := make([]int64, len(fileInfos))
 	needInfo := make([]int, 0, len(fileInfos))
@@ -146,7 +145,7 @@ func fetchRowCountsConcurrently(
 	for k, idx := range needInfo {
 		idx := idx
 		futures[k] = pool.Submit(func() (struct{}, error) {
-			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfsOverrides)
+			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
 			if err != nil {
 				return struct{}{}, fmt.Errorf("failed to get file info for %s: %w", fileInfos[idx].FilePath, err)
 			}
@@ -188,10 +187,10 @@ func FetchFragmentsFromExternalSourceWithRange(
 		return nil, fmt.Errorf("explore manifest path is required")
 	}
 
-	extfsPrefix := ExtfsPrefixForCollection(opts.CollectionID)
-	extfsOverrides := BuildExtfsOverrides(externalSource, storageConfig, extfsPrefix, opts.SpecExtfs)
-	for k, v := range opts.FormatProperties {
-		extfsOverrides[k] = v
+	extfs := ExternalSpecContext{
+		CollectionID: opts.CollectionID,
+		Source:       externalSource,
+		Spec:         opts.ExternalSpec,
 	}
 
 	exploreStart := time.Now()
@@ -217,7 +216,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	getFileInfoStart := time.Now()
-	rowCounts, err := fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfsOverrides)
+	rowCounts, err := fetchRowCountsConcurrently(ctx, format, fileInfos, storageConfig, extfs)
 	if err != nil {
 		return nil, err
 	}

@@ -805,25 +805,6 @@ func (s *RefreshExternalCollectionTaskSuite) TestParseExternalSpec_ExtfsBooleanV
 	s.NoError(err)
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestExternalSpec_BuildExtfsOverrides() {
-	spec := &externalspec.ExternalSpec{
-		Format: "parquet",
-		Extfs:  map[string]string{"region": "us-west-2", "use_iam": "true"},
-	}
-	overrides := spec.BuildExtfsOverrides("extfs.99.")
-	s.Equal("us-west-2", overrides["extfs.99.region"])
-	s.Equal("true", overrides["extfs.99.use_iam"])
-	s.Len(overrides, 2)
-
-	// Empty extfs returns nil
-	spec2 := &externalspec.ExternalSpec{Format: "parquet"}
-	s.Nil(spec2.BuildExtfsOverrides("extfs.99."))
-
-	// Nil extfs returns nil
-	spec3 := &externalspec.ExternalSpec{Format: "parquet", Extfs: map[string]string{}}
-	s.Nil(spec3.BuildExtfsOverrides("extfs.99."))
-}
-
 func (s *RefreshExternalCollectionTaskSuite) TestFragmentKey() {
 	f1 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000}
 	f2 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 1000, EndRow: 2000}
@@ -1020,25 +1001,6 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_CtxC
 	s.ErrorIs(err, context.Canceled)
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestExternalSpec_BuildFormatProperties() {
-	// Non-iceberg format returns empty map
-	spec := &externalspec.ExternalSpec{Format: "parquet"}
-	props := spec.BuildFormatProperties()
-	s.Empty(props)
-
-	// Iceberg-table without snapshot ID returns empty
-	spec2 := &externalspec.ExternalSpec{Format: "iceberg-table"}
-	props2 := spec2.BuildFormatProperties()
-	s.Empty(props2)
-
-	// Iceberg-table with snapshot ID sets the property
-	snapID := int64(42)
-	spec3 := &externalspec.ExternalSpec{Format: "iceberg-table", SnapshotID: &snapID}
-	props3 := spec3.BuildFormatProperties()
-	s.Equal("42", props3["iceberg.snapshot_id"])
-	s.Len(props3, 1)
-}
-
 func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -1187,7 +1149,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	var callCount int32
 	perCallSizes := []int64{50, 100, 200}
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			idx := int(atomic.AddInt32(&callCount, 1)) - 1
 			if idx >= len(perCallSizes) {
 				idx = len(perCallSizes) - 1
@@ -1256,7 +1218,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerS
 	// not the third (250), since fallbackAvg latches on the first success.
 	var callCount int32
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			idx := int(atomic.AddInt32(&callCount, 1)) - 1
 			switch idx {
 			case 0:
@@ -1617,7 +1579,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
-	// Parse the spec so BuildExtfsOverrides works correctly
+	// Parse the spec so the balance path has an in-memory struct to work with.
 	parsed, err := externalspec.ParseExternalSpec(req.GetExternalSpec())
 	s.Require().NoError(err)
 	task.parsedSpec = parsed
@@ -1629,11 +1591,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 	defer m1.UnPatch()
 
 	var capturedStorageConfig *indexpb.StorageConfig
-	var capturedSpecExtfs map[string]string
+	var capturedExternalSpec string
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			capturedStorageConfig = storageConfig
-			capturedSpecExtfs = specExtfs
+			capturedExternalSpec = externalSpec
 			return map[string]int64{"vec_col": 3072}, nil
 		}).Build()
 	defer m2.UnPatch()
@@ -1652,12 +1614,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Pass
 	s.Equal(expectedStorageConfig.GetBucketName(), capturedStorageConfig.GetBucketName())
 	s.Equal(expectedStorageConfig.GetStorageType(), capturedStorageConfig.GetStorageType())
 
-	// Verify specExtfs contains the extfs overrides from ExternalSpec
-	s.NotNil(capturedSpecExtfs, "specExtfs must be passed to SampleExternalFieldSizes")
-	extfsPrefix := packed.ExtfsPrefixForCollection(s.collectionID)
-	s.Equal("us-west-2", capturedSpecExtfs[extfsPrefix+"region"])
-	s.Equal("true", capturedSpecExtfs[extfsPrefix+"use_ssl"])
-	s.Equal("aws", capturedSpecExtfs[extfsPrefix+"cloud_provider"])
+	// Verify raw externalSpec JSON is forwarded so C++ InjectExternalSpecProperties
+	// can derive extfs.* overrides.
+	s.Equal(req.GetExternalSpec(), capturedExternalSpec)
 }
 
 // TestBalanceFragmentsToSegments_NilSpecExtfsWhenNoExtfsInSpec verifies that
@@ -1694,11 +1653,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 	defer m1.UnPatch()
 
 	var capturedStorageConfig *indexpb.StorageConfig
-	var capturedSpecExtfs map[string]string
+	var capturedExternalSpec string
 	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
-		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig) (map[string]int64, error) {
 			capturedStorageConfig = storageConfig
-			capturedSpecExtfs = specExtfs
+			capturedExternalSpec = externalSpec
 			return map[string]int64{"text_col": 64}, nil
 		}).Build()
 	defer m2.UnPatch()
@@ -1715,12 +1674,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 	s.NotNil(capturedStorageConfig)
 	s.Equal("local", capturedStorageConfig.GetStorageType())
 
-	// No extfs overrides — specExtfs should be empty (no extfs.* keys)
-	extfsPrefix := packed.ExtfsPrefixForCollection(s.collectionID)
-	for k := range capturedSpecExtfs {
-		s.Falsef(len(k) > len(extfsPrefix) && k[:len(extfsPrefix)] == extfsPrefix,
-			"unexpected extfs key in specExtfs: %s", k)
-	}
+	// Same-bucket: externalSpec has no extfs → C++ inject is a no-op.
+	s.Equal(req.GetExternalSpec(), capturedExternalSpec)
 }
 
 func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
