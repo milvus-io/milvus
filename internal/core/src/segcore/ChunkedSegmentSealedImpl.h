@@ -266,7 +266,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
-         milvus::OpContext* op_ctx = nullptr) override;
+         milvus::OpContext* op_ctx) override;
 
     void
     LoadManifest(const std::string& manifest_path);
@@ -1254,6 +1254,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   SegmentLoadInfo& segment_load_info,
                   LoadDiff& load_diff);
 
+    // Atomically records that a text index has been created for `field_id` in
+    // the published segment_load_info_. Uses a CAS loop so it is safe whether
+    // or not the caller holds reopen_mutex_ (tests call CreateTextIndex
+    // directly, outside a Reopen/Load chain).
+    void
+    RecordTextIndexCreated(FieldId field_id);
+
     void
     load_field_data_common(
         FieldId field_id,
@@ -1328,14 +1335,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Test-only: set use_take_for_output flag.
     void
     SetUseTakeForOutputForTesting(bool val) {
-        use_take_for_output_ = val;
+        use_take_for_output_.store(val, std::memory_order_relaxed);
     }
 
-    // Test-only: direct access to segment_load_info_ for asserting Reopen
+    // Test-only: snapshot access to segment_load_info_ for asserting Reopen
     // preserves runtime-only state (e.g. created_text_indexes_).
-    SegmentLoadInfo&
+    std::shared_ptr<const SegmentLoadInfo>
     TestGetSegmentLoadInfo() {
-        return segment_load_info_;
+        return std::atomic_load(&segment_load_info_);
+    }
+
+    // Test-only: stamp a field as having had its text index created, via the
+    // same COW path production uses. Simulates a prior CreateTextIndex.
+    void
+    TestRecordTextIndexCreated(FieldId field_id) {
+        RecordTextIndexCreated(field_id);
     }
 #endif
 
@@ -1386,7 +1400,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     LoadFieldDataInfo field_data_info_;
 
-    SegmentLoadInfo segment_load_info_;
+    // Load-info snapshot. Readers MUST use std::atomic_load(&segment_load_info_)
+    // to obtain a shared_ptr snapshot; writers MUST publish via
+    // std::atomic_store(&segment_load_info_, …). The pointee is const —
+    // mutations go through copy-on-write (see RecordTextIndexCreated and the
+    // Reopen/SetLoadInfo/Load entry points).
+    std::shared_ptr<const SegmentLoadInfo> segment_load_info_;
+
+    // Serializes top-level writers of segment_load_info_
+    // (Reopen(pb), SetLoadInfo, Load) so their diff → publish → ApplyLoadDiff
+    // sequences never interleave. Does NOT block readers — reader paths access
+    // segment_load_info_ via atomic_load.
+    // Lock order: reopen_mutex_ → mutex_ (outer → inner) only. Never inverse,
+    // and reader paths that take mutex_ must not take reopen_mutex_.
+    std::mutex reopen_mutex_;
 
     SchemaPtr schema_;
     int64_t id_;
@@ -1408,7 +1435,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool is_sorted_by_pk_ = false;
 
     // When true, use take() API for output field retrieval from external storage.
-    bool use_take_for_output_{false};
+    // Published alongside segment_load_info_ by the writer entry points; read
+    // lock-free on query hot paths.
+    std::atomic<bool> use_take_for_output_{false};
 
     // milvus storage internal api reader instance (NOT thread-safe).
     // Load-time access (get_chunk_reader, SetReader) is safe: single-threaded,
