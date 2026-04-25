@@ -248,6 +248,101 @@ func (suite *ReduceSuite) TestReduceInvalid() {
 	suite.Error(err)
 }
 
+// buildSearchResult runs a small search against suite.segment and returns the
+// request and its result, used by reduce-related tests.
+func (suite *ReduceSuite) buildSearchResult(nq int64) (*segcore.SearchRequest, *segcore.SearchResult) {
+	vec := testutils.GenerateFloatVectors(1, mock_segcore.DefaultDim)
+	var searchRawData []byte
+	for i, ele := range vec {
+		buf := make([]byte, 4)
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
+		searchRawData = append(searchRawData, buf...)
+	}
+	placeholderValue := commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   commonpb.PlaceholderType_FloatVector,
+		Values: [][]byte{},
+	}
+	for i := 0; i < int(nq); i++ {
+		placeholderValue.Values = append(placeholderValue.Values, searchRawData)
+	}
+	placeholderGroup := commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{&placeholderValue},
+	}
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	suite.Require().NoError(err)
+
+	planStr := `vector_anns: <
+                 field_id: 107
+                 query_info: <
+                   topk: 10
+                   round_decimal: 6
+                   metric_type: "L2"
+                   search_params: "{\"nprobe\": 10}"
+                 >
+                 placeholder_tag: "$0"
+               >`
+	var planNode planpb.PlanNode
+	suite.Require().NoError(prototext.Unmarshal([]byte(planStr), &planNode))
+	serializedPlan, err := proto.Marshal(&planNode)
+	suite.Require().NoError(err)
+	searchReq, err := segcore.NewSearchRequest(suite.collection, &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			SerializedExprPlan: serializedPlan,
+			MvccTimestamp:      typeutil.MaxTimestamp,
+		},
+	}, placeGroupByte)
+	suite.Require().NoError(err)
+
+	searchResult, err := suite.segment.Search(context.Background(), searchReq)
+	suite.Require().NoError(err)
+	return searchReq, searchResult
+}
+
+func (suite *ReduceSuite) TestReduceAsyncSuccess() {
+	nq := int64(10)
+	searchReq, searchResult := suite.buildSearchResult(nq)
+	defer searchReq.Delete()
+
+	blobs, err := segcore.ReduceSearchResultsAndFillData(
+		context.Background(),
+		searchReq.Plan(),
+		searchReq.PlaceholderGroup(),
+		[]*segcore.SearchResult{searchResult},
+		1,
+		[]int64{nq},
+		[]int64{searchReq.Plan().GetTopK()},
+	)
+	suite.NoError(err)
+	suite.NotNil(blobs)
+	segcore.DeleteSearchResultDataBlobs(blobs)
+}
+
+func (suite *ReduceSuite) TestReduceAsyncPreCancelled() {
+	nq := int64(10)
+	searchReq, searchResult := suite.buildSearchResult(nq)
+	defer searchReq.Delete()
+
+	// Context is already canceled when ReduceSearchResultsAndFillData is
+	// entered, so the early ctx.Err() check returns without dispatching to
+	// cgo.Async. This exercises the pre-dispatch bail-out path.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	blobs, err := segcore.ReduceSearchResultsAndFillData(
+		ctx,
+		searchReq.Plan(),
+		searchReq.PlaceholderGroup(),
+		[]*segcore.SearchResult{searchResult},
+		1,
+		[]int64{nq},
+		[]int64{searchReq.Plan().GetTopK()},
+	)
+	suite.Error(err)
+	suite.ErrorIs(err, context.Canceled)
+	suite.Nil(blobs)
+}
+
 func TestReduce(t *testing.T) {
 	suite.Run(t, new(ReduceSuite))
 }
