@@ -223,7 +223,7 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 			}
 			logger.Info("append flush message for segments that not created by streaming service into wal", zap.Stringer("msgID", appendResult.MessageID), zap.Uint64("timeTick", appendResult.TimeTick))
 			return nil
-		}, retry.AttemptAlways()); err != nil {
+		}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true })); err != nil {
 			return nil, err
 		}
 	}
@@ -233,7 +233,7 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 		var err error
 		ds, err = impl.buildDataSyncService(ctx, recoverInfo)
 		return err
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 	if err != nil {
 		return nil, err
 	}
