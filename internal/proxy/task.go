@@ -1054,7 +1054,26 @@ func (t *truncateCollectionTask) OnEnqueue() error {
 }
 
 func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
-	return validateCollectionName(t.CollectionName)
+	if err := validateCollectionName(t.CollectionName); err != nil {
+		return err
+	}
+	// Truncate is a destructive op on internal segments. External collections
+	// have no internal data to truncate — their authoritative data lives in
+	// the user's object store and is materialized by RefreshExternalCollection.
+	// Allowing truncate would either no-op silently (misleading) or wipe the
+	// generated segment metadata while leaving the external source intact,
+	// putting the collection in an inconsistent state from which the next
+	// load/search would fail. Reject up front; users who want to reset the
+	// view should use RefreshExternalCollection or DropCollection.
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	if typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"truncate is not supported on external collections; use RefreshExternalCollection to refresh the data view, or DropCollection to remove it")
+	}
+	return nil
 }
 
 func (t *truncateCollectionTask) Execute(ctx context.Context) error {

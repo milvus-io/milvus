@@ -3584,18 +3584,67 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_truncateCollectionTask_PreExecute(t *testing.T) {
-	tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
-		Base:           &commonpb.MsgBase{},
-		CollectionName: "valid",
-	}}
+	mix := NewMixCoordMock()
 	ctx := context.Background()
-	err := tct.PreExecute(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, InitMetaCache(ctx, mix))
 
-	// Test invalid collection name
-	tct.CollectionName = "#0xc0de"
-	err = tct.PreExecute(ctx)
-	assert.Error(t, err)
+	dbName := ""
+	regularName := "regular_truncate_" + funcutil.GenRandomStr()
+	externalName := "ext_truncate_" + funcutil.GenRandomStr()
+
+	regularSchema := constructCollectionSchema("pk", "fvec", 4, regularName)
+	regBytes, err := proto.Marshal(regularSchema)
+	require.NoError(t, err)
+	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName: dbName, CollectionName: regularName, Schema: regBytes, ShardsNum: 1,
+	})
+	require.NoError(t, err)
+
+	extSchema := &schemapb.CollectionSchema{
+		Name:           externalName,
+		ExternalSource: "s3://bucket/path/",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+	}
+	extBytes, err := proto.Marshal(extSchema)
+	require.NoError(t, err)
+	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName: dbName, CollectionName: externalName, Schema: extBytes, ShardsNum: 1,
+	})
+	require.NoError(t, err)
+
+	t.Run("regular collection passes", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: regularName,
+		}}
+		assert.NoError(t, tct.PreExecute(ctx))
+	})
+
+	t.Run("invalid collection name rejected", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, CollectionName: "#0xc0de",
+		}}
+		assert.Error(t, tct.PreExecute(ctx))
+	})
+
+	// Truncate is destructive on internal segments and meaningless for
+	// external collections (data lives in user object store). Reject up
+	// front to prevent silent no-op or inconsistent meta state.
+	t.Run("external collection rejected", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: externalName,
+		}}
+		err := tct.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "external collection")
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
 }
 
 func Test_truncateCollectionTask_Execute(t *testing.T) {
