@@ -101,7 +101,7 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 		}
 		logger.Info("alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
 		return nil
-	}, retry.AttemptAlways())
+	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
 }
 
 func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {

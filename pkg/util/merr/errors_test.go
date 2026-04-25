@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ErrSuite struct {
@@ -34,7 +33,6 @@ type ErrSuite struct {
 }
 
 func (s *ErrSuite) SetupSuite() {
-	paramtable.Init()
 }
 
 func (s *ErrSuite) TestCode() {
@@ -104,7 +102,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrResourceGroupReachLimit("test_ResourceGroup", 1, "failed to get ResourceGroup"), ErrResourceGroupReachLimit)
 	s.ErrorIs(WrapErrResourceGroupIllegalConfig("test_ResourceGroup", nil, "failed to get ResourceGroup"), ErrResourceGroupIllegalConfig)
 	s.ErrorIs(WrapErrResourceGroupNodeNotEnough("test_ResourceGroup", 1, 2, "failed to get ResourceGroup"), ErrResourceGroupNodeNotEnough)
-	s.ErrorIs(WrapErrResourceGroupServiceAvailable("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupServiceAvailable)
+	s.ErrorIs(WrapErrResourceGroupServiceUnAvailable("test_ResourceGroup", "failed to get ResourceGroup"), ErrResourceGroupServiceUnAvailable)
 
 	// Replica related
 	s.ErrorIs(WrapErrReplicaNotFound(1, "failed to get replica"), ErrReplicaNotFound)
@@ -224,7 +222,7 @@ func (s *ErrSuite) TestIsHealthy() {
 	}
 	for _, tc := range cases {
 		s.Run(tc.code.String(), func() {
-			s.Equal(tc.expect, IsHealthy(tc.code) == nil)
+			s.Equal(tc.expect, CheckHealthy(tc.code) == nil)
 		})
 	}
 }
@@ -274,4 +272,75 @@ func TestNewIOErrors(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	suite.Run(t, new(ErrSuite))
+}
+
+// TestWrapErrPreservesInnerChain locks in the contract that WrapErr*Err helpers
+// keep the inner error chain reachable via errors.Is while still attributing
+// the milvus sentinel for code lookup. Regression guard against the previous
+// implementation that string-flattened the inner error and lost its identity.
+func TestWrapErrPreservesInnerChain(t *testing.T) {
+	inner := errors.New("inner-error")
+
+	for _, tc := range []struct {
+		name     string
+		wrap     func() error
+		sentinel error
+		other    error
+		code     int32
+	}{
+		{
+			name:     "ServiceInternal",
+			wrap:     func() error { return WrapErrServiceInternalErr(inner, "ctx %s", "test") },
+			sentinel: ErrServiceInternal,
+			other:    ErrParameterInvalid,
+			code:     ErrServiceInternal.errCode,
+		},
+		{
+			name:     "ParameterInvalid",
+			wrap:     func() error { return WrapErrParameterInvalidErr(inner, "ctx %d", 42) },
+			sentinel: ErrParameterInvalid,
+			other:    ErrServiceInternal,
+			code:     ErrParameterInvalid.errCode,
+		},
+		{
+			name:     "MqInternal",
+			wrap:     func() error { return WrapErrMqInternal(inner, "step1", "step2") },
+			sentinel: ErrMqInternal,
+			other:    ErrServiceInternal,
+			code:     ErrMqInternal.errCode,
+		},
+		{
+			name:     "BuildCompactionRequestFail",
+			wrap:     func() error { return WrapErrBuildCompactionRequestFail(inner) },
+			sentinel: ErrBuildCompactionRequestFail,
+			other:    ErrServiceInternal,
+			code:     ErrBuildCompactionRequestFail.errCode,
+		},
+		{
+			name:     "GetCompactionPlanResultFail",
+			wrap:     func() error { return WrapErrGetCompactionPlanResultFail(inner) },
+			sentinel: ErrGetCompactionPlanResultFail,
+			other:    ErrServiceInternal,
+			code:     ErrGetCompactionPlanResultFail.errCode,
+		},
+		{
+			name:     "OperationNotSupported",
+			wrap:     func() error { return WrapErrOperationNotSupported(inner, "op %s", "drop") },
+			sentinel: ErrOperationNotSupported,
+			other:    ErrServiceInternal,
+			code:     ErrOperationNotSupported.errCode,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tc.wrap()
+			assert.True(t, errors.Is(w, tc.sentinel), "must match its sentinel")
+			assert.True(t, errors.Is(w, inner), "must preserve inner chain")
+			assert.False(t, errors.Is(w, tc.other), "must not match unrelated sentinel")
+			assert.Equal(t, tc.code, Code(w), "Code() must report sentinel's code")
+			assert.Contains(t, w.Error(), inner.Error(), "message must include inner")
+		})
+	}
+
+	// nil err falls back to the Msg variant; just make sure that still works.
+	assert.True(t, errors.Is(WrapErrServiceInternalErr(nil, "no underlying err"), ErrServiceInternal))
 }
