@@ -71,6 +71,13 @@ BINARY_DIM = 64  # must be a multiple of 8
 DEFAULT_NB = 200
 REFRESH_TIMEOUT = 180
 
+# Multi-file format coverage: each format E2E writes FORMAT_NUM_FILES sibling
+# data files (or fragments / appended snapshots), each carrying
+# FORMAT_ROWS_PER_FILE rows, exercising the multi-file refresh path.
+FORMAT_NUM_FILES = 3
+FORMAT_ROWS_PER_FILE = 3000
+FORMAT_TOTAL_ROWS = FORMAT_NUM_FILES * FORMAT_ROWS_PER_FILE
+
 
 def _env(key, default):
     return os.environ.get(key, default)
@@ -288,6 +295,234 @@ def gen_multi_vector_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
     return buf.getvalue()
 
 
+def gen_timestamptz_parquet_bytes(num_rows, start_id, dim=TEST_DIM, ts_unit="us"):
+    """Parquet with id + ts (arrow timestamp) + embedding.
+
+    Milvus reads Timestamptz as int64 microseconds; the arrow timestamp column
+    is normalized to int64 by NormalizeExternalArrow on the load path.
+    """
+    ids = list(range(start_id, start_id + num_rows))
+    vectors = _float_vectors(ids, dim)
+    base = 1_700_000_000
+    if ts_unit == "us":
+        ts_vals = [(base + i) * 1_000_000 for i in ids]
+    elif ts_unit == "ms":
+        ts_vals = [(base + i) * 1_000 for i in ids]
+    else:
+        ts_vals = [base + i for i in ids]
+    table = pa.table({
+        "id":        pa.array(ids, type=pa.int64()),
+        "ts":        pa.array(ts_vals, type=pa.timestamp(ts_unit)),
+        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+    })
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
+def gen_all_null_columns_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
+    """Parquet where every user scalar column is entirely null.
+
+    External collections force user fields to nullable=true (schema.go:2350).
+    A column with no non-null values exercises that path: arrow reads back
+    ListArray with null_count == num_rows, and Milvus must surface those
+    nulls without crashing the segment writer.
+    """
+    ids = list(range(start_id, start_id + num_rows))
+    vectors = _float_vectors(ids, dim)
+    table = pa.table({
+        "id":          pa.array(ids, type=pa.int64()),
+        "n_int":       pa.array([None] * num_rows, type=pa.int32()),
+        "n_float":     pa.array([None] * num_rows, type=pa.float32()),
+        "n_varchar":   pa.array([None] * num_rows, type=pa.string()),
+        "n_json":      pa.array([None] * num_rows, type=pa.string()),
+        "embedding":   pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+    })
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
+def gen_large_parquet_with_row_groups(num_rows, start_id, row_group_size, dim=TEST_DIM):
+    """Generate a single large parquet file with explicit row_group_size.
+
+    Forces parquet to split internally into multiple row groups so the
+    Milvus reader exercises the multi-row-group path. The same file may
+    also be split into multiple Milvus segments by the loon FFI layer
+    when num_rows exceeds the segment-size threshold.
+    """
+    ids = list(range(start_id, start_id + num_rows))
+    vectors = _float_vectors(ids, dim)
+    table = pa.table({
+        "id":        pa.array(ids, type=pa.int64()),
+        "value":     pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+    })
+    buf = io.BytesIO()
+    pq.write_table(
+        table, buf,
+        compression=_PARQUET_COMPRESSION,
+        row_group_size=row_group_size,
+    )
+    return buf.getvalue()
+
+
+# ============================================================
+# Full-matrix schema (DataType × Index)
+# ============================================================
+# A single collection schema covering every supported scalar + vector
+# DataType, with same-dtype duplicates wired to different index types.
+# Each entry is (milvus_field_name, milvus_DataType, index_type, index_metric,
+#                index_params, ext_field_name, arrow_writer_type, value_fn,
+#                add_field_extra). Vector entries treat dim/element_type via
+#                add_field_extra rather than a value_fn.
+#
+# The same field list is consumed by both the parquet/lance arrow-table
+# generator and the iceberg multi-column writer (vector columns degrade to
+# raw binary blobs in iceberg because Iceberg has no fixed-size-list).
+
+FULL_MATRIX_SCALAR_FIELDS = [
+    # (field_name, DataType,           pa type,            milvus add_field extras, value_fn)
+    ("b_inv",     DataType.BOOL,       pa.bool_(),         {},                    lambda i: i % 2 == 0),
+    ("i8_bmp",    DataType.INT8,       pa.int8(),          {},                    lambda i: i % 100),
+    ("i16_inv",   DataType.INT16,      pa.int16(),         {},                    lambda i: (i * 3) % 32000),
+    ("i32_stl",   DataType.INT32,      pa.int32(),         {},                    lambda i: i * 7),
+    ("i64_inv",   DataType.INT64,      pa.int64(),         {},                    lambda i: i * 1000),
+    ("f_inv",     DataType.FLOAT,      pa.float32(),       {},                    lambda i: float(i) * 1.5),
+    ("d_inv",     DataType.DOUBLE,     pa.float64(),       {},                    lambda i: float(i) * 2.5),
+    ("vc_trie",   DataType.VARCHAR,    pa.string(),        {"max_length": 64},    lambda i: f"s_{i:05d}"),
+    ("j",         DataType.JSON,       pa.string(),        {},                    lambda i: json.dumps({"k": i, "g": i % 3})),
+    ("ts",        DataType.TIMESTAMPTZ, pa.timestamp("us"), {},                   lambda i: (1_700_000_000 + i) * 1_000_000),
+]
+
+# Scalar indexes wired per field. None means no scalar index built.
+FULL_MATRIX_SCALAR_INDEXES = {
+    "b_inv":   "INVERTED",
+    "i8_bmp":  "BITMAP",
+    "i16_inv": "INVERTED",
+    "i32_stl": "STL_SORT",
+    "i64_inv": "INVERTED",
+    "f_inv":   "INVERTED",
+    "d_inv":   "INVERTED",
+    "vc_trie": "TRIE",
+    # j (JSON) and ts (Timestamptz) are stored without scalar index.
+}
+
+FULL_MATRIX_ARRAY_FIELD = ("arr_int", DataType.INT64, lambda i: [i, i + 1, i + 2])
+
+# A fixed POINT(0 0) WKB blob — sufficient to verify Geometry round-trip.
+# WKB: byte order (1=little-endian) | uint32 type(1=POINT) | float64 x | float64 y
+_GEOMETRY_WKB = (
+    b"\x01\x01\x00\x00\x00"
+    + b"\x00" * 8  # x = 0.0
+    + b"\x00" * 8  # y = 0.0
+)
+
+# Full-matrix vectors use a production-realistic dim (128) rather than
+# TEST_DIM=8. Reason: the auto-tuned IVF_FLAT_CC config Milvus picks for
+# AUTOINDEX (nlist=128, sub_dim=4) on dim=8 is degenerate and triggers a
+# native SIGSEGV in the querynode load path on master-20260424-5409a81 —
+# this is a milvus bug worth its own issue, but full matrix tests should
+# run on realistic shapes anyway.
+FULL_MATRIX_DIM = 128
+FULL_MATRIX_BINARY_DIM = 128  # multiple of 8
+
+# Vector fields. Each entry: (name, DataType, dim, index_type, metric, params).
+FULL_MATRIX_VECTOR_FIELDS = [
+    ("fv_auto",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
+    ("fv_flat",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "FLAT",          "L2",      {}),
+    ("fv_hnsw",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "HNSW",          "L2",      {"M": 8, "efConstruction": 64}),
+    ("fv_ivf",    DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "IVF_FLAT",      "L2",      {"nlist": 8}),
+    ("f16v",      DataType.FLOAT16_VECTOR,  FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
+    ("bf16v",     DataType.BFLOAT16_VECTOR, FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
+    ("binv_flat", DataType.BINARY_VECTOR,   FULL_MATRIX_BINARY_DIM, "BIN_FLAT",      "HAMMING", {}),
+    ("binv_ivf",  DataType.BINARY_VECTOR,   FULL_MATRIX_BINARY_DIM, "BIN_IVF_FLAT",  "HAMMING", {"nlist": 8}),
+    ("i8v",       DataType.INT8_VECTOR,     FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
+]
+
+
+def _full_matrix_arrow_columns(num_rows, start_id,
+                               dim=FULL_MATRIX_DIM,
+                               bin_dim=FULL_MATRIX_BINARY_DIM,
+                               excluded_fields=()):
+    """Build a dict {column_name → pyarrow.Array} that fits both parquet and
+    Lance. Column layout matches FULL_MATRIX_SCALAR_FIELDS / VECTOR_FIELDS;
+    each milvus field reads from a uniquely-named column.
+
+    Pass excluded_fields to omit specific scalar columns (e.g. for vortex,
+    where the server reader can't sample Arrow String buffers)."""
+    ids = list(range(start_id, start_id + num_rows))
+    excluded = set(excluded_fields)
+
+    columns = {"id": pa.array(ids, type=pa.int64())}
+
+    # Scalars
+    for name, _dtype, arrow_type, _extra, value_fn in FULL_MATRIX_SCALAR_FIELDS:
+        if name in excluded:
+            continue
+        columns[name] = pa.array([value_fn(i) for i in ids], type=arrow_type)
+
+    # Array<Int64>
+    arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
+    if arr_name not in excluded:
+        columns[arr_name] = pa.array([arr_value_fn(i) for i in ids],
+                                     type=pa.list_(pa.int64()))
+
+    # Geometry as binary (WKB).
+    if "geo" not in excluded:
+        columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
+
+    # Vectors. Layout per type:
+    #   FloatVector / Int8Vector  → FixedSizeList<element, dim>
+    #   Float16Vector             → FixedSizeList<uint16, dim> (raw bits)
+    #   BFloat16Vector            → FixedSizeList<uint16, dim> (raw bits)
+    #   BinaryVector              → FixedSizeList<uint8,  dim/8>
+    fv_arr = _float_vectors(ids, dim).flatten()
+    f16_arr = _float16_vectors(ids, dim).view(np.uint16).flatten()
+    bf16_arr = _bfloat16_vectors(ids, dim).flatten()
+    i8_arr = _int8_vectors(ids, dim).flatten()
+    bin_arr = _binary_vectors_bytes(ids, bin_dim).flatten()
+
+    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        if name in excluded:
+            continue
+        if vtype == DataType.FLOAT_VECTOR:
+            columns[name] = pa.FixedSizeListArray.from_arrays(
+                pa.array(fv_arr, type=pa.float32()), list_size=vdim,
+            )
+        elif vtype == DataType.FLOAT16_VECTOR:
+            columns[name] = pa.FixedSizeListArray.from_arrays(
+                pa.array(f16_arr, type=pa.uint16()), list_size=vdim,
+            )
+        elif vtype == DataType.BFLOAT16_VECTOR:
+            columns[name] = pa.FixedSizeListArray.from_arrays(
+                pa.array(bf16_arr, type=pa.uint16()), list_size=vdim,
+            )
+        elif vtype == DataType.INT8_VECTOR:
+            columns[name] = pa.FixedSizeListArray.from_arrays(
+                pa.array(i8_arr, type=pa.int8()), list_size=vdim,
+            )
+        elif vtype == DataType.BINARY_VECTOR:
+            columns[name] = pa.FixedSizeListArray.from_arrays(
+                pa.array(bin_arr, type=pa.uint8()), list_size=vdim // 8,
+            )
+        else:
+            raise ValueError(f"unsupported vector dtype {vtype}")
+    return columns
+
+
+def gen_full_matrix_parquet_bytes(num_rows, start_id,
+                                  dim=FULL_MATRIX_DIM,
+                                  bin_dim=FULL_MATRIX_BINARY_DIM):
+    """Single parquet file with every full-matrix field."""
+    columns = _full_matrix_arrow_columns(num_rows, start_id, dim=dim,
+                                         bin_dim=bin_dim)
+    table = pa.table(columns)
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
 # ============================================================
 # MinIO Helpers
 # ============================================================
@@ -373,6 +608,70 @@ def build_multi_vector_schema(client, ext_path, float_dim=TEST_DIM, bin_dim=BINA
     schema.add_field("dense_vec", DataType.FLOAT_VECTOR, dim=float_dim, external_field="dense_vec")
     schema.add_field("bin_vec",   DataType.BINARY_VECTOR, dim=bin_dim, external_field="bin_vec")
     return schema
+
+
+def build_full_matrix_schema(client, ext_path, ext_spec='{"format":"parquet"}',
+                              dim=FULL_MATRIX_DIM,
+                              bin_dim=FULL_MATRIX_BINARY_DIM,
+                              excluded_fields=()):
+    """Schema covering every supported DataType, with same-dtype duplicates
+    wired to different index types. See FULL_MATRIX_SCALAR_FIELDS /
+    FULL_MATRIX_VECTOR_FIELDS for the full layout.
+    """
+    schema = client.create_schema(external_source=ext_path,
+                                  external_spec=ext_spec)
+    schema.add_field("id", DataType.INT64, external_field="id")
+    excluded = set(excluded_fields)
+
+    for name, dtype, _arrow, extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS:
+        if name in excluded:
+            continue
+        schema.add_field(name, dtype, external_field=name, **extra)
+
+    arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
+    if arr_name not in excluded:
+        schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype,
+                         max_capacity=8, external_field=arr_name)
+
+    if "geo" not in excluded:
+        schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
+
+    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        if name in excluded:
+            continue
+        schema.add_field(name, vtype, dim=vdim, external_field=name)
+    return schema
+
+
+def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
+    """Build every scalar + vector index per FULL_MATRIX configuration in
+    a single create_index call.
+    """
+    index_params = client.prepare_index_params()
+    excluded = set(excluded_fields)
+
+    # Scalar indexes
+    for field, idx_type in FULL_MATRIX_SCALAR_INDEXES.items():
+        if field in excluded:
+            continue
+        index_params.add_index(
+            field_name=field, index_type=idx_type,
+        )
+
+    # Vector indexes
+    for name, _vtype, _vdim, idx_type, metric, params in FULL_MATRIX_VECTOR_FIELDS:
+        if name in excluded:
+            continue
+        kwargs = {
+            "field_name": name,
+            "index_type": idx_type,
+            "metric_type": metric,
+        }
+        if params:
+            kwargs["params"] = params
+        index_params.add_index(**kwargs)
+
+    client.create_index(collection_name, index_params)
 
 
 def refresh_and_wait(client, collection_name, timeout=REFRESH_TIMEOUT,
@@ -1002,6 +1301,204 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
                 search_params={"metric_type": "HAMMING"},
             )
             assert len(dense_res[0]) == 3 and len(bin_res[0]) == 3
+        finally:
+            client.drop_collection(coll)
+
+    # ---- Whitelist gap coverage --------------------------------------
+    # The supported-type whitelist in pkg/util/typeutil/schema.go:2369-2394
+    # accepts Text, Timestamptz, and ArrayOfVector for external collections.
+    # The cases below probe each explicitly so the contract stays observable.
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("ts_unit", ["us", "ms"])
+    def test_timestamptz_type_e2e(self, ts_unit, minio_env, external_prefix):
+        """Timestamptz field: arrow timestamp in parquet → Milvus Timestamptz.
+
+        NormalizeExternalArrow (Util.cpp:2092-2097) converts arrow.timestamp
+        to int64 microseconds; query output is rendered as ISO-8601.
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        nb = DEFAULT_NB
+        upload_parquet(
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            gen_timestamptz_parquet_bytes(nb, 0, ts_unit=ts_unit),
+        )
+
+        schema = client.create_schema(
+            external_source=ext_url, external_spec='{"format":"parquet"}',
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("ts", DataType.TIMESTAMPTZ, external_field="ts")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
+                         external_field="embedding")
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert query_count(client, coll) == nb
+
+            row = client.query(coll, filter="id == 7", output_fields=["id", "ts"])
+            assert len(row) == 1
+            ts_val = row[0]["ts"]
+            # Server returns ISO-8601 string; verify the offset matches our
+            # encoding base (1700000000 + 7 = 1700000007 → "2023-11-14T22:13:27Z").
+            assert isinstance(ts_val, str) and ts_val.startswith("2023-11-14")
+            log.info(f"[timestamptz/{ts_unit}] id=7 -> {ts_val}")
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_array_of_vector_top_level_rejected(self, external_prefix):
+        """ArrayOfVector is on the external whitelist (schema.go:2389) but the
+        general schema validator only accepts it inside a struct array field
+        ('array of vector can only be in the struct array field'). External
+        collections separately reject struct fields (schema.go:2285-2287),
+        so there is no usable path today.
+
+        This test pins the contradiction: top-level _ARRAY_OF_VECTOR fails
+        at create_collection. If a future build relaxes either side, this
+        test must be updated to a positive E2E assertion.
+        """
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url = external_prefix["url"]
+        schema = client.create_schema(
+            external_source=ext_url, external_spec='{"format":"parquet"}',
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field(
+            "vecs", DataType._ARRAY_OF_VECTOR,
+            element_type=DataType.FLOAT_VECTOR, dim=TEST_DIM, max_capacity=4,
+            external_field="vecs",
+        )
+        with pytest.raises(Exception) as exc:
+            client.create_collection(collection_name=coll, schema=schema)
+        msg = str(exc.value)
+        assert "struct" in msg.lower() or "array of vector" in msg.lower(), msg
+        log.info(f"[array_of_vector] rejected as expected: {msg}")
+
+
+# ============================================================
+# 2.5 Edge cases: nullable behavior + large files
+# ============================================================
+
+class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
+    """External user fields are force-nullable (schema.go:2350). Probe edge
+    cases of that contract."""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_all_null_scalar_columns(self, minio_env, external_prefix):
+        """Every user scalar column is entirely null in parquet.
+
+        Verifies: (1) refresh succeeds, (2) count(*) reflects the row total,
+        (3) get-by-id returns rows with None for null fields, (4) `field is
+        null` filter matches every row.
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        nb = 100
+        upload_parquet(
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            gen_all_null_columns_parquet_bytes(nb, 0),
+        )
+
+        schema = client.create_schema(
+            external_source=ext_url, external_spec='{"format":"parquet"}',
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("n_int", DataType.INT32, external_field="n_int")
+        schema.add_field("n_float", DataType.FLOAT, external_field="n_float")
+        schema.add_field("n_varchar", DataType.VARCHAR, max_length=64,
+                         external_field="n_varchar")
+        schema.add_field("n_json", DataType.JSON, external_field="n_json")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
+                         external_field="embedding")
+
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert query_count(client, coll) == nb
+
+            # Single-row peek: every user field should round-trip as None.
+            rows = client.query(
+                coll, filter="id == 5",
+                output_fields=["id", "n_int", "n_float", "n_varchar", "n_json"],
+            )
+            assert len(rows) == 1, f"missing id=5 in result: {rows}"
+            r = rows[0]
+            assert r["id"] == 5
+            assert r["n_int"] is None
+            assert r["n_float"] is None
+            assert r["n_varchar"] is None
+            assert r["n_json"] is None
+
+            # `is null` filter should match every row.
+            null_rows = client.query(
+                coll, filter="n_int is null",
+                output_fields=["id"], limit=nb,
+            )
+            assert len(null_rows) == nb, f"is-null filter only matched {len(null_rows)}/{nb}"
+        finally:
+            client.drop_collection(coll)
+
+
+class TestExternalTableLargeFile(TestMilvusClientV2Base):
+    """Large single-file scenarios — multi-row-group parquet and large row
+    counts that can be split into multiple Milvus segments."""
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("num_rows,row_group_size", [
+        (5_000,  500),    # 10 row groups
+        (20_000, 1_000),  # 20 row groups
+    ], ids=["10rg", "20rg"])
+    def test_large_single_file_with_row_groups(
+        self, num_rows, row_group_size, minio_env, external_prefix,
+    ):
+        """A single large parquet file with explicit row_group_size, verifying
+        the multi-row-group reader path on a stable external table.
+
+        Asserts: count(*) is exact; spot-checked rows round-trip correctly;
+        a vector search returns at least `limit` results.
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            gen_large_parquet_with_row_groups(num_rows, 0, row_group_size),
+        )
+
+        schema = build_basic_schema(client, ext_url)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert query_count(client, coll) == num_rows
+
+            # Spot-check rows in the first, middle, and last row group.
+            for sample in (0, num_rows // 2, num_rows - 1):
+                rows = client.query(
+                    coll, filter=f"id == {sample}",
+                    output_fields=["id", "value"],
+                )
+                assert len(rows) == 1, f"missing id={sample}"
+                assert abs(rows[0]["value"] - sample * 1.5) < 1e-3
+
+            hits = client.search(
+                coll, data=[[0.0] * TEST_DIM], limit=10,
+                anns_field="embedding", output_fields=["id"],
+            )
+            assert len(hits[0]) == 10
         finally:
             client.drop_collection(coll)
 
@@ -2748,29 +3245,46 @@ def _write_lance_to_minio(minio_client, bucket, key_prefix, num_rows, start_id,
     """Build a Lance dataset locally and upload every file under its folder
     to MinIO, preserving the relative layout Lance uses (versions/, data/, etc).
     """
+    return _write_lance_to_minio_batches(
+        minio_client, bucket, key_prefix,
+        batches=[(start_id, num_rows)], dim=dim,
+    )
+
+
+def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches,
+                                  dim=TEST_DIM):
+    """Multi-fragment variant: each (start_id, count) tuple in `batches` is
+    appended into the same Lance dataset, producing one fragment file per
+    batch under data/. Used to exercise multi-data-file refresh.
+    """
     import os
     import shutil
     import tempfile
 
     import lance
 
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
-
     tmpdir = tempfile.mkdtemp(prefix="ext_lance_")
     local_path = os.path.join(tmpdir, "dataset.lance")
     try:
-        lance.write_dataset(table, local_path)
+        for idx, (start_id, num_rows) in enumerate(batches):
+            ids = list(range(start_id, start_id + num_rows))
+            vectors = _float_vectors(ids, dim)
+            table = pa.table({
+                "id":        pa.array(ids, type=pa.int64()),
+                "value":     pa.array([float(i) * 1.5 for i in ids],
+                                      type=pa.float32()),
+                "embedding": pa.FixedSizeListArray.from_arrays(
+                    vectors.flatten(), list_size=dim,
+                ),
+            })
+            mode = "create" if idx == 0 else "append"
+            lance.write_dataset(table, local_path, mode=mode)
         for root, _dirs, files in os.walk(local_path):
             for fname in files:
                 absolute = os.path.join(root, fname)
                 relative = os.path.relpath(absolute, local_path)
-                minio_client.fput_object(bucket, f"{key_prefix}/{relative}", absolute)
+                minio_client.fput_object(bucket, f"{key_prefix}/{relative}",
+                                         absolute)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -2794,13 +3308,16 @@ def _find_vortex_sidecar_python():
 
 
 def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id,
-                           dim=TEST_DIM):
+                           dim=TEST_DIM, filename="data.vortex"):
     """Write a Vortex dataset to MinIO via the `.venv-vortex` sidecar
     (Python 3.11+ required for vortex-data >= 0.35).
 
     The embedding is written as FixedSizeList<uint8, dim*4> inside the vortex
     file — Milvus's vortex reader reinterprets those raw bytes as float32
     vectors of width `dim`.
+
+    Pass a unique `filename` per call to write multiple sibling .vortex files
+    under the same key_prefix (used for multi-file format coverage).
     """
     import os
     import subprocess
@@ -2826,7 +3343,7 @@ def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id,
         "MINIO_BUCKET": bucket,
         "MINIO_ACCESS_KEY": cfg["access_key"],
         "MINIO_SECRET_KEY": cfg["secret_key"],
-        "VT_MINIO_KEY": f"{key_prefix}/data.vortex",
+        "VT_MINIO_KEY": f"{key_prefix}/{filename}",
     })
     result = subprocess.run(
         [sidecar, helper],
@@ -2840,6 +3357,381 @@ def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id,
     log.info(f"[vortex] wrote {result.stdout.strip()} to {key_prefix}/data.vortex")
 
 
+def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *,
+                                 filename="data.vortex"):
+    """Write an arbitrary pyarrow Table to MinIO as a vortex file via the
+    sidecar venv. The table is serialized to an Arrow IPC stream and piped
+    to the sidecar over stdin; the sidecar deserializes and hands the
+    table directly to vx.io.write — schema (FixedSizeList dimensions,
+    types, etc.) is preserved verbatim across the venv boundary.
+
+    Used by the full-matrix vortex test where the schema is too rich to
+    encode via env vars.
+    """
+    import os
+    import subprocess
+
+    sidecar = _find_vortex_sidecar_python()
+    if sidecar is None:
+        pytest.skip(
+            "Vortex sidecar venv missing. Create it once with:\n"
+            "  uv venv .venv-vortex -p python3.12\n"
+            "  source .venv-vortex/bin/activate && uv pip install "
+            "'vortex-data==0.67.0' 'pyarrow>=16' 'numpy>=2.0' minio"
+        )
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    helper = os.path.join(here, "_vortex_gen.py")
+
+    buf = io.BytesIO()
+    with pa.ipc.new_stream(buf, table.schema) as writer:
+        writer.write_table(table)
+    ipc_bytes = buf.getvalue()
+
+    env = os.environ.copy()
+    env.update({
+        "VT_INPUT_FROM_STDIN": "1",
+        "MINIO_ADDRESS":     cfg["address"],
+        "MINIO_BUCKET":      bucket,
+        "MINIO_ACCESS_KEY":  cfg["access_key"],
+        "MINIO_SECRET_KEY":  cfg["secret_key"],
+        "VT_MINIO_KEY":      f"{key_prefix}/{filename}",
+    })
+    result = subprocess.run(
+        [sidecar, helper],
+        input=ipc_bytes, env=env, capture_output=True, timeout=180,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"vortex helper failed (code {result.returncode}): "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    log.info(f"[vortex] wrote {result.stdout.decode().strip()} "
+             f"to {key_prefix}/{filename}")
+
+
+def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
+    """Create an Iceberg table whose warehouse lives directly on MinIO.
+
+    Writing the warehouse to MinIO (not locally) is required because Iceberg
+    metadata.json records absolute data-file URIs at write time; if we wrote
+    to file:// then uploaded, those URIs would be unreachable from the
+    Milvus reader.
+
+    Vector encoding: each row stores its vector as a single binary blob of
+    dim * sizeof(float) bytes. The Milvus iceberg reader path returns it as
+    arrow.binary, and external_field=embedding is mapped to a FloatVector
+    field — NormalizeExternalArrow reinterprets the raw bytes as float32.
+
+    Note: list<float32> looks more natural but pyarrow >=15 promotes long
+    lists to large_list, which the vector normalizer rejects
+    (Util.cpp:1761). The binary encoding sidesteps that.
+
+    `batches` is a list of (start_id, count) tuples. Each batch is appended
+    to the same iceberg table as a separate parquet data file under data/.
+    The final snapshot includes every batch.
+
+    Returns (snapshot_id, ext_url) where ext_url is the s3:// URL of the
+    table's metadata.json in Milvus URI form.
+    """
+    import shutil
+    import struct
+    import tempfile
+
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema as IbgSchema
+    from pyiceberg.types import BinaryType, LongType, NestedField
+
+    tmp = tempfile.mkdtemp(prefix="ibg_cat_")
+    try:
+        cat = SqlCatalog(
+            "milvus_test",
+            **{
+                "uri":                  f"sqlite:///{tmp}/cat.db",
+                "warehouse":            f"s3://{cfg['bucket']}/{prefix}",
+                "s3.endpoint":          f"http://{cfg['address']}",
+                "s3.access-key-id":     cfg["access_key"],
+                "s3.secret-access-key": cfg["secret_key"],
+                "s3.region":            "us-east-1",
+                "s3.path-style-access": "true",
+            },
+        )
+        cat.create_namespace("ext")
+
+        ibg_schema = IbgSchema(
+            NestedField(1, "id", LongType(), required=False),
+            NestedField(2, "embedding", BinaryType(), required=False),
+        )
+        arrow_schema = pa.schema([
+            pa.field("id", pa.int64(), nullable=True),
+            pa.field("embedding", pa.binary(), nullable=True),
+        ])
+        tbl = cat.create_table("ext.t", schema=ibg_schema)
+
+        for start_id, num_rows in batches:
+            ids = list(range(start_id, start_id + num_rows))
+            vec_bytes = [
+                struct.pack(f"<{dim}f",
+                            *[float(i + j * 0.1) for j in range(dim)])
+                for i in ids
+            ]
+            arrow_table = pa.table({
+                "id":        pa.array(ids, type=pa.int64()),
+                "embedding": pa.array(vec_bytes, type=pa.binary()),
+            }, schema=arrow_schema)
+            tbl.append(arrow_table)
+
+        snap = tbl.current_snapshot().snapshot_id
+        # metadata_location: s3://<bucket>/<prefix>/.../metadata/000NN-uuid.metadata.json
+        # → Milvus form: s3://<address>/<bucket>/...
+        meta_loc = tbl.metadata_location
+        if not meta_loc.startswith("s3://"):
+            raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
+        bucket_and_key = meta_loc[len("s3://"):]
+        ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
+        return snap, ext_url
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# Iceberg full-matrix is a strict subset of FULL_MATRIX_* because Iceberg V2
+# only supports int (32-bit) and long (64-bit) integers — no Int8/Int16. We
+# reuse the same field names where possible to keep query expectations
+# identical between formats; Int8 → IntegerType promoted to Milvus INT32
+# rather than INT8, otherwise NormalizeExternalArrow refuses the cast.
+ICEBERG_FULL_MATRIX_SCALAR_FIELDS = [
+    # (field_name, milvus DataType, iceberg type ctor (lambda field_id: type),
+    #  arrow type, milvus add_field extras, value_fn)
+    ("b_inv",     DataType.BOOL,   lambda fid: ("BooleanType",), pa.bool_(),     {},                 lambda i: i % 2 == 0),
+    ("i32_stl",   DataType.INT32,  lambda fid: ("IntegerType",), pa.int32(),     {},                 lambda i: i * 7),
+    ("i64_inv",   DataType.INT64,  lambda fid: ("LongType",),    pa.int64(),     {},                 lambda i: i * 1000),
+    ("f_inv",     DataType.FLOAT,  lambda fid: ("FloatType",),   pa.float32(),   {},                 lambda i: float(i) * 1.5),
+    ("d_inv",     DataType.DOUBLE, lambda fid: ("DoubleType",),  pa.float64(),   {},                 lambda i: float(i) * 2.5),
+    ("vc_trie",   DataType.VARCHAR, lambda fid: ("StringType",), pa.string(),    {"max_length": 64}, lambda i: f"s_{i:05d}"),
+    ("j",         DataType.JSON,   lambda fid: ("StringType",),  pa.string(),    {},                 lambda i: json.dumps({"k": i, "g": i % 3})),
+    ("ts",        DataType.TIMESTAMPTZ, lambda fid: ("TimestamptzType",), pa.timestamp("us", tz="UTC"), {}, lambda i: (1_700_000_000 + i) * 1_000_000),
+]
+
+ICEBERG_FULL_MATRIX_SCALAR_INDEXES = {
+    "b_inv":   "INVERTED",
+    "i32_stl": "STL_SORT",
+    "i64_inv": "INVERTED",
+    "f_inv":   "INVERTED",
+    "d_inv":   "INVERTED",
+    "vc_trie": "TRIE",
+}
+
+
+def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
+                                     dim=FULL_MATRIX_DIM,
+                                     bin_dim=FULL_MATRIX_BINARY_DIM):
+    """Iceberg variant of the full-matrix dataset.
+
+    Vectors are stored as raw binary blobs because Iceberg has no
+    fixed-size-list. JSON / Geometry use String / Binary respectively.
+    Returns (snapshot_id, ext_url).
+    """
+    import shutil
+    import struct
+    import tempfile
+
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema as IbgSchema
+    from pyiceberg.types import (
+        BinaryType,
+        BooleanType,
+        DoubleType,
+        FloatType,
+        IntegerType,
+        ListType,
+        LongType,
+        NestedField,
+        StringType,
+        TimestamptzType,
+    )
+
+    iceberg_type_lookup = {
+        "BooleanType":     BooleanType(),
+        "IntegerType":     IntegerType(),
+        "LongType":        LongType(),
+        "FloatType":       FloatType(),
+        "DoubleType":      DoubleType(),
+        "StringType":      StringType(),
+        "TimestamptzType": TimestamptzType(),
+    }
+
+    ids = list(range(num_rows))
+    next_field_id = [3]   # field-id assignment, id=1, schema starts at 2 then bumps
+
+    def fid():
+        x = next_field_id[0]
+        next_field_id[0] += 1
+        return x
+
+    nested_fields = [NestedField(1, "id", LongType(), required=False)]
+    arrow_fields = [pa.field("id", pa.int64(), nullable=True)]
+    arrow_columns = {"id": pa.array(ids, type=pa.int64())}
+
+    # Scalars
+    for name, _dtype, ibg_factory, arrow_type, _extra, value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
+        ibg_type = iceberg_type_lookup[ibg_factory(0)[0]]
+        nested_fields.append(NestedField(fid(), name, ibg_type, required=False))
+        arrow_fields.append(pa.field(name, arrow_type, nullable=True))
+        arrow_columns[name] = pa.array([value_fn(i) for i in ids], type=arrow_type)
+
+    # Array<Int64>: ListType<LongType>
+    arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
+    nested_fields.append(
+        NestedField(
+            fid(), arr_name,
+            ListType(element_id=fid(), element_type=LongType(),
+                     element_required=False),
+            required=False,
+        ),
+    )
+    arrow_fields.append(
+        pa.field(arr_name,
+                 pa.list_(pa.field("element", pa.int64(), nullable=True)),
+                 nullable=True),
+    )
+    arrow_columns[arr_name] = pa.array(
+        [arr_value_fn(i) for i in ids],
+        type=pa.list_(pa.field("element", pa.int64(), nullable=True)),
+    )
+
+    # Geometry → BinaryType (WKB)
+    nested_fields.append(NestedField(fid(), "geo", BinaryType(), required=False))
+    arrow_fields.append(pa.field("geo", pa.binary(), nullable=True))
+    arrow_columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows,
+                                    type=pa.binary())
+
+    # Vector fields → BinaryType blobs of dim*sizeof(elem) bytes.
+    fv_arr = _float_vectors(ids, dim)
+    f16_arr = _float16_vectors(ids, dim).view(np.uint16)
+    bf16_arr = _bfloat16_vectors(ids, dim)  # already raw uint16-equivalent
+    i8_arr = _int8_vectors(ids, dim)
+    bin_arr = _binary_vectors_bytes(ids, bin_dim)
+
+    def vec_blobs(name, vtype, vdim):
+        if vtype == DataType.FLOAT_VECTOR:
+            return [struct.pack(f"<{vdim}f", *fv_arr[i].tolist())
+                    for i in range(num_rows)]
+        if vtype == DataType.FLOAT16_VECTOR:
+            return [f16_arr[i].astype(np.uint16).tobytes() for i in range(num_rows)]
+        if vtype == DataType.BFLOAT16_VECTOR:
+            return [bf16_arr[i].tobytes() for i in range(num_rows)]
+        if vtype == DataType.INT8_VECTOR:
+            return [i8_arr[i].tobytes() for i in range(num_rows)]
+        if vtype == DataType.BINARY_VECTOR:
+            return [bin_arr[i].tobytes() for i in range(num_rows)]
+        raise ValueError(f"unsupported vec type {vtype}")
+
+    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        nested_fields.append(NestedField(fid(), name, BinaryType(), required=False))
+        arrow_fields.append(pa.field(name, pa.binary(), nullable=True))
+        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim),
+                                       type=pa.binary())
+
+    ibg_schema = IbgSchema(*nested_fields)
+    arrow_schema = pa.schema(arrow_fields)
+    arrow_table = pa.table(arrow_columns, schema=arrow_schema)
+
+    tmp = tempfile.mkdtemp(prefix="ibg_fm_")
+    try:
+        cat = SqlCatalog("milvus_test_fm", **{
+            "uri":                  f"sqlite:///{tmp}/cat.db",
+            "warehouse":            f"s3://{cfg['bucket']}/{prefix}",
+            "s3.endpoint":          f"http://{cfg['address']}",
+            "s3.access-key-id":     cfg["access_key"],
+            "s3.secret-access-key": cfg["secret_key"],
+            "s3.region":            "us-east-1",
+            "s3.path-style-access": "true",
+        })
+        cat.create_namespace("ext")
+        tbl = cat.create_table("ext.t", schema=ibg_schema)
+        tbl.append(arrow_table)
+
+        snap = tbl.current_snapshot().snapshot_id
+        meta_loc = tbl.metadata_location
+        if not meta_loc.startswith("s3://"):
+            raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
+        bucket_and_key = meta_loc[len("s3://"):]
+        ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
+        return snap, ext_url
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def build_iceberg_full_matrix_schema(client, ext_path, ext_spec,
+                                     dim=FULL_MATRIX_DIM,
+                                     bin_dim=FULL_MATRIX_BINARY_DIM):
+    """Milvus schema for the iceberg full-matrix dataset. Matches
+    ICEBERG_FULL_MATRIX_SCALAR_FIELDS for scalars and FULL_MATRIX_VECTOR_FIELDS
+    for vectors (vectors are stored as iceberg binary blobs but exposed as
+    Milvus vector types; NormalizeExternalArrow reinterprets the bytes)."""
+    schema = client.create_schema(external_source=ext_path,
+                                  external_spec=ext_spec)
+    schema.add_field("id", DataType.INT64, external_field="id")
+    for name, dtype, _ibg, _arrow, extra, _value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
+        schema.add_field(name, dtype, external_field=name, **extra)
+    arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
+    schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype,
+                     max_capacity=8, external_field=arr_name)
+    schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
+    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        schema.add_field(name, vtype, dim=vdim, external_field=name)
+    return schema
+
+
+def create_iceberg_full_matrix_indexes(client, collection_name):
+    """Wire the iceberg-subset scalar indexes + the same 9 vector indexes
+    used by parquet/lance full-matrix."""
+    index_params = client.prepare_index_params()
+    for field, idx_type in ICEBERG_FULL_MATRIX_SCALAR_INDEXES.items():
+        index_params.add_index(field_name=field, index_type=idx_type)
+    for name, _vtype, _vdim, idx_type, metric, params in FULL_MATRIX_VECTOR_FIELDS:
+        kwargs = {"field_name": name, "index_type": idx_type, "metric_type": metric}
+        if params:
+            kwargs["params"] = params
+        index_params.add_index(**kwargs)
+    client.create_index(collection_name, index_params)
+
+
+def _iceberg_full_matrix_assert(client, coll, expected_count):
+    """Iceberg-specific subset of _full_matrix_assert_basic: scalar set is
+    smaller (no Int8/Int16/Bitmap)."""
+    assert query_count(client, coll) == expected_count
+
+    output_fields = ["id"] + [f for f, _, _, _, _, _ in ICEBERG_FULL_MATRIX_SCALAR_FIELDS]
+    output_fields += [FULL_MATRIX_ARRAY_FIELD[0], "geo"]
+    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
+    assert len(rows) == 1, f"id=42 missing: {rows}"
+    r = rows[0]
+    assert r["id"] == 42
+    for name, _dtype, _ibg, _arrow, _extra, value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
+        expected = value_fn(42)
+        if name == "j":
+            parsed = r["j"] if isinstance(r["j"], dict) else json.loads(r["j"])
+            assert parsed.get("k") == 42, f"json[k]: {parsed}"
+        elif name in ("f_inv", "d_inv"):
+            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]}"
+        elif name == "ts":
+            assert isinstance(r[name], str) and r[name], "ts empty"
+        else:
+            assert r[name] == expected, f"{name}: {r[name]} != {expected}"
+    arr_name, _, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
+    assert r[arr_name] == arr_value_fn(42), f"{arr_name}: {r[arr_name]}"
+
+    for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        query_vec = _full_matrix_query_vec(name, vdim)
+        hits = client.search(
+            coll, data=query_vec, limit=3,
+            anns_field=name, output_fields=["id"],
+            search_params={"metric_type": metric},
+        )[0]
+        assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
+
+
 class TestExternalTableFormats(TestMilvusClientV2Base):
     """Coverage for the `external_spec.format` string values."""
 
@@ -2847,14 +3739,23 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
     def test_parquet_format_explicit(self, minio_env, external_prefix):
         """Explicit `{"format":"parquet"}` round-trip.
 
-        The rest of the suite already implicitly covers parquet, but this
-        case locks the explicit format string into the contract.
+        Writes FORMAT_NUM_FILES sibling parquet files (each
+        FORMAT_ROWS_PER_FILE rows) under the prefix to exercise multi-file
+        refresh on the explicit-format path.
         """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
+
+        for idx in range(FORMAT_NUM_FILES):
+            upload_parquet(
+                minio_client, cfg["bucket"],
+                f"{ext_key}/file_{idx:03d}.parquet",
+                gen_basic_parquet_bytes(
+                    FORMAT_ROWS_PER_FILE, idx * FORMAT_ROWS_PER_FILE,
+                ),
+            )
 
         schema = client.create_schema(
             external_source=ext_url, external_spec='{"format":"parquet"}',
@@ -2867,13 +3768,30 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
         try:
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
-            assert query_count(client, coll) == DEFAULT_NB
+            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
+
+            # Spot-check the first row of each file survived ingestion.
+            for idx in range(FORMAT_NUM_FILES):
+                first_id = idx * FORMAT_ROWS_PER_FILE
+                rows = client.query(
+                    coll, filter=f"id == {first_id}",
+                    output_fields=["id", "value"],
+                )
+                assert len(rows) == 1, f"row id={first_id} missing"
+                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
         finally:
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_lance_table_format(self, minio_env, external_prefix):
-        """Lance-table format E2E: write a Lance dataset to MinIO, refresh, query."""
+        """Lance-table format E2E with multi-fragment dataset.
+
+        Builds a single Lance dataset by sequentially appending
+        FORMAT_NUM_FILES batches (each FORMAT_ROWS_PER_FILE rows). Each
+        append produces a new fragment file under data/, so the iceberg-
+        like multi-file refresh path is exercised even though Lance presents
+        a unified dataset to the reader.
+        """
         try:
             import lance  # noqa: F401
         except ImportError:
@@ -2884,8 +3802,13 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
-        nb = 300
-        _write_lance_to_minio(minio_client, cfg["bucket"], ext_key, nb, 0)
+        batches = [
+            (idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE)
+            for idx in range(FORMAT_NUM_FILES)
+        ]
+        _write_lance_to_minio_batches(
+            minio_client, cfg["bucket"], ext_key, batches,
+        )
 
         schema = client.create_schema(
             external_source=ext_url,
@@ -2900,10 +3823,17 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
 
-            assert query_count(client, coll) == nb
-            rows = client.query(coll, filter="id == 7", output_fields=["id", "value"])
-            assert len(rows) == 1
-            assert abs(rows[0]["value"] - 7 * 1.5) < 1e-4
+            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
+
+            # Spot-check a row from each fragment survived ingestion.
+            for idx in range(FORMAT_NUM_FILES):
+                first_id = idx * FORMAT_ROWS_PER_FILE
+                rows = client.query(
+                    coll, filter=f"id == {first_id}",
+                    output_fields=["id", "value"],
+                )
+                assert len(rows) == 1, f"row id={first_id} missing"
+                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
 
             hits = client.search(
                 coll, data=[[0.0] * TEST_DIM], limit=5,
@@ -2915,21 +3845,29 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_vortex_format(self, minio_env, external_prefix):
-        """Vortex format E2E.
+        """Vortex format E2E with multiple sibling .vortex files.
 
         Vortex file generation happens in a Python 3.12 sidecar venv
         (`.venv-vortex/`) because vortex-data >= 0.35 requires Python >= 3.11
         while the main test venv is pinned to 3.10. The embedding is written
         as a raw-byte FixedSizeList<uint8, dim*4>; Milvus's vortex reader
         reinterprets those bytes as the Float32 vector column.
+
+        Writes FORMAT_NUM_FILES sibling vortex files each carrying
+        FORMAT_ROWS_PER_FILE rows.
         """
         _minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
-        nb = 200
-        _write_vortex_to_minio(cfg["bucket"], cfg, ext_key, nb, 0)
+        for idx in range(FORMAT_NUM_FILES):
+            _write_vortex_to_minio(
+                cfg["bucket"], cfg, ext_key,
+                num_rows=FORMAT_ROWS_PER_FILE,
+                start_id=idx * FORMAT_ROWS_PER_FILE,
+                filename=f"data_{idx:03d}.vortex",
+            )
 
         schema = client.create_schema(
             external_source=ext_url,
@@ -2944,15 +3882,429 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
 
-            assert query_count(client, coll) == nb
-            rows = client.query(coll, filter="id == 11", output_fields=["id", "value"])
-            assert len(rows) == 1
-            assert abs(rows[0]["value"] - 11 * 1.5) < 1e-4
+            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
+
+            # Spot-check a row from each vortex file survived ingestion.
+            for idx in range(FORMAT_NUM_FILES):
+                first_id = idx * FORMAT_ROWS_PER_FILE
+                rows = client.query(
+                    coll, filter=f"id == {first_id}",
+                    output_fields=["id", "value"],
+                )
+                assert len(rows) == 1, f"row id={first_id} missing"
+                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
 
             hits = client.search(
                 coll, data=[[0.0] * TEST_DIM], limit=5,
                 anns_field="embedding", output_fields=["id"],
             )[0]
             assert len(hits) == 5
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_iceberg_table_format(self, minio_env, external_prefix):
+        """Iceberg-table format E2E: write an Iceberg dataset to MinIO via
+        pyiceberg, then refresh / index / load / query / search through
+        Milvus's iceberg reader path.
+
+        Vector field is stored as raw binary blobs (dim * 4 bytes per row)
+        because (a) Iceberg has no native fixed-size-list, and (b) Milvus's
+        NormalizeVectorArraysToFixedSizeBinary (Util.cpp:1693-1779)
+        explicitly accepts arrow Binary as a vector source.
+
+        external_source must point at the metadata.json file (not a
+        directory) — the iceberg reader's PlanFiles entry point parses
+        that URI directly. Source comes from pyiceberg's
+        `tbl.metadata_location` after append.
+
+        Skipped when pyiceberg is unavailable in the test environment:
+            uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'
+        """
+        try:
+            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
+        except ImportError:
+            pytest.skip(
+                "pyiceberg not installed. Install in this venv with:\n"
+                "  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'"
+            )
+
+        _minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_key = external_prefix["key"]
+
+        # Multiple appends → multiple data files under data/. The final
+        # snapshot includes every batch.
+        batches = [
+            (idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE)
+            for idx in range(FORMAT_NUM_FILES)
+        ]
+        snapshot_id, ext_url = _build_iceberg_table_in_minio(
+            ext_key, cfg, batches=batches,
+        )
+        log.info(f"[iceberg] snapshot={snapshot_id} ext_url={ext_url}")
+
+        # Iceberg requires explicit credentials in extfs because the iceberg
+        # reader path runs in the Rust opendal layer, which does not pick up
+        # AKSK from the Milvus root configuration.
+        ext_spec = json.dumps({
+            "format":      "iceberg-table",
+            "snapshot_id": int(snapshot_id),
+            "extfs": {
+                "access_key_id":    cfg["access_key"],
+                "access_key_value": cfg["secret_key"],
+                "cloud_provider":   "aws",
+                "storage_type":     "remote",
+                "region":           "us-east-1",
+                "use_ssl":          "false",
+            },
+        })
+
+        schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
+                         external_field="embedding")
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+
+            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
+
+            # Spot-check the first row of each batch's data file: the
+            # vector for row id=N encodes [N.0, N.1, N.2, ...] up to dim.
+            for idx in range(FORMAT_NUM_FILES):
+                first_id = idx * FORMAT_ROWS_PER_FILE
+                rows = client.query(
+                    coll, filter=f"id == {first_id}",
+                    output_fields=["id", "embedding"],
+                )
+                assert len(rows) == 1, f"row id={first_id} missing"
+                vec = rows[0]["embedding"]
+                assert len(vec) == TEST_DIM
+                for j, v in enumerate(vec):
+                    expected = float(first_id) + j * 0.1
+                    assert abs(v - expected) < 1e-2, (
+                        f"vec[{j}] for id={first_id} = {v}, expected {expected}"
+                    )
+
+            hits = client.search(
+                coll, data=[[0.0] * TEST_DIM], limit=3,
+                anns_field="embedding", output_fields=["id"],
+            )[0]
+            assert len(hits) == 3
+            # NOTE: AUTOINDEX (IVF-family) on 9k rows can miss the true
+            # nearest neighbor (recall < 1.0); we don't assert id==0 here.
+            # Per-row vector content is already verified above via direct
+            # query on the spot-checked ids.
+        finally:
+            client.drop_collection(coll)
+
+
+# ============================================================
+# 10. Full-matrix coverage: every DataType × every Index × every Format
+# ============================================================
+
+# Smaller row count keeps full-matrix tests under ~2 min each: each test
+# builds 21 fields with 10+ scalar indexes and 9 vector indexes.
+FULL_MATRIX_NB = 200
+
+# Vortex reader limitations identified by exhaustive per-field probing on
+# master-20260424-5409a81. Two distinct server-side bugs share the same
+# root cause — the vortex C++ reader assumes Arrow types use a 2-buffer
+# (validity + flat data) layout, which only holds for fixed-width
+# primitives. Variable-length Arrow types have 3 buffers (validity +
+# offsets + data), and the reader misreads them:
+#
+# 1. milvus#49352 — refresh-time sampler raises "Expected 2 buffers,
+#    got 3" on Arrow `string`, so VARCHAR and JSON fields cannot be
+#    ingested via vortex (refresh fails).
+# 2. milvus#49353 — load-time column-group loader SIGSEGVs at
+#    SI_ADDR=0x8 (null-pointer + offset deref) when it tries to decode
+#    an Arrow `binary` cell, which is what GEOMETRY is stored as.
+#
+# Probe results (1 FV + 1 scalar each, vortex on master-20260424):
+#   bool / int8 / int16 / int32 / int64 / float / double / timestamp /
+#   array<int64>                      → load OK
+#   string  (VARCHAR / JSON)          → refresh fails (#49352)
+#   binary  (GEOMETRY)                → load SIGSEGV (#49353)
+# All vector dtypes (FloatVector / Float16 / BFloat16 / Int8 / Binary)
+# load fine on their own and in any combination — the trigger is the
+# scalar layout, not the vector set.
+#
+# Until both are fixed, the vortex full-matrix excludes only the three
+# affected scalar fields. Every other DataType (Bool, all integer
+# widths, Float, Double, Timestamptz, Array<Int64>) and every vector
+# type/index combination (FloatVector × {AUTOINDEX, FLAT, HNSW,
+# IVF_FLAT}, Float16, BFloat16, Int8, BinaryVector × {BIN_FLAT,
+# BIN_IVF_FLAT}) is still covered.
+_VORTEX_EXCLUDED_FIELDS = {
+    "vc_trie",  # VARCHAR — refresh fails per milvus#49352
+    "j",        # JSON    — refresh fails per milvus#49352
+    "geo",      # GEOMETRY — load SIGSEGV per milvus#49353
+}
+
+
+def _full_matrix_query_vec(vec_field, dim):
+    """Build a search query vector matching the dtype of the given vector
+    field. pymilvus is dtype-strict on the wire — int8 needs np.int8,
+    bf16 needs raw bytes, etc."""
+    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        if name != vec_field:
+            continue
+        if vtype == DataType.BINARY_VECTOR:
+            return [b"\x00" * (vdim // 8)]
+        if vtype == DataType.INT8_VECTOR:
+            return [np.zeros(vdim, dtype=np.int8)]
+        if vtype == DataType.FLOAT16_VECTOR:
+            return [np.zeros(vdim, dtype=np.float16)]
+        if vtype == DataType.BFLOAT16_VECTOR:
+            return [bytes(vdim * 2)]
+        return [[0.0] * vdim]
+    raise KeyError(vec_field)
+
+
+def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
+    """Shared assertions: count + per-type spot-checks + search hits per
+    vector field. Used by every full-matrix format test."""
+    assert query_count(client, coll) == expected_count
+    excluded = set(excluded_fields)
+
+    # Spot-check id=42: every scalar field round-trips with the expected
+    # value derived from the same value_fn used to build the parquet.
+    output_fields = ["id"] + [f for f, _, _, _, _ in FULL_MATRIX_SCALAR_FIELDS
+                              if f not in excluded]
+    arr_name = FULL_MATRIX_ARRAY_FIELD[0]
+    if arr_name not in excluded:
+        output_fields.append(arr_name)
+    if "geo" not in excluded:
+        output_fields.append("geo")
+    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
+    assert len(rows) == 1, f"id=42 missing: {rows}"
+    r = rows[0]
+    assert r["id"] == 42
+    for name, _dtype, _arrow, _extra, value_fn in FULL_MATRIX_SCALAR_FIELDS:
+        if name in excluded:
+            continue
+        expected = value_fn(42)
+        if name == "j":
+            parsed = r["j"] if isinstance(r["j"], dict) else json.loads(r["j"])
+            assert parsed.get("k") == 42, f"json[k] mismatch: {parsed}"
+        elif name == "f_inv":
+            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]} != {expected}"
+        elif name == "d_inv":
+            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]} != {expected}"
+        elif name == "ts":
+            # Server returns an ISO-8601 string; we just assert non-empty.
+            assert isinstance(r[name], str) and r[name], f"ts empty: {r[name]}"
+        else:
+            assert r[name] == expected, f"{name}: {r[name]} != {expected}"
+    arr_name, _, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
+    if arr_name not in excluded:
+        assert r[arr_name] == arr_value_fn(42), f"{arr_name}: {r[arr_name]}"
+
+    # One search per vector field → confirms every (type × index × metric)
+    # combination produced a usable index.
+    for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
+        if name in excluded:
+            continue
+        query_vec = _full_matrix_query_vec(name, vdim)
+        hits = client.search(
+            coll, data=query_vec, limit=3,
+            anns_field=name, output_fields=["id"],
+            search_params={"metric_type": metric},
+        )[0]
+        assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
+
+
+class TestExternalTableFullMatrix(TestMilvusClientV2Base):
+    """End-to-end coverage of every supported DataType × Index combination
+    on every external file format. A single collection per format carries
+    21 fields wired to 8 scalar indexes + 9 vector indexes (4 FloatVector
+    variants for AUTOINDEX/FLAT/HNSW/IVF_FLAT, plus Float16/BFloat16/
+    Int8/Binary vectors with their canonical indexes)."""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_matrix_parquet(self, minio_env, external_prefix):
+        """Parquet × full DataType × full Index matrix."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            gen_full_matrix_parquet_bytes(FULL_MATRIX_NB, 0),
+        )
+        schema = build_full_matrix_schema(client, ext_url)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            create_full_matrix_indexes(client, coll)
+            client.load_collection(coll)
+            _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_matrix_lance(self, minio_env, external_prefix):
+        """Lance × full DataType × full Index matrix.
+
+        Lance writes the same arrow columns (FixedSizeList vectors, native
+        scalar types) into a Lance dataset on MinIO; the iceberg-table
+        path is exercised separately because Iceberg has no FixedSizeList.
+        """
+        try:
+            import lance  # noqa: F401
+        except ImportError:
+            pytest.skip("lance package not installed in this environment")
+
+        import os
+        import shutil
+        import tempfile
+
+        import lance
+
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        columns = _full_matrix_arrow_columns(FULL_MATRIX_NB, 0)
+        table = pa.table(columns)
+
+        tmpdir = tempfile.mkdtemp(prefix="ext_lance_fm_")
+        local_path = os.path.join(tmpdir, "dataset.lance")
+        try:
+            lance.write_dataset(table, local_path)
+            for root, _dirs, files in os.walk(local_path):
+                for fname in files:
+                    absolute = os.path.join(root, fname)
+                    relative = os.path.relpath(absolute, local_path)
+                    minio_client.fput_object(
+                        cfg["bucket"], f"{ext_key}/{relative}", absolute,
+                    )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        schema = build_full_matrix_schema(
+            client, ext_url, ext_spec='{"format":"lance-table"}',
+        )
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            create_full_matrix_indexes(client, coll)
+            client.load_collection(coll)
+            _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_matrix_vortex(self, minio_env, external_prefix):
+        """Vortex × full DataType × full Index matrix.
+
+        Vortex generation runs in the .venv-vortex sidecar (Python >=3.11
+        for vortex-data >= 0.35). The arrow Table is built in the main
+        venv with the shared full-matrix column generator, then streamed
+        to the sidecar via Arrow IPC over stdin so the schema (including
+        FixedSizeList vector dims) is preserved verbatim.
+
+        VARCHAR / JSON / GEOMETRY columns are omitted because Milvus's
+        vortex C++ reader mishandles Arrow's variable-length 3-buffer
+        layout (validity + offsets + data):
+            - milvus#49352: refresh-time sampler raises "Expected 2
+              buffers, got 3" on Arrow `string` (VARCHAR + JSON).
+            - milvus#49353: load-time column-group loader SIGSEGVs on
+              Arrow `binary` (GEOMETRY).
+        Every other scalar (Bool / Int{8,16,32,64} / Float / Double /
+        Timestamptz / Array<Int64>) and every vector type/index
+        combination is still covered.
+
+        Splits the full row set into FORMAT_NUM_FILES sibling .vortex
+        files to also exercise multi-file ingestion through the vortex
+        reader path.
+        """
+        _minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        excluded = _VORTEX_EXCLUDED_FIELDS
+
+        # Distribute rows across multiple sibling vortex files.
+        rows_per_file, remainder = divmod(FULL_MATRIX_NB, FORMAT_NUM_FILES)
+        offset = 0
+        for idx in range(FORMAT_NUM_FILES):
+            n = rows_per_file + (1 if idx < remainder else 0)
+            columns = _full_matrix_arrow_columns(
+                n, offset, excluded_fields=excluded,
+            )
+            table = pa.table(columns)
+            _write_vortex_table_to_minio(
+                cfg["bucket"], cfg, ext_key, table,
+                filename=f"data_{idx:03d}.vortex",
+            )
+            offset += n
+        assert offset == FULL_MATRIX_NB
+
+        schema = build_full_matrix_schema(
+            client, ext_url, ext_spec='{"format":"vortex"}',
+            excluded_fields=excluded,
+        )
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            create_full_matrix_indexes(client, coll, excluded_fields=excluded)
+            client.load_collection(coll)
+            _full_matrix_assert_basic(
+                client, coll, FULL_MATRIX_NB, excluded_fields=excluded,
+            )
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_full_matrix_iceberg(self, minio_env, external_prefix):
+        """Iceberg × full DataType × full Index matrix.
+
+        Iceberg has no native fixed-size-list (vectors stored as binary
+        blobs) and no Int8/Int16 (only 32/64-bit integers), so the iceberg
+        scalar set is a strict subset of FULL_MATRIX_SCALAR_FIELDS. Vector
+        fields and indexes mirror parquet/lance exactly.
+        """
+        try:
+            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
+        except ImportError:
+            pytest.skip(
+                "pyiceberg not installed. Install with:\n"
+                "  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'"
+            )
+
+        _minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_key = external_prefix["key"]
+
+        snapshot_id, ext_url = _build_iceberg_full_matrix_table(
+            ext_key, cfg, num_rows=FULL_MATRIX_NB,
+        )
+        ext_spec = json.dumps({
+            "format":      "iceberg-table",
+            "snapshot_id": int(snapshot_id),
+            "extfs": {
+                "access_key_id":    cfg["access_key"],
+                "access_key_value": cfg["secret_key"],
+                "cloud_provider":   "aws",
+                "storage_type":     "remote",
+                "region":           "us-east-1",
+                "use_ssl":          "false",
+            },
+        })
+        schema = build_iceberg_full_matrix_schema(client, ext_url, ext_spec)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            create_iceberg_full_matrix_indexes(client, coll)
+            client.load_collection(coll)
+            _iceberg_full_matrix_assert(client, coll, FULL_MATRIX_NB)
         finally:
             client.drop_collection(coll)
