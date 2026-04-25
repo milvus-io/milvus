@@ -216,6 +216,17 @@ func (s *GrpcAccessInfoSuite) TestOutputFields() {
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestPartialUpdate() {
+	// non-Upsert request -> NotAny
+	s.Equal(NotAny, Get(s.info, "$partial_update")[0])
+
+	s.info.req = &milvuspb.UpsertRequest{PartialUpdate: false}
+	s.Equal("false", Get(s.info, "$partial_update")[0])
+
+	s.info.req = &milvuspb.UpsertRequest{PartialUpdate: true}
+	s.Equal("true", Get(s.info, "$partial_update")[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestConsistencyLevel() {
 	result := Get(s.info, "$consistency_level")
 	s.Equal(Unknown, result[0])

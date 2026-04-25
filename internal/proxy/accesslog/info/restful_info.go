@@ -287,3 +287,10 @@ func (i *RestfulInfo) TemplateValueLength() string {
 
 	return fmt.Sprint(m)
 }
+
+func (i *RestfulInfo) PartialUpdate() string {
+	if req, ok := i.req.(*milvuspb.UpsertRequest); ok {
+		return fmt.Sprint(req.GetPartialUpdate())
+	}
+	return NotAny
+}
