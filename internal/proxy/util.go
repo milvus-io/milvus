@@ -1365,7 +1365,7 @@ func ValidateUsername(username string) error {
 	}
 
 	if len(username) > Params.ProxyCfg.MaxUsernameLength.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("invalid username %s with length %d, the length of username must be less than %d", username, len(username), Params.ProxyCfg.MaxUsernameLength.GetValue())
+		return merr.WrapErrParameterInvalidMsg("invalid username %s with length %d, the length of username must be less than %d", username, len(username), Params.ProxyCfg.MaxUsernameLength.GetAsInt())
 	}
 
 	firstChar := username[0]

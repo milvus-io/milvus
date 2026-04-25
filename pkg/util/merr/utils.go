@@ -19,16 +19,14 @@ package merr
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
+	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
-	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const InputErrorFlagKey string = "is_input_error"
@@ -40,25 +38,31 @@ func Code(err error) int32 {
 		return 0
 	}
 
-	cause := errors.Cause(err)
-	switch specificErr := cause.(type) {
-	case milvusError:
-		return specificErr.code()
-
-	default:
-		if errors.Is(specificErr, context.Canceled) {
-			return CanceledCode
-		} else if errors.Is(specificErr, context.DeadlineExceeded) {
-			return TimeoutCode
-		} else {
-			return errUnexpected.code()
+	// Walk the chain looking for a milvus marker (either milvusError directly,
+	// or our wrappedMilvusError whose sentinel.Cause is hidden so that the
+	// inner error stays reachable via errors.Is). Stop at the first match.
+	for cur := err; cur != nil; cur = errors.Unwrap(cur) {
+		switch v := cur.(type) {
+		case milvusError:
+			return v.code()
+		case *wrappedMilvusError:
+			return v.code()
 		}
 	}
+
+	cause := errors.Cause(err)
+	if errors.Is(cause, context.Canceled) {
+		return CanceledCode
+	} else if errors.Is(cause, context.DeadlineExceeded) {
+		return TimeoutCode
+	}
+	return errUnexpected.code()
 }
 
 func IsRetryableErr(err error) bool {
-	if err, ok := err.(milvusError); ok {
-		return err.retriable
+	var me milvusError
+	if errors.As(err, &me) {
+		return me.retriable
 	}
 
 	return false
@@ -298,17 +302,6 @@ func SegcoreError(code int32, msg string) error {
 	return newMilvusError(msg, code, false)
 }
 
-// CheckHealthy checks whether the state is healthy,
-// returns nil if healthy,
-// otherwise returns ErrServiceNotReady wrapped with current state
-func CheckHealthy(state commonpb.StateCode) error {
-	if state != commonpb.StateCode_Healthy {
-		return WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), state.String())
-	}
-
-	return nil
-}
-
 func IsHealthy(stateCode commonpb.StateCode) error {
 	if stateCode == commonpb.StateCode_Healthy {
 		return nil
@@ -323,19 +316,17 @@ func IsHealthyOrStopping(stateCode commonpb.StateCode) error {
 	return CheckHealthy(stateCode)
 }
 
-func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
-	if err := Error(state.GetStatus()); err != nil {
-		return errors.Wrapf(err, "%s=%d not healthy", role, nodeID)
-	} else if state := state.GetState().GetStateCode(); state != commonpb.StateCode_Healthy {
-		return WrapErrServiceNotReady(role, nodeID, state.String())
-	}
-
-	return nil
-}
-
 func WrapErrAsInputError(err error) error {
 	if merr, ok := err.(milvusError); ok {
 		WithErrorType(InputError)(&merr)
+		return merr
+	}
+	return err
+}
+
+func WrapErrAsSysError(err error) error {
+	if merr, ok := err.(milvusError); ok {
+		WithErrorType(SystemError)(&merr)
 		return merr
 	}
 	return err
@@ -345,7 +336,6 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	if merr, ok := err.(milvusError); ok {
 		for _, target := range targets {
 			if target.errCode == merr.errCode {
-				log.Info("mark error as input error", zap.Error(err))
 				WithErrorType(InputError)(&merr)
 				return merr
 			}
@@ -354,15 +344,43 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	return err
 }
 
+func WrapErrCollectionReplicateMode(operation string) error {
+	return wrapFields(ErrCollectionReplicateMode, value("operation", operation))
+}
+
 func GetErrorType(err error) ErrorType {
-	if merr, ok := err.(milvusError); ok {
-		return merr.errType
+	var me milvusError
+	if errors.As(err, &me) {
+		return me.errType
 	}
 
 	return SystemError
 }
 
-// Service related
+// keeps only 2 decimal places
+func toMB[T constraints.Integer | constraints.Float](mem T) T {
+	return T(math.Round(float64(mem)/1024/1024*100) / 100)
+}
+
+// CheckHealthy checks whether the state is healthy,
+// returns nil if healthy,
+// otherwise returns ErrServiceNotReady wrapped with current state
+func CheckHealthy(stateCode commonpb.StateCode) error {
+	if stateCode != commonpb.StateCode_Healthy {
+		return ErrServiceNotReady
+	}
+	return nil
+}
+
+func AnalyzeState(role string, nodeID int64, state *milvuspb.ComponentStates) error {
+	if err := Error(state.GetStatus()); err != nil {
+		return WrapErrServiceNotReady(role, nodeID, err.Error())
+	} else if stateCode := state.GetState().GetStateCode(); stateCode != commonpb.StateCode_Healthy {
+		return WrapErrServiceNotReady(role, nodeID, stateCode.String())
+	}
+	return nil
+}
+
 func WrapErrServiceNotReady(role string, sessionID int64, state string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceNotReady,
 		state,
@@ -384,8 +402,8 @@ func WrapErrServiceUnavailable(reason string, msg ...string) error {
 
 func WrapErrServiceMemoryLimitExceeded(predict, limit float32, msg ...string) error {
 	err := wrapFields(ErrServiceMemoryLimitExceeded,
-		value("predict(MB)", logutil.ToMB(float64(predict))),
-		value("limit(MB)", logutil.ToMB(float64(limit))),
+		value("predict(MB)", toMB(float64(predict))),
+		value("limit(MB)", toMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -411,6 +429,21 @@ func WrapErrServiceInternal(reason string, msg ...string) error {
 	return err
 }
 
+func WrapErrServiceInternalErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrServiceInternalMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrServiceInternal,
+	}
+}
+
+func WrapErrServiceInternalMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrServiceInternal, fmt, args...)
+}
+
 func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, msg ...string) error {
 	err := wrapFields(ErrServiceCrossClusterRouting,
 		value("expectedCluster", expectedCluster),
@@ -424,8 +457,8 @@ func WrapErrServiceCrossClusterRouting(expectedCluster, actualCluster string, ms
 
 func WrapErrServiceDiskLimitExceeded(predict, limit float32, msg ...string) error {
 	err := wrapFields(ErrServiceDiskLimitExceeded,
-		value("predict(MB)", logutil.ToMB(float64(predict))),
-		value("limit(MB)", logutil.ToMB(float64(limit))),
+		value("predict(MB)", toMB(float64(predict))),
+		value("limit(MB)", toMB(float64(limit))),
 	)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
@@ -714,9 +747,9 @@ func WrapErrResourceGroupNodeNotEnough(rg any, current any, expected any, msg ..
 	return err
 }
 
-// WrapErrResourceGroupServiceAvailable wraps ErrResourceGroupServiceAvailable with resource group
-func WrapErrResourceGroupServiceAvailable(msg ...string) error {
-	err := wrapFields(ErrResourceGroupServiceAvailable)
+// WrapErrResourceGroupServiceUnAvailable wraps ErrResourceGroupServiceUnAvailable with resource group
+func WrapErrResourceGroupServiceUnAvailable(msg ...string) error {
+	err := wrapFields(ErrResourceGroupServiceUnAvailable)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
@@ -1041,6 +1074,21 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	return err
 }
 
+// WrapErrParameterInvalidErr wraps an existing error 'err' with ErrParameterInvalid (Code 1005).
+// This is used when an underlying error (e.g., from parsing, validation utility, or dependency)
+// causes a parameter check to fail, and you need to provide extra context
+// in 'format' and 'args'.
+func WrapErrParameterInvalidErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrParameterInvalidMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrParameterInvalid,
+	}
+}
+
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := wrapFields(ErrParameterInvalid,
 		bound("value", actual, lower, upper),
@@ -1063,6 +1111,10 @@ func WrapErrParameterMissing[T any](param T, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrParameterMissingMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrParameterMissing, fmt, args...)
 }
 
 func WrapErrParameterTooLarge(name string, msg ...string) error {
@@ -1100,11 +1152,14 @@ func WrapErrMqTopicNotEmpty(name string, msg ...string) error {
 }
 
 func WrapErrMqInternal(err error, msg ...string) error {
-	err = wrapFieldsWithDesc(ErrMqInternal, err.Error())
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
+	if err == nil {
+		return ErrMqInternal
 	}
-	return err
+	ctx := ErrMqInternal.msg
+	if len(msg) > 0 {
+		ctx = strings.Join(msg, "->") + ": " + ctx
+	}
+	return &wrappedMilvusError{msg: ctx, inner: err, sentinel: ErrMqInternal}
 }
 
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
@@ -1246,6 +1301,12 @@ func WrapErrIllegalCompactionPlan(msg ...string) error {
 	return err
 }
 
+func WrapErrIllegalCompactionPlanMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	// Since this is the message-only path, we wrap the constant error with the formatted message.
+	return errors.Wrap(ErrIllegalCompactionPlan, detail)
+}
+
 func WrapErrCompactionPlanConflict(msg ...string) error {
 	err := error(ErrCompactionPlanConflict)
 	if len(msg) > 0 {
@@ -1314,11 +1375,25 @@ func WrapErrAnalyzeTaskNotFound(id int64) error {
 }
 
 func WrapErrBuildCompactionRequestFail(err error) error {
-	return wrapFieldsWithDesc(ErrBuildCompactionRequestFail, err.Error())
+	if err == nil {
+		return ErrBuildCompactionRequestFail
+	}
+	return &wrappedMilvusError{
+		msg:      ErrBuildCompactionRequestFail.msg,
+		inner:    err,
+		sentinel: ErrBuildCompactionRequestFail,
+	}
 }
 
 func WrapErrGetCompactionPlanResultFail(err error) error {
-	return wrapFieldsWithDesc(ErrGetCompactionPlanResultFail, err.Error())
+	if err == nil {
+		return ErrGetCompactionPlanResultFail
+	}
+	return &wrappedMilvusError{
+		msg:      ErrGetCompactionPlanResultFail.msg,
+		inner:    err,
+		sentinel: ErrGetCompactionPlanResultFail,
+	}
 }
 
 func WrapErrCompactionResult(msg ...string) error {
@@ -1378,4 +1453,23 @@ func WrapErrSnapshotPinned(name any, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+// WrapErrOperationNotSupportedMsg creates a new ErrOperationNotSupported with a detail message (Code 14).
+// This is the primary replacement for fmt.Errorf/errors.New for operations that are
+// currently not supported by the system.
+func WrapErrOperationNotSupportedMsg(format string, args ...any) error {
+	return errors.Wrapf(ErrOperationNotSupported, format, args...)
+}
+
+// WrapErrOperationNotSupported wraps an existing error 'err' with ErrOperationNotSupported (Code 14).
+func WrapErrOperationNotSupported(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrOperationNotSupportedMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrOperationNotSupported,
+	}
 }

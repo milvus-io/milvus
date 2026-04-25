@@ -72,10 +72,23 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				}
 				return err
 			}
-			if c.isRetryErr != nil && !c.isRetryErr(err) {
-				log.Warn("retry func failed, not be retryable",
+
+			// Caller-explicit RetryErr predicate takes precedence over the
+			// default InputError abort: when caller passes RetryErr they have
+			// decided which errors are retriable, framework must not override.
+			if c.isRetryErr != nil {
+				if !c.isRetryErr(err) {
+					log.Warn("retry func failed, not be retryable",
+						zap.Uint("retried", i),
+						zap.Uint("attempt", c.attempts),
+						zap.String("caller", getCaller(2)),
+					)
+					return err
+				}
+			} else if merr.GetErrorType(err) == merr.InputError {
+				log.Warn("retry func failed, input error is non-retriable",
 					zap.Uint("retried", i),
-					zap.Uint("attempt", c.attempts),
+					zap.Error(err),
 					zap.String("caller", getCaller(2)),
 				)
 				return err
@@ -162,6 +175,27 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 				if isContextErr && lastErr != nil {
 					return lastErr
 				}
+				return err
+			}
+
+			// Caller-explicit RetryErr predicate takes precedence over the
+			// default InputError abort: when caller passes RetryErr they have
+			// decided which errors are retriable, framework must not override.
+			if c.isRetryErr != nil {
+				if !c.isRetryErr(err) {
+					log.Warn("retry func failed, not be retryable",
+						zap.Uint("retried", i),
+						zap.Uint("attempt", c.attempts),
+						zap.String("caller", getCaller(2)),
+					)
+					return err
+				}
+			} else if merr.GetErrorType(err) == merr.InputError {
+				log.Warn("retry func failed, input error is non-retriable",
+					zap.Uint("retried", i),
+					zap.Error(err),
+					zap.String("caller", getCaller(2)),
+				)
 				return err
 			}
 
