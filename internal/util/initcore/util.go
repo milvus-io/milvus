@@ -107,6 +107,10 @@ func ResolveArrowIOThreadPoolCapacity() int {
 	return threads
 }
 
+func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
+	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
+}
+
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
 }

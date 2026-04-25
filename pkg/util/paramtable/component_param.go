@@ -3506,6 +3506,10 @@ type queryNodeConfig struct {
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
+	// Target average byte size per storage v2 cache cell. Parquet row groups
+	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
+	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
+
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
@@ -4592,6 +4596,27 @@ user-task-polling:
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.StorageV2CellTargetSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.storageV2.cellTargetSizeBytes",
+		Version:      "3.0.0",
+		DefaultValue: "4194304", // 4 MiB
+		Doc: `Target average byte size per storage v2 cache cell. Parquet row groups are ` +
+			`greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. ` +
+			`Each cell always contains at least one row group and cells never cross file ` +
+			`boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get ` +
+			`finer cache granularity. Default 4 MiB.`,
+		Export: true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				log.Warn("queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
+					zap.String("configured", v))
+				return "4194304"
+			}
+			return v
+		},
+	}
+	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
