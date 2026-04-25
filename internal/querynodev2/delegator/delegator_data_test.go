@@ -983,6 +983,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	})
 
 	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
