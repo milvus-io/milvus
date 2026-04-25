@@ -46,6 +46,7 @@ DoReduce(milvus::tracer::TraceContext trace_ctx,
     milvus::tracer::AutoSpan span(
         "ReduceSearchResultsAndFillData", &trace_ctx, true);
 
+    auto num_slices = static_cast<int64_t>(slice_nqs.size());
     std::shared_ptr<milvus::segcore::ReduceHelper> reduce_helper;
     if (plan->plan_node_->search_info_.group_by_field_id_.has_value()) {
         reduce_helper =
@@ -53,19 +54,21 @@ DoReduce(milvus::tracer::TraceContext trace_ctx,
                 search_results,
                 plan,
                 placeholder_group,
-                slice_nqs,
-                slice_topKs,
+                slice_nqs.data(),
+                slice_topKs.data(),
                 num_slices,
-                &trace_ctx);
+                &trace_ctx,
+                op_ctx);
     } else {
         reduce_helper = std::make_shared<milvus::segcore::ReduceHelper>(
             search_results,
             plan,
             placeholder_group,
-            slice_nqs,
-            slice_topKs,
+            slice_nqs.data(),
+            slice_topKs.data(),
             num_slices,
-            &trace_ctx);
+            &trace_ctx,
+            op_ctx);
     }
     reduce_helper->Reduce();
     reduce_helper->Marshal();
