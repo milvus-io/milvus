@@ -87,7 +87,7 @@ type ExternalSpec struct {
 	Format     string            `json:"format"`                // one of Format* constants
 	Columns    []string          `json:"columns"`               // optional: specific columns to load
 	Extfs      map[string]string `json:"extfs,omitempty"`       // optional: extfs config overrides (non-sensitive only)
-	SnapshotID *int64            `json:"snapshot_id,omitempty"` // Iceberg snapshot ID (required for iceberg-table)
+	SnapshotID *int64            `json:"snapshot_id,string,omitempty"` // Iceberg snapshot ID (required for iceberg-table); string-encoded to preserve int64 precision in JS/JSON clients
 }
 
 // supportedFormats lists the file formats supported for external collections

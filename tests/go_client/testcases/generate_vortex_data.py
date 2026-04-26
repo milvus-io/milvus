@@ -8,9 +8,16 @@ Example:
     python3 generate_vortex_data.py external-e2e-test/vortex_test 2000 4
 
 Schema:
-    - id (Int64)
-    - value (Float32)
+    - id        (Int64)
+    - value     (Float32)
     - embedding (FixedSizeList<UInt8>[dim * sizeof(float32)])
+    - varchar_val (String)            # exercises Arrow string -> VARCHAR
+    - json_val    (String)            # exercises Arrow string -> JSON
+    - geo_val     (Binary, WKB POINT) # exercises Arrow binary -> GEOMETRY
+
+The string + binary columns are required to repro vortex-specific bugs:
+    - issue #49352: vortex VARCHAR/JSON refresh "Expected 2 buffers, got 3"
+    - issue #49353: vortex GEOMETRY load SIGSEGV
 
 Environment variables:
     MINIO_ADDRESS   (default: localhost:9000)
@@ -20,6 +27,7 @@ Environment variables:
 
 Requires: vortex-data>=0.56.0, pyarrow, obstore (pip install in Python >=3.11)
 """
+import json
 import os
 import struct
 import sys
@@ -30,6 +38,11 @@ import pyarrow as pa
 import vortex.io  # noqa: F401 — ensure vx.io is importable
 import vortex as vx
 from obstore.store import S3Store
+
+
+def encode_wkb_point(x: float, y: float) -> bytes:
+    # WKB layout (little-endian POINT): 1B order + 4B type + 8B x + 8B y
+    return struct.pack("<BIdd", 1, 1, x, y)
 
 
 def main():
@@ -60,10 +73,18 @@ def main():
     embedding_arr = pa.FixedSizeListArray.from_arrays(
         pa.array(flat_bytes, type=pa.uint8()), byte_width,
     )
+
+    varchar_vals = [f"vc_{i}" for i in ids]
+    json_vals = [json.dumps({"k": i, "name": f"item_{i}"}) for i in ids]
+    geo_vals = [encode_wkb_point(float(i), float(i) * 0.1) for i in ids]
+
     table = pa.table({
         "id": pa.array(ids, type=pa.int64()),
         "value": pa.array(values, type=pa.float32()),
         "embedding": embedding_arr,
+        "varchar_val": pa.array(varchar_vals, type=pa.string()),
+        "json_val": pa.array(json_vals, type=pa.string()),
+        "geo_val": pa.array(geo_vals, type=pa.binary()),
     })
 
     # vx.io.write() only writes to local filesystem.

@@ -397,3 +397,33 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 		assert.Contains(t, err.Error(), "only valid for GCP")
 	})
 }
+
+// TestParseExternalSpec_SnapshotIDStringEncoded covers the JS/JSON-safe
+// string form of snapshot_id (Iceberg int64 IDs exceed JS Number.MAX_SAFE_INTEGER).
+// Bare-number form is rejected by `,string` json tag — clients must quote the value.
+func TestParseExternalSpec_SnapshotIDStringEncoded(t *testing.T) {
+	t.Run("string_form_accepted", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137"}`)
+		require.NoError(t, err)
+		require.NotNil(t, spec.SnapshotID)
+		assert.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+	})
+
+	t.Run("bare_number_rejected", func(t *testing.T) {
+		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid external spec JSON")
+	})
+
+	t.Run("non_numeric_string_rejected", func(t *testing.T) {
+		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid external spec JSON")
+	})
+
+	t.Run("omitted_yields_nil", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"iceberg-table"}`)
+		require.NoError(t, err)
+		assert.Nil(t, spec.SnapshotID)
+	})
+}
