@@ -26,7 +26,6 @@ import pyarrow as pa
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import (
-    BinaryType,
     BooleanType,
     DoubleType,
     FixedType,

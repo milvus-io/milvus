@@ -35,8 +35,8 @@ import tempfile
 
 import obstore
 import pyarrow as pa
-import vortex.io  # noqa: F401 — ensure vx.io is importable
 import vortex as vx
+import vortex.io  # noqa: F401 — ensure vx.io is importable
 from obstore.store import S3Store
 
 

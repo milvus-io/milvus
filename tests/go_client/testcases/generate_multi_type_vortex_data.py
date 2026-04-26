@@ -34,14 +34,13 @@ Environment variables:
 """
 import json
 import os
-import struct
 import sys
 import tempfile
 
 import obstore
 import pyarrow as pa
-import vortex.io  # noqa: F401
 import vortex as vx
+import vortex.io  # noqa: F401
 from obstore.store import S3Store
 
 
