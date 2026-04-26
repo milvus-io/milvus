@@ -296,7 +296,7 @@ class SegmentInterface {
 
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
-         milvus::OpContext* op_ctx = nullptr) = 0;
+         milvus::OpContext* op_ctx) = 0;
 
     // Get IArrayOffsets for element-level filtering on array fields
     // Returns nullptr if the field doesn't have IArrayOffsets

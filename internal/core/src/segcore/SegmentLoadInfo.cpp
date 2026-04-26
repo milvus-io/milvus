@@ -35,7 +35,7 @@
 namespace milvus::segcore {
 
 std::shared_ptr<milvus_storage::api::ColumnGroups>
-SegmentLoadInfo::GetColumnGroups() {
+SegmentLoadInfo::GetColumnGroups() const {
     auto manifest_path = GetManifestPath();
     if (manifest_path.empty()) {
         return nullptr;

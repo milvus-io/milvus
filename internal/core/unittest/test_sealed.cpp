@@ -3194,8 +3194,9 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
 
     // Simulate the state a prior Load would leave behind after running
     // CreateTextIndex for the enable_match field.
-    sealed->TestGetSegmentLoadInfo().SetTextIndexCreated(text_fid);
-    ASSERT_TRUE(sealed->TestGetSegmentLoadInfo().HasTextIndexCreated(text_fid));
+    sealed->TestRecordTextIndexCreated(text_fid);
+    ASSERT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
 
     // Reopen must preserve the runtime-only created_text_indexes_. Before
     // the fix this fails (member wiped by `segment_load_info_ =
@@ -3209,5 +3210,6 @@ TEST(SealedSegmentReopen, TextIndexCreatedWipedByReopen) {
     } catch (...) {
     }
 
-    EXPECT_TRUE(sealed->TestGetSegmentLoadInfo().HasTextIndexCreated(text_fid));
+    EXPECT_TRUE(
+        sealed->TestGetSegmentLoadInfo()->HasTextIndexCreated(text_fid));
 }
