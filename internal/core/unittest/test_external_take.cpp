@@ -1767,14 +1767,40 @@ TEST(InjectExtfsAllowlist, InvalidJsonIsHandledGracefully) {
 TEST(InjectExtfsAllowlist, URIWithoutTrailingSlashParsed) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
+    // Explicit cloud_provider=aws opts into AWS-form parsing. Without it,
+    // the swap is suppressed (Milvus-form, host treated as endpoint) — see
+    // ExplicitCloudProviderRequiredForAwsFormSwap below.
     std::string spec =
-        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}})";
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}})";
 
     EXPECT_NO_THROW(
         ::InjectExternalSpecProperties(props, coll_id, "s3://mybucket", spec));
     // AWS-form path: URI.host=bucket, derived endpoint=regional S3.
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
               "mybucket");
+}
+
+// Regression: scheme-based cloud_provider inference must NOT drive the
+// AWS-form swap. Self-hosted MinIO at `s3://localhost:9000/bucket/key`
+// without an explicit cloud_provider must be treated as Milvus-form
+// (host=endpoint, no swap). Auto-inferring cp=aws would falsely classify
+// `localhost:9000` as a bucket.
+TEST(InjectExtfsAllowlist, ExplicitCloudProviderRequiredForAwsFormSwap) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://localhost:9000/bucket/key", spec);
+
+    // No cloud_provider → no swap. Layer 0 zero-init may seed empty slots,
+    // but the swap path must NOT write URI.host as bucket_name (which would
+    // misclassify localhost:9000 as a bucket name).
+    if (props.count("extfs.42.bucket_name")) {
+        EXPECT_NE(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "localhost:9000");
+    }
 }
 
 // milvus-storage's fs.* property registry does not yet declare

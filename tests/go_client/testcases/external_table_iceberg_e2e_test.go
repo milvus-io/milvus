@@ -325,7 +325,12 @@ func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
 			"region":           "us-east-1",
 			"use_ssl":          "false",
 			"use_virtual_host": "false",
-			"cloud_provider":   "aws",
+			// `minio` sentinel: tells milvus to treat URI host as
+			// endpoint instead of swapping for AWS canonical endpoint.
+			// `aws` would derive s3.us-east-1.amazonaws.com and fail
+			// the (address, bucket) lookup against the URI host
+			// `localhost:9000`.
+			"cloud_provider":   "minio",
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
 		},

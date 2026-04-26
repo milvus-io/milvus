@@ -569,6 +569,15 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                         } else if (key == "region") {
                             spec_region = val;
                         }
+                        // "minio" is a Milvus-only cloud_provider sentinel
+                        // meaning "self-hosted S3-compatible, do not derive
+                        // endpoint and do not swap host". loon's allowlist
+                        // does not include it, so propagate the value only
+                        // for our swap-decision logic above and drop it
+                        // before reaching loon.
+                        if (key == "cloud_provider" && val == "minio") {
+                            continue;
+                        }
                         milvus_storage::api::SetValue(
                             properties,
                             (extfs_prefix + key).c_str(),
@@ -608,23 +617,15 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     //   keys (`s3://endpoint/bucket`). Comparing derive result with host
     //   handles both cases correctly — the derived endpoint string is a
     //   stable cloud-provider identifier, not dependent on path structure.
-    // Infer cloud_provider from scheme when spec omits it. Mirror of Go
-    // externalspec.ValidateExtfsComplete; keep lists in lockstep.
-    std::string effective_cp = spec_cloud_provider;
-    if (effective_cp.empty()) {
-        if (scheme == "s3" || scheme == "s3a" || scheme == "aws") {
-            effective_cp = "aws";
-        } else if (scheme == "gs" || scheme == "gcs") {
-            effective_cp = "gcp";
-        } else if (scheme == "oss") {
-            effective_cp = "aliyun";
-        } else if (scheme == "cos") {
-            effective_cp = "tencent";
-        } else if (scheme == "obs") {
-            effective_cp = "huawei";
-        }
-    }
-    std::string derived = DeriveEndpoint(effective_cp, spec_region);
+    // Swap decision uses ONLY the user-supplied cloud_provider, never a
+    // scheme-inferred fallback. Self-hosted MinIO with
+    // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
+    // cloud_provider=aws from scheme=s3 would produce
+    // derived=https://s3.<region>.amazonaws.com, falsely classify host
+    // as a bucket, and swap. When the user does not declare
+    // cloud_provider, DeriveEndpoint returns empty and the URI is
+    // treated as Milvus-form (host is endpoint).
+    std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
     // Cloud-family host suffix check: if URI.host ends with a known cloud
     // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
     // endpoint variants including global/accelerate/dualstack/FIPS/VPC), the

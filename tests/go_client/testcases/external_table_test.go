@@ -25,7 +25,7 @@ func TestCreateExternalCollection(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
@@ -56,7 +56,7 @@ func TestCreateExternalCollection(t *testing.T) {
 
 	// Verify external source and spec
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
-	require.Equal(t, `{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`, coll.Schema.ExternalSpec)
+	require.Equal(t, `{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`, coll.Schema.ExternalSpec)
 
 	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
 	require.Len(t, coll.Schema.Fields, 3)
@@ -99,7 +99,7 @@ func TestCreateExternalCollectionMissingExternalField(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
@@ -134,7 +134,7 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -169,7 +169,7 @@ func TestCreateExternalCollectionWithDynamicField(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithDynamicFieldEnabled(true).
 		WithField(
 			entity.NewField().
@@ -205,7 +205,7 @@ func TestCreateExternalCollectionWithAutoID(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("id").
@@ -240,7 +240,7 @@ func TestCreateExternalCollectionWithPartitionKey(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("category").
@@ -276,7 +276,7 @@ func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource("s3://test-bucket/data/").
-		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1"}}`).
+		WithExternalSpec(`{"format": "parquet","extfs":{"access_key_id":"dummy","access_key_value":"dummy","region":"us-east-1","cloud_provider":"aws"}}`).
 		WithField(
 			entity.NewField().
 				WithName("text").
