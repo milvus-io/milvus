@@ -922,7 +922,7 @@ TEST(CApiTest, GlobalRefineTruncateMergesBeforeSegmentPruning) {
 
     helper.TruncateForTest();
 
-    // refine_topk = ceil(0.5 * max(slice_topk=2, max_unity_topk=2)) = 1
+    // refine_topk = ceil(0.5 * max(slice_topk=2, 0 since ef/search_list not specified)) = 1
     // merge top-1 across segments: seg0 keeps only 0.95, seg1 gets none
     ASSERT_EQ(seg0.distances_.size(), 1);
     ASSERT_EQ(seg0.seg_offsets_.size(), 1);
@@ -940,6 +940,9 @@ TEST(CApiTest, GlobalRefineTruncateHandlesMixedSegmentUnityTopk) {
     query::Plan plan(schema);
     plan.plan_node_ = std::make_unique<query::VectorPlanNode>();
     plan.plan_node_->search_info_.refine_topk_ratio_ = 1.0;
+    knowhere::Json search_params;
+    search_params["ef"] = 3;
+    plan.plan_node_->search_info_.search_params_ = search_params;
 
     SearchResult seg0;
     seg0.total_nq_ = 1;
@@ -963,7 +966,7 @@ TEST(CApiTest, GlobalRefineTruncateHandlesMixedSegmentUnityTopk) {
 
     helper.TruncateForTest();
 
-    // refine_topk = ceil(1.0 * max(slice_topk=2, max_unity_topk=3)) = 3
+    // refine_topk = ceil(1.0 * max(slice_topk=2, ef/search_list=3)) = 3
     // merge top-3 across segments: 0.99(seg0), 0.98(seg1), 0.95(seg0)
     ASSERT_EQ(seg0.distances_.size(), 2);
     ASSERT_EQ(seg0.seg_offsets_.size(), 2);
