@@ -143,12 +143,12 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
         if (external_source != nullptr && external_source[0] != '\0') {
-            InjectExtfsProperties(*properties,
-                                  collection_id,
-                                  std::string(external_source),
-                                  external_spec != nullptr
-                                      ? std::string(external_spec)
-                                      : std::string());
+            InjectExternalSpecProperties(*properties,
+                                         collection_id,
+                                         std::string(external_source),
+                                         external_spec != nullptr
+                                             ? std::string(external_spec)
+                                             : std::string());
         }
         auto column_groups =
             std::make_shared<milvus_storage::api::ColumnGroups>();
