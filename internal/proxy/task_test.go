@@ -3596,7 +3596,7 @@ func Test_truncateCollectionTask_PreExecute(t *testing.T) {
 	regBytes, err := proto.Marshal(regularSchema)
 	require.NoError(t, err)
 	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 		DbName: dbName, CollectionName: regularName, Schema: regBytes, ShardsNum: 1,
 	})
 	require.NoError(t, err)
@@ -3607,14 +3607,16 @@ func Test_truncateCollectionTask_PreExecute(t *testing.T) {
 		ExternalSpec:   `{"format":"parquet"}`,
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
-			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{
+				FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
 		},
 	}
 	extBytes, err := proto.Marshal(extSchema)
 	require.NoError(t, err)
 	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 		DbName: dbName, CollectionName: externalName, Schema: extBytes, ShardsNum: 1,
 	})
 	require.NoError(t, err)
@@ -7319,36 +7321,36 @@ func TestAlterCollection_RejectExternalTupleMutation(t *testing.T) {
 	}
 
 	t.Run("reject properties with external_source", func(t *testing.T) {
-		task.AlterCollectionRequest.Properties = []*commonpb.KeyValuePair{
+		task.Properties = []*commonpb.KeyValuePair{
 			{Key: common.CollectionExternalSource, Value: "s3://bucket/a/"},
 		}
-		task.AlterCollectionRequest.DeleteKeys = nil
+		task.DeleteKeys = nil
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "RefreshExternalCollection")
 	})
 
 	t.Run("reject properties with external_spec", func(t *testing.T) {
-		task.AlterCollectionRequest.Properties = []*commonpb.KeyValuePair{
+		task.Properties = []*commonpb.KeyValuePair{
 			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
 		}
-		task.AlterCollectionRequest.DeleteKeys = nil
+		task.DeleteKeys = nil
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "RefreshExternalCollection")
 	})
 
 	t.Run("reject delete of external_source", func(t *testing.T) {
-		task.AlterCollectionRequest.Properties = nil
-		task.AlterCollectionRequest.DeleteKeys = []string{common.CollectionExternalSource}
+		task.Properties = nil
+		task.DeleteKeys = []string{common.CollectionExternalSource}
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "immutable")
 	})
 
 	t.Run("reject delete of external_spec", func(t *testing.T) {
-		task.AlterCollectionRequest.Properties = nil
-		task.AlterCollectionRequest.DeleteKeys = []string{common.CollectionExternalSpec}
+		task.Properties = nil
+		task.DeleteKeys = []string{common.CollectionExternalSpec}
 		err := task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "immutable")

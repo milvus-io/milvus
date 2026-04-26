@@ -772,9 +772,9 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 // and struct-array fields alike. Fix for issue #49314.
 func validateReservedFieldNames(schema *schemapb.CollectionSchema) error {
 	reserved := map[string]struct{}{
-		common.RowIDFieldName:      {},
-		common.TimeStampFieldName:  {},
-		common.VirtualPKFieldName:  {},
+		common.RowIDFieldName:     {},
+		common.TimeStampFieldName: {},
+		common.VirtualPKFieldName: {},
 	}
 	check := func(name string) error {
 		if _, ok := reserved[name]; ok {

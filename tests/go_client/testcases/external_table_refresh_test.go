@@ -1232,7 +1232,8 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 // generateMultiTypeParquetBytes / generate_multi_type_vortex_data.py with
 // the given numRows.
 func runMultiTypeRefreshIndexLoadVerify(ctx context.Context, t *testing.T,
-	mc *base.MilvusClient, collName string, numRows int64) {
+	mc *base.MilvusClient, collName string, numRows int64,
+) {
 	runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx, t, mc, collName, numRows, "", "")
 }
 
@@ -1240,7 +1241,8 @@ func runMultiTypeRefreshIndexLoadVerify(ctx context.Context, t *testing.T,
 // source+spec (used by iceberg paths that re-supply extfs credentials on
 // refresh; proxy now enforces both-or-neither).
 func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *testing.T,
-	mc *base.MilvusClient, collName string, numRows int64, refreshSource, refreshSpec string) {
+	mc *base.MilvusClient, collName string, numRows int64, refreshSource, refreshSpec string,
+) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh + index all vector fields + load
 	// ---------------------------------------------------------------
@@ -1540,7 +1542,6 @@ func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *te
 	require.Equal(t, 25, compoundRes.GetColumn("id").Len(),
 		`compound filter: bool_val==true AND int32_val<5000 AND varchar like "str_00%" → 25 rows`)
 	t.Log("Compound filter across types (incl. varchar) passed")
-
 }
 
 // --- Lance format helpers ---
@@ -3353,7 +3354,10 @@ func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
 	require.NoError(t, err)
 	dataB, err := generateParquetBytes(8, 1000)
 	require.NoError(t, err)
-	for _, p := range []struct{ path string; bytes []byte }{{pathA, dataA}, {pathB, dataB}} {
+	for _, p := range []struct {
+		path  string
+		bytes []byte
+	}{{pathA, dataA}, {pathB, dataB}} {
 		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
 			fmt.Sprintf("%s/data.parquet", p.path),
 			bytes.NewReader(p.bytes), int64(len(p.bytes)),
@@ -3468,11 +3472,11 @@ func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
 	}
 	// Stray non-parquet files interleaved by lex order with the parquets.
 	strays := map[string][]byte{
-		"_SUCCESS":     []byte(""),
-		"_committed":   []byte("xyz"),
-		"part-00.crc":  []byte("crc-checksum-bytes"),
-		"README.md":    []byte("# this dir\n"),
-		"metadata":     []byte(`{"v":1}`),
+		"_SUCCESS":    []byte(""),
+		"_committed":  []byte("xyz"),
+		"part-00.crc": []byte("crc-checksum-bytes"),
+		"README.md":   []byte("# this dir\n"),
+		"metadata":    []byte(`{"v":1}`),
 	}
 	for name, payload := range strays {
 		_, err = minioClient.PutObject(ctx, minioCfg.bucket,

@@ -596,7 +596,6 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		}
 	}
 
-
 	sampleOne := func(manifestPath string) (int64, bool) {
 		fieldSizes, err := packed.SampleExternalFieldSizes(
 			manifestPath, sampleRows,
