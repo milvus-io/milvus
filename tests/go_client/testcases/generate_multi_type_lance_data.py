@@ -35,6 +35,7 @@ lance_bridgeimpl.rs note in generate_lance_data.py).
 Environment variables:
     MINIO_ADDRESS, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
 """
+
 import json
 import os
 import struct
@@ -77,10 +78,7 @@ def main():
     double_vals = [float(i) * 0.01 for i in ids]
     varchar_vals = [f"str_{i:04d}" for i in ids]
     # Compact JSON (no spaces) — matches verifier substring assertions.
-    json_vals = [
-        json.dumps({"key": i, "name": f"item_{i}"}, separators=(",", ":"))
-        for i in ids
-    ]
+    json_vals = [json.dumps({"key": i, "name": f"item_{i}"}, separators=(",", ":")) for i in ids]
 
     array_int_vals = [[i, i * 2, i * 3] for i in ids]
     array_str_vals = [[f"tag_{i}_a", f"tag_{i}_b"] for i in ids]
@@ -92,41 +90,38 @@ def main():
     geo_vals = [f"POINT({i} {i * 0.1:.1f})" for i in ids]
 
     # FloatVector packed as float32 bytes
-    embedding_rows = [
-        struct.pack(f"{vec_dim}f", *[float(i) * 0.1 + d for d in range(vec_dim)])
-        for i in ids
-    ]
+    embedding_rows = [struct.pack(f"{vec_dim}f", *[float(i) * 0.1 + d for d in range(vec_dim)]) for i in ids]
 
     def gen_bytes_block(byte_width):
-        return [
-            bytes((i + b) % 256 for b in range(byte_width)) for i in ids
-        ]
+        return [bytes((i + b) % 256 for b in range(byte_width)) for i in ids]
 
     bin_vec_rows = gen_bytes_block(bin_vec_byte_width)
     fp16_vec_rows = gen_bytes_block(fp16_byte_width)
     bf16_vec_rows = gen_bytes_block(bf16_byte_width)
     int8_vec_rows = gen_bytes_block(int8_vec_byte_width)
 
-    schema = pa.schema([
-        pa.field("id", pa.int64()),
-        pa.field("bool_val", pa.bool_()),
-        pa.field("int8_val", pa.int8()),
-        pa.field("int16_val", pa.int16()),
-        pa.field("int32_val", pa.int32()),
-        pa.field("float_val", pa.float32()),
-        pa.field("double_val", pa.float64()),
-        pa.field("varchar_val", pa.string()),
-        pa.field("json_val", pa.string()),
-        pa.field("array_int", pa.list_(pa.int32())),
-        pa.field("array_str", pa.list_(pa.string())),
-        pa.field("ts_val", pa.timestamp("us", tz="UTC")),
-        pa.field("geo_val", pa.string()),
-        pa.field("embedding", pa.binary(embedding_byte_width)),
-        pa.field("bin_vec", pa.binary(bin_vec_byte_width)),
-        pa.field("fp16_vec", pa.binary(fp16_byte_width)),
-        pa.field("bf16_vec", pa.binary(bf16_byte_width)),
-        pa.field("int8_vec", pa.binary(int8_vec_byte_width)),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64()),
+            pa.field("bool_val", pa.bool_()),
+            pa.field("int8_val", pa.int8()),
+            pa.field("int16_val", pa.int16()),
+            pa.field("int32_val", pa.int32()),
+            pa.field("float_val", pa.float32()),
+            pa.field("double_val", pa.float64()),
+            pa.field("varchar_val", pa.string()),
+            pa.field("json_val", pa.string()),
+            pa.field("array_int", pa.list_(pa.int32())),
+            pa.field("array_str", pa.list_(pa.string())),
+            pa.field("ts_val", pa.timestamp("us", tz="UTC")),
+            pa.field("geo_val", pa.string()),
+            pa.field("embedding", pa.binary(embedding_byte_width)),
+            pa.field("bin_vec", pa.binary(bin_vec_byte_width)),
+            pa.field("fp16_vec", pa.binary(fp16_byte_width)),
+            pa.field("bf16_vec", pa.binary(bf16_byte_width)),
+            pa.field("int8_vec", pa.binary(int8_vec_byte_width)),
+        ]
+    )
 
     table = pa.table(
         {
@@ -166,10 +161,7 @@ def main():
         mode="overwrite",
         storage_options=storage_options,
     )
-    print(
-        f"OK rows={ds.count_rows()} fragments={len(ds.get_fragments())} "
-        f"uri={s3_uri}"
-    )
+    print(f"OK rows={ds.count_rows()} fragments={len(ds.get_fragments())} uri={s3_uri}")
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ Environment variables:
 
 Requires: vortex-data>=0.56.0, pyarrow, obstore (pip install in Python >=3.11)
 """
+
 import json
 import os
 import struct
@@ -71,21 +72,24 @@ def main():
         flat_bytes.extend(struct.pack(f"{dim}f", *[float(i) * 0.1 + j for j in range(dim)]))
 
     embedding_arr = pa.FixedSizeListArray.from_arrays(
-        pa.array(flat_bytes, type=pa.uint8()), byte_width,
+        pa.array(flat_bytes, type=pa.uint8()),
+        byte_width,
     )
 
     varchar_vals = [f"vc_{i}" for i in ids]
     json_vals = [json.dumps({"k": i, "name": f"item_{i}"}) for i in ids]
     geo_vals = [encode_wkb_point(float(i), float(i) * 0.1) for i in ids]
 
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        "value": pa.array(values, type=pa.float32()),
-        "embedding": embedding_arr,
-        "varchar_val": pa.array(varchar_vals, type=pa.string()),
-        "json_val": pa.array(json_vals, type=pa.string()),
-        "geo_val": pa.array(geo_vals, type=pa.binary()),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "value": pa.array(values, type=pa.float32()),
+            "embedding": embedding_arr,
+            "varchar_val": pa.array(varchar_vals, type=pa.string()),
+            "json_val": pa.array(json_vals, type=pa.string()),
+            "geo_val": pa.array(geo_vals, type=pa.binary()),
+        }
+    )
 
     # vx.io.write() only writes to local filesystem.
     # Write locally then upload to MinIO via obstore.

@@ -32,6 +32,7 @@ representation (NormalizeVectorArrays handles the conversion).
 Environment variables:
     MINIO_ADDRESS, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET
 """
+
 import json
 import os
 import sys
@@ -73,10 +74,7 @@ def main():
     float_vals = [float(i) * 1.5 for i in ids]
     double_vals = [float(i) * 0.01 for i in ids]
     varchar_vals = [f"str_{i:04d}" for i in ids]
-    json_vals = [
-        json.dumps({"key": i, "name": f"item_{i}"}, separators=(",", ":"))
-        for i in ids
-    ]
+    json_vals = [json.dumps({"key": i, "name": f"item_{i}"}, separators=(",", ":")) for i in ids]
 
     # Array<Int32>: [i*1, i*2, i*3]
     array_int_vals = [[i, i * 2, i * 3] for i in ids]
@@ -95,7 +93,8 @@ def main():
         for d in range(vec_dim):
             embedding_flat.append(float(i) * 0.1 + d)
     embedding_arr = pa.FixedSizeListArray.from_arrays(
-        pa.array(embedding_flat, type=pa.float32()), vec_dim,
+        pa.array(embedding_flat, type=pa.float32()),
+        vec_dim,
     )
 
     # BinaryVector / FP16 / BF16 / Int8Vector — all FixedSizeList<UInt8>
@@ -105,7 +104,8 @@ def main():
             for b in range(byte_width):
                 flat.append((i + b) % 256)
         return pa.FixedSizeListArray.from_arrays(
-            pa.array(flat, type=pa.uint8()), byte_width,
+            pa.array(flat, type=pa.uint8()),
+            byte_width,
         )
 
     bin_vec_arr = gen_uint8_block(bin_vec_byte_width)
@@ -113,26 +113,28 @@ def main():
     bf16_vec_arr = gen_uint8_block(bf16_byte_width)
     int8_vec_arr = gen_uint8_block(int8_vec_byte_width)
 
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        "bool_val": pa.array(bool_vals, type=pa.bool_()),
-        "int8_val": pa.array(int8_vals, type=pa.int8()),
-        "int16_val": pa.array(int16_vals, type=pa.int16()),
-        "int32_val": pa.array(int32_vals, type=pa.int32()),
-        "float_val": pa.array(float_vals, type=pa.float32()),
-        "double_val": pa.array(double_vals, type=pa.float64()),
-        "varchar_val": pa.array(varchar_vals, type=pa.string()),
-        "json_val": pa.array(json_vals, type=pa.string()),
-        "array_int": pa.array(array_int_vals, type=pa.list_(pa.int32())),
-        "array_str": pa.array(array_str_vals, type=pa.list_(pa.string())),
-        "ts_val": pa.array(ts_vals, type=pa.timestamp("us", tz="UTC")),
-        "geo_val": pa.array(geo_vals, type=pa.string()),
-        "embedding": embedding_arr,
-        "bin_vec": bin_vec_arr,
-        "fp16_vec": fp16_vec_arr,
-        "bf16_vec": bf16_vec_arr,
-        "int8_vec": int8_vec_arr,
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "bool_val": pa.array(bool_vals, type=pa.bool_()),
+            "int8_val": pa.array(int8_vals, type=pa.int8()),
+            "int16_val": pa.array(int16_vals, type=pa.int16()),
+            "int32_val": pa.array(int32_vals, type=pa.int32()),
+            "float_val": pa.array(float_vals, type=pa.float32()),
+            "double_val": pa.array(double_vals, type=pa.float64()),
+            "varchar_val": pa.array(varchar_vals, type=pa.string()),
+            "json_val": pa.array(json_vals, type=pa.string()),
+            "array_int": pa.array(array_int_vals, type=pa.list_(pa.int32())),
+            "array_str": pa.array(array_str_vals, type=pa.list_(pa.string())),
+            "ts_val": pa.array(ts_vals, type=pa.timestamp("us", tz="UTC")),
+            "geo_val": pa.array(geo_vals, type=pa.string()),
+            "embedding": embedding_arr,
+            "bin_vec": bin_vec_arr,
+            "fp16_vec": fp16_vec_arr,
+            "bf16_vec": bf16_vec_arr,
+            "int8_vec": int8_vec_arr,
+        }
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".vortex", delete=False) as tmp:
         tmp_path = tmp.name
