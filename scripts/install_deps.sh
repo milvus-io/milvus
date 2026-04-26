@@ -58,7 +58,7 @@ print_error() {
 MIN_CMAKE_VERSION="3.26"
 MIN_GO_VERSION="1.21"
 CONAN_VERSION="2.25.1"
-RUST_VERSION="1.89"
+RUST_VERSION="1.92"
 
 #######################################
 # Check if a command exists

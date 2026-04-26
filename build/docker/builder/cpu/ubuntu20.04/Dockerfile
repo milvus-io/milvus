@@ -55,7 +55,7 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.89 -y
+    sh -s -- --default-toolchain=1.92 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 
