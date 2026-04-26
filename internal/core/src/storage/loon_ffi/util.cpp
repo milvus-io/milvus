@@ -466,8 +466,19 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
 
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).
+    //
+    // "anonymous" is intentionally skipped: milvus-storage's fs.* property
+    // registry does not yet declare PROPERTY_FS_ANONYMOUS, so any SetValue
+    // on "extfs.<cid>.anonymous" hits strict "undefined key" in
+    // ExtractExternalFsProperties (iceberg explore path). Skipping the
+    // default zero-init keeps the slot absent — equivalent to anonymous=false
+    // — so the default credential path stays unaffected. Once the upstream
+    // registry adds the key, this skip can be removed without further
+    // changes (and user-supplied anonymous=true via Layer 2 will start
+    // working automatically — we deliberately do NOT drop it on Layer 2 so
+    // the future fix is a one-line revert here).
     for (const auto& [name, is_bool] : kExtfsFields) {
-        if (is_bool) {
+        if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
     }

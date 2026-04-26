@@ -1777,12 +1777,45 @@ TEST(InjectExtfsAllowlist, URIWithoutTrailingSlashParsed) {
               "mybucket");
 }
 
-// Regression: anonymous is a bool field and must be zero-initialized by
-// Layer 0 so stale Properties reuse cannot leak anonymous=true across
-// collections.
-TEST(InjectExtfsAllowlist, AnonymousIsZeroInitialized) {
+// milvus-storage's fs.* property registry does not yet declare
+// PROPERTY_FS_ANONYMOUS. Until upstream registers the key,
+// InjectExternalSpecProperties must not zero-init extfs.{cid}.anonymous
+// in Layer 0 — any SetValue on that slot triggers a strict "undefined
+// key" error in ExtractExternalFsProperties on the iceberg explore path.
+//
+// We deliberately do NOT also drop user-supplied anonymous=true from
+// Layer 2: when upstream finally registers the key, removing the Layer 0
+// skip below is the only change needed for anonymous to start working.
+// User-supplied anonymous=true today still surfaces the same upstream
+// "undefined key" error, which is the right signal — silent no-op would
+// be worse (caller would think public-bucket access is configured).
+TEST(InjectExtfsAllowlist, AnonymousLayer0Skipped) {
     milvus_storage::api::Properties props;
-    // Pre-seed the slot to simulate stale reuse.
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    // Other bool fields still get Layer 0 zero-init: sanity check the
+    // skip is anonymous-specific, not a wholesale Layer 0 regression.
+    // (use_ssl is excluded — Layer 1 derives it from the URI scheme and
+    // overwrites the Layer 0 default.)
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_iam")), "false");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_virtual_host")),
+              "false");
+    // anonymous slot must be absent — no Layer 0 write, no SetValue.
+    EXPECT_EQ(props.count("extfs.42.anonymous"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, AnonymousLayer0SkippedWithStalePreseed) {
+    // Pre-seed the slot to simulate stale Properties reuse. Layer 0 skip
+    // must not overwrite or clear it (the skip is a continue, not a
+    // SetValue("")). The pre-existing value is left as-is so the caller's
+    // intent — including a future caller that has explicitly chosen to
+    // route anonymous via a separate channel — survives.
+    milvus_storage::api::Properties props;
     props["extfs.42.anonymous"] = std::string("true");
     const int64_t coll_id = 42;
     std::string spec =
@@ -1791,8 +1824,7 @@ TEST(InjectExtfsAllowlist, AnonymousIsZeroInitialized) {
     ::InjectExternalSpecProperties(
         props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    // Layer 0 must overwrite the stale value with "false".
-    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "false");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "true");
 }
 
 // ============================================================
