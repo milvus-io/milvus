@@ -127,6 +127,41 @@ func TestUnmarshalCollectionModel(t *testing.T) {
 	assert.Nil(t, UnmarshalCollectionModel(nil))
 }
 
+func TestCollection_ToCollectionSchemaPB(t *testing.T) {
+	// All schema-level fields populated with non-zero values so a future
+	// addition that forgets to wire ToCollectionSchemaPB will trip an
+	// assertion below — this is the tripwire that prevents the historical
+	// "missing EnableNamespace on broadcast" class of bugs from recurring.
+	props := []*commonpb.KeyValuePair{{Key: "k", Value: "v"}}
+	coll := &Collection{
+		Name:               "c",
+		DBName:             "db",
+		Description:        "desc",
+		AutoID:             true,
+		Fields:             []*Field{fieldModel},
+		StructArrayFields:  []*StructArrayField{structFieldModel},
+		Functions:          []*Function{functionModel},
+		EnableDynamicField: true,
+		EnableNamespace:    true,
+		Properties:         props,
+		SchemaVersion:      7,
+	}
+
+	schema := coll.ToCollectionSchemaPB()
+
+	assert.Equal(t, "c", schema.GetName())
+	assert.Equal(t, "db", schema.GetDbName())
+	assert.Equal(t, "desc", schema.GetDescription())
+	assert.True(t, schema.GetAutoID())
+	assert.Equal(t, MarshalFieldModels(coll.Fields), schema.GetFields())
+	assert.Equal(t, MarshalStructArrayFieldModels(coll.StructArrayFields), schema.GetStructArrayFields())
+	assert.Equal(t, MarshalFunctionModels(coll.Functions), schema.GetFunctions())
+	assert.True(t, schema.GetEnableDynamicField())
+	assert.True(t, schema.GetEnableNamespace())
+	assert.Equal(t, props, schema.GetProperties())
+	assert.Equal(t, int32(7), schema.GetVersion())
+}
+
 func TestMarshalCollectionModel(t *testing.T) {
 	assert.Nil(t, MarshalCollectionModel(nil))
 }

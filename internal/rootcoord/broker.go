@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -253,16 +252,8 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 		partitionIDs = append(partitionIDs, p.PartitionID)
 	}
 	dcReq := &datapb.AlterCollectionRequest{
-		CollectionID: collectionID,
-		Schema: &schemapb.CollectionSchema{
-			Name:              colMeta.Name,
-			Description:       colMeta.Description,
-			AutoID:            colMeta.AutoID,
-			Fields:            model.MarshalFieldModels(colMeta.Fields),
-			StructArrayFields: model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
-			Functions:         model.MarshalFunctionModels(colMeta.Functions),
-			Properties:        colMeta.Properties,
-		},
+		CollectionID:   collectionID,
+		Schema:         colMeta.ToCollectionSchemaPB(),
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
 		Properties:     colMeta.Properties,
