@@ -37,17 +37,8 @@ import (
 
 func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, dbName string, collectionName string) error {
 	// build new collection schema.
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: coll.EnableDynamicField,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)
 	if err != nil {

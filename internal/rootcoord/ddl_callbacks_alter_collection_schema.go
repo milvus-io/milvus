@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -139,25 +138,14 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	}
 
 	// 6. build new collection schema.
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: coll.EnableDynamicField,
-		Properties:         coll.Properties,
-		DbName:             coll.DBName,
-		FileResourceIds:    coll.FileResourceIds,
-		// Version is incremented by 1. No CAS is needed here because Proxy's
-		// checkSchemaVersionConsistency gate blocks new AlterCollectionSchema calls
-		// until the previous backfill reaches 100% consistency, and DDL requests
-		// are serialized through a single DDL queue — so concurrent schema changes
-		// that could produce duplicate version numbers are impossible.
-		Version:            coll.SchemaVersion + 1,
-		DoPhysicalBackfill: addRequest.GetDoPhysicalBackfill(),
-	}
+	schema := coll.ToCollectionSchemaPB()
+	// Version is incremented by 1. No CAS is needed here because Proxy's
+	// checkSchemaVersionConsistency gate blocks new AlterCollectionSchema calls
+	// until the previous backfill reaches 100% consistency, and DDL requests
+	// are serialized through a single DDL queue — so concurrent schema changes
+	// that could produce duplicate version numbers are impossible.
+	schema.Version = coll.SchemaVersion + 1
+	schema.DoPhysicalBackfill = addRequest.GetDoPhysicalBackfill()
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
 

@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -168,23 +167,8 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}
 
 		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
-		schema := &schemapb.CollectionSchema{
-			Name:               coll.Name,
-			Description:        coll.Description,
-			AutoID:             coll.AutoID,
-			Fields:             model.MarshalFieldModels(coll.Fields),
-			StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-			Functions:          model.MarshalFunctionModels(coll.Functions),
-			EnableDynamicField: coll.EnableDynamicField,
-			Properties:         newPropsKeyValuePairs,
-			Version:            coll.SchemaVersion,
-		}
-		// Preserve ExternalSource/ExternalSpec from current collection state.
-		// Alter never mutates them (rejected at request entry above), but the
-		// TTL-driven schema snapshot must still carry them so downstream
-		// consumers see a complete schema.
-		schema.ExternalSource = coll.ExternalSource
-		schema.ExternalSpec = coll.ExternalSpec
+		schema := coll.ToCollectionSchemaPB()
+		schema.Properties = newPropsKeyValuePairs
 		udpates.Schema = schema
 	}
 
@@ -255,17 +239,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 
 	fieldSchema.FieldID = nextFieldID(coll)
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: targetValue,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
+	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)

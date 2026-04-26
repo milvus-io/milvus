@@ -147,6 +147,33 @@ func (c *Collection) Clone() *Collection {
 	}
 }
 
+// ToCollectionSchemaPB returns a schemapb.CollectionSchema populated from the
+// current Collection. All schema-level fields are copied verbatim — callers
+// override Version, Properties, EnableDynamicField, DoPhysicalBackfill, etc.
+// after the call when the operation requires a different value.
+//
+// Centralizing the conversion here ensures that newly added schema fields are
+// propagated consistently across every rootcoord broadcast/response path.
+func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:               c.Name,
+		Description:        c.Description,
+		AutoID:             c.AutoID,
+		Fields:             MarshalFieldModels(c.Fields),
+		StructArrayFields:  MarshalStructArrayFieldModels(c.StructArrayFields),
+		Functions:          MarshalFunctionModels(c.Functions),
+		EnableDynamicField: c.EnableDynamicField,
+		EnableNamespace:    c.EnableNamespace,
+		Properties:         c.Properties,
+		DbName:             c.DBName,
+		Version:            c.SchemaVersion,
+		FileResourceIds:    c.FileResourceIds,
+		ExternalSource:     c.ExternalSource,
+		ExternalSpec:       c.ExternalSpec,
+		DoPhysicalBackfill: c.DoPhysicalBackfill,
+	}
+}
+
 func (c *Collection) GetPartitionNum(filterUnavailable bool) int {
 	if !filterUnavailable {
 		return len(c.Partitions)
