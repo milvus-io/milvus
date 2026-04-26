@@ -1965,9 +1965,8 @@ CoerceToBinary(const arrow::ArrayVector& arrays) {
             }
             std::shared_ptr<arrow::Array> out;
             status = builder.Finish(&out);
-            AssertInfo(
-                status.ok(),
-                "BinaryBuilder finish failed: " + status.ToString());
+            AssertInfo(status.ok(),
+                       "BinaryBuilder finish failed: " + status.ToString());
             result.push_back(out);
             continue;
         }
@@ -1991,8 +1990,7 @@ CoerceToList(const arrow::ArrayVector& arrays) {
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
         const auto tid = arr->type_id();
-        if (tid != arrow::Type::LARGE_LIST &&
-            tid != arrow::Type::LIST_VIEW) {
+        if (tid != arrow::Type::LARGE_LIST && tid != arrow::Type::LIST_VIEW) {
             result.push_back(arr);
             continue;
         }
@@ -2050,23 +2048,22 @@ CoerceToList(const arrow::ArrayVector& arrays) {
             concat_values = *empty;
         } else {
             auto concat = arrow::Concatenate(value_slices);
-            AssertInfo(concat.ok(),
-                       "CoerceToList: concat failed: " +
-                           concat.status().ToString());
+            AssertInfo(
+                concat.ok(),
+                "CoerceToList: concat failed: " + concat.status().ToString());
             concat_values = *concat;
         }
 
         auto offsets_buf =
-            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)
-                ->values();
-        auto list_arr = std::make_shared<arrow::ListArray>(
-            arrow::list(values->type()),
-            arr->length(),
-            offsets_buf,
-            concat_values,
-            RebuildNullBitmap(arr),
-            arr->null_count(),
-            0);
+            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
+        auto list_arr =
+            std::make_shared<arrow::ListArray>(arrow::list(values->type()),
+                                               arr->length(),
+                                               offsets_buf,
+                                               concat_values,
+                                               RebuildNullBitmap(arr),
+                                               arr->null_count(),
+                                               0);
         result.push_back(list_arr);
     }
     return result;
@@ -2113,8 +2110,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     const auto tid = array->type_id();
 
     // Variable-length string variants -> STRING
-    if (tid == arrow::Type::STRING_VIEW ||
-        tid == arrow::Type::LARGE_STRING) {
+    if (tid == arrow::Type::STRING_VIEW || tid == arrow::Type::LARGE_STRING) {
         arrow::StringBuilder builder;
         auto status = builder.Reserve(array->length());
         AssertInfo(status.ok(),
@@ -2148,8 +2144,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     }
 
     // Variable-length binary variants -> BINARY
-    if (tid == arrow::Type::BINARY_VIEW ||
-        tid == arrow::Type::LARGE_BINARY) {
+    if (tid == arrow::Type::BINARY_VIEW || tid == arrow::Type::LARGE_BINARY) {
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(array->length());
         AssertInfo(status.ok(),
@@ -2161,12 +2156,12 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     AssertInfo(builder.AppendNull().ok(), "appendnull");
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder
-                                   .Append(reinterpret_cast<const uint8_t*>(
-                                               v.data()),
-                                           v.size())
-                                   .ok(),
-                               "append bin");
+                    AssertInfo(
+                        builder
+                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
+                                    v.size())
+                            .ok(),
+                        "append bin");
                 }
             }
         } else {
@@ -2176,12 +2171,12 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     AssertInfo(builder.AppendNull().ok(), "appendnull");
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder
-                                   .Append(reinterpret_cast<const uint8_t*>(
-                                               v.data()),
-                                           v.size())
-                                   .ok(),
-                               "append bin");
+                    AssertInfo(
+                        builder
+                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
+                                    v.size())
+                            .ok(),
+                        "append bin");
                 }
             }
         }
@@ -2255,14 +2250,12 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             concat_values = *empty;
         } else {
             auto concat = arrow::Concatenate(slices);
-            AssertInfo(concat.ok(),
-                       "concat: " + concat.status().ToString());
+            AssertInfo(concat.ok(), "concat: " + concat.status().ToString());
             concat_values = *concat;
         }
 
         auto offsets_buf =
-            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)
-                ->values();
+            std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
         return std::make_shared<arrow::ListArray>(
             arrow::list(canonical_values->type()),
             array->length(),
@@ -2281,8 +2274,8 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
         if (canonical_inner.get() == inner.get()) {
             return array;
         }
-        auto fsl_type = std::static_pointer_cast<arrow::FixedSizeListType>(
-            fsl->type());
+        auto fsl_type =
+            std::static_pointer_cast<arrow::FixedSizeListType>(fsl->type());
         return std::make_shared<arrow::FixedSizeListArray>(
             arrow::fixed_size_list(canonical_inner->type(),
                                    fsl_type->list_size()),
@@ -2543,8 +2536,7 @@ NarrowIntArray(const std::shared_ptr<arrow::Array>& src_arr,
                    "Append narrowed int failed");
     }
     std::shared_ptr<arrow::Array> out;
-    AssertInfo(builder.Finish(&out).ok(),
-               "NarrowIntArray finish failed");
+    AssertInfo(builder.Finish(&out).ok(), "NarrowIntArray finish failed");
     return out;
 }
 
@@ -2552,31 +2544,35 @@ NarrowIntArray(const std::shared_ptr<arrow::Array>& src_arr,
 // matching (DataType, arrow::Type::type). Returns nullptr if no narrowing
 // applies; caller continues original dispatch.
 static std::shared_ptr<arrow::Array>
-MaybeNarrowInt(DataType data_type,
-               const std::shared_ptr<arrow::Array>& array) {
+MaybeNarrowInt(DataType data_type, const std::shared_ptr<arrow::Array>& array) {
     auto type_id = array->type_id();
     if (data_type == DataType::INT8) {
         if (type_id == arrow::Type::INT16)
-            return NarrowIntArray<arrow::Int16Array, arrow::Int8Builder,
+            return NarrowIntArray<arrow::Int16Array,
+                                  arrow::Int8Builder,
                                   int8_t>(array, "INT8");
         if (type_id == arrow::Type::INT32)
-            return NarrowIntArray<arrow::Int32Array, arrow::Int8Builder,
+            return NarrowIntArray<arrow::Int32Array,
+                                  arrow::Int8Builder,
                                   int8_t>(array, "INT8");
         if (type_id == arrow::Type::INT64)
-            return NarrowIntArray<arrow::Int64Array, arrow::Int8Builder,
+            return NarrowIntArray<arrow::Int64Array,
+                                  arrow::Int8Builder,
                                   int8_t>(array, "INT8");
     }
     if (data_type == DataType::INT16) {
         if (type_id == arrow::Type::INT32)
-            return NarrowIntArray<arrow::Int32Array, arrow::Int16Builder,
+            return NarrowIntArray<arrow::Int32Array,
+                                  arrow::Int16Builder,
                                   int16_t>(array, "INT16");
         if (type_id == arrow::Type::INT64)
-            return NarrowIntArray<arrow::Int64Array, arrow::Int16Builder,
+            return NarrowIntArray<arrow::Int64Array,
+                                  arrow::Int16Builder,
                                   int16_t>(array, "INT16");
     }
     if (data_type == DataType::INT32 && type_id == arrow::Type::INT64) {
-        return NarrowIntArray<arrow::Int64Array, arrow::Int32Builder,
-                              int32_t>(array, "INT32");
+        return NarrowIntArray<arrow::Int64Array, arrow::Int32Builder, int32_t>(
+            array, "INT32");
     }
     return nullptr;
 }

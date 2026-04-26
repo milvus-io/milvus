@@ -68,11 +68,10 @@ MakeBinaryViewArray(const std::vector<std::string>& vals,
         if (!valid[i]) {
             EXPECT_TRUE(b.AppendNull().ok());
         } else {
-            EXPECT_TRUE(b
-                           .Append(reinterpret_cast<const uint8_t*>(
-                                       vals[i].data()),
-                                   vals[i].size())
-                           .ok());
+            EXPECT_TRUE(
+                b.Append(reinterpret_cast<const uint8_t*>(vals[i].data()),
+                         vals[i].size())
+                    .ok());
         }
     }
     std::shared_ptr<arrow::Array> out;
@@ -88,11 +87,10 @@ MakeLargeBinaryArray(const std::vector<std::string>& vals,
         if (!valid[i]) {
             EXPECT_TRUE(b.AppendNull().ok());
         } else {
-            EXPECT_TRUE(b
-                           .Append(reinterpret_cast<const uint8_t*>(
-                                       vals[i].data()),
-                                   vals[i].size())
-                           .ok());
+            EXPECT_TRUE(
+                b.Append(reinterpret_cast<const uint8_t*>(vals[i].data()),
+                         vals[i].size())
+                    .ok());
         }
     }
     std::shared_ptr<arrow::Array> out;
@@ -174,15 +172,15 @@ TEST(CanonicalizeArrowVariants, CanonicalIntPassthrough) {
 }
 
 TEST(CanonicalizeArrowVariants, LargeListToList) {
-    auto values = MakeLargeStringArray({"a", "b", "c", "d"},
-                                       {true, true, true, true});
+    auto values =
+        MakeLargeStringArray({"a", "b", "c", "d"}, {true, true, true, true});
     // Build LargeListArray with offsets [0, 2, 2, 4] -> [[a,b], [], [c,d]]
     arrow::Int64Builder ob;
     ASSERT_TRUE(ob.AppendValues({0, 2, 2, 4}).ok());
     std::shared_ptr<arrow::Array> offsets;
     ASSERT_TRUE(ob.Finish(&offsets).ok());
-    auto large_list_result = arrow::LargeListArray::FromArrays(*offsets,
-                                                               *values);
+    auto large_list_result =
+        arrow::LargeListArray::FromArrays(*offsets, *values);
     ASSERT_TRUE(large_list_result.ok());
     auto in = *large_list_result;
 
@@ -203,8 +201,7 @@ TEST(CanonicalizeArrowVariants, LargeListToList) {
 }
 
 TEST(CanonicalizeArrowVariants, ListWithStringViewInnerRecurses) {
-    auto values =
-        MakeStringViewArray({"x", "y", "z"}, {true, true, true});
+    auto values = MakeStringViewArray({"x", "y", "z"}, {true, true, true});
     arrow::Int32Builder ob;
     ASSERT_TRUE(ob.AppendValues({0, 1, 3}).ok());
     std::shared_ptr<arrow::Array> offsets;
@@ -253,8 +250,7 @@ TEST(CoerceToBinary, StringToBinaryZeroCopy) {
 
 TEST(CoerceToBinary, BinaryPassthrough) {
     arrow::BinaryBuilder b;
-    ASSERT_TRUE(
-        b.Append(reinterpret_cast<const uint8_t*>("xy"), 2).ok());
+    ASSERT_TRUE(b.Append(reinterpret_cast<const uint8_t*>("xy"), 2).ok());
     std::shared_ptr<arrow::Array> in;
     ASSERT_TRUE(b.Finish(&in).ok());
     auto out = CoerceToBinary({in})[0];
@@ -298,7 +294,8 @@ MakeInt32Array(const std::vector<int32_t>& vals,
 }  // namespace
 
 TEST(IntegerNarrowing, Int32ToInt8) {
-    auto in = MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
+    auto in =
+        MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
     auto out = milvus::storage::NormalizeExternalArrow(
         in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
     ASSERT_EQ(out->type_id(), arrow::Type::INT8);
@@ -311,7 +308,8 @@ TEST(IntegerNarrowing, Int32ToInt8) {
 }
 
 TEST(IntegerNarrowing, Int32ToInt16) {
-    auto in = MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
+    auto in =
+        MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
     auto out = milvus::storage::NormalizeExternalArrow(
         in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE);
     ASSERT_EQ(out->type_id(), arrow::Type::INT16);
@@ -390,9 +388,13 @@ TEST(CanonicalizeArrowVariants, SlicedLargeListNullsPreserved) {
     std::shared_ptr<arrow::Buffer> null_buf;
     ASSERT_TRUE(nb.Finish(&null_buf).ok());
     auto large_list = std::make_shared<arrow::LargeListArray>(
-        arrow::large_list(values->type()), 4,
+        arrow::large_list(values->type()),
+        4,
         std::static_pointer_cast<arrow::Int64Array>(offsets)->values(),
-        values, null_buf, 1, 0);
+        values,
+        null_buf,
+        1,
+        0);
 
     // Slice from offset 1, length 3: should yield [NULL, [c,d], [e,f]]
     auto sliced = large_list->Slice(1, 3);
@@ -413,9 +415,8 @@ TEST(CanonicalizeArrowVariants, SlicedLargeListNullsPreserved) {
 }
 
 TEST(CanonicalizeArrowVariants, SlicedFixedSizeListNullsPreserved) {
-    auto values =
-        MakeStringViewArray({"a", "b", "c", "d", "e", "f"},
-                            {true, true, true, true, true, true});
+    auto values = MakeStringViewArray({"a", "b", "c", "d", "e", "f"},
+                                      {true, true, true, true, true, true});
     arrow::TypedBufferBuilder<bool> nb;
     ASSERT_TRUE(nb.Reserve(3).ok());
     nb.UnsafeAppend(true);
@@ -458,9 +459,13 @@ TEST(CoerceToList, SlicedLargeListNullsPreserved) {
     std::shared_ptr<arrow::Buffer> null_buf;
     ASSERT_TRUE(nb.Finish(&null_buf).ok());
     auto ll = std::make_shared<arrow::LargeListArray>(
-        arrow::large_list(values->type()), 4,
-        std::static_pointer_cast<arrow::Int64Array>(offsets)->values(), values,
-        null_buf, 1, 0);
+        arrow::large_list(values->type()),
+        4,
+        std::static_pointer_cast<arrow::Int64Array>(offsets)->values(),
+        values,
+        null_buf,
+        1,
+        0);
     auto sliced = ll->Slice(1, 3);
 
     auto out = CoerceToList({sliced})[0];
