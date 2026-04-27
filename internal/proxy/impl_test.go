@@ -2966,7 +2966,9 @@ func TestCheckSchemaVersionConsistency(t *testing.T) {
 				}).Build()
 
 			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
+			assert.Error(t, err)
 			assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+			assert.NotErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Contains(t, err.Error(), "5")
 			assert.Contains(t, err.Error(), "10")
 			status := merr.Status(err)

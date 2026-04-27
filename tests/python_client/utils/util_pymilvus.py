@@ -1,4 +1,5 @@
 import json
+import logging
 import random
 import string
 import threading
@@ -804,7 +805,7 @@ def restart_server(helm_release_name):
     res = True
     timeout = 120
     from kubernetes import client, config
-    client.rest.logger.setLevel(log.WARNING)
+    client.rest.logger.setLevel(logging.WARNING)
 
     # service_name = "%s.%s.svc.cluster.local" % (helm_release_name, namespace)
     init_k8s_client_config()

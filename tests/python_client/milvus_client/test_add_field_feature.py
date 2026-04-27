@@ -9,8 +9,9 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus.exceptions import MilvusException
 from pymilvus.orm.types import CONSISTENCY_STRONG
-from utils.util_pymilvus import DataType
+from utils.util_pymilvus import DataType, restart_server
 
 prefix = "add_field"
 default_vector_field_name = "vector"
@@ -1423,6 +1424,80 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         )
 
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_add_field_retry_after_restart_during_backfill(self, args):
+        """
+        target: verify AddCollectionField remains retryable after restart while previous backfill catches up
+        method: create flushed segments, add one nullable field, restart server, retry adding another field
+        expected: transient schema-version inconsistency returns code 1 service-not-ready, then retry succeeds
+        """
+        if "service_name" not in args or not args["service_name"]:
+            pytest.skip("Skip restart case if service name not provided")
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        batch = 2000
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="L2")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        schema_res = self.describe_collection(client, collection_name)[0]
+        for batch_id in range(3):
+            rows = cf.gen_row_data_by_schema(nb=batch, schema=schema_res, start=batch_id * batch)
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+        self.add_collection_field(
+            client,
+            collection_name,
+            field_name="field_v1",
+            data_type=DataType.INT64,
+            nullable=True,
+            default_value=0,
+        )
+        assert restart_server(args["service_name"])
+
+        retryable_seen = False
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            retry_client = self._client(timeout=10)
+            try:
+                retry_client.add_collection_field(
+                    collection_name=collection_name,
+                    field_name="field_v2",
+                    data_type=DataType.INT64,
+                    nullable=True,
+                    default_value=0,
+                    timeout=10,
+                )
+                if retryable_seen:
+                    break
+                stats, _ = self.get_collection_stats(retry_client, collection_name)
+                if stats.get("schema_version_consistent_segments") == stats.get("schema_version_total_segments"):
+                    break
+            except MilvusException as err:
+                message = str(err)
+                if "field_v2" in message and "already" in message.lower():
+                    break
+                assert err.code != 1100, message
+                assert err.code == 1, message
+                assert "schema version consistency check failed" in message
+                retryable_seen = True
+                time.sleep(1)
+            finally:
+                self.close(retry_client)
+        else:
+            raise AssertionError("field_v2 was not added before retry deadline")
+
+        fields = [field["name"] for field in self.describe_collection(client, collection_name)[0]["fields"]]
+        assert "field_v1" in fields
+        assert "field_v2" in fields
 
 
 class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
