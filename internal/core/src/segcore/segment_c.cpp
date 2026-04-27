@@ -318,7 +318,8 @@ AsyncSearch(CTraceContext c_trace,
             int32_t consistency_level,
             uint64_t collection_ttl,
             uint64_t entity_ttl_physical_time_us,
-            bool filter_only) {
+            bool filter_only,
+            bool enable_expr_cache) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -334,7 +335,8 @@ AsyncSearch(CTraceContext c_trace,
          consistency_level,
          collection_ttl,
          entity_ttl_physical_time_us,
-         filter_only](folly::CancellationToken cancel_token) {
+         filter_only,
+         enable_expr_cache](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -353,7 +355,8 @@ AsyncSearch(CTraceContext c_trace,
                                                  consistency_level,
                                                  collection_ttl,
                                                  entity_ttl_physical_time_us,
-                                                 filter_only);
+                                                 filter_only,
+                                                 enable_expr_cache);
             if (!filter_only &&
                 !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {

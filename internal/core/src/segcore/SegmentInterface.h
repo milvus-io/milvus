@@ -103,7 +103,8 @@ class SegmentInterface {
            int32_t consistency_level,
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
-           bool filter_only = false) const = 0;
+           bool filter_only = false,
+           bool enable_expr_cache = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -117,6 +118,7 @@ class SegmentInterface {
                       0,
                       0,
                       0,
+                      false,
                       false);
     }
 
@@ -420,7 +422,8 @@ class SegmentInternalInterface : public SegmentInterface {
            int32_t consistency_level,
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
-           bool filter_only = false) const override;
+           bool filter_only = false,
+           bool enable_expr_cache = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
