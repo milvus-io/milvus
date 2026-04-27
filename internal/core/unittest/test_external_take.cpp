@@ -1853,6 +1853,19 @@ TEST(InjectExtfsAllowlist, AnonymousLayer0SkippedWithStalePreseed) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "true");
 }
 
+TEST(InjectExtfsAllowlist, IcebergSnapshotIDAcceptsString) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec =
+        R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("iceberg.snapshot_id")),
+              "5320540205222981137");
+}
+
 // ============================================================
 // Tests for NormalizeExternalArrow and internal-vs-external
 // VARCHAR handling (regression for index build opt_field crash)

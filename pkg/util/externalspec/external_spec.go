@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -103,10 +104,54 @@ var validCloudProviders = map[string]bool{
 
 // ExternalSpec represents the parsed external collection specification
 type ExternalSpec struct {
-	Format     string            `json:"format"`                       // one of Format* constants
-	Columns    []string          `json:"columns"`                      // optional: specific columns to load
-	Extfs      map[string]string `json:"extfs,omitempty"`              // optional: extfs config overrides (non-sensitive only)
-	SnapshotID *int64            `json:"snapshot_id,string,omitempty"` // Iceberg snapshot ID (required for iceberg-table); string-encoded to preserve int64 precision in JS/JSON clients
+	Format     string            `json:"format"`          // one of Format* constants
+	Columns    []string          `json:"columns"`         // optional: specific columns to load
+	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides (non-sensitive only)
+	SnapshotID *int64            `json:"snapshot_id,omitempty"`
+}
+
+func (s *ExternalSpec) UnmarshalJSON(data []byte) error {
+	type externalSpec ExternalSpec
+	var raw struct {
+		externalSpec
+		SnapshotID json.RawMessage `json:"snapshot_id"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = ExternalSpec(raw.externalSpec)
+	if len(raw.SnapshotID) == 0 || string(raw.SnapshotID) == "null" {
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(raw.SnapshotID, &n); err == nil {
+		s.SnapshotID = &n
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(raw.SnapshotID, &str); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return err
+	}
+	s.SnapshotID = &parsed
+	return nil
+}
+
+func (s ExternalSpec) MarshalJSON() ([]byte, error) {
+	type externalSpec ExternalSpec
+	var raw struct {
+		externalSpec
+		SnapshotID *string `json:"snapshot_id,omitempty"`
+	}
+	raw.externalSpec = externalSpec(s)
+	if s.SnapshotID != nil {
+		str := strconv.FormatInt(*s.SnapshotID, 10)
+		raw.SnapshotID = &str
+	}
+	return json.Marshal(raw)
 }
 
 // supportedFormats lists the file formats supported for external collections

@@ -20,6 +20,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -678,10 +679,26 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "iceberg-table") {
+                auto snapshot_field = doc.find_field("snapshot_id");
                 int64_t snapshot_id = 0;
-                if (doc.find_field("snapshot_id")
-                        .get_int64()
-                        .get(snapshot_id) == simdjson::SUCCESS) {
+                auto int_err = snapshot_field.get_int64().get(snapshot_id);
+                if (int_err == simdjson::INCORRECT_TYPE) {
+                    std::string_view snapshot_view;
+                    if (snapshot_field.get_string().get(snapshot_view) ==
+                        simdjson::SUCCESS) {
+                        try {
+                            snapshot_id = std::stoll(std::string(snapshot_view));
+                            int_err = simdjson::SUCCESS;
+                        } catch (const std::exception& e) {
+                            LOG_WARN(
+                                "iceberg snapshot_id parse failed "
+                                "(collection_id={}): {}",
+                                collection_id,
+                                e.what());
+                        }
+                    }
+                }
+                if (int_err == simdjson::SUCCESS) {
                     milvus_storage::api::SetValue(
                         properties,
                         "iceberg.snapshot_id",
