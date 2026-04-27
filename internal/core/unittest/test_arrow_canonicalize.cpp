@@ -759,13 +759,13 @@ TEST(NormalizeExternalArrow, VectorArrayRejectsOuterNullRow) {
 
     auto outer_offsets_values =
         std::static_pointer_cast<arrow::Int32Array>(outer_offsets)->values();
-    auto input = std::make_shared<arrow::ListArray>(
-        arrow::list(inner_list->type()),
-        2,
-        outer_offsets_values,
-        inner_list,
-        null_bitmap,
-        1);
+    auto input =
+        std::make_shared<arrow::ListArray>(arrow::list(inner_list->type()),
+                                           2,
+                                           outer_offsets_values,
+                                           inner_list,
+                                           null_bitmap,
+                                           1);
 
     EXPECT_THROW(
         milvus::storage::NormalizeExternalArrow(input,
