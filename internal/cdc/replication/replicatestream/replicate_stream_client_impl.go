@@ -40,12 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-const (
-	// TODO: sheep, make these parameters configurable
-	pendingMessageQueueLength  = 128
-	pendingMessageQueueMaxSize = 128 * 1024 * 1024
-)
-
 var ErrReplicationRemoved = errors.New("replication removed")
 
 // replicateStreamClient is the implementation of ReplicateStreamClient.
@@ -68,8 +62,8 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 	ctx1 = contextutil.WithClusterID(ctx1, channel.Value.GetTargetCluster().GetClusterId())
 
 	options := MsgQueueOptions{
-		Capacity: pendingMessageQueueLength,
-		MaxSize:  pendingMessageQueueMaxSize,
+		Capacity: paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueLength.GetAsInt(),
+		MaxSize:  paramtable.Get().StreamingCfg.ReplicationPendingMessagesQueueMaxSize.GetAsInt(),
 	}
 	pendingMessages := NewMsgQueue(options)
 	rs := &replicateStreamClient{

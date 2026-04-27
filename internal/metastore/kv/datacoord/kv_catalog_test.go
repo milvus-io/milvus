@@ -495,7 +495,7 @@ func Test_AlterSegments(t *testing.T) {
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 
-		var binlogXL []*datapb.FieldBinlog
+		binlogXL := make([]*datapb.FieldBinlog, 0, 255)
 		for i := 0; i < 255; i++ {
 			binlogXL = append(binlogXL, &datapb.FieldBinlog{
 				FieldID: int64(i),

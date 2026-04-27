@@ -127,14 +127,21 @@ func getLengthFromTemplateValue(tv *schemapb.TemplateValue) int {
 }
 
 func listToString(strs []string) string {
-	result := "["
+	if len(strs) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
 	for i, str := range strs {
 		if i != 0 {
-			result += ", "
+			b.WriteString(", ")
 		}
-		result += "\"" + str + "\""
+		b.WriteByte('"')
+		b.WriteString(str)
+		b.WriteByte('"')
 	}
-	return result + "]"
+	b.WriteByte(']')
+	return b.String()
 }
 
 func kvsToString(kvs []*commonpb.KeyValuePair) string {
