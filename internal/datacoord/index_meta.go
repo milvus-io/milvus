@@ -558,7 +558,9 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
 
-	segIndex.IndexState = commonpb.IndexState_Unissued
+	if segIndex.IndexState == commonpb.IndexState_IndexStateNone {
+		segIndex.IndexState = commonpb.IndexState_Unissued
+	}
 	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 		log.Ctx(ctx).Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
