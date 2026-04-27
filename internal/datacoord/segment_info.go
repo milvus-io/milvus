@@ -378,6 +378,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
 	}
+	cloned.deltaRowcount.Store(-1)
 	for _, opt := range opts {
 		opt(cloned)
 	}
