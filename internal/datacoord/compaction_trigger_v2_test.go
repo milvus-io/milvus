@@ -215,8 +215,10 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	}
 	segments := genSegmentsForMeta(s.testLabel)
 	s.meta = &meta{
-		segments:    NewCachedSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		ctx:            context.TODO(),
+		segments:       NewCachedSegmentsInfo(),
+		segmentPersist: newTestSegmentPersist(),
+		collections:    typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment, 0)
@@ -1196,6 +1198,121 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		// stubDispatchableView.Trigger() returns nil, so notify() short-circuits
 		// before reaching SubmitBumpSchemaVersionViewToScheduler. We only care here that
 		// isFull was consulted and the dispatch path was entered.
-		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+	})
+
+	s.Run("inline-executable backfill view applied regardless of inspector full", func() {
+		// Regression for backfillCompactionPolicy: pure column additions emit an
+		// inline-executable BackfillSegmentsView (inlineMetaOnly=true). The trigger
+		// manager must apply it via meta.UpdateSegment without consulting isFull —
+		// otherwise schema versions never converge under inspector pressure.
+		s.SetupTest()
+
+		segmentID := int64(424242)
+		s.Require().NoError(s.triggerManager.meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  s.testLabel.CollectionID,
+				PartitionID:   s.testLabel.PartitionID,
+				InsertChannel: s.testLabel.Channel,
+				State:         commonpb.SegmentState_Flushed,
+				SchemaVersion: 1,
+			},
+		}))
+
+		// Inline views come from TriggerInline(), not Trigger(). Trigger() returns nothing.
+		// The inline view is applied before isFull() is even consulted, so schema version
+		// convergence is guaranteed regardless of inspector pressure.
+		mockPolicy := &testCompactionPolicy{
+			enabled:    true,
+			policyName: "test-meta-update",
+			inlineTriggerResult: map[CompactionTriggerType][]CompactionView{
+				TriggerTypeBackfill: {
+					&BackfillSegmentsView{
+						label:               s.testLabel,
+						segments:            []*SegmentView{{ID: segmentID, label: s.testLabel}},
+						inlineMetaOnly:      true,
+						targetSchemaVersion: 5,
+					},
+				},
+			},
+			// triggerResult is nil: no compaction tasks to dispatch
+		}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		// isFull() is consulted for the Trigger() gate — simulate a full inspector to
+		// prove inline views are unaffected by inspector pressure.
+		s.inspector.EXPECT().isFull().Return(true).Once()
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+
+		updated := s.triggerManager.meta.segments.GetSegment(segmentID)
+		s.Require().NotNil(updated)
+		s.Equal(int32(5), updated.GetSchemaVersion(),
+			"inline view must be applied to bump segment schema version")
+	})
+
+	s.Run("applyInlineView with wrong view type logs warning and returns", func() {
+		// When TriggerInline() returns a non-BackfillSegmentsView in the inline events,
+		// applyInlineView must log a warning and return without panic.
+		s.SetupTest()
+		mockPolicy := &testCompactionPolicy{
+			enabled:    true,
+			policyName: "test-wrong-inline-type",
+			inlineTriggerResult: map[CompactionTriggerType][]CompactionView{
+				TriggerTypeBackfill: {
+					// stubDispatchableView is NOT *BackfillSegmentsView — triggers the wrong-type branch.
+					stubDispatchableView{},
+				},
+			},
+			// No compaction tasks to dispatch.
+		}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		// isFull() is consulted for the Trigger() gate.
+		s.inspector.EXPECT().isFull().Return(true).Once()
+		// Should complete without panic.
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+	})
+
+	s.Run("applyInlineView UpdateSegment fails logs error and continues", func() {
+		// When meta.UpdateSegment fails, applyInlineView logs the error
+		// and continues rather than aborting the whole inline pass.
+		s.SetupTest()
+
+		segmentID := int64(424243)
+		s.Require().NoError(s.triggerManager.meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  s.testLabel.CollectionID,
+				PartitionID:   s.testLabel.PartitionID,
+				InsertChannel: s.testLabel.Channel,
+				State:         commonpb.SegmentState_Flushed,
+				SchemaVersion: 1,
+			},
+		}))
+		s.triggerManager.meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("persist error")})
+
+		mockPolicy := &testCompactionPolicy{
+			enabled:    true,
+			policyName: "test-update-segment-fail",
+			inlineTriggerResult: map[CompactionTriggerType][]CompactionView{
+				TriggerTypeBackfill: {
+					&BackfillSegmentsView{
+						label:               s.testLabel,
+						segments:            []*SegmentView{{ID: segmentID, label: s.testLabel}},
+						inlineMetaOnly:      true,
+						targetSchemaVersion: 9,
+					},
+				},
+			},
+		}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		s.inspector.EXPECT().isFull().Return(true).Once()
+		// Should not panic despite the catalog error.
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+
+		// Schema version must remain unchanged because UpdateSegment failed.
+		updated := s.triggerManager.meta.segments.GetSegment(segmentID)
+		s.Require().NotNil(updated)
+		s.Equal(int32(1), updated.GetSchemaVersion(),
+			"schema version must stay 1 when UpdateSegment fails")
 	})
 }
