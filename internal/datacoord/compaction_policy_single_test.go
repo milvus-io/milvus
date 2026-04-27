@@ -142,8 +142,8 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
 	segmentsInfo := newTestCachedSegmentsInfo(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
@@ -177,8 +177,8 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
 	segmentsInfo := newTestCachedSegmentsInfo(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())

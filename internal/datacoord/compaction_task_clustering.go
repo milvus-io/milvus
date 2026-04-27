@@ -718,10 +718,8 @@ func (t *clusteringCompactionTask) doClean() error {
 				mutations[segID] = []SegmentOperator{dropMutate}
 				if !hasResultSegments {
 					toSegments, _ := t.meta.(*meta).GetCompactionTo(segID)
-					if toSegments != nil {
-						for _, toSeg := range toSegments {
-							mutations[toSeg.GetID()] = []SegmentOperator{dropMutate}
-						}
+					for _, toSeg := range toSegments {
+						mutations[toSeg.GetID()] = []SegmentOperator{dropMutate}
 					}
 				}
 			}
