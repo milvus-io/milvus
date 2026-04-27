@@ -147,7 +147,11 @@ func (s *CachedSegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInf
 }
 
 func (s *CachedSegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo, version int64) (old *SegmentInfo, existed bool) {
-	old, existed = s.segments.Insert(segmentID, segment, version)
+	var applied bool
+	old, existed, applied = s.segments.Insert(segmentID, segment, version)
+	if !applied {
+		return old, false
+	}
 	if existed {
 		s.removeSecondaryIndex(old)
 		s.deleteCompactTo(old)
@@ -159,11 +163,10 @@ func (s *CachedSegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo
 
 // DropSegment marks the segment as a tombstone; the version blocks later stale writes.
 func (s *CachedSegmentsInfo) DropSegment(segmentID UniqueID, version int64) {
-	if old, ok := s.segments.Lookup(segmentID); ok {
+	if old := s.segments.Erase(segmentID, version); old != nil {
 		s.removeSecondaryIndex(old)
 		s.deleteCompactTo(old)
 	}
-	s.segments.Erase(segmentID, version)
 }
 
 // PruneSegment removes a tombstone entry, freeing memory.
@@ -265,7 +268,8 @@ func (s *CachedSegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 func (s *CachedSegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
 		existing, _ := s.compactionTo.GetOrInsert(from, nil)
-		s.compactionTo.Insert(from, append(existing, segment.GetID()))
+		next := append(append([]UniqueID(nil), existing...), segment.GetID())
+		s.compactionTo.Insert(from, next)
 	}
 }
 

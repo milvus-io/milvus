@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -69,6 +68,79 @@ type MetaReloadSuite struct {
 	meta    *meta
 }
 
+type failCommitPersist struct {
+	err error
+}
+
+func (p failCommitPersist) Txn(ctx context.Context) Txn {
+	return failCommitTxn{err: p.err}
+}
+
+func (p failCommitPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return nil, nil, nil, nil
+}
+
+type failCommitTxn struct {
+	err error
+}
+
+func (t failCommitTxn) Insert(key string, value []byte)                        {}
+func (t failCommitTxn) Update(key string, value []byte, expectedVersion int64) {}
+func (t failCommitTxn) Delete(key string)                                      {}
+func (t failCommitTxn) Put(key string, value []byte)                           {}
+func (t failCommitTxn) Remove(key string)                                      {}
+func (t failCommitTxn) Commit() ([]TxnResult, error)                           { return nil, t.err }
+
+type failScanPersist struct {
+	err error
+}
+
+func (p failScanPersist) Txn(ctx context.Context) Txn {
+	return NewOptimisticTxnMemoryPersist().Txn(ctx)
+}
+
+func (p failScanPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	return nil, nil, nil, p.err
+}
+
+func newTestSegmentPersistWithSegments(t *testing.T, segments ...*datapb.SegmentInfo) *SegmentTxnWrapper {
+	t.Helper()
+	persist := NewSegmentTxnWrapper(NewOptimisticTxnMemoryPersist())
+	txn := persist.Txn(context.TODO())
+	for _, segment := range segments {
+		require.NoError(t, txn.Insert(segmentKey(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()), segment))
+	}
+	_, err := txn.Commit()
+	require.NoError(t, err)
+	return persist
+}
+
+func newTestMetaFromCache(t *testing.T, segments *CachedSegmentsInfo, chunkManager storage.ChunkManager) *meta {
+	t.Helper()
+	if segments == nil {
+		segments = NewCachedSegmentsInfo()
+	}
+	persist := NewSegmentTxnWrapper(NewOptimisticTxnMemoryPersist())
+	cached := segments.GetSegments()
+	txn := persist.Txn(context.TODO())
+	for _, segment := range cached {
+		require.NoError(t, txn.Insert(segmentKey(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()), segment.SegmentInfo))
+	}
+	results, err := txn.Commit()
+	require.NoError(t, err)
+	for i, segment := range cached {
+		segments.SetSegment(segment.GetID(), segment, results[i].Version)
+	}
+	return &meta{
+		ctx:            context.TODO(),
+		catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments:       segments,
+		chunkManager:   chunkManager,
+		segmentPersist: persist,
+		channelCPs:     newChannelCps(),
+	}
+}
+
 func (suite *MetaReloadSuite) SetupTest() {
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	suite.catalog = catalog
@@ -94,7 +166,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				},
 			},
 		}, nil)
-		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -105,7 +176,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist(), "")
+		_, err := newMeta(ctx, suite.catalog, nil, brk, NewSegmentTxnWrapper(failScanPersist{err: errors.New("mock")}), "")
 		suite.Error(err)
 	})
 
@@ -113,7 +184,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
 		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
@@ -148,14 +218,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{
-			{
-				ID:           1,
-				CollectionID: 1,
-				PartitionID:  1,
-				State:        commonpb.SegmentState_Flushed,
-			},
-		}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
 			"ch": {
 				ChannelName: "cn",
@@ -167,7 +229,13 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist(), "")
+		segmentPersist := newTestSegmentPersistWithSegments(suite.T(), &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushed,
+		})
+		_, err := newMeta(ctx, suite.catalog, nil, brk, segmentPersist, "")
 		suite.NoError(err)
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0"), 1)
@@ -315,18 +383,15 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error) {
-				return []*datapb.SegmentInfo{
-					{
-						ID:           rand.Int63(),
-						CollectionID: collectionID,
-						State:        commonpb.SegmentState_Flushed,
-					},
-				}, nil
-			})
-
-		meta, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist(), "")
+		segmentPersist := newTestSegmentPersistWithSegments(suite.T(),
+			&datapb.SegmentInfo{ID: 1000, CollectionID: 100, State: commonpb.SegmentState_Flushed},
+			&datapb.SegmentInfo{ID: 1001, CollectionID: 101, State: commonpb.SegmentState_Flushed},
+			&datapb.SegmentInfo{ID: 1002, CollectionID: 102, State: commonpb.SegmentState_Flushed},
+			&datapb.SegmentInfo{ID: 2000, CollectionID: 200, State: commonpb.SegmentState_Flushed},
+			&datapb.SegmentInfo{ID: 2001, CollectionID: 201, State: commonpb.SegmentState_Flushed},
+			&datapb.SegmentInfo{ID: 2002, CollectionID: 202, State: commonpb.SegmentState_Flushed},
+		)
+		meta, err := newMeta(ctx, suite.catalog, nil, brk, segmentPersist, "")
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -439,11 +504,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1, 2},
 			Type:          datapb.CompactionType_MixCompaction,
 		}
-		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -482,11 +543,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1, 2},
 			Type:          datapb.CompactionType_MixCompaction,
 		}
-		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
@@ -543,11 +600,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1, 2},
 			Type:          datapb.CompactionType_MixCompaction,
 		}
-		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
@@ -641,11 +694,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InputSegments: []UniqueID{1},
 			Type:          datapb.CompactionType_SortCompaction,
 		}
-		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
@@ -1014,12 +1063,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_MixCompaction,
 			Channel:       "ch-1",
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1076,12 +1120,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_MixCompaction,
 			Channel:       "ch-1",
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1136,12 +1175,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_ClusteringCompaction,
 			Channel:       "ch-1",
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1196,12 +1230,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_ClusteringCompaction,
 			Channel:       "ch-1",
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1241,12 +1270,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			InputSegments: []UniqueID{1},
 			Type:          datapb.CompactionType_SortCompaction,
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1286,12 +1310,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			InputSegments: []UniqueID{1},
 			Type:          datapb.CompactionType_SortCompaction,
 		}
-		m := &meta{
-			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:       latestSegments,
-			chunkManager:   mockChMgr,
-			segmentPersist: newTestSegmentPersist(),
-		}
+		m := newTestMetaFromCache(suite.T(), latestSegments, mockChMgr)
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
@@ -1304,14 +1323,11 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
-	catalog := mocks2.NewDataCoordCatalog(suite.T())
-	meta.catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	suite.Run("normal", func() {
 		segmentID := int64(1000)
-		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:            segmentID,
 			MaxRowNum:     30000,
@@ -1326,15 +1342,12 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 			return true
 		})
 
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
-
 		err = meta.UpdateSegment(segmentID, noOp)
 		suite.NoError(err)
 	})
 
 	suite.Run("not_updated", func() {
 		segmentID := int64(1001)
-		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:            segmentID,
 			MaxRowNum:     30000,
@@ -1353,9 +1366,8 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 		suite.NoError(err)
 	})
 
-	suite.Run("catalog_error", func() {
+	suite.Run("persist_error", func() {
 		segmentID := int64(1002)
-		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:            segmentID,
 			MaxRowNum:     30000,
@@ -1370,7 +1382,9 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 			return true
 		})
 
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mocked")).Once()
+		oldPersist := meta.segmentPersist
+		meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("mocked")})
+		defer func() { meta.segmentPersist = oldPersist }()
 
 		err = meta.UpdateSegment(segmentID, noOp)
 		suite.Error(err)
@@ -1408,10 +1422,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 	}
 
 	suite.Run("too many input segments", func() {
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: makeSegments(1, commonpb.SegmentState_Flushed),
-		}
+		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Flushed), nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1, 2}, // two inputs — should error
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1428,10 +1439,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 	})
 
 	suite.Run("too many result segments", func() {
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: makeSegments(1, commonpb.SegmentState_Flushed),
-		}
+		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Flushed), nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1450,10 +1458,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 
 	suite.Run("segment not found", func() {
 		// Segment 99 is not in meta.
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: NewCachedSegmentsInfo(),
-		}
+		m := newTestMetaFromCache(suite.T(), NewCachedSegmentsInfo(), nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{99},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1471,10 +1476,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 	})
 
 	suite.Run("segment dropped", func() {
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: makeSegments(1, commonpb.SegmentState_Dropped),
-		}
+		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Dropped), nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1492,10 +1494,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 	})
 
 	suite.Run("segment ID mismatch", func() {
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: makeSegments(1, commonpb.SegmentState_Flushed),
-		}
+		m := newTestMetaFromCache(suite.T(), makeSegments(1, commonpb.SegmentState_Flushed), nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1524,10 +1523,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 			NumOfRows:     5,
 			SchemaVersion: 1,
 		}}, 0)
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segs,
-		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1570,10 +1566,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 			NumOfRows:     5,
 			SchemaVersion: 1,
 		}}, 0)
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segs,
-		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1618,10 +1611,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 			NumOfRows:     5,
 			SchemaVersion: 1,
 		}}, 0)
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segs,
-		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1680,10 +1670,7 @@ func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
 			NumOfRows:     5,
 			SchemaVersion: 1,
 		}}, 0)
-		m := &meta{
-			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segs,
-		}
+		m := newTestMetaFromCache(suite.T(), segs, nil)
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{1},
 			Type:          datapb.CompactionType_BackfillCompaction,
@@ -1813,48 +1800,39 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
 	})
 
-	t.Run("Test segment with kv fails", func(t *testing.T) {
-		// inject error for `Save`
+	t.Run("Test segment persistence fails", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		metakv.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
-		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err := newMeta(context.TODO(), catalog, nil, mockBroker, NewSegmentTxnWrapper(failCommitPersist{err: errors.New("failed")}), "")
 		assert.NoError(t, err)
 
 		err = meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.Error(t, err)
 
-		metakv2 := mockkv.NewMetaKv(t)
-		metakv2.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-		metakv2.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
-		metakv2.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Maybe()
-		metakv2.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv2.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv2.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-		metakv2.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-		metakv2.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed"))
-		catalog = datacoord.NewCatalog(metakv2, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
+		catalog = datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+		mockBroker = broker.NewMockBroker(t)
+		mockBroker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err = newMeta(context.TODO(), catalog, nil, mockBroker, newTestSegmentPersist(), "")
 		assert.NoError(t, err)
 		// ErrKeyNotFound, since no segment yet
-		segToDrop := NewSegmentInfo(&datapb.SegmentInfo{})
+		segToDrop := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 1, PartitionID: 1})
 		err = meta.DropSegment(context.TODO(), segToDrop)
 		assert.NoError(t, err)
-		// nil, since Save error not injected
 		err = meta.AddSegment(context.TODO(), segToDrop)
 		assert.NoError(t, err)
-		// error injected
+		meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("failed")})
 		err = meta.DropSegment(context.TODO(), segToDrop)
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
+		mockBroker = broker.NewMockBroker(t)
+		mockBroker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+		meta, err = newMeta(context.TODO(), catalog, nil, mockBroker, newTestSegmentPersist(), "")
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -2562,15 +2540,13 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 	t.Run("test save etcd failed", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mocked fail")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("mocked fail")).Maybe()
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		metakv.EXPECT().Has(mock.Anything, mock.Anything).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
+		meta, err := newMeta(context.TODO(), catalog, nil, broker, NewSegmentTxnWrapper(failCommitPersist{err: errors.New("mocked fail")}), "")
 		assert.NoError(t, err)
 
 		segmentInfo := &SegmentInfo{

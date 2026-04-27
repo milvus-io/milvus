@@ -364,6 +364,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		// cannot copy size, since binlog may be changed
 		lastWrittenTime: s.lastWrittenTime,
 	}
+	cloned.deltaRowcount.Store(-1)
 	for _, opt := range opts {
 		opt(cloned)
 	}

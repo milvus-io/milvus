@@ -95,8 +95,9 @@ type SegmentTxn struct {
 	// mainIdx records, for each typed segment op, the index of its main op
 	// inside inner. Binlog Put/Remove ops take the slots in between; the
 	// mapping lets Commit return one result per typed op in add order.
-	mainIdx []int
-	count   int
+	mainIdx      []int
+	mainSegments []*datapb.SegmentInfo
+	count        int
 }
 
 // SegmentTxnResult is one entry per typed segment op, in add order.
@@ -119,7 +120,7 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 		return err
 	}
 	t.inner.Insert(key, value)
-	t.recordMain()
+	t.recordMain(seg)
 	for k, v := range binlogKvs {
 		t.inner.Put(k, v)
 		t.recordAux()
@@ -150,7 +151,7 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 		return err
 	}
 	t.inner.Update(key, value, expectedVersion)
-	t.recordMain()
+	t.recordMain(seg)
 	for k, v := range binlogKvs {
 		t.inner.Put(k, v)
 		t.recordAux()
@@ -166,7 +167,7 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 // Fails (ErrKeyNotFound) if the segment key is missing.
 func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
 	t.inner.Delete(key)
-	t.recordMain()
+	t.recordMain(nil)
 	for _, k := range segmentBinlogKeys(seg) {
 		t.inner.Remove(k)
 		t.recordAux()
@@ -179,30 +180,33 @@ func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
 func (t *SegmentTxn) RawTxn() Txn { return t.inner }
 
 // Commit executes the underlying atomic transaction. Returned results are in
-// add order of the typed ops; binlog Put/Remove ops are not reported.
+// add order of the typed ops; binlog Put/Remove ops are not reported. Segment
+// results keep the fully stitched SegmentInfo supplied to Insert/Update rather
+// than the stripped proto persisted in the main segment key.
 func (t *SegmentTxn) Commit() ([]SegmentTxnResult, error) {
 	raws, err := t.inner.Commit()
 	if err != nil {
 		return nil, err
 	}
 	results := make([]SegmentTxnResult, 0, len(t.mainIdx))
-	for _, idx := range t.mainIdx {
+	for i, idx := range t.mainIdx {
 		r := raws[idx]
 		out := SegmentTxnResult{Version: r.Version}
-		if len(r.Value) > 0 {
-			s := &datapb.SegmentInfo{}
-			if err := proto.Unmarshal(r.Value, s); err != nil {
-				return nil, fmt.Errorf("unmarshal commit result: %w", err)
-			}
-			out.Segment = s
+		if t.mainSegments[i] != nil {
+			out.Segment = proto.Clone(t.mainSegments[i]).(*datapb.SegmentInfo)
 		}
 		results = append(results, out)
 	}
 	return results, nil
 }
 
-func (t *SegmentTxn) recordMain() {
+func (t *SegmentTxn) recordMain(seg *datapb.SegmentInfo) {
 	t.mainIdx = append(t.mainIdx, t.count)
+	if seg == nil {
+		t.mainSegments = append(t.mainSegments, nil)
+	} else {
+		t.mainSegments = append(t.mainSegments, proto.Clone(seg).(*datapb.SegmentInfo))
+	}
 	t.count++
 }
 
