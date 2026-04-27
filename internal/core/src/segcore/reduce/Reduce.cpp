@@ -274,11 +274,6 @@ ReduceHelper::TruncateToRefineTopk() {
                                plan_->plan_node_->search_info_.search_params_,
                                index::HNSW_QUERY_EF)
                                .value_or(0);
-    search_range = std::max(search_range,
-                            index::GetValueFromConfig<int64_t>(
-                                plan_->plan_node_->search_info_.search_params_,
-                                index::DISK_ANN_QUERY_LIST)
-                                .value_or(0));
 
     // Use ReduceResultData-style per-slice/per-NQ iteration, with
     // distance-only merge (no PKs available at this stage).
