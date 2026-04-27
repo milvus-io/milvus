@@ -268,10 +268,11 @@ ReduceHelper::TruncateToRefineTopk() {
         return;
     }
 
-    auto max_unity_topk = int64_t{0};
-    for (auto& search_result : search_results_) {
-        max_unity_topk = std::max(max_unity_topk, search_result->unity_topK_);
-    }
+    // get search range from search params for refinement
+    int64_t search_range = index::GetValueFromConfig<int64_t>(
+                               plan_->plan_node_->search_info_.search_params_,
+                               index::HNSW_QUERY_EF)
+                               .value_or(0);
 
     // Use ReduceResultData-style per-slice/per-NQ iteration, with
     // distance-only merge (no PKs available at this stage).
@@ -279,7 +280,7 @@ ReduceHelper::TruncateToRefineTopk() {
     for (int64_t slice_index = 0; slice_index < num_slices_; ++slice_index) {
         auto refine_topk = static_cast<int64_t>(
             std::ceil(refine_topk_ratio *
-                      std::max(slice_topKs_[slice_index], max_unity_topk)));
+                      std::max(slice_topKs_[slice_index], search_range)));
         auto nq_begin = slice_nqs_prefix_sum_[slice_index];
         auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
 
