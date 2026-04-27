@@ -817,7 +817,7 @@ func injectVirtualPKForExternalCollection(schema *schemapb.CollectionSchema) err
 	// will assign the actual field ID during collection creation.
 	virtualPKField := &schemapb.FieldSchema{
 		Name:         common.VirtualPKFieldName,
-		Description:  "Virtual primary key for external collection: (segmentID << 32) | offset",
+		Description:  "auto-generated primary key for external collection",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
 		AutoID:       true, // Virtual PKs are auto-generated
