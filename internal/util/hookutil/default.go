@@ -60,6 +60,6 @@ func (d DefaultExtension) Report(info any) int {
 	return 0
 }
 
-func (d DefaultExtension) ReportRefused(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string) error {
+func (d DefaultExtension) ReportAction(ctx context.Context, req interface{}, resp interface{}, err error, fullMethod string, action string) error {
 	return nil
 }

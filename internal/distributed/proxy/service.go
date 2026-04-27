@@ -145,9 +145,9 @@ func authenticate(c *gin.Context) {
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
 	}
 
-	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
-	}, nil, c.FullPath())
+	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
