@@ -71,7 +71,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
 	github.com/milvus-io/milvus/client/v2 v2.6.2
-	github.com/milvus-io/milvus/pkg/v3 v3.0.0-00010101000000-000000000000
+	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/tidwall/gjson v1.17.1
