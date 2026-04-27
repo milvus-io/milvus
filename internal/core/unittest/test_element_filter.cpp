@@ -1847,6 +1847,139 @@ TEST(ElementFilter, RetrieveSortedByPk) {
     EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
+// Regression test for https://github.com/milvus-io/milvus/issues/49260
+// ElementFilterBitsNode: when element_filter is AND-composed with a predicate
+// that matches 0 docs on a segment, doc_hit_ratio = 0 triggers offset_mode
+// with empty element_offsets. The downstream expression's Eval returns
+// nullptr on empty input, violating the "exactly one result" assertion in
+// PhyElementFilterBitsNode::EvaluateElementExpression. The fix short-circuits
+// the empty-offsets case and returns an all-filtered bitset.
+//
+// Parameterize over sealed/growing to cover both segment types — the bug is
+// triggered purely by a 0-hit upstream predicate, not by segment type.
+class ElementFilterEmptyDocHit : public ::testing::TestWithParam<bool> {};
+
+TEST_P(ElementFilterEmptyDocHit, ZeroHitPredicateWithAnd) {
+    bool with_sealed = GetParam();
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 1000;
+    int array_len = 3;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // doc i -> price_array [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Build segment. The default DataGen assigns PK id in [0, N), so any
+    // predicate "id >= N" matches zero rows -> doc_hit_ratio = 0 -> offset_mode
+    // -> empty element_offsets on the segment (the exact trigger for #49260).
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    // Build retrieve plan: element_filter(structA, $[price_array] >= 0)
+    //                      AND id >= N
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(100);
+
+    auto* expr = query->mutable_predicates();
+    auto* element_filter = expr->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    // Element-level predicate: value >= 0 (always true for our data).
+    auto* element_expr = element_filter->mutable_element_expr();
+    auto* elem_range = element_expr->mutable_unary_range_expr();
+    auto* elem_col = elem_range->mutable_column_info();
+    elem_col->set_field_id(int_array_fid.get());
+    elem_col->set_data_type(proto::schema::DataType::Int32);
+    elem_col->set_element_type(proto::schema::DataType::Int32);
+    elem_col->set_is_element_level(true);
+    elem_range->set_op(proto::plan::OpType::GreaterEqual);
+    elem_range->mutable_value()->set_int64_val(0);
+
+    // Doc-level predicate that matches zero rows: id >= N.
+    auto* predicate = element_filter->mutable_predicate();
+    auto* pred_range = predicate->mutable_unary_range_expr();
+    auto* pred_col = pred_range->mutable_column_info();
+    pred_col->set_field_id(int64_fid.get());
+    pred_col->set_data_type(proto::schema::DataType::Int64);
+    pred_range->set_op(proto::plan::OpType::GreaterEqual);
+    pred_range->mutable_value()->set_int64_val(static_cast<int64_t>(N));
+
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(int_array_fid.get());
+
+    auto parser = ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+
+    // Without the fix this call aborts with:
+    //   Assert "results.size() == 1 && results[0] != nullptr"
+    // at ElementFilterBitsNode.cpp:191.
+    std::unique_ptr<proto::segcore::RetrieveResults> retrieve_results;
+    ASSERT_NO_THROW({
+        retrieve_results = segment->Retrieve(nullptr,
+                                             plan.get(),
+                                             1L << 63,
+                                             INT64_MAX,
+                                             false,
+                                             folly::CancellationToken(),
+                                             0,
+                                             0);
+    });
+
+    ASSERT_NE(retrieve_results, nullptr);
+    ASSERT_EQ(retrieve_results->offset_size(), 0)
+        << "No doc satisfies id >= N, expected empty result";
+}
+
+INSTANTIATE_TEST_SUITE_P(ElementFilter,
+                         ElementFilterEmptyDocHit,
+                         ::testing::Values(true, false),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                             return info.param ? "Sealed" : "Growing";
+                         });
+
 enum class NestedIndexType { NONE, STL_SORT, INVERTED };
 
 std::string
