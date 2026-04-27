@@ -1,6 +1,6 @@
 package migration
 
-import "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+import "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 
 const (
 	Role = "migration"

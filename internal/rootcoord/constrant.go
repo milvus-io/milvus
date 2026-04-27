@@ -19,7 +19,7 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (

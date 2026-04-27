@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // PinnedRef is a smart-pointer-like owner of a resource of type T.

@@ -16,7 +16,7 @@
 
 package messageutil
 
-import "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+import "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 // IsSchemaChange checks if the put collection message is a schema change message.
 func IsSchemaChange(header *message.AlterCollectionMessageHeader) bool {

@@ -20,7 +20,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today

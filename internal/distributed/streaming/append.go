@@ -2,8 +2,8 @@ package streaming
 
 import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // createOrGetProducer creates or get a producer.

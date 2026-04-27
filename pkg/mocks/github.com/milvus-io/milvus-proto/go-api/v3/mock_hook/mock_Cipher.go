@@ -3,7 +3,7 @@
 package mock_hook
 
 import (
-	hook "github.com/milvus-io/milvus-proto/go-api/v2/hook"
+	hook "github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	mock "github.com/stretchr/testify/mock"
 )
 

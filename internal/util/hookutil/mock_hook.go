@@ -21,7 +21,7 @@
 
 package hookutil
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/hook"
+import "github.com/milvus-io/milvus-proto/go-api/v3/hook"
 
 // MockAPIHook is a mock hook for api key verification, ONLY FOR TEST
 type MockAPIHook struct {

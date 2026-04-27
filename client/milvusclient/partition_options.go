@@ -16,7 +16,7 @@
 
 package milvusclient
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 // CreatePartitionOption is the interface builds Create Partition request.
 type CreatePartitionOption interface {

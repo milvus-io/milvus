@@ -3,13 +3,13 @@
 package mock_shards
 
 import (
-	log "github.com/milvus-io/milvus/pkg/v2/log"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	log "github.com/milvus-io/milvus/pkg/v3/log"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
 	shards "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	utils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 )

@@ -18,8 +18,8 @@ package httpserver
 
 import (
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 // v2

@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 var wildcards = map[byte]struct{}{

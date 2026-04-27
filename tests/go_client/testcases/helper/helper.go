@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
@@ -255,11 +255,11 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 		// The collection will be cleanup after the test
 		// But some ctx is setted with timeout for only a part of unittest,
 		// which will cause the drop collection failed with timeout.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*30)
-		defer cancel()
+		// ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*30)
+		// defer cancel()
 
-		err := mc.DropCollection(ctx, client.NewDropCollectionOption(schema.CollectionName))
-		common.CheckErr(t, err, true)
+		// err := mc.DropCollection(ctx, client.NewDropCollectionOption(schema.CollectionName))
+		// common.CheckErr(t, err, true)
 	})
 	return chainTask, schema
 }

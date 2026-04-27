@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
 
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
 func TestRbacConfig_DefaultPrivileges(t *testing.T) {

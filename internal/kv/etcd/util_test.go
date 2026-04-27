@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
 type EtcdKVUtilSuite struct {
