@@ -175,7 +175,7 @@ func StatusWithErrorCode(err error, code commonpb.ErrorCode) *commonpb.Status {
 
 func oldCode(code int32) commonpb.ErrorCode {
 	switch code {
-	case ErrServiceNotReady.code():
+	case ErrServiceNotReady.code(), ErrCollectionSchemaVersionNotReady.code():
 		return commonpb.ErrorCode_NotReadyServe
 
 	case ErrCollectionNotFound.code():
@@ -582,6 +582,14 @@ func WrapErrCollectionSchemaMisMatch(collection any, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrCollectionSchemaVersionNotReady(collection any, consistentSegments, totalSegments int) error {
+	return wrapFieldsWithDesc(
+		ErrCollectionSchemaVersionNotReady,
+		fmt.Sprintf("%d/%d segments are consistent, required 100%%", consistentSegments, totalSegments),
+		value("collection", collection),
+	)
 }
 
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {

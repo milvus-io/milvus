@@ -71,8 +71,9 @@ var (
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
 	// Deprecated, keep it only for reserving the error code
-	ErrCollectionReplicateMode  = newMilvusError("can't operate on the collection under standby mode", 108, false)
-	ErrCollectionSchemaMismatch = newMilvusError("collection schema mismatch", 109, false)
+	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false)
+	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false)
+	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)

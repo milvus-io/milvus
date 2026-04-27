@@ -990,9 +990,13 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	}
 	defer node.alterSchemaInFlight.Delete(collKey)
 
-	// Block until all segments have caught up to the current schema version,
-	// preventing a new field addition while a previous backfill is still in progress.
-	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
+	// Retry the schema consistency gate in Proxy first to hide short backfill
+	// convergence windows from clients until SDK retry handling is fixed.
+	if err := retry.Handle(ctx, func() (bool, error) {
+		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
+		return merr.IsRetryableErr(err), err
+	}); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1082,8 +1086,13 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	}
 	defer node.alterSchemaInFlight.Delete(collKey)
 
-	// Check schema version consistency before proceeding with alter collection schema
-	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
+	// Retry the schema consistency gate in Proxy first to hide short backfill
+	// convergence windows from clients until SDK retry handling is fixed.
+	if err := retry.Handle(ctx, func() (bool, error) {
+		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
+		return merr.IsRetryableErr(err), err
+	}); err != nil {
 		return &milvuspb.AlterCollectionSchemaResponse{
 			AlterStatus: merr.Status(err),
 		}, nil
@@ -1224,9 +1233,7 @@ func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, co
 		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
 	}
 	if consistentSegments < totalSegments {
-		return merr.WrapErrParameterInvalidMsg(
-			"schema version consistency check failed: %d/%d segments are consistent, required 100%%",
-			consistentSegments, totalSegments)
+		return merr.WrapErrCollectionSchemaVersionNotReady(collectionName, consistentSegments, totalSegments)
 	}
 	return nil
 }
