@@ -206,6 +206,18 @@ impl IndexWriterWrapperImpl {
         self.add_document(document, offset)
     }
 
+    /// Batch add multiple JSON documents, each as a separate document with sequential offsets.
+    pub fn add_json_batch(&mut self, datas: &[*const c_char], offset_begin: u32) -> Result<()> {
+        for (i, &data_ptr) in datas.iter().enumerate() {
+            let data = c_ptr_to_str(data_ptr)?;
+            let j = serde_json::from_str::<serde_json::Value>(data)?;
+            let mut document = TantivyDocument::default();
+            j.add_to_document(self.field.field_id(), &mut document);
+            self.add_document(document, offset_begin + i as u32)?;
+        }
+        Ok(())
+    }
+
     pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
         let mut document = TantivyDocument::default();
         for element in datas {

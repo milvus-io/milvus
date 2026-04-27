@@ -256,6 +256,30 @@ RustResult tantivy_json_term_query_keyword(void *ptr,
                                            const char *term,
                                            void *bitset);
 
+RustResult tantivy_json_terms_query_i64(void *ptr,
+                                        const char *json_path,
+                                        const int64_t *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_f64(void *ptr,
+                                        const char *json_path,
+                                        const double *terms,
+                                        uintptr_t len,
+                                        void *bitset);
+
+RustResult tantivy_json_terms_query_bool(void *ptr,
+                                         const char *json_path,
+                                         const bool *terms,
+                                         uintptr_t len,
+                                         void *bitset);
+
+RustResult tantivy_json_terms_query_keyword(void *ptr,
+                                            const char *json_path,
+                                            const char *const *terms,
+                                            uintptr_t len,
+                                            void *bitset);
+
 RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
 
 RustResult tantivy_json_range_query_i64(void *ptr,
@@ -432,6 +456,11 @@ RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
                                                           uintptr_t len);
 
 RustResult tantivy_index_add_json(void *ptr, const char *s, int64_t offset);
+
+RustResult tantivy_index_add_json_batch(void *ptr,
+                                        const char *const *array,
+                                        uintptr_t len,
+                                        int64_t offset_begin);
 
 RustResult tantivy_index_add_array_json(void *ptr,
                                         const char *const *array,

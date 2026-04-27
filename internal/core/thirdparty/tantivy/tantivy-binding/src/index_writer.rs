@@ -115,6 +115,19 @@ impl IndexWriterWrapper {
         }
     }
 
+    pub fn add_json_batch(&mut self, datas: &[*const c_char], offset_begin: i64) -> Result<()> {
+        match self {
+            IndexWriterWrapper::V5(_) => {
+                return Err(TantivyBindingError::InternalError(
+                    "add json batch with tantivy index version 5 is not supported".into(),
+                ));
+            }
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_json_batch(datas, offset_begin as u32)
+            }
+        }
+    }
+
     pub fn add_array_json(&mut self, datas: &[*const c_char], offset: Option<i64>) -> Result<()> {
         match self {
             IndexWriterWrapper::V5(_) => {
