@@ -1983,6 +1983,160 @@ func Test_SegmentScorers(t *testing.T) {
 	})
 }
 
+func Test_FieldScoreScorer(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	makeFieldScoreRanker := func(fieldScore, weight string) *schemapb.FunctionSchema {
+		params := []*commonpb.KeyValuePair{
+			{Key: rerank.WeightKey, Value: weight},
+			{Key: "reranker", Value: rerank.BoostName},
+			{Key: BoostFieldScoreKey, Value: fieldScore},
+		}
+		return &schemapb.FunctionSchema{Params: params}
+	}
+
+	findParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+		for _, kv := range kvs {
+			if kv.GetKey() == key {
+				return kv.GetValue(), true
+			}
+		}
+		return "", false
+	}
+
+	t.Run("ok - int64 field", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": "Int64Field"}`, "1.5"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(plan.Scorers))
+		assert.Equal(t, planpb.FunctionType_FunctionTypeField, plan.Scorers[0].GetType())
+
+		fieldID, ok := findParam(plan.Scorers[0].GetParams(), FieldScoreFieldIdKey)
+		assert.True(t, ok)
+		int64Field, err := schema.GetFieldFromName("Int64Field")
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprint(int64Field.FieldID), fieldID)
+	})
+
+	t.Run("ok - all arithmetic types accepted", func(t *testing.T) {
+		for _, name := range []string{"Int8Field", "Int16Field", "Int32Field", "Int64Field", "FloatField", "DoubleField"} {
+			fs := &schemapb.FunctionScore{
+				Functions: []*schemapb.FunctionSchema{
+					makeFieldScoreRanker(fmt.Sprintf(`{"field": %q}`, name), "1.0"),
+				},
+			}
+			plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+			assert.NoError(t, err, name)
+			assert.Equal(t, planpb.FunctionType_FunctionTypeField, plan.Scorers[0].GetType(), name)
+		}
+	})
+
+	t.Run("ok - missing_value forwarded into params", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": "FloatField", "missing_value": 42.5}`, "1.0"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		missing, ok := findParam(plan.Scorers[0].GetParams(), FieldScoreMissingValueKey)
+		assert.True(t, ok)
+		assert.Equal(t, "42.5", missing)
+	})
+
+	t.Run("ok - unknown key in field_score is tolerated", func(t *testing.T) {
+		// mirrors random_score's lenient behavior on unknown keys
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": "Int64Field", "future_tuning_knob": 3}`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+	})
+
+	t.Run("error - field not found", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": "NotAField"}`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - non-numeric field rejected", func(t *testing.T) {
+		for _, name := range []string{"VarCharField", "StringField", "BoolField"} {
+			fs := &schemapb.FunctionScore{
+				Functions: []*schemapb.FunctionSchema{
+					makeFieldScoreRanker(fmt.Sprintf(`{"field": %q}`, name), "1.0"),
+				},
+			}
+			_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+			assert.Error(t, err, name)
+		}
+	})
+
+	t.Run("error - missing field key", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"missing_value": 1.0}`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - field name not string", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": 123}`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - missing_value not number", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field": "Int64Field", "missing_value": "oops"}`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - field_score and random_score mutual exclusion", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{Params: []*commonpb.KeyValuePair{
+					{Key: rerank.WeightKey, Value: "1.0"},
+					{Key: "reranker", Value: rerank.BoostName},
+					{Key: BoostFieldScoreKey, Value: `{"field": "Int64Field"}`},
+					{Key: BoostRandomScoreKey, Value: `{"seed": 1}`},
+				}},
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - invalid json in field_score", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeFieldScoreRanker(`{"field":`, "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.Error(t, err)
+	})
+}
+
 func TestConcurrency(t *testing.T) {
 	schemaHelper := newTestSchemaHelper(t)
 

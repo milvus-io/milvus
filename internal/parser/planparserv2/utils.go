@@ -19,11 +19,16 @@ import (
 
 const (
 	BoostRandomScoreKey    = "random_score"
+	BoostFieldScoreKey     = "field_score"
 	BoostModeKey           = "boost_mode"
 	BoostFunctionModeKey   = "function_mode"
 	RandomScoreSeedKey     = "seed"
 	RandomScoreFileNameKey = "field"
 	RandomScoreFileIdKey   = "field_id"
+
+	FieldScoreFieldNameKey    = "field"
+	FieldScoreFieldIdKey      = "field_id"
+	FieldScoreMissingValueKey = "missing_value"
 )
 
 // Precompiled regex patterns for performance optimization

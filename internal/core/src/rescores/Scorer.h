@@ -122,6 +122,92 @@ class WeightScorer : public Scorer {
     float weight_;
 };
 
+class FieldScorer : public Scorer {
+ public:
+    FieldScorer(expr::TypedExprPtr& filter,
+                float weight,
+                const ProtoParams& params) {
+        auto param_map = RepeatedKeyValToMap(params);
+        if (auto it = param_map.find("field_id"); it != param_map.end()) {
+            try {
+                field_ = FieldId(std::stoll(it->second));
+            } catch (const std::exception& e) {
+                ThrowInfo(ErrorCode::InvalidParameter,
+                          "parse boost field_score field ID failed: {}",
+                          e.what());
+            }
+        } else {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "boost field_score must specify field_id");
+        }
+
+        if (auto it = param_map.find("missing_value"); it != param_map.end()) {
+            try {
+                missing_value_ = std::stof(it->second);
+            } catch (const std::exception& e) {
+                ThrowInfo(ErrorCode::InvalidParameter,
+                          "parse boost field_score missing_value failed: {}",
+                          e.what());
+            }
+        }
+
+        weight_ = weight;
+        filter_ = filter;
+    }
+
+    expr::TypedExprPtr
+    filter() override {
+        return filter_;
+    }
+
+    void
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
+                const proto::plan::FunctionMode& mode,
+                const FixedVector<int32_t>& offsets,
+                const TargetBitmapView& bitmap,
+                std::vector<std::optional<float>>& boost_scores) override;
+
+    void
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
+                const proto::plan::FunctionMode& mode,
+                const FixedVector<int32_t>& offsets,
+                const TargetBitmap& bitmap,
+                std::vector<std::optional<float>>& boost_scores) override;
+
+    void
+    batch_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
+                const proto::plan::FunctionMode& mode,
+                const FixedVector<int32_t>& offsets,
+                std::vector<std::optional<float>>& boost_scores) override;
+
+    float
+    weight() override {
+        return weight_;
+    }
+
+ private:
+    void
+    set_score(float field_value,
+              std::optional<float>& old_score,
+              const proto::plan::FunctionMode& mode);
+
+    void
+    field_score(milvus::OpContext* op_ctx,
+                const segcore::SegmentInternalInterface* segment,
+                const proto::plan::FunctionMode& mode,
+                const FixedVector<int64_t>& target_offsets,
+                const FixedVector<int>* idx,
+                std::vector<std::optional<float>>& boost_scores);
+
+    expr::TypedExprPtr filter_;
+    float weight_;
+    FieldId field_{-1};
+    std::optional<float> missing_value_;
+};
+
 class RandomScorer : public Scorer {
  public:
     RandomScorer(expr::TypedExprPtr& filter,

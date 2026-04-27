@@ -341,19 +341,85 @@ func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*c
 	return result, nil
 }
 
+func prepareBoostFieldParams(schema *typeutil.SchemaHelper, bytes string) ([]*commonpb.KeyValuePair, error) {
+	paramsMap := make(map[string]any)
+
+	dec := json.NewDecoder(strings.NewReader(bytes))
+	dec.UseNumber()
+
+	err := dec.Decode(&paramsMap)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*commonpb.KeyValuePair, 0)
+	hasField := false
+	for key, value := range paramsMap {
+		switch key {
+		case FieldScoreFieldNameKey:
+			name, ok := value.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("field_score field name must be string")
+			}
+
+			field, err := schema.GetFieldFromName(name)
+			if err != nil {
+				return nil, merr.WrapErrFieldNotFound(value, "field_score field not found")
+			}
+
+			if !typeutil.IsArithmetic(field.DataType) {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"field_score only support numeric field, but got %s", field.DataType.String())
+			}
+			result = append(result, &commonpb.KeyValuePair{Key: FieldScoreFieldIdKey, Value: fmt.Sprint(field.FieldID)})
+			hasField = true
+		case FieldScoreMissingValueKey:
+			number, ok := value.(json.Number)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("field_score missing_value must be number")
+			}
+			result = append(result, &commonpb.KeyValuePair{Key: key, Value: number.String()})
+		}
+	}
+	if !hasField {
+		return nil, merr.WrapErrParameterInvalidMsg("field_score must specify 'field'")
+	}
+	return result, nil
+}
+
 func setBoostType(schema *typeutil.SchemaHelper, scorer *planpb.ScoreFunction, params []*commonpb.KeyValuePair) error {
 	scorer.Type = planpb.FunctionType_FunctionTypeWeight
+
+	setType := func(newType planpb.FunctionType) error {
+		if scorer.Type != planpb.FunctionType_FunctionTypeWeight {
+			return merr.WrapErrParameterInvalidMsg(
+				"conflicting boost scorer params: %s and %s cannot be set at the same time",
+				scorer.Type.String(), newType.String())
+		}
+		scorer.Type = newType
+		return nil
+	}
+
 	for _, param := range params {
 		switch param.GetKey() {
 		case BoostRandomScoreKey:
-			{
-				scorer.Type = planpb.FunctionType_FunctionTypeRandom
-				params, err := prepareBoostRandomParams(schema, param.GetValue())
-				if err != nil {
-					return err
-				}
-				scorer.Params = params
+			if err := setType(planpb.FunctionType_FunctionTypeRandom); err != nil {
+				return err
 			}
+			params, err := prepareBoostRandomParams(schema, param.GetValue())
+			if err != nil {
+				return err
+			}
+			scorer.Params = params
+		case BoostFieldScoreKey:
+			if err := setType(planpb.FunctionType_FunctionTypeField); err != nil {
+				return err
+			}
+			params, err := prepareBoostFieldParams(schema, param.GetValue())
+			if err != nil {
+				return err
+			}
+			scorer.Params = params
 		default:
 		}
 	}
