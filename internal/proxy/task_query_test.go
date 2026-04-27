@@ -746,7 +746,7 @@ func TestTaskQuery_functions(t *testing.T) {
 						Value: test.inValue[i],
 					})
 				}
-				ret, err := parseQueryParams(inParams, false)
+				ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 				if test.expectErr {
 					assert.Error(t, err)
 					assert.Empty(t, ret)
@@ -770,7 +770,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrderForBest, ret.reduceType)
 		}
@@ -784,7 +784,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "TrueXXXX",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -798,7 +798,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.Error(t, err)
 			assert.Nil(t, ret)
 		}
@@ -809,7 +809,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting iterator tag, ignore reduce_stop_for_best
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
 		}
@@ -820,7 +820,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Value: "True",
 			})
 			// when not setting reduce_stop_for_best tag, reduce by keep results in order
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -834,7 +834,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "True",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceInOrder, ret.reduceType)
 		}
@@ -848,10 +848,51 @@ func TestTaskQuery_functions(t *testing.T) {
 				Key:   IteratorField,
 				Value: "False",
 			})
-			ret, err := parseQueryParams(inParams, false)
+			ret, err := parseQueryParams(inParams, false, schemapb.DataType_Int64)
 			assert.NoError(t, err)
 			assert.Equal(t, reduce.IReduceNoOrder, ret.reduceType)
 		}
+	})
+
+	t.Run("test parseQueryParams for query iterator cursor", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err := parseQueryParams(params, false, schemapb.DataType_Int64)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		require.NotNil(t, ret.queryIteratorCursor.LastIntPk)
+		assert.EqualValues(t, 7, ret.queryIteratorCursor.GetLastIntPk())
+		assert.EqualValues(t, 2, ret.queryIteratorCursor.GetLastElementOffset())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "pk-7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_VarChar)
+		require.NoError(t, err)
+		require.NotNil(t, ret.queryIteratorCursor)
+		assert.Equal(t, "pk-7", ret.queryIteratorCursor.GetLastStrPk())
+
+		params = []*commonpb.KeyValuePair{
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "2"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
+
+		params = []*commonpb.KeyValuePair{
+			{Key: IteratorField, Value: "true"},
+			{Key: QueryIterLastPKKey, Value: "7"},
+			{Key: QueryIterLastOffsetKey, Value: "-1"},
+		}
+		ret, err = parseQueryParams(params, false, schemapb.DataType_Int64)
+		assert.Error(t, err)
+		assert.Nil(t, ret)
 	})
 
 	t.Run("test reduceRetrieveResults", func(t *testing.T) {

@@ -13,11 +13,13 @@
 
 #include <stdint.h>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 
 namespace milvus::plan {
 class PlanNode;
@@ -67,6 +69,7 @@ struct RetrievePlanNode : PlanNode {
     // Field IDs for pipeline columns in the same order as the ProjectNode output.
     // Used by FillOrderByResult to set field_id on DataArrays produced by the pipeline.
     std::vector<FieldId> pipeline_field_ids_;
+    std::optional<QueryIteratorCursor> query_iterator_cursor_;
 };
 
 }  // namespace milvus::query
