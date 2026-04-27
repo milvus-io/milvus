@@ -138,7 +138,17 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 		return nil, fmt.Errorf("cannot parse expression: %s", exprStr)
 	}
 	if !canBeExecuted(predicate) {
-		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		// Handle standalone boolean literals: true → AlwaysTrueExpr, false → AlwaysFalseExpr.
+		if boolVal := predicate.expr.GetValueExpr().GetValue(); boolVal != nil && IsBool(boolVal) {
+			if boolVal.GetBoolVal() {
+				predicate.expr = alwaysTrueExpr()
+			} else {
+				predicate.expr = alwaysFalseExpr()
+			}
+			predicate.nodeDependent = false
+		} else {
+			return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		}
 	}
 
 	valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
