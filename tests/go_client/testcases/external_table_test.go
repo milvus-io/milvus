@@ -162,7 +162,7 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 
 	// Create collection should fail - external collections don't support primary key
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "does not support primary key")
+	common.CheckErr(t, err, false, "does not support user-defined primary key")
 }
 
 // TestCreateExternalCollectionWithDynamicField tests that creating external collection

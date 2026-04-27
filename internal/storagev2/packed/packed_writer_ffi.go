@@ -176,7 +176,25 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return HandleLoonFFIResult(result)
 }
 
+// Destroy releases the underlying C writer handle and properties. Idempotent;
+// safe to call multiple times. Use as `defer w.Destroy()` after construction so
+// resources are freed on every error path (Close already invokes Destroy on
+// success).
+func (pw *FFIPackedWriter) Destroy() {
+	if pw.destroyed {
+		return
+	}
+	pw.destroyed = true
+	C.loon_writer_destroy(pw.cWriterHandle)
+	if pw.cProperties != nil {
+		C.loon_properties_free(pw.cProperties)
+		pw.cProperties = nil
+	}
+}
+
 func (pw *FFIPackedWriter) Close() (string, error) {
+	defer pw.Destroy()
+
 	var cColumnGroups *C.LoonColumnGroups
 
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
@@ -222,6 +240,5 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
 
-	defer C.loon_properties_free(pw.cProperties)
 	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
 }

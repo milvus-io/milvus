@@ -529,7 +529,13 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
-			manifestPath, err := t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			var manifestPath string
+			var err error
+			if t.hasFunctions() {
+				manifestPath, err = t.createManifestWithFunctions(ctx, work.segmentID, work.fragments)
+			} else {
+				manifestPath, err = t.createManifestForSegment(ctx, work.segmentID, work.fragments)
+			}
 			if err != nil {
 				return "", fmt.Errorf("failed to create manifest for segment %d: %w", work.segmentID, err)
 			}
@@ -724,6 +730,33 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		t.columns,
 		fragments,
 		t.req.GetStorageConfig(),
+	)
+}
+
+// hasFunctions returns true if the schema defines any functions.
+func (t *RefreshExternalCollectionTask) hasFunctions() bool {
+	return len(t.req.GetSchema().GetFunctions()) > 0
+}
+
+// createManifestWithFunctions builds an input manifest from the segment's
+// fragments, runs schema functions, and appends a function-output column group
+// on top. External input files are referenced, never copied.
+func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
+	ctx context.Context,
+	segmentID int64,
+	fragments []packed.Fragment,
+) (string, error) {
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+
+	return ExecuteFunctionsForSegment(
+		ctx,
+		t.req.GetSchema(),
+		fragments,
+		t.parsedSpec.Format,
+		t.req.GetStorageConfig(),
+		t.req.GetCollectionID(),
+		segmentID,
+		clusterID,
 	)
 }
 

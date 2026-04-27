@@ -271,6 +271,7 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 	partitionID := collInfo.Partitions[0]
 	for _, seg := range updatedSegments {
 		seg.State = commonpb.SegmentState_Flushed
+		seg.IsSorted = true // external segments skip sort compaction pipeline
 		if seg.InsertChannel == "" {
 			seg.InsertChannel = insertChannel
 		}
