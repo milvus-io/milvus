@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -972,7 +971,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	}
 
 	suite.Run("mix_compaction_recalculates_positions_from_binlogs", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -999,7 +998,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2},
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		result := &datapb.CompactionPlanResult{
@@ -1016,9 +1015,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Channel:       "ch-1",
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -1032,7 +1032,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1059,7 +1059,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 300},
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		// Result binlogs have no timestamps (legacy)
@@ -1077,9 +1077,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Channel:       "ch-1",
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -1092,7 +1093,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1119,7 +1120,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2},
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		result := &datapb.CompactionPlanResult{
@@ -1136,9 +1137,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Channel:       "ch-1",
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -1151,7 +1153,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1178,7 +1180,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		result := &datapb.CompactionPlanResult{
@@ -1195,9 +1197,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Channel:       "ch-1",
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -1209,7 +1212,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1223,7 +1226,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1},
 			InsertChannel:  "ch-1",
 			StorageVersion: storage.StorageV1,
-		}})
+		}}, 0)
 
 		result := &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{{
@@ -1239,9 +1242,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_SortCompaction,
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -1253,7 +1257,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewCachedSegmentsInfo()
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1267,7 +1271,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 333},
 			InsertChannel:  "ch-1",
 			StorageVersion: storage.StorageV1,
-		}})
+		}}, 0)
 
 		result := &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{{
@@ -1283,9 +1287,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			Type:          datapb.CompactionType_SortCompaction,
 		}
 		m := &meta{
-			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments:     latestSegments,
-			chunkManager: mockChMgr,
+			catalog:        &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:       latestSegments,
+			chunkManager:   mockChMgr,
+			segmentPersist: newTestSegmentPersist(),
 		}
 
 		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
@@ -2295,15 +2300,27 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 0, segment1.NumOfRows)
 
-		// UpdateCheckPointOperator with cpNumRows=100, segment has no binlogs
+		// Checkpoint update with cpNumRows=100, segment has no binlogs
 		// CalcRowCountFromBinLog will return 0, so should fall back to cpNumRows
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{
-				SegmentID: 1,
-				NumOfRows: 100,
-				Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
-			}}, true),
+			map[int64][]SegmentOperator{
+				1: {allBinlogs(func(seg *datapb.SegmentInfo) bool {
+					cp := &datapb.CheckPoint{
+						SegmentID: 1,
+						NumOfRows: 100,
+						Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
+					}
+					seg.DmlPosition = cp.GetPosition()
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					} else {
+						seg.NumOfRows = cp.GetNumOfRows()
+					}
+					return true
+				})},
+			},
 		)
 		assert.NoError(t, err)
 

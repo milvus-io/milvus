@@ -4343,15 +4343,17 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		var capturedOps int
 		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
-				capturedOps = len(operators)
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+				for _, operators := range mutations {
+					capturedOps += len(operators)
+				}
 				return nil
 			}).Build()
 		defer mockUpdate.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -4397,15 +4399,17 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		var capturedOps int
 		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
-				capturedOps = len(operators)
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+				for _, operators := range mutations {
+					capturedOps += len(operators)
+				}
 				return nil
 			}).Build()
 		defer mockUpdate.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)

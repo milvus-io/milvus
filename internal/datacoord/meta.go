@@ -1652,10 +1652,10 @@ func (m *meta) completeMixCompactionMutation(
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
 	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
-	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	fallbackStart := getMinPosition(lo.Map(compactFromCached, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetStartPosition()
 	}))
-	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+	fallbackDml := getMaxPosition(lo.Map(compactFromCached, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 		return info.GetDmlPosition()
 	}))
 
@@ -1874,10 +1874,68 @@ func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
 	return m.segments.GetCompactionTo(segmentID)
 }
 
+// GetMinGrowingSegmentCheckpoint returns the minimum DmlPosition of all growing
+// segments on the given channel that belong to TEXT collections.
+func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition {
+	segments := m.SelectSegments(context.TODO(), WithChannel(channel))
+
+	textCollectionCache := make(map[int64]bool)
+	var minPos *msgpb.MsgPosition
+	for _, s := range segments {
+		if s.GetState() != commonpb.SegmentState_Growing {
+			continue
+		}
+		if s.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+
+		collID := s.GetCollectionID()
+		isText, cached := textCollectionCache[collID]
+		if !cached {
+			isText = m.collectionHasTextFields(collID)
+			textCollectionCache[collID] = isText
+		}
+		if !isText {
+			continue
+		}
+
+		pos := s.GetDmlPosition()
+		if pos == nil {
+			continue
+		}
+		if minPos == nil || pos.GetTimestamp() < minPos.GetTimestamp() {
+			minPos = pos
+		}
+	}
+	return minPos
+}
+
+func (m *meta) collectionHasTextFields(collectionID int64) bool {
+	coll := m.GetCollection(collectionID)
+	if coll == nil || coll.Schema == nil {
+		return false
+	}
+	for _, field := range coll.Schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
+}
+
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	if pos == nil || pos.GetMsgID() == nil {
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
+	}
+
+	minGrowingCP := m.GetMinGrowingSegmentCheckpoint(vChannel)
+	if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
+		log.Ctx(ctx).Info("clamping channel checkpoint to min growing segment checkpoint",
+			zap.String("vChannel", vChannel),
+			zap.Uint64("requestedTs", pos.GetTimestamp()),
+			zap.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
+		pos = minGrowingCP
 	}
 
 	m.channelCPs.Lock()
@@ -1928,6 +1986,20 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 // UpdateChannelCheckpoints updates and saves channel checkpoints.
 func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
 	log := log.Ctx(ctx)
+	for i, pos := range positions {
+		if pos == nil || pos.GetChannelName() == "" {
+			continue
+		}
+		minGrowingCP := m.GetMinGrowingSegmentCheckpoint(pos.GetChannelName())
+		if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
+			log.Info("clamping channel checkpoint to min growing segment checkpoint",
+				zap.String("vChannel", pos.GetChannelName()),
+				zap.Uint64("requestedTs", pos.GetTimestamp()),
+				zap.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
+			positions[i] = minGrowingCP
+		}
+	}
+
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
