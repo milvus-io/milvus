@@ -198,9 +198,21 @@ func FetchFragmentsFromExternalSourceWithRange(
 	if err != nil {
 		return nil, fmt.Errorf("failed to read explore manifest: %w", err)
 	}
+	rawCount := len(fileInfos)
+	// Apply the same sort+format-filter that DataCoord used to derive
+	// fileIndexBegin/End. The manifest persists the raw arrow listing
+	// (Spark `_SUCCESS`, `.crc`, README, etc.) so slicing it directly
+	// against DataCoord's filtered indices would pick the wrong files —
+	// either a non-parquet stray triggering "Invalid parquet magic", or
+	// a real parquet getting silently dropped. NormalizeFileInfos must
+	// stay byte-for-byte identical to the DataCoord-side call so both
+	// indexed views agree.
+	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	log.Info("Read file list from explore manifest",
 		zap.String("manifestPath", exploreManifestPath),
-		zap.Int("totalFileCount", len(fileInfos)),
+		zap.Int("rawFileCount", rawCount),
+		zap.Int("normalizedFileCount", len(fileInfos)),
+		zap.Int("skippedNonFormat", skipped),
 		zap.Duration("readDuration", time.Since(exploreStart)))
 
 	// Slice to assigned range.

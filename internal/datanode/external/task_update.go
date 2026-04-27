@@ -43,6 +43,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -415,6 +417,14 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		totalRows += f.RowCount
 	}
 
+	// Guard against zero-row parquet files that would cause divide-by-zero below.
+	// Fragment-level RowCount comes from manifest (endRow - startRow) and reflects real row counts,
+	// unlike datacoord's pre-split FileInfo.NumRows which carries a -1 sentinel from PlainFormat::explore.
+	if totalRows == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("external source has %d fragments but zero total rows", len(fragments)))
+	}
+
 	// Get target rows per segment from configuration
 	targetRowsPerSegment := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
 	if totalRows < targetRowsPerSegment {
@@ -575,6 +585,17 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 	segmentAvgBytes := make([]int64, len(works))
 	var fallbackAvg int64
 
+	// firstSampleErr captures the first underlying sampling failure so we
+	// can surface the real root cause (e.g. "Column 'xxx' not found in
+	// schema" from an external_field typo, issue #48637) to the client
+	// instead of a generic "sampling failed for all N segment(s)" message.
+	var firstSampleErr error
+	recordErr := func(err error) {
+		if firstSampleErr == nil {
+			firstSampleErr = err
+		}
+	}
+
 	sampleOne := func(manifestPath string) (int64, bool) {
 		fieldSizes, err := packed.SampleExternalFieldSizes(
 			manifestPath, sampleRows,
@@ -587,6 +608,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			log.Warn("failed to sample external field sizes",
 				zap.String("manifestPath", manifestPath),
 				zap.Error(err))
+			recordErr(err)
 			return 0, false
 		}
 		total := sumFieldSizes(fieldSizes, t.req.GetSchema())
@@ -599,6 +621,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			log.Warn("external field size sample produced non-positive total",
 				zap.String("manifestPath", manifestPath),
 				zap.Int64("total", total))
+			recordErr(fmt.Errorf("sampled field sizes sum to %d (schema may have no external_field mappings, or sampled rows are empty)", total))
 			return 0, false
 		}
 		return total, true
@@ -632,12 +655,23 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 		// resource estimator and risk OOM on load. We prefer a loud
 		// failure (retry-eligible via the task state machine) over a
 		// silent success that corrupts downstream accounting.
+		//
+		// Embed firstSampleErr (issue #48637) so the client-facing
+		// RefreshFailed reason names the root cause (e.g. column not
+		// found in parquet) rather than forcing the operator to SSH
+		// into datanode logs.
 		if fallbackAvg == 0 {
-			return nil, fmt.Errorf(
-				"external field size sampling failed for all %d segment(s); "+
-					"refusing to emit segments with MemorySize=0 (would risk QueryNode OOM on load). "+
-					"check sample logs above for the root cause",
-				len(manifestPaths))
+			rootCause := "unknown (no sample attempted)"
+			if firstSampleErr != nil {
+				rootCause = firstSampleErr.Error()
+			}
+			hint := ""
+			if strings.Contains(rootCause, "not found in schema") {
+				hint = "; check external_field mappings in collection schema against actual parquet columns"
+			}
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf(
+				"external field size sampling failed for all %d segment(s): %s%s",
+				len(manifestPaths), rootCause, hint))
 		}
 		// Fill any zero slots (sampling failed mid-loop) with the first
 		// successful average so every segment gets a non-zero MemorySize.

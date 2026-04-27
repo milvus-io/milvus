@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -81,7 +82,7 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	// Build ExternalSpec with extfs for MinIO access (same pattern as cross-bucket parquet E2E)
 	type externalSpecJSON struct {
 		Format     string            `json:"format"`
-		SnapshotID int64             `json:"snapshot_id"`
+		SnapshotID int64             `json:"snapshot_id,string"`
 		Extfs      map[string]string `json:"extfs,omitempty"`
 	}
 	specObj := externalSpecJSON{
@@ -248,4 +249,108 @@ func icebergEnvOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// createIcebergMultiTypeTable runs the Python script to create the 18-column
+// multi-type iceberg table on MinIO.
+func createIcebergMultiTypeTable(t *testing.T, endpoint, accessKey, secretKey, bucket, tablePath string, numRows, vecDim, binVecDim int) icebergTableInfo {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok, "failed to get caller info")
+	scriptPath := filepath.Join(filepath.Dir(thisFile), "testdata", "create_iceberg_multi_type_table.py")
+	infoPath := filepath.Join(t.TempDir(), "iceberg_multi_type_info.json")
+
+	cmd := exec.Command("python3", scriptPath, // #nosec G204
+		"--endpoint", endpoint,
+		"--access-key", accessKey,
+		"--secret-key", secretKey,
+		"--bucket", bucket,
+		"--table-path", tablePath,
+		"--num-rows", fmt.Sprintf("%d", numRows),
+		"--vec-dim", fmt.Sprintf("%d", vecDim),
+		"--bin-vec-dim", fmt.Sprintf("%d", binVecDim),
+		"--output", infoPath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	require.NoError(t, err, "failed to create iceberg multi-type table via Python script")
+
+	data, err := os.ReadFile(infoPath)
+	require.NoError(t, err)
+
+	var info icebergTableInfo
+	require.NoError(t, json.Unmarshal(data, &info))
+	return info
+}
+
+// TestExternalCollectionMultipleDataTypesIceberg mirrors the parquet/vortex/lance
+// multi-type tests for the iceberg-table source. Iceberg lacks Int8/Int16
+// primitives so int8_val/int16_val are widened to Int32 in the source schema;
+// milvus narrows them on read.
+func TestExternalCollectionMultipleDataTypesIceberg(t *testing.T) {
+	t.Parallel()
+
+	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
+		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
+	}
+
+	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
+	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
+	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
+	bucket := icebergEnvOrDefault("ICEBERG_MINIO_BUCKET", "a-bucket")
+
+	collName := common.GenRandomString("ext_multi_iceberg", 6)
+	tablePath := fmt.Sprintf("iceberg-test/%s", collName)
+
+	const numRows = 100
+	tableInfo := createIcebergMultiTypeTable(t, minioEndpoint, minioAccessKey,
+		minioSecretKey, bucket, tablePath, numRows, testVecDim, testBinVecDim)
+
+	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
+	externalSource := toMilvusURI(tableInfo.MetadataLocation, minioHost)
+
+	type externalSpecJSON struct {
+		Format     string            `json:"format"`
+		SnapshotID int64             `json:"snapshot_id,string"`
+		Extfs      map[string]string `json:"extfs,omitempty"`
+	}
+	specObj := externalSpecJSON{
+		Format:     "iceberg-table",
+		SnapshotID: tableInfo.SnapshotID,
+		Extfs: map[string]string{
+			"bucket_name":      bucket,
+			"region":           "us-east-1",
+			"use_ssl":          "false",
+			"use_virtual_host": "false",
+			// `minio` sentinel: tells milvus to treat URI host as
+			// endpoint instead of swapping for AWS canonical endpoint.
+			// `aws` would derive s3.us-east-1.amazonaws.com and fail
+			// the (address, bucket) lookup against the URI host
+			// `localhost:9000`.
+			"cloud_provider":   "minio",
+			"access_key_id":    minioAccessKey,
+			"access_key_value": minioSecretKey,
+		},
+	}
+	specBytes, err := json.Marshal(specObj)
+	require.NoError(t, err)
+	externalSpec := string(specBytes)
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := buildMultiTypeExternalSchema(collName, externalSource, externalSpec)
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Logf("Created multi-type iceberg external collection: %s", collName)
+
+	runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx, t, mc, collName, int64(numRows), externalSource, externalSpec)
 }

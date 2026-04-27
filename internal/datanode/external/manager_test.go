@@ -162,6 +162,44 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	assert.Equal(t, expectedError.Error(), info.FailReason)
 }
 
+// Regression for #49225: a panic inside taskFunc (e.g. divide-by-zero from a
+// malformed external parquet) must be isolated to the task — the manager pool
+// goroutine must NOT crash the process, and the task must surface as Failed.
+func TestExternalCollectionManager_SubmitTask_PanicIsolated(t *testing.T) {
+	ctx := context.Background()
+	manager := NewExternalCollectionManager(ctx, 4)
+	defer manager.Close()
+
+	clusterID := "test-cluster"
+	taskID := int64(4242)
+	collID := int64(9999)
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		TaskID:       taskID,
+		CollectionID: collID,
+	}
+
+	taskFunc := func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		var zero int64
+		// Reproduces the original #49225 crash shape.
+		_ = int64(1) / zero
+		return nil, nil
+	}
+
+	err := manager.SubmitTask(clusterID, req, taskFunc)
+	assert.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
+
+	info := manager.Get(clusterID, taskID)
+	assert.NotNil(t, info)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
+	assert.Contains(t, info.FailReason, "panic")
+}
+
 func TestExternalCollectionManager_CancelTask(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)

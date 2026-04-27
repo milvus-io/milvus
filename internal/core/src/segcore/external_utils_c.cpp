@@ -29,6 +29,7 @@
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/reader.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/util.h"
 
 static CStatus
@@ -127,7 +128,12 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             int64_t col_bytes = 0;
             auto chunked = table->column(i);
             for (int c = 0; c < chunked->num_chunks(); c++) {
-                col_bytes += calcArrayDataSize(chunked->chunk(c)->data());
+                // Single view-variant elimination via shared helper.
+                // (issue #49352: vortex schemaless emits view types whose
+                // buffer layout differs; canonicalize before sizing.)
+                auto chunk = milvus::storage::CanonicalizeArrowVariants(
+                    chunked->chunk(c));
+                col_bytes += calcArrayDataSize(chunk->data());
             }
 
             auto name = table->field(i)->name();

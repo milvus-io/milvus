@@ -172,6 +172,32 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 	s.Nil(result)
 }
 
+// Regression for #49225: zero-row parquet produces fragments whose RowCount
+// sums to 0 and previously triggered divide-by-zero panic in
+// balanceFragmentsToSegments. Must return error, never panic.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ZeroTotalRowsWithFragments() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID,
+		TaskID:       s.taskID,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 0, FilePath: "s3://bucket/zero.parquet"},
+		{FragmentID: 2, RowCount: 0, FilePath: "s3://bucket/zero2.parquet"},
+	}
+	s.NotPanics(func() {
+		result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+		s.Error(err)
+		s.Nil(result)
+		s.Contains(err.Error(), "zero total rows")
+	})
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
 	paramtable.Init()
 
@@ -1100,6 +1126,57 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Samp
 	s.Error(err, "sampling failure must surface as a task error, not a silent MemorySize=0")
 	s.Contains(err.Error(), "sampling failed")
 	s.Nil(result)
+}
+
+// Regression for #48637: when external_field mappings point to columns
+// absent in the parquet file, SampleExternalFieldSizes returns a real
+// error like "Column 'wrong_col_a' not found in schema". That error
+// must propagate to the task error (and thus to the RefreshFailed
+// reason surfaced to the client) rather than being swallowed as a
+// generic "sampling failed for all N segment(s)" message.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SamplingError_RootCausePropagated() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "wrong_col_a"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	cppErr := fmt.Errorf("Invalid: Column 'wrong_col_a' not found in schema. [path=data.parquet]")
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).Return(nil, cppErr).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{{FragmentID: 1, RowCount: 500}}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err)
+	s.Nil(result)
+	// Root cause string must reach the client-facing task error.
+	s.Contains(err.Error(), "Column 'wrong_col_a' not found in schema")
+	// And emit actionable hint guiding the user to the real fix.
+	s.Contains(err.Error(), "external_field mappings")
 }
 
 // Regression: the samplePerSegment=true branch of Phase 3 was previously

@@ -65,6 +65,7 @@ set(MILVUS_TEST_FILES
         test_virtual_pk.cpp
         test_mvcc_fast_path.cpp
         test_external_take.cpp
+        test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
         )
 

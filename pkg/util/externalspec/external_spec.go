@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -80,14 +81,77 @@ const (
 	CloudProviderTencent = "tencent"
 	CloudProviderHuawei  = "huawei"
 	CloudProviderAzure   = "azure"
+	// CloudProviderMinIO opts the request into Milvus-form URI parsing
+	// (scheme://endpoint/bucket/key). Use for self-hosted S3-compatible
+	// stores (MinIO, Ceph RGW, Garage, etc.) where no canonical cloud
+	// endpoint exists and the URI host must be treated as the endpoint.
+	CloudProviderMinIO = "minio"
 )
+
+// validCloudProviders gates extfs.cloud_provider values. Inference from URI
+// scheme was previously allowed but produced silent misconfiguration when a
+// scheme mapped to multiple providers (s3:// → AWS S3 vs self-hosted MinIO).
+// Forcing an explicit value moves the disambiguation to the API boundary.
+var validCloudProviders = map[string]bool{
+	CloudProviderAWS:     true,
+	CloudProviderGCP:     true,
+	CloudProviderAliyun:  true,
+	CloudProviderTencent: true,
+	CloudProviderHuawei:  true,
+	CloudProviderAzure:   true,
+	CloudProviderMinIO:   true,
+}
 
 // ExternalSpec represents the parsed external collection specification
 type ExternalSpec struct {
-	Format     string            `json:"format"`                // one of Format* constants
-	Columns    []string          `json:"columns"`               // optional: specific columns to load
-	Extfs      map[string]string `json:"extfs,omitempty"`       // optional: extfs config overrides (non-sensitive only)
-	SnapshotID *int64            `json:"snapshot_id,omitempty"` // Iceberg snapshot ID (required for iceberg-table)
+	Format     string            `json:"format"`          // one of Format* constants
+	Columns    []string          `json:"columns"`         // optional: specific columns to load
+	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides (non-sensitive only)
+	SnapshotID *int64            `json:"snapshot_id,omitempty"`
+}
+
+func (s *ExternalSpec) UnmarshalJSON(data []byte) error {
+	type externalSpec ExternalSpec
+	var raw struct {
+		externalSpec
+		SnapshotID json.RawMessage `json:"snapshot_id"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = ExternalSpec(raw.externalSpec)
+	if len(raw.SnapshotID) == 0 || string(raw.SnapshotID) == "null" {
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(raw.SnapshotID, &n); err == nil {
+		s.SnapshotID = &n
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(raw.SnapshotID, &str); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return err
+	}
+	s.SnapshotID = &parsed
+	return nil
+}
+
+func (s ExternalSpec) MarshalJSON() ([]byte, error) {
+	type externalSpec ExternalSpec
+	var raw struct {
+		externalSpec
+		SnapshotID *string `json:"snapshot_id,omitempty"`
+	}
+	raw.externalSpec = externalSpec(s)
+	if s.SnapshotID != nil {
+		str := strconv.FormatInt(*s.SnapshotID, 10)
+		raw.SnapshotID = &str
+	}
+	return json.Marshal(raw)
 }
 
 // supportedFormats lists the file formats supported for external collections
@@ -256,6 +320,20 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 // anonymous=true), and region for AWS-family schemes. role_arn subsumes
 // use_iam (do not double-count). No inheritance from Milvus fs.* config.
 func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
+	// extfs.cloud_provider is required and must be from the allowed set.
+	// Inferring cloud_provider from URI scheme is ambiguous (s3:// matches
+	// AWS S3 and self-hosted MinIO; no scheme-only signal can pick the
+	// correct URI parsing form, auth protocol, or default endpoint). Force
+	// the caller to be explicit so misconfiguration fails at the API
+	// boundary instead of silently routing to the wrong backend.
+	cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
+	if cp == "" {
+		return fmt.Errorf("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
+	}
+	if !validCloudProviders[cp] {
+		return fmt.Errorf("extfs.cloud_provider=%q is not supported: must be one of [aws, gcp, aliyun, tencent, huawei, azure, minio]", cp)
+	}
+
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
 	hasAKOnly := (extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != "")
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
@@ -288,7 +366,6 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 
 	if hasGCPImpersonation {
-		cp := strings.ToLower(extfs[ExtfsKeyCloudProvider])
 		if scheme != "" && scheme != SchemeGS && scheme != SchemeGCS && cp != CloudProviderGCP {
 			return fmt.Errorf("extfs.gcp_target_service_account is only valid for GCP (scheme=gs/gcs or cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
 		}
@@ -302,14 +379,13 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return fmt.Errorf("extfs.region is required for scheme %q (AWS-family schemes need region for SigV4 signing)", scheme)
 	}
 
-	// Azure consistency: scheme=azure requires cloud_provider=azure (or unset),
-	// and cloud_provider=azure requires scheme=azure. Pairing guards against
+	// Azure consistency: scheme=azure requires cloud_provider=azure, and
+	// cloud_provider=azure requires scheme=azure. Pairing guards against
 	// misconfigured dispatch to a non-Azure storage backend.
-	cpLower := strings.ToLower(extfs[ExtfsKeyCloudProvider])
-	if scheme == SchemeAzure && cpLower != "" && cpLower != CloudProviderAzure {
-		return fmt.Errorf("scheme=azure requires extfs.cloud_provider to be %q or unset, got %q", CloudProviderAzure, cpLower)
+	if scheme == SchemeAzure && cp != CloudProviderAzure {
+		return fmt.Errorf("scheme=azure requires extfs.cloud_provider=%q, got %q", CloudProviderAzure, cp)
 	}
-	if cpLower == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
+	if cp == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
 		return fmt.Errorf("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
 	}
 
@@ -333,26 +409,11 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			pathSegs = 0
 		}
 		if pathSegs <= 1 {
-			// AWS-form: endpoint must be derivable. Infer cloud_provider
-			// from scheme when omitted (conventional mapping). minio stays
-			// empty — it has no canonical cp and must use Milvus-form URI.
-			effectiveCP := cpLower
-			if effectiveCP == "" {
-				switch scheme {
-				case SchemeS3, SchemeS3A, SchemeAWS:
-					effectiveCP = CloudProviderAWS
-				case SchemeGS, SchemeGCS:
-					effectiveCP = CloudProviderGCP
-				case SchemeOSS:
-					effectiveCP = CloudProviderAliyun
-				case SchemeCOS:
-					effectiveCP = CloudProviderTencent
-				case SchemeOBS:
-					effectiveCP = CloudProviderHuawei
-				}
-			}
-			if DeriveEndpoint(effectiveCP, extfs[ExtfsKeyRegion]) == "" {
-				return fmt.Errorf("cannot resolve endpoint for %q: set extfs.cloud_provider + extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource)
+			// AWS-form: endpoint must be derivable from the user-supplied
+			// cloud_provider + region. cp=minio has no canonical endpoint
+			// and must use Milvus-form URI to embed the host explicitly.
+			if DeriveEndpoint(cp, extfs[ExtfsKeyRegion]) == "" {
+				return fmt.Errorf("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
 			}
 		}
 	}

@@ -913,7 +913,18 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 			Status: merr.Status(err),
 		}, nil
 	}
-	return interceptor.Call(ctx, request)
+	resp, err := interceptor.Call(ctx, request)
+	// Single-point redaction at the API edge. The persisted spec carries
+	// extfs credentials (access_key_id / access_key_value / ssl_ca_cert)
+	// that internal callers (refresh / load) need raw via the same
+	// mixCoord.DescribeCollection RPC; redacting at source would break
+	// FFI auth. Sanitize here so every provider path (cached / remote)
+	// converges through one spot — adding a new provider does not
+	// re-introduce the leak.
+	if resp != nil && resp.GetSchema() != nil {
+		resp.Schema.ExternalSpec = externalspec.RedactExternalSpec(resp.Schema.ExternalSpec)
+	}
+	return resp, err
 }
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {

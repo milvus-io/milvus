@@ -664,20 +664,11 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
 	}
-	// Reject zero-total-rows sources up front: a non-empty file list whose
-	// rows sum to zero (e.g. user-supplied empty parquet) would otherwise
-	// reach datanode's balanceFragmentsToSegments which divides by zero
-	// and crashes the process. Treat as non-retriable so the operator gets
-	// a clear failure signal instead of a CrashLoopBackOff. Fix for #49225.
-	var totalRows int64
-	for _, f := range allFiles {
-		totalRows += f.NumRows
-	}
-	if totalRows == 0 {
-		return nil, newNonRetriableJobError(
-			"external source %s has %d files but zero total rows; nothing to refresh",
-			job.GetExternalSource(), len(allFiles))
-	}
+	// NOTE: zero-total-rows cannot be detected here. PlainFormat::explore
+	// hardcodes start_index/end_index to -1 as sentinels and never reads
+	// parquet metadata, so FileInfo.NumRows carries -1, not a real row count.
+	// The real guard lives at datanode's balanceFragmentsToSegments, where
+	// fragment RowCount is populated from manifest (endRow - startRow).
 	log.Info("explored external files for task splitting",
 		zap.Int("totalFiles", len(allFiles)),
 		zap.String("manifestPath", manifestPath))

@@ -81,7 +81,7 @@ func extTestURI(cfg minioConfig, relPath string) string {
 // Tier-2 endpoint derivation that redirects the URI at AWS S3.
 func extTestSpec(cfg minioConfig, format string) string {
 	return fmt.Sprintf(
-		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false"}}`,
+		`{"format":%q,"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
 		format, cfg.accessKey, cfg.secretKey)
 }
 
@@ -1213,37 +1213,50 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 2: Create external collection with multi-type schema
 	// ---------------------------------------------------------------
-	schema := entity.NewSchema().
-		WithName(collName).
-		WithExternalSource(extTestURI(minioCfg, extPath)).
-		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
-		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
-		WithField(entity.NewField().WithName("bool_val").WithDataType(entity.FieldTypeBool).WithExternalField("bool_val")).
-		WithField(entity.NewField().WithName("int8_val").WithDataType(entity.FieldTypeInt8).WithExternalField("int8_val")).
-		WithField(entity.NewField().WithName("int16_val").WithDataType(entity.FieldTypeInt16).WithExternalField("int16_val")).
-		WithField(entity.NewField().WithName("int32_val").WithDataType(entity.FieldTypeInt32).WithExternalField("int32_val")).
-		WithField(entity.NewField().WithName("float_val").WithDataType(entity.FieldTypeFloat).WithExternalField("float_val")).
-		WithField(entity.NewField().WithName("double_val").WithDataType(entity.FieldTypeDouble).WithExternalField("double_val")).
-		WithField(entity.NewField().WithName("varchar_val").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64).WithExternalField("varchar_val")).
-		WithField(entity.NewField().WithName("json_val").WithDataType(entity.FieldTypeJSON).WithExternalField("json_val")).
-		WithField(entity.NewField().WithName("array_int").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt32).WithMaxCapacity(16).WithExternalField("array_int")).
-		WithField(entity.NewField().WithName("array_str").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(64).WithMaxCapacity(16).WithExternalField("array_str")).
-		WithField(entity.NewField().WithName("ts_val").WithDataType(entity.FieldTypeTimestamptz).WithExternalField("ts_val")).
-		WithField(entity.NewField().WithName("geo_val").WithDataType(entity.FieldTypeGeometry).WithExternalField("geo_val")).
-		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding")).
-		WithField(entity.NewField().WithName("bin_vec").WithDataType(entity.FieldTypeBinaryVector).WithDim(testBinVecDim).WithExternalField("bin_vec")).
-		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).WithDim(testVecDim).WithExternalField("fp16_vec")).
-		WithField(entity.NewField().WithName("bf16_vec").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(testVecDim).WithExternalField("bf16_vec")).
-		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).WithDim(testVecDim).WithExternalField("int8_vec"))
+	schema := buildMultiTypeExternalSchema(collName,
+		extTestURI(minioCfg, extPath),
+		extTestSpec(minioCfg, "parquet"))
 
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
 	t.Logf("Created multi-type external collection: %s", collName)
 
+	runMultiTypeRefreshIndexLoadVerify(ctx, t, mc, collName, numRows)
+}
+
+// runMultiTypeRefreshIndexLoadVerify drives the post-create stages of the
+// multi-type external-collection test (refresh -> index all vector fields ->
+// load -> exhaustive query/search verification). Shared between the parquet
+// and vortex multi-type tests so the same schema + verification plan covers
+// both formats.  Assumes the dataset shape produced by
+// generateMultiTypeParquetBytes / generate_multi_type_vortex_data.py with
+// the given numRows.
+func runMultiTypeRefreshIndexLoadVerify(ctx context.Context, t *testing.T,
+	mc *base.MilvusClient, collName string, numRows int64,
+) {
+	runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx, t, mc, collName, numRows, "", "")
+}
+
+// runMultiTypeRefreshIndexLoadVerifyWithSourceSpec accepts optional refresh
+// source+spec (used by iceberg paths that re-supply extfs credentials on
+// refresh; proxy now enforces both-or-neither).
+func runMultiTypeRefreshIndexLoadVerifyWithSourceSpec(ctx context.Context, t *testing.T,
+	mc *base.MilvusClient, collName string, numRows int64, refreshSource, refreshSpec string,
+) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh + index all vector fields + load
 	// ---------------------------------------------------------------
-	refreshAndWait(ctx, t, mc, collName)
+	if refreshSource == "" && refreshSpec == "" {
+		refreshAndWait(ctx, t, mc, collName)
+	} else {
+		opt := client.NewRefreshExternalCollectionOption(collName).
+			WithExternalSource(refreshSource).
+			WithExternalSpec(refreshSpec)
+		refreshResult, err := mc.RefreshExternalCollection(ctx, opt)
+		common.CheckErr(t, err, true)
+		require.Greater(t, refreshResult.JobID, int64(0))
+		waitForRefreshComplete(ctx, t, mc, refreshResult.JobID, 120*time.Second)
+	}
 
 	// Create index on all vector fields
 	for _, vecField := range []string{"embedding", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"} {
@@ -1704,7 +1717,9 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
-	require.Equal(t, extTestSpec(minioCfg, "lance-table"), coll.Schema.ExternalSpec)
+	// Spec redacted at proxy edge.
+	require.Contains(t, coll.Schema.ExternalSpec, `"format":"lance-table"`)
+	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
 
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
@@ -1859,6 +1874,58 @@ func generateVortexDataOnMinIO(t *testing.T, pythonBin, outputPath string, numRo
 	t.Logf("Generated vortex data: %s", out)
 }
 
+// generateMultiTypeVortexDataOnMinIO mirrors generateMultiTypeParquetBytes but
+// writes a vortex file. Used by TestExternalCollectionMultipleDataTypesVortex
+// to exercise the full schema (Bool/Int*/Float*/VarChar/JSON/Array/Timestamp/
+// Geometry + all vector dtypes) against vortex format. Vortex Python writer
+// doesn't support FixedSizeBinary, so binary-flavored vectors are stored as
+// FixedSizeList<UInt8> (milvus normalizes both to its internal layout).
+func generateMultiTypeVortexDataOnMinIO(t *testing.T, pythonBin, outputPath string, numRows, vecDim, binVecDim int) {
+	t.Helper()
+	minioCfg := getMinIOConfig()
+
+	out, err := runPythonScript(t, pythonBin, "generate_multi_type_vortex_data.py",
+		map[string]string{
+			"MINIO_ADDRESS":    minioCfg.address,
+			"MINIO_ACCESS_KEY": minioCfg.accessKey,
+			"MINIO_SECRET_KEY": minioCfg.secretKey,
+			"MINIO_BUCKET":     minioCfg.bucket,
+		},
+		outputPath, strconv.Itoa(numRows), strconv.Itoa(vecDim), strconv.Itoa(binVecDim))
+	require.NoError(t, err, "generate multi-type vortex data: %s", out)
+	require.Contains(t, out, "OK", "multi-type vortex data generation should succeed")
+	t.Logf("Generated multi-type vortex data: %s", out)
+}
+
+// buildMultiTypeExternalSchema constructs the schema mirroring the one used
+// by TestExternalCollectionMultipleDataTypes. Shared across format tests so
+// that the same field set + index plan can be exercised with parquet, vortex,
+// lance, etc.
+func buildMultiTypeExternalSchema(collName, externalSource, externalSpec string) *entity.Schema {
+	return entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("bool_val").WithDataType(entity.FieldTypeBool).WithExternalField("bool_val")).
+		WithField(entity.NewField().WithName("int8_val").WithDataType(entity.FieldTypeInt8).WithExternalField("int8_val")).
+		WithField(entity.NewField().WithName("int16_val").WithDataType(entity.FieldTypeInt16).WithExternalField("int16_val")).
+		WithField(entity.NewField().WithName("int32_val").WithDataType(entity.FieldTypeInt32).WithExternalField("int32_val")).
+		WithField(entity.NewField().WithName("float_val").WithDataType(entity.FieldTypeFloat).WithExternalField("float_val")).
+		WithField(entity.NewField().WithName("double_val").WithDataType(entity.FieldTypeDouble).WithExternalField("double_val")).
+		WithField(entity.NewField().WithName("varchar_val").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64).WithExternalField("varchar_val")).
+		WithField(entity.NewField().WithName("json_val").WithDataType(entity.FieldTypeJSON).WithExternalField("json_val")).
+		WithField(entity.NewField().WithName("array_int").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt32).WithMaxCapacity(16).WithExternalField("array_int")).
+		WithField(entity.NewField().WithName("array_str").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).WithMaxLength(64).WithMaxCapacity(16).WithExternalField("array_str")).
+		WithField(entity.NewField().WithName("ts_val").WithDataType(entity.FieldTypeTimestamptz).WithExternalField("ts_val")).
+		WithField(entity.NewField().WithName("geo_val").WithDataType(entity.FieldTypeGeometry).WithExternalField("geo_val")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(testVecDim).WithExternalField("embedding")).
+		WithField(entity.NewField().WithName("bin_vec").WithDataType(entity.FieldTypeBinaryVector).WithDim(testBinVecDim).WithExternalField("bin_vec")).
+		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).WithDim(testVecDim).WithExternalField("fp16_vec")).
+		WithField(entity.NewField().WithName("bf16_vec").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(testVecDim).WithExternalField("bf16_vec")).
+		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).WithDim(testVecDim).WithExternalField("int8_vec"))
+}
+
 // TestExternalCollectionVortexFormat tests external collections with vortex format:
 //  1. Generate vortex dataset on MinIO using the generate_vortex_data tool
 //  2. Create external collection with vortex format
@@ -1930,6 +1997,27 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 				WithDataType(entity.FieldTypeFloatVector).
 				WithDim(testVecDim).
 				WithExternalField("embedding"),
+		).
+		// VARCHAR / JSON / GEOMETRY trigger vortex-specific bugs (#49352, #49353)
+		// that are not covered by the int/float/vector-only baseline.
+		WithField(
+			entity.NewField().
+				WithName("varchar_val").
+				WithDataType(entity.FieldTypeVarChar).
+				WithMaxLength(64).
+				WithExternalField("varchar_val"),
+		).
+		WithField(
+			entity.NewField().
+				WithName("json_val").
+				WithDataType(entity.FieldTypeJSON).
+				WithExternalField("json_val"),
+		).
+		WithField(
+			entity.NewField().
+				WithName("geo_val").
+				WithDataType(entity.FieldTypeGeometry).
+				WithExternalField("geo_val"),
 		)
 
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
@@ -1943,7 +2031,9 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	require.Equal(t, extTestURI(minioCfg, extPath), coll.Schema.ExternalSource)
-	require.Equal(t, extTestSpec(minioCfg, "vortex"), coll.Schema.ExternalSpec)
+	// Spec redacted at proxy edge.
+	require.Contains(t, coll.Schema.ExternalSpec, `"format":"vortex"`)
+	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
 
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
@@ -2074,6 +2164,127 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	t.Logf("Hybrid search (id in [50000,60000)) returned %d results with correct values", hybridRes[0].ResultCount)
 
 	t.Log("Vortex format external collection test passed!")
+}
+
+// TestExternalCollectionMultipleDataTypesVortex mirrors
+// TestExternalCollectionMultipleDataTypes but writes the dataset in vortex
+// format. It exercises the same multi-type schema (Bool/Int*/Float*/VarChar/
+// JSON/Array/Timestamp/Geometry + all vector dtypes) and the same
+// refresh/index/load/query/search verification plan, ensuring vortex matches
+// parquet behavior across the entire type matrix.
+func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	// vortex-data >= 0.56.0 requires Python >= 3.11
+	pythonBin, err := findPython3ForVortex()
+	if err != nil {
+		t.Skipf("Python >= 3.11 not found for Vortex, skipping: %v", err)
+	}
+	if err := checkPythonDeps(pythonBin, "pyarrow", "vortex", "obstore"); err != nil {
+		t.Skipf("Python deps for Vortex unavailable, skipping: %v", err)
+	}
+
+	collName := common.GenRandomString("ext_multi_vortex", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	// Step 1: Generate multi-type vortex dataset on MinIO
+	const numRows = int64(100)
+	generateMultiTypeVortexDataOnMinIO(t, pythonBin, extPath, int(numRows), testVecDim, testBinVecDim)
+
+	// Step 2: Create external collection with shared multi-type schema
+	schema := buildMultiTypeExternalSchema(collName,
+		extTestURI(minioCfg, extPath),
+		extTestSpec(minioCfg, "vortex"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Logf("Created multi-type vortex external collection: %s", collName)
+
+	// Step 3 onwards: shared refresh + index + load + verify
+	runMultiTypeRefreshIndexLoadVerify(ctx, t, mc, collName, numRows)
+}
+
+// generateMultiTypeLanceDataOnMinIO writes a Lance dataset on MinIO using the
+// shared 18-column multi-type schema. Used by
+// TestExternalCollectionMultipleDataTypesLance.
+func generateMultiTypeLanceDataOnMinIO(t *testing.T, s3URI string, numRows, vecDim, binVecDim int) {
+	t.Helper()
+	minioCfg := getMinIOConfig()
+
+	out, err := runPythonScript(t, "python3", "generate_multi_type_lance_data.py",
+		map[string]string{
+			"MINIO_ADDRESS":    minioCfg.address,
+			"MINIO_ACCESS_KEY": minioCfg.accessKey,
+			"MINIO_SECRET_KEY": minioCfg.secretKey,
+		},
+		s3URI, strconv.Itoa(numRows), strconv.Itoa(vecDim), strconv.Itoa(binVecDim))
+	require.NoError(t, err, "generate multi-type lance data: %s", out)
+	require.Contains(t, out, "OK", "multi-type lance data generation should succeed")
+	t.Logf("Generated multi-type lance data: %s", out)
+}
+
+// TestExternalCollectionMultipleDataTypesLance mirrors
+// TestExternalCollectionMultipleDataTypesVortex but writes the dataset in lance
+// format. Exercises the same multi-type schema and shared
+// refresh/index/load/query/search verification across the lance bridge.
+func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	if err := checkPythonDeps("python3", "pyarrow", "lance"); err != nil {
+		t.Skipf("Python deps for Lance unavailable, skipping: %v", err)
+	}
+
+	collName := common.GenRandomString("ext_multi_lance", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	const numRows = int64(100)
+	// Lance writer takes a full s3:// URI (different from vortex's relative path).
+	s3URI := fmt.Sprintf("s3://%s/%s", minioCfg.bucket, extPath)
+	generateMultiTypeLanceDataOnMinIO(t, s3URI, int(numRows), testVecDim, testBinVecDim)
+
+	schema := buildMultiTypeExternalSchema(collName,
+		extTestURI(minioCfg, extPath),
+		extTestSpec(minioCfg, "lance-table"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Logf("Created multi-type lance external collection: %s", collName)
+
+	runMultiTypeRefreshIndexLoadVerify(ctx, t, mc, collName, numRows)
 }
 
 // TestExternalCollectionFloat32ListVector verifies that external collections
@@ -2471,7 +2682,12 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	require.Equal(t, pathV1, coll.Schema.ExternalSource, "initial ExternalSource should be pathV1")
-	require.Equal(t, specV1, coll.Schema.ExternalSpec, "initial ExternalSpec should be specV1")
+	// DescribeCollection redacts secret extfs values at the proxy edge;
+	// assert format + non-secret keys + redaction markers, not byte-equality.
+	require.Contains(t, coll.Schema.ExternalSpec, `"format":"parquet"`)
+	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_id":"***"`)
+	require.Contains(t, coll.Schema.ExternalSpec, `"access_key_value":"***"`)
+	require.Contains(t, coll.Schema.ExternalSpec, `"region":"us-east-1"`)
 
 	// ---------------------------------------------------------------
 	// Step 2: First refresh (with default source/spec) — establishes baseline
@@ -2505,9 +2721,13 @@ func TestRefreshExternalCollectionUpdatesSchema(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.Equal(t, pathV2, coll2.Schema.ExternalSource,
 		"ExternalSource should be updated to pathV2 after refresh")
-	require.Equal(t, specV2, coll2.Schema.ExternalSpec,
-		"ExternalSpec should be updated to specV2 after refresh")
+	// Redacted via proxy edge; verify shape + non-secret values.
+	require.Contains(t, coll2.Schema.ExternalSpec, `"format":"parquet"`)
+	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_id":"***"`)
+	require.Contains(t, coll2.Schema.ExternalSpec, `"access_key_value":"***"`)
+	require.Contains(t, coll2.Schema.ExternalSpec, `"region":"us-east-1"`)
 	t.Logf("Verified: schema updated — source=%s, spec=%s", coll2.Schema.ExternalSource, coll2.Schema.ExternalSpec)
+	_ = specV2 // value used to drive the refresh; final spec compared structurally above.
 }
 
 // TestExternalSourceFormats is a table-driven test covering the 3 supported
@@ -2557,7 +2777,7 @@ func TestExternalSourceFormats(t *testing.T) {
 	// still required by ValidateExtfsComplete for s3-family schemes, but
 	// the endpoint must come from the URI host (Milvus form).
 	extfsFragment := fmt.Sprintf(
-		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false"}`,
+		`"extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}`,
 		minioCfg.accessKey, minioCfg.secretKey)
 
 	type testCase struct {
@@ -2903,8 +3123,8 @@ func TestRefreshExternalCollectionZeroRowParquet(t *testing.T) {
 
 	schema := entity.NewSchema().
 		WithName(collName).
-		WithExternalSource(extPath).
-		WithExternalSpec(`{"format":"parquet"}`).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
 		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
@@ -2955,4 +3175,362 @@ func TestRefreshExternalCollectionZeroRowParquet(t *testing.T) {
 		"zero-row external source must surface as RefreshFailed, not silent Completed")
 	require.Contains(t, strings.ToLower(finalReason), "zero",
 		"failure reason should mention zero rows so operators can act; got %q", finalReason)
+}
+
+// Regression for issue #48637: a typo in external_field mapping (name
+// points to a column that does not exist in the parquet) must surface
+// the C++ "Column 'xxx' not found in schema" root cause in the
+// RefreshFailed reason returned to the client, not the generic
+// "sampling failed for all N segment(s)" message that forces operators
+// to SSH into datanode logs.
+func TestRefreshExternalCollectionWrongExternalField(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_wrong_field", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// Well-formed parquet with real columns id/value/embedding.
+	data, err := generateParquetBytes(8, 0)
+	require.NoError(t, err)
+	_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+		fmt.Sprintf("%s/data.parquet", extPath),
+		bytes.NewReader(data), int64(len(data)),
+		miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+	})
+
+	// Schema maps "embedding" to a column "wrong_col_a" that does not exist.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("wrong_col_a"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	jobID := refreshResult.JobID
+
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var finalState entity.RefreshExternalCollectionState
+	var finalReason string
+	for done := false; !done; {
+		select {
+		case <-deadline:
+			t.Fatalf("Refresh job %d did not reach terminal state within 60s", jobID)
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(jobID))
+			require.NoError(t, err)
+			t.Logf("Job %d: state=%s reason=%q", jobID, progress.State, progress.Reason)
+			if progress.State == entity.RefreshStateCompleted ||
+				progress.State == entity.RefreshStateFailed {
+				finalState = progress.State
+				finalReason = progress.Reason
+				done = true
+			}
+		}
+	}
+
+	require.Equal(t, entity.RefreshStateFailed, finalState,
+		"wrong external_field must surface as RefreshFailed")
+	// Root cause from C++ layer must reach the client.
+	require.Contains(t, finalReason, "wrong_col_a",
+		"reason must name the offending column; got %q", finalReason)
+	require.Contains(t, strings.ToLower(finalReason), "not found",
+		"reason must state the column was not found; got %q", finalReason)
+	require.Contains(t, finalReason, "external_field mappings",
+		"reason must hint at the real fix; got %q", finalReason)
+}
+
+// Security regression: DescribeCollection must redact secret extfs keys
+// (access_key_id / access_key_value / ssl_ca_cert) in the ExternalSpec
+// JSON returned to the client. Any caller with Describe privilege would
+// otherwise be able to read another tenant's object-storage credentials.
+func TestDescribeExternalCollectionRedactsCredentials(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	if _, err := newMinIOClient(minioCfg); err != nil {
+		t.Skipf("MinIO unavailable, skipping: %v", err)
+	}
+
+	collName := common.GenRandomString("ext_redact", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// Embed secret credentials in extfs; they are persisted into etcd and
+	// must NOT flow back out unredacted through DescribeCollection.
+	rawSpec := fmt.Sprintf(
+		`{"format":"parquet","extfs":{"access_key_id":%q,"access_key_value":%q,"region":"us-east-1","use_ssl":"false","use_virtual_host":"false","cloud_provider":"minio"}}`,
+		"AKIAEXAMPLELEAKME", "supersecretvaluemustnotleak")
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(rawSpec).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	desc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+
+	returnedSpec := desc.Schema.ExternalSpec
+	t.Logf("returned ExternalSpec: %s", returnedSpec)
+
+	require.NotContains(t, returnedSpec, "AKIAEXAMPLELEAKME",
+		"access_key_id plaintext leaked via DescribeCollection")
+	require.NotContains(t, returnedSpec, "supersecretvaluemustnotleak",
+		"access_key_value plaintext leaked via DescribeCollection")
+	require.Contains(t, returnedSpec, `"access_key_id":"***"`,
+		"access_key_id must be redacted to ***")
+	require.Contains(t, returnedSpec, `"access_key_value":"***"`,
+		"access_key_value must be redacted to ***")
+	// Non-secret values remain visible for operator troubleshooting.
+	require.Contains(t, returnedSpec, `"region":"us-east-1"`,
+		"non-secret extfs values must remain readable")
+}
+
+// Regression for issue #49335: a refresh_external_collection call carrying
+// an explicit (external_source, external_spec) override must persist the
+// new tuple back into the collection schema, so that subsequent
+// describe_collection reflects the new source AND a later reuse-path
+// refresh (no override) targets the new source rather than silently
+// reverting to the original one.
+//
+// Pre-fix behavior: the post-completion schema-sync path
+// (server_external_schema_updater.updateExternalSchemaViaWAL) went through
+// AlterCollection, which the atomic-tuple guard introduced in PR #49302
+// rejected — the data load against NEW succeeded but the persisted
+// schema stayed pointing at OLD forever.
+func TestRefreshExternalCollectionOverridePersistsNewSource(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_override", 6)
+	pathA := fmt.Sprintf("external-e2e-test/%s/a", collName)
+	pathB := fmt.Sprintf("external-e2e-test/%s/b", collName)
+
+	// Upload distinct parquet payloads to bucket/A and bucket/B.
+	dataA, err := generateParquetBytes(8, 0)
+	require.NoError(t, err)
+	dataB, err := generateParquetBytes(8, 1000)
+	require.NoError(t, err)
+	for _, p := range []struct {
+		path  string
+		bytes []byte
+	}{{pathA, dataA}, {pathB, dataB}} {
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/data.parquet", p.path),
+			bytes.NewReader(p.bytes), int64(len(p.bytes)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("external-e2e-test/%s/", collName))
+	})
+
+	uriA := extTestURI(minioCfg, pathA)
+	uriB := extTestURI(minioCfg, pathB)
+	spec := extTestSpec(minioCfg, "parquet")
+
+	// Create with SRC_A.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(uriA).
+		WithExternalSpec(spec).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	// Initial refresh against SRC_A (reuse path).
+	refreshA, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshA.JobID, entity.RefreshStateCompleted)
+
+	// Override refresh to SRC_B with explicit external_source.
+	refreshB, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName).
+			WithExternalSource(uriB).
+			WithExternalSpec(spec))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refreshB.JobID, entity.RefreshStateCompleted)
+
+	// Persisted schema must now reflect SRC_B. Pre-fix this still showed pathA.
+	desc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	require.Equal(t, uriB, desc.Schema.ExternalSource,
+		"override refresh must persist new external_source; pre-fix #49335 left it stale")
+}
+
+func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClient, jobID int64, expect entity.RefreshExternalCollectionState) {
+	t.Helper()
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("refresh job %d did not reach terminal state within 60s", jobID)
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(jobID))
+			require.NoError(t, err)
+			t.Logf("Job %d: state=%s reason=%q", jobID, progress.State, progress.Reason)
+			if progress.State == entity.RefreshStateCompleted ||
+				progress.State == entity.RefreshStateFailed {
+				require.Equal(t, expect, progress.State,
+					"refresh terminal state mismatch (reason=%s)", progress.Reason)
+				return
+			}
+		}
+	}
+}
+
+// Regression for the explore-manifest index-drift bug: the source
+// directory is intentionally polluted with non-parquet strays
+// (`_SUCCESS`, `.crc`, `README.md`) interleaved with valid parquet
+// shards. Pre-fix, DataCoord filtered them out before slicing tasks
+// while DataNode read the unfiltered manifest and sliced against the
+// stale index space — picking `_SUCCESS` as a "parquet" file and
+// failing with "Invalid parquet magic" or silently dropping a real
+// shard. Post-fix, both layers normalize (sort + format-filter) the
+// manifest identically, so refresh completes and total row count
+// matches the sum of the parquet shards only.
+func TestRefreshExternalCollectionFiltersNonParquetStrays(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	collName := common.GenRandomString("ext_strays", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	// 3 valid parquet shards, varying sizes to detect index drift.
+	const rowsPerShard = int64(8)
+	const numShards = 3
+	for i := 0; i < numShards; i++ {
+		data, err := generateParquetBytes(rowsPerShard, int64(i)*rowsPerShard)
+		require.NoError(t, err)
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/part-%05d.parquet", extPath, i),
+			bytes.NewReader(data), int64(len(data)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	// Stray non-parquet files interleaved by lex order with the parquets.
+	strays := map[string][]byte{
+		"_SUCCESS":    []byte(""),
+		"_committed":  []byte("xyz"),
+		"part-00.crc": []byte("crc-checksum-bytes"),
+		"README.md":   []byte("# this dir\n"),
+		"metadata":    []byte(`{"v":1}`),
+	}
+	for name, payload := range strays {
+		_, err = minioClient.PutObject(ctx, minioCfg.bucket,
+			fmt.Sprintf("%s/%s", extPath, name),
+			bytes.NewReader(payload), int64(len(payload)),
+			miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	// Load + count to assert no shard was dropped and no stray was read
+	// (a stray would either fail load or — worse — succeed silently with
+	// the wrong row count if the bug let mis-sliced indices slip
+	// through).
+	idxOpt := client.NewCreateIndexOption(collName, "embedding", index.NewAutoIndex(entity.MetricType("L2")))
+	idxTask, err := mc.CreateIndex(ctx, idxOpt)
+	common.CheckErr(t, err, true)
+	require.NoError(t, idxTask.Await(ctx))
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.NoError(t, loadTask.Await(ctx))
+
+	res, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter("").
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Greater(t, len(res.Fields), 0)
+	got := res.Fields[0].FieldData().GetScalars().GetLongData().GetData()
+	require.Len(t, got, 1)
+	expected := rowsPerShard * numShards
+	require.Equal(t, expected, got[0],
+		"row count must equal sum of parquet shards (%d); strays must be filtered, no shard may be dropped",
+		expected)
 }

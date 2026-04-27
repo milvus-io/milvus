@@ -20,6 +20,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -466,8 +467,19 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
 
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).
+    //
+    // "anonymous" is intentionally skipped: milvus-storage's fs.* property
+    // registry does not yet declare PROPERTY_FS_ANONYMOUS, so any SetValue
+    // on "extfs.<cid>.anonymous" hits strict "undefined key" in
+    // ExtractExternalFsProperties (iceberg explore path). Skipping the
+    // default zero-init keeps the slot absent — equivalent to anonymous=false
+    // — so the default credential path stays unaffected. Once the upstream
+    // registry adds the key, this skip can be removed without further
+    // changes (and user-supplied anonymous=true via Layer 2 will start
+    // working automatically — we deliberately do NOT drop it on Layer 2 so
+    // the future fix is a one-line revert here).
     for (const auto& [name, is_bool] : kExtfsFields) {
-        if (is_bool) {
+        if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
     }
@@ -558,6 +570,15 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                         } else if (key == "region") {
                             spec_region = val;
                         }
+                        // "minio" is a Milvus-only cloud_provider sentinel
+                        // meaning "self-hosted S3-compatible, do not derive
+                        // endpoint and do not swap host". loon's allowlist
+                        // does not include it, so propagate the value only
+                        // for our swap-decision logic above and drop it
+                        // before reaching loon.
+                        if (key == "cloud_provider" && val == "minio") {
+                            continue;
+                        }
                         milvus_storage::api::SetValue(
                             properties,
                             (extfs_prefix + key).c_str(),
@@ -597,23 +618,15 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     //   keys (`s3://endpoint/bucket`). Comparing derive result with host
     //   handles both cases correctly — the derived endpoint string is a
     //   stable cloud-provider identifier, not dependent on path structure.
-    // Infer cloud_provider from scheme when spec omits it. Mirror of Go
-    // externalspec.ValidateExtfsComplete; keep lists in lockstep.
-    std::string effective_cp = spec_cloud_provider;
-    if (effective_cp.empty()) {
-        if (scheme == "s3" || scheme == "s3a" || scheme == "aws") {
-            effective_cp = "aws";
-        } else if (scheme == "gs" || scheme == "gcs") {
-            effective_cp = "gcp";
-        } else if (scheme == "oss") {
-            effective_cp = "aliyun";
-        } else if (scheme == "cos") {
-            effective_cp = "tencent";
-        } else if (scheme == "obs") {
-            effective_cp = "huawei";
-        }
-    }
-    std::string derived = DeriveEndpoint(effective_cp, spec_region);
+    // Swap decision uses ONLY the user-supplied cloud_provider, never a
+    // scheme-inferred fallback. Self-hosted MinIO with
+    // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
+    // cloud_provider=aws from scheme=s3 would produce
+    // derived=https://s3.<region>.amazonaws.com, falsely classify host
+    // as a bucket, and swap. When the user does not declare
+    // cloud_provider, DeriveEndpoint returns empty and the URI is
+    // treated as Milvus-form (host is endpoint).
+    std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
     // Cloud-family host suffix check: if URI.host ends with a known cloud
     // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
     // endpoint variants including global/accelerate/dualstack/FIPS/VPC), the
@@ -666,10 +679,27 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "iceberg-table") {
+                auto snapshot_field = doc.find_field("snapshot_id");
                 int64_t snapshot_id = 0;
-                if (doc.find_field("snapshot_id")
-                        .get_int64()
-                        .get(snapshot_id) == simdjson::SUCCESS) {
+                auto int_err = snapshot_field.get_int64().get(snapshot_id);
+                if (int_err == simdjson::INCORRECT_TYPE) {
+                    std::string_view snapshot_view;
+                    if (snapshot_field.get_string().get(snapshot_view) ==
+                        simdjson::SUCCESS) {
+                        try {
+                            snapshot_id =
+                                std::stoll(std::string(snapshot_view));
+                            int_err = simdjson::SUCCESS;
+                        } catch (const std::exception& e) {
+                            LOG_WARN(
+                                "iceberg snapshot_id parse failed "
+                                "(collection_id={}): {}",
+                                collection_id,
+                                e.what());
+                        }
+                    }
+                }
+                if (int_err == simdjson::SUCCESS) {
                     milvus_storage::api::SetValue(
                         properties,
                         "iceberg.snapshot_id",
