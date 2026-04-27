@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
@@ -437,6 +438,7 @@ type memEntry struct {
 }
 
 type memPersist struct {
+	mu      sync.Mutex
 	data    map[string]*memEntry
 	nextVer int64
 }
@@ -453,6 +455,9 @@ func (p *memPersist) Txn(ctx context.Context) Txn {
 }
 
 func (p *memPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var ks []string
 	var vals [][]byte
 	var vers []int64
@@ -461,7 +466,7 @@ func (p *memPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byt
 			continue
 		}
 		ks = append(ks, k)
-		vals = append(vals, entry.value)
+		vals = append(vals, append([]byte(nil), entry.value...))
 		vers = append(vers, entry.version)
 	}
 	return ks, vals, vers, nil
@@ -494,6 +499,9 @@ func (t *memTxn) Remove(key string) {
 
 func (t *memTxn) Commit() ([]TxnResult, error) {
 	p := t.persist
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	// Validate all ops first so we don't partially apply.
 	for _, op := range t.ops {
 		switch op.kind {
