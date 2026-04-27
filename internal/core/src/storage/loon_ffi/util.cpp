@@ -687,7 +687,8 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                     if (snapshot_field.get_string().get(snapshot_view) ==
                         simdjson::SUCCESS) {
                         try {
-                            snapshot_id = std::stoll(std::string(snapshot_view));
+                            snapshot_id =
+                                std::stoll(std::string(snapshot_view));
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
