@@ -283,7 +283,14 @@ class ColumnVector final : public SimpleVector {
 
         auto old_size = length_;
         values_->FillFieldData(other.GetRawData(), other.size());
-        length_ += other.size();
+
+        auto values_length = values_->Length();
+        AssertInfo(values_length >= old_size,
+                   "ColumnVector append length mismatch: values_length {} < "
+                   "old_size {}",
+                   values_length,
+                   old_size);
+        length_ = values_length;
         valid_values_.resize(length_);
 
         // Copy validity from other
