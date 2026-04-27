@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/bytedance/mockey"
@@ -2404,16 +2405,55 @@ func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
 			}, nil).Build()
 
 			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
-				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
 			).Build()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+
+			resp, err := node.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.ErrorIs(t, merr.Error(resp), merr.ErrCollectionSchemaVersionNotReady)
+			assert.True(t, resp.GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+		})
+	})
+
+	t.Run("consistency check retries until success", func(t *testing.T) {
+		mockey.PatchConvey("consistency check retries AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			attempt := 0
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).To(func(*Proxy, context.Context, string, string) error {
+				attempt++
+				if attempt == 1 {
+					return merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3)
+				}
+				return nil
+			}).Build()
+
+			mockey.Mock((*ddTaskQueue).Enqueue).To(func(_ *ddTaskQueue, t task) error {
+				_ = t.OnEnqueue()
+				return nil
+			}).Build()
+			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
 
 			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
 				DbName:         "default",
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp))
-			assert.Contains(t, resp.GetReason(), "consistency check failed")
+			assert.True(t, merr.Ok(resp))
+			assert.Equal(t, 2, attempt)
 		})
 	})
 
@@ -2720,14 +2760,19 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 			}, nil).Build()
 
 			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
-				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+				merr.WrapErrCollectionSchemaVersionNotReady("test_coll", 1, 3),
 			).Build()
 
-			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+
+			resp, err := node.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
 				CollectionName: "test_coll",
 			})
 			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp.GetAlterStatus()))
+			assert.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrCollectionSchemaVersionNotReady)
+			assert.True(t, resp.GetAlterStatus().GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetAlterStatus().GetErrorCode())
 		})
 	})
 
@@ -2921,9 +2966,12 @@ func TestCheckSchemaVersionConsistency(t *testing.T) {
 				}).Build()
 
 			err := node.checkSchemaVersionConsistency(context.Background(), "db", "coll")
-			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 			assert.Contains(t, err.Error(), "5")
 			assert.Contains(t, err.Error(), "10")
+			status := merr.Status(err)
+			assert.True(t, status.GetRetriable())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 		})
 	})
 
