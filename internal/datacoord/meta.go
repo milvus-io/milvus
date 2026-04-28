@@ -227,6 +227,8 @@ func (m *meta) segmentCollectionPrefix(collectionID int64) string {
 }
 
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker, segmentPersist *SegmentTxnWrapper, metaRootPath string) (*meta, error) {
+	segmentPersist = segmentPersist.WithMetaRootPath(metaRootPath)
+
 	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
 	collectionIDs, err := showCollectionIDs(ctx, broker)
 	if err != nil {

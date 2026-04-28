@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -69,4 +70,49 @@ func TestSegmentTxnCommitReturnsStitchedSegment(t *testing.T) {
 	persisted := &datapb.SegmentInfo{}
 	require.NoError(t, proto.Unmarshal(values[0], persisted))
 	require.Empty(t, persisted.GetBinlogs())
+}
+
+func TestSegmentTxnWritesSidePrefixKVsUnderMetaRootPath(t *testing.T) {
+	ctx := context.Background()
+	metaRootPath := "by-dev/meta"
+	wrapper := NewSegmentTxnWrapper(NewOptimisticTxnMemoryPersist()).WithMetaRootPath(metaRootPath)
+	key := metaRootPath + "/" + segmentKey(1, 2, 3)
+	seg := &datapb.SegmentInfo{
+		ID:           3,
+		CollectionID: 1,
+		PartitionID:  2,
+		State:        commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 10, Binlogs: []*datapb.Binlog{{LogID: 100}}},
+		},
+		Deltalogs: []*datapb.FieldBinlog{
+			{FieldID: 11, Binlogs: []*datapb.Binlog{{LogID: 101}}},
+		},
+		Statslogs: []*datapb.FieldBinlog{
+			{FieldID: 12, Binlogs: []*datapb.Binlog{{LogID: 102}}},
+		},
+		Bm25Statslogs: []*datapb.FieldBinlog{
+			{FieldID: 13, Binlogs: []*datapb.Binlog{{LogID: 103}}},
+		},
+	}
+
+	txn := wrapper.Txn(ctx)
+	require.NoError(t, txn.Insert(key, seg))
+	_, err := txn.Commit()
+	require.NoError(t, err)
+
+	for _, prefix := range []string{
+		datacoordkv.SegmentBinlogPathPrefix,
+		datacoordkv.SegmentDeltalogPathPrefix,
+		datacoordkv.SegmentStatslogPathPrefix,
+		datacoordkv.SegmentBM25logPathPrefix,
+	} {
+		keys, _, _, err := wrapper.ScanRaw(ctx, metaRootPath+"/"+prefix)
+		require.NoError(t, err)
+		require.Len(t, keys, 1)
+
+		keys, _, _, err = wrapper.ScanRaw(ctx, prefix)
+		require.NoError(t, err)
+		require.Empty(t, keys)
+	}
 }

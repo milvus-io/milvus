@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -50,15 +51,22 @@ func (i *BinlogIncrement) Union(o BinlogIncrement) {
 // binlogs populated from a cache lookup). The wrapper strips the proto and
 // emits binlog KVs in the same atomic backend transaction.
 type SegmentTxnWrapper struct {
-	inner OptimisticTxnPersist
+	inner        OptimisticTxnPersist
+	metaRootPath string
 }
 
 func NewSegmentTxnWrapper(inner OptimisticTxnPersist) *SegmentTxnWrapper {
 	return &SegmentTxnWrapper{inner: inner}
 }
 
+func (w *SegmentTxnWrapper) WithMetaRootPath(metaRootPath string) *SegmentTxnWrapper {
+	cloned := *w
+	cloned.metaRootPath = strings.TrimSuffix(metaRootPath, "/")
+	return &cloned
+}
+
 func (w *SegmentTxnWrapper) Txn(ctx context.Context) *SegmentTxn {
-	return &SegmentTxn{inner: w.inner.Txn(ctx)}
+	return &SegmentTxn{inner: w.inner.Txn(ctx), metaRootPath: w.metaRootPath}
 }
 
 // Scan reads all segment records under the given prefix and returns them
@@ -91,7 +99,8 @@ func (w *SegmentTxnWrapper) ScanRaw(ctx context.Context, prefix string) (keys []
 // SegmentTxn accepts typed SegmentInfo ops. On Commit, the stripped segment
 // record and all its binlog KVs persist atomically in a single backend txn.
 type SegmentTxn struct {
-	inner Txn
+	inner        Txn
+	metaRootPath string
 	// mainIdx records, for each typed segment op, the index of its main op
 	// inside inner. Binlog Put/Remove ops take the slots in between; the
 	// mapping lets Commit return one result per typed op in add order.
@@ -110,7 +119,7 @@ type SegmentTxnResult struct {
 // binlog KV derived from seg's binlog fields. Fails the commit
 // (ErrKeyAlreadyExists) if the segment key is already present.
 func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
-	value, binlogKvs, removals, err := buildSegmentWrite(seg, BinlogIncrement{
+	value, binlogKvs, removals, err := t.buildSegmentWrite(seg, BinlogIncrement{
 		Binlogs:       seg.GetBinlogs(),
 		Deltalogs:     seg.GetDeltalogs(),
 		Statslogs:     seg.GetStatslogs(),
@@ -146,7 +155,7 @@ func (t *SegmentTxn) Insert(key string, seg *datapb.SegmentInfo) error {
 // seg MUST be the fully-stitched post-mutation SegmentInfo (for the segment
 // record write); binlog fields in seg are stripped from the persisted proto.
 func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion int64, inc BinlogIncrement) error {
-	value, binlogKvs, removals, err := buildSegmentWrite(seg, inc)
+	value, binlogKvs, removals, err := t.buildSegmentWrite(seg, inc)
 	if err != nil {
 		return err
 	}
@@ -168,7 +177,7 @@ func (t *SegmentTxn) Update(key string, seg *datapb.SegmentInfo, expectedVersion
 func (t *SegmentTxn) Delete(key string, seg *datapb.SegmentInfo) {
 	t.inner.Delete(key)
 	t.recordMain(nil)
-	for _, k := range segmentBinlogKeys(seg) {
+	for _, k := range t.segmentBinlogKeys(seg) {
 		t.inner.Remove(k)
 		t.recordAux()
 	}
@@ -215,7 +224,7 @@ func (t *SegmentTxn) recordAux() { t.count++ }
 // buildSegmentWrite produces the stripped segment proto bytes plus one
 // side-prefix KV per FieldBinlog in the increment. Each passed FieldBinlog is
 // persisted verbatim under its side-prefix key.
-func buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrement) ([]byte, map[string][]byte, []string, error) {
+func (t *SegmentTxn) buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrement) ([]byte, map[string][]byte, []string, error) {
 	stripped := proto.Clone(seg).(*datapb.SegmentInfo)
 	datacoordkv.ResetBinlogFields(stripped)
 	value, err := proto.Marshal(stripped)
@@ -225,7 +234,7 @@ func buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrement) ([]byte, ma
 	if inc.IsEmpty() {
 		return value, nil, nil, nil
 	}
-	removals := segmentDroppedBinlogKeys(seg, inc.DroppedBinlogFieldIDs)
+	removals := t.segmentDroppedBinlogKeys(seg, inc.DroppedBinlogFieldIDs)
 	kvs, err := datacoordkv.BuildBinlogKvsWithLogID(
 		seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(),
 		datacoordkv.CloneLogs(inc.Binlogs),
@@ -241,31 +250,31 @@ func buildSegmentWrite(seg *datapb.SegmentInfo, inc BinlogIncrement) ([]byte, ma
 	}
 	binlogPuts := make(map[string][]byte, len(kvs))
 	for k, v := range kvs {
-		binlogPuts[k] = []byte(v)
+		binlogPuts[t.joinMetaRootPath(k)] = []byte(v)
 	}
 	return value, binlogPuts, removals, nil
 }
 
-func segmentDroppedBinlogKeys(seg *datapb.SegmentInfo, fieldIDs []int64) []string {
+func (t *SegmentTxn) segmentDroppedBinlogKeys(seg *datapb.SegmentInfo, fieldIDs []int64) []string {
 	keys := make([]string, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
-		keys = append(keys, fmt.Sprintf("%s/%d/%d/%d/%d",
+		keys = append(keys, t.joinMetaRootPath(fmt.Sprintf("%s/%d/%d/%d/%d",
 			datacoordkv.SegmentBinlogPathPrefix,
 			seg.GetCollectionID(),
 			seg.GetPartitionID(),
 			seg.GetID(),
-			fieldID))
+			fieldID)))
 	}
 	return keys
 }
 
 // segmentBinlogKeys enumerates every side-prefix binlog KV key for the segment.
-func segmentBinlogKeys(seg *datapb.SegmentInfo) []string {
+func (t *SegmentTxn) segmentBinlogKeys(seg *datapb.SegmentInfo) []string {
 	keys := make([]string, 0)
 	add := func(prefix string, logs []*datapb.FieldBinlog) {
 		for _, fb := range logs {
-			keys = append(keys, fmt.Sprintf("%s/%d/%d/%d/%d",
-				prefix, seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fb.GetFieldID()))
+			keys = append(keys, t.joinMetaRootPath(fmt.Sprintf("%s/%d/%d/%d/%d",
+				prefix, seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), fb.GetFieldID())))
 		}
 	}
 	add(datacoordkv.SegmentBinlogPathPrefix, seg.GetBinlogs())
@@ -273,4 +282,11 @@ func segmentBinlogKeys(seg *datapb.SegmentInfo) []string {
 	add(datacoordkv.SegmentStatslogPathPrefix, seg.GetStatslogs())
 	add(datacoordkv.SegmentBM25logPathPrefix, seg.GetBm25Statslogs())
 	return keys
+}
+
+func (t *SegmentTxn) joinMetaRootPath(key string) string {
+	if t.metaRootPath == "" {
+		return key
+	}
+	return t.metaRootPath + "/" + key
 }

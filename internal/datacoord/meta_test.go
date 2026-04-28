@@ -73,7 +73,7 @@ type failCommitPersist struct {
 }
 
 func (p failCommitPersist) Txn(ctx context.Context) Txn {
-	return failCommitTxn{err: p.err}
+	return failCommitTxn(p)
 }
 
 func (p failCommitPersist) Scan(ctx context.Context, prefix string) ([]string, [][]byte, []int64, error) {
