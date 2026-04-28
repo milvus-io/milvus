@@ -58,10 +58,14 @@ func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.Drop
 	channels := make([]string, 0, len(dropCollectionTask.vchannels)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, dropCollectionTask.vchannels...)
+	broadcastOpts := make([]message.OptBuildBroadcast, 0, 1)
+	if dropCollectionTask.ackSyncUp {
+		broadcastOpts = append(broadcastOpts, message.OptBuildBroadcastAckSyncUp())
+	}
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(dropCollectionTask.header).
 		WithBody(dropCollectionTask.body).
-		WithBroadcast(channels).
+		WithBroadcast(channels, broadcastOpts...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err

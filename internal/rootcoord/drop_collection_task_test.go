@@ -127,5 +127,32 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		assert.Equal(t, collectionName, task.body.CollectionName)
 		assert.Equal(t, "db1", task.body.DbName)
 		assert.Equal(t, []string{"vchannel1"}, task.vchannels)
+		assert.False(t, task.ackSyncUp)
+	})
+
+	t.Run("collection has file resource dependency", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IsAlias(mock.Anything, mock.Anything, mock.Anything).Return(false)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+			CollectionID:        2,
+			DBName:              "db1",
+			DBID:                1,
+			State:               pb.CollectionState_CollectionCreated,
+			VirtualChannelNames: []string{"vchannel1"},
+			FileResourceIds:     []int64{1001},
+		}, nil)
+		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
+
+		core := newTestCore(withMeta(meta))
+		task := &dropCollectionTask{
+			Core: core,
+			Req: &milvuspb.DropCollectionRequest{
+				CollectionName: collectionName,
+			},
+		}
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+		assert.True(t, task.ackSyncUp)
 	})
 }
