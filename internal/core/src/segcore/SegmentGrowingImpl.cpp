@@ -2322,10 +2322,9 @@ SegmentGrowingImpl::LoadColumnGroup(
     for (auto& future : part_futures) {
         auto part_result = future.get();
         for (auto& record_batch : part_result) {
-            // result->emplace_back(std::move(record_batch));
             auto batch_num_rows = record_batch->num_rows();
-            for (auto i = 0; i < column_group->columns.size(); ++i) {
-                auto column = column_group->columns[i];
+            for (auto i = 0; i < record_batch->num_columns(); ++i) {
+                auto column = record_batch->column_name(i);
 
                 auto field_id = FieldId(std::stoll(column));
 
@@ -2343,7 +2342,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                     batch_num_rows);
                 auto array = record_batch->column(i);
                 field_data->FillFieldData(array);
-                field_data_map[FieldId(field_id)].push_back(field_data);
+                field_data_map[field_id].push_back(field_data);
             }
         }
     }
