@@ -809,7 +809,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	// For ArrayOfVector fields, the placeholder type decides the search semantics:
 	// - Element-level (plain vector placeholder): behaves like a normal single-vector
-	//   search; supports range search, iterator, and group by primary key.
+	//   search; supports range search, search iterator v2, and group by primary key.
 	// - Embedding-list-level (multi-search-multi): does not support range search,
 	//   iterator, or group by (other than the PK case above).
 	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
@@ -825,6 +825,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("", "",
 					"search iterator is not supported for multi-search-multi on embedding list fields")
 			}
+		} else if t.isIterator && queryInfo.GetSearchIteratorV2Info() == nil {
+			return merr.WrapErrParameterInvalid("", "",
+				"legacy search iterator is not supported for element-level search on embedding list fields; use search iterator v2")
 		}
 
 		if queryInfo.GetGroupByFieldId() > 0 {
