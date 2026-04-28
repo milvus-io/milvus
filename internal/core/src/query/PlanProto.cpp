@@ -755,6 +755,23 @@ ProtoParser::RetrievePlanNodeFromProto(
                 parse_expr_to_filter_node(query.predicates());
             }
         }
+        if (query.has_query_iterator_cursor()) {
+            AssertInfo(is_element_level,
+                       "query iterator cursor is only supported for "
+                       "element-level query");
+            const auto& cursor_proto = query.query_iterator_cursor();
+            QueryIteratorCursor cursor;
+            if (cursor_proto.has_last_int_pk()) {
+                cursor.last_pk = cursor_proto.last_int_pk();
+            } else if (cursor_proto.has_last_str_pk()) {
+                cursor.last_pk = cursor_proto.last_str_pk();
+            } else {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "query iterator cursor requires last primary key");
+            }
+            cursor.last_element_offset = cursor_proto.last_element_offset();
+            plan_node->query_iterator_cursor_ = std::move(cursor);
+        }
 
         // 2. Build MvccNode
         plannode = std::make_shared<milvus::plan::MvccNode>(

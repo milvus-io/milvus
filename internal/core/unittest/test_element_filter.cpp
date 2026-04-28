@@ -1849,6 +1849,197 @@ TEST(ElementFilter, RetrieveSortedByPk) {
     EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
+TEST(ElementFilter, RetrieveIteratorCursorSkipsReturnedElements) {
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 20;
+    int array_len = 5;
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    array_data->mutable_int_data()->mutable_data()->Add(elem);
+                }
+            }
+            break;
+        }
+    }
+
+    auto segment = CreateSealedSegment(schema,
+                                       empty_index_meta,
+                                       /*segment_id=*/0,
+                                       SegcoreConfig::default_config(),
+                                       /*is_sorted_by_pk=*/true);
+    LoadGeneratedDataIntoSegment(raw_data, segment.get());
+
+    auto build_plan = [&](int64_t limit,
+                          std::optional<int64_t> min_pk,
+                          std::optional<std::pair<int64_t, int64_t>> cursor) {
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(limit);
+
+        auto* expr = query->mutable_predicates();
+        auto* element_filter = expr->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        auto* element_expr = element_filter->mutable_element_expr();
+        auto* element_range = element_expr->mutable_unary_range_expr();
+        auto* element_column = element_range->mutable_column_info();
+        element_column->set_field_id(int_array_fid.get());
+        element_column->set_data_type(proto::schema::DataType::Int32);
+        element_column->set_element_type(proto::schema::DataType::Int32);
+        element_column->set_is_element_level(true);
+        element_range->set_op(proto::plan::OpType::GreaterEqual);
+        element_range->mutable_value()->set_int64_val(0);
+
+        if (min_pk.has_value()) {
+            auto* predicate = element_filter->mutable_predicate();
+            auto* pk_range = predicate->mutable_unary_range_expr();
+            auto* pk_column = pk_range->mutable_column_info();
+            pk_column->set_field_id(int64_fid.get());
+            pk_column->set_data_type(proto::schema::DataType::Int64);
+            pk_range->set_op(proto::plan::OpType::GreaterEqual);
+            pk_range->mutable_value()->set_int64_val(min_pk.value());
+        }
+
+        if (cursor.has_value()) {
+            auto* query_cursor = query->mutable_query_iterator_cursor();
+            query_cursor->set_last_int_pk(cursor->first);
+            query_cursor->set_last_element_offset(cursor->second);
+        }
+
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        return parser.CreateRetrievePlan(plan_node);
+    };
+
+    auto retrieve = [&](const RetrievePlan* plan) {
+        return segment->Retrieve(nullptr,
+                                 plan,
+                                 1L << 63,
+                                 INT64_MAX,
+                                 false,
+                                 folly::CancellationToken(),
+                                 0,
+                                 0);
+    };
+
+    auto first_plan = build_plan(
+        /*limit=*/8, /*min_pk=*/std::nullopt, /*cursor=*/std::nullopt);
+    auto first_results = retrieve(first_plan.get());
+    ASSERT_NE(first_results, nullptr);
+    ASSERT_TRUE(first_results->element_level());
+    ASSERT_TRUE(first_results->has_more_result());
+    ASSERT_EQ(first_results->offset_size(), 2);
+    ASSERT_EQ(first_results->offset(0), 0);
+    ASSERT_EQ(first_results->element_indices(0).indices_size(), 5);
+    for (int i = 0; i < 5; i++) {
+        ASSERT_EQ(first_results->element_indices(0).indices(i), i);
+    }
+    ASSERT_EQ(first_results->offset(1), 1);
+    ASSERT_EQ(first_results->element_indices(1).indices_size(), 3);
+    for (int i = 0; i < 3; i++) {
+        ASSERT_EQ(first_results->element_indices(1).indices(i), i);
+    }
+
+    auto second_plan =
+        build_plan(/*limit=*/8,
+                   /*min_pk=*/std::optional<int64_t>(1),
+                   /*cursor=*/std::make_pair<int64_t, int64_t>(1, 2));
+    auto second_results = retrieve(second_plan.get());
+    ASSERT_NE(second_results, nullptr);
+    ASSERT_TRUE(second_results->element_level());
+    ASSERT_TRUE(second_results->has_more_result());
+    ASSERT_EQ(second_results->offset_size(), 3);
+
+    ASSERT_EQ(second_results->offset(0), 1);
+    ASSERT_EQ(second_results->element_indices(0).indices_size(), 2);
+    ASSERT_EQ(second_results->element_indices(0).indices(0), 3);
+    ASSERT_EQ(second_results->element_indices(0).indices(1), 4);
+
+    ASSERT_EQ(second_results->offset(1), 2);
+    ASSERT_EQ(second_results->element_indices(1).indices_size(), 5);
+    for (int i = 0; i < 5; i++) {
+        ASSERT_EQ(second_results->element_indices(1).indices(i), i);
+    }
+
+    ASSERT_EQ(second_results->offset(2), 3);
+    ASSERT_EQ(second_results->element_indices(2).indices_size(), 1);
+    ASSERT_EQ(second_results->element_indices(2).indices(0), 0);
+
+    auto last_page_plan =
+        build_plan(/*limit=*/2,
+                   /*min_pk=*/std::optional<int64_t>(19),
+                   /*cursor=*/std::make_pair<int64_t, int64_t>(19, 2));
+    auto last_page_results = retrieve(last_page_plan.get());
+    ASSERT_NE(last_page_results, nullptr);
+    ASSERT_TRUE(last_page_results->element_level());
+    ASSERT_FALSE(last_page_results->has_more_result());
+    ASSERT_EQ(last_page_results->offset_size(), 1);
+    ASSERT_EQ(last_page_results->offset(0), 19);
+    ASSERT_EQ(last_page_results->element_indices(0).indices_size(), 2);
+    ASSERT_EQ(last_page_results->element_indices(0).indices(0), 3);
+    ASSERT_EQ(last_page_results->element_indices(0).indices(1), 4);
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
+TEST(ElementFilter, QueryIteratorCursorRequiresElementFilter) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(10);
+
+    auto* predicate = query->mutable_predicates();
+    auto* range = predicate->mutable_unary_range_expr();
+    auto* column_info = range->mutable_column_info();
+    column_info->set_field_id(int64_fid.get());
+    column_info->set_data_type(proto::schema::DataType::Int64);
+    range->set_op(proto::plan::OpType::GreaterEqual);
+    range->mutable_value()->set_int64_val(0);
+
+    auto* cursor = query->mutable_query_iterator_cursor();
+    cursor->set_last_int_pk(1);
+    cursor->set_last_element_offset(2);
+
+    plan_node.add_output_field_ids(int64_fid.get());
+
+    auto parser = ProtoParser(schema);
+    ASSERT_ANY_THROW(parser.CreateRetrievePlan(plan_node));
+}
+
 // Regression test for https://github.com/milvus-io/milvus/issues/49260
 // ElementFilterBitsNode: when element_filter is AND-composed with a predicate
 // that matches 0 docs on a segment, doc_hit_ratio = 0 triggers offset_mode
