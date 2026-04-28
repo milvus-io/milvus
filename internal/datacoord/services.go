@@ -627,12 +627,98 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	mutations := map[int64][]SegmentOperator{}
 	var newSegments []*datapb.SegmentInfo
 	var validationSkipped bool
+	reqCopy := req
+
+	applySaveBinlogPaths := func(applyStateAndStorage bool) SegmentOperator {
+		return func(seg *SegmentInfo) (BinlogIncrement, bool) {
+			if applyStateAndStorage {
+				seg.StorageVersion = reqCopy.GetStorageVersion()
+
+				if reqCopy.GetDropped() {
+					seg.State = commonpb.SegmentState_Dropped
+					seg.DroppedAt = uint64(time.Now().UnixNano())
+				} else if reqCopy.GetFlushed() {
+					if enableSortCompaction() && reqCopy.GetSegLevel() != datapb.SegmentLevel_L0 {
+						seg.IsInvisible = true
+					}
+					seg.State = commonpb.SegmentState_Flushed
+				}
+			}
+
+			// Binlogs
+			if reqCopy.GetWithFullBinlogs() {
+				seg.Binlogs = mergeFieldBinlogs(nil, reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(nil, reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2Bm25LogPaths())
+			} else {
+				seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), reqCopy.GetField2Bm25LogPaths())
+			}
+			if len(reqCopy.GetDeltalogs()) > 0 {
+				seg.deltaRowcount.Store(-1)
+			}
+
+			// Checkpoint
+			skipCheck := reqCopy.GetWithFullBinlogs()
+			var cpNumRows int64
+			for _, cp := range reqCopy.GetCheckPoints() {
+				if cp.SegmentID != seg.GetID() {
+					continue
+				}
+				if cp.GetPosition() == nil {
+					continue
+				}
+				if !skipCheck && seg.DmlPosition != nil && seg.DmlPosition.Timestamp >= cp.Position.Timestamp {
+					continue
+				}
+				cpNumRows = cp.GetNumOfRows()
+				seg.DmlPosition = cp.GetPosition()
+			}
+
+			// Num rows from binlog, falling back to checkpoint for storage-v3/L0
+			// updates whose insert binlogs are intentionally empty.
+			count := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo)
+			if count > 0 {
+				seg.NumOfRows = count
+			} else if cpNumRows > 0 {
+				seg.NumOfRows = cpNumRows
+			}
+
+			// Manifest
+			if reqCopy.GetManifestPath() != "" {
+				seg.ManifestPath = reqCopy.GetManifestPath()
+			}
+
+			// Start position for this segment
+			for _, pos := range reqCopy.GetStartPositions() {
+				if pos.GetSegmentID() == seg.GetID() && len(pos.GetStartPosition().GetMsgID()) > 0 {
+					seg.StartPosition = pos.GetStartPosition()
+				}
+			}
+
+			// Drop empty flushing segments
+			if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
+				(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+			}
+			return BinlogIncrement{
+				Binlogs:       seg.Binlogs,
+				Statslogs:     seg.Statslogs,
+				Deltalogs:     seg.Deltalogs,
+				Bm25Statslogs: seg.Bm25Statslogs,
+			}, true
+		}
+	}
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		// Insert new L0 segment if it doesn't exist
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		if segment == nil {
-			newSegments = append(newSegments, &datapb.SegmentInfo{
+			newSegment := NewSegmentInfo(&datapb.SegmentInfo{
 				ID:            req.GetSegmentID(),
 				CollectionID:  req.GetCollectionID(),
 				PartitionID:   req.GetPartitionID(),
@@ -640,6 +726,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				State:         commonpb.SegmentState_Flushed,
 				Level:         datapb.SegmentLevel_L0,
 			})
+			applySaveBinlogPaths(false)(newSegment)
+			newSegments = append(newSegments, newSegment.SegmentInfo)
+		} else {
+			mutations[req.GetSegmentID()] = []SegmentOperator{applySaveBinlogPaths(false)}
 		}
 	} else {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
@@ -669,7 +759,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 
 		// Validate inside SegmentOperator: check against persist value (lock-free CAS)
-		reqCopy := req // capture for closure
 		validate := func(seg *SegmentInfo) (BinlogIncrement, bool) {
 			if !reqCopy.GetWithFullBinlogs() {
 				return BinlogIncrement{}, true
@@ -694,90 +783,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return BinlogIncrement{}, true
 		}
 
-		// Build mutation for the main segment
-		mutate := func(seg *SegmentInfo) (BinlogIncrement, bool) {
-			seg.StorageVersion = reqCopy.GetStorageVersion()
+		mutations[req.GetSegmentID()] = []SegmentOperator{validate, applySaveBinlogPaths(true)}
+	}
 
-			if reqCopy.GetDropped() {
-				seg.State = commonpb.SegmentState_Dropped
-				seg.DroppedAt = uint64(time.Now().UnixNano())
-			} else if reqCopy.GetFlushed() {
-				if enableSortCompaction() && reqCopy.GetSegLevel() != datapb.SegmentLevel_L0 {
-					seg.IsInvisible = true
-				}
-				seg.State = commonpb.SegmentState_Flushed
-			}
-
-			// Binlogs
-			if reqCopy.GetWithFullBinlogs() {
-				seg.Binlogs = mergeFieldBinlogs(nil, reqCopy.GetField2BinlogPaths())
-				seg.Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2StatslogPaths())
-				seg.Deltalogs = mergeFieldBinlogs(nil, reqCopy.GetDeltalogs())
-				seg.Bm25Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2Bm25LogPaths())
-			} else {
-				seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), reqCopy.GetField2BinlogPaths())
-				seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), reqCopy.GetField2StatslogPaths())
-				seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), reqCopy.GetDeltalogs())
-				seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), reqCopy.GetField2Bm25LogPaths())
-			}
-
-			// Checkpoint
-			skipCheck := reqCopy.GetWithFullBinlogs()
-			for _, cp := range reqCopy.GetCheckPoints() {
-				if cp.SegmentID != seg.GetID() {
-					continue
-				}
-				if !skipCheck && seg.DmlPosition != nil && seg.DmlPosition.Timestamp >= cp.Position.Timestamp {
-					continue
-				}
-				seg.DmlPosition = cp.GetPosition()
-			}
-
-			// Num rows from binlog
-			count := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo)
-			if count > 0 {
-				seg.NumOfRows = count
-			}
-
-			// Manifest
-			if reqCopy.GetManifestPath() != "" {
-				seg.ManifestPath = reqCopy.GetManifestPath()
-			}
-
-			// Start position for this segment
-			for _, pos := range reqCopy.GetStartPositions() {
-				if pos.GetSegmentID() == seg.GetID() && len(pos.GetStartPosition().GetMsgID()) > 0 {
-					seg.StartPosition = pos.GetStartPosition()
-				}
-			}
-
-			// Drop empty flushing segments
-			if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
-				(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
-				seg.State = commonpb.SegmentState_Dropped
-				seg.DroppedAt = uint64(time.Now().UnixNano())
-			}
-			return BinlogIncrement{
-				Binlogs:       seg.Binlogs,
-				Statslogs:     seg.Statslogs,
-				Deltalogs:     seg.Deltalogs,
-				Bm25Statslogs: seg.Bm25Statslogs,
-			}, true
+	// Start positions for other segments
+	for _, pos := range req.GetStartPositions() {
+		if len(pos.GetStartPosition().GetMsgID()) == 0 || pos.GetSegmentID() == req.GetSegmentID() {
+			continue
 		}
-
-		mutations[req.GetSegmentID()] = []SegmentOperator{validate, mutate}
-
-		// Start positions for other segments
-		for _, pos := range req.GetStartPositions() {
-			if len(pos.GetStartPosition().GetMsgID()) == 0 || pos.GetSegmentID() == req.GetSegmentID() {
-				continue
-			}
-			sp := pos.GetStartPosition()
-			mutations[pos.GetSegmentID()] = []SegmentOperator{func(seg *SegmentInfo) (BinlogIncrement, bool) {
-				seg.StartPosition = sp
-				return BinlogIncrement{}, true
-			}}
-		}
+		segID := pos.GetSegmentID()
+		sp := pos.GetStartPosition()
+		mutations[segID] = append(mutations[segID], func(seg *SegmentInfo) (BinlogIncrement, bool) {
+			seg.StartPosition = sp
+			return BinlogIncrement{}, true
+		})
 	}
 
 	// Update segment info in memory and meta.
