@@ -56,6 +56,12 @@ class TestReduceHelper : public ReduceHelper {
     using ReduceHelper::CanUseGlobalRefine;
     using ReduceHelper::IsSearchResultRefineEnabled;
     using ReduceHelper::ReduceHelper;
+    using ReduceHelper::ReduceResultData;
+
+    const std::vector<std::vector<std::vector<int64_t>>>&
+    FinalSearchRecordsForTest() const {
+        return final_search_records_;
+    }
 
     void
     TruncateForTest() {
@@ -333,6 +339,41 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     DeletePlaceholderGroup(placeholderGroup);
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, ReduceKeepsDistinctElementLevelHitsWithSamePK) {
+    SearchResult seg0;
+    seg0.total_nq_ = 1;
+    seg0.topk_per_nq_prefix_sum_ = {0, 4};
+    seg0.primary_keys_ = {
+        int64_t(5),
+        int64_t(5),
+        int64_t(5),
+        int64_t(6),
+    };
+    seg0.distances_ = {0.99f, 0.98f, 0.97f, 0.96f};
+    seg0.seg_offsets_ = {10, 10, 10, 11};
+    seg0.element_level_ = true;
+    seg0.element_indices_ = {0, 1, 1, 0};
+
+    std::vector<SearchResult*> search_results{&seg0};
+    std::vector<int64_t> slice_nqs{1};
+    std::vector<int64_t> slice_topks{4};
+    TestReduceHelper helper(search_results,
+                            nullptr,
+                            nullptr,
+                            slice_nqs.data(),
+                            slice_topks.data(),
+                            slice_nqs.size(),
+                            nullptr);
+
+    helper.ReduceResultData();
+
+    EXPECT_EQ(seg0.result_offsets_, std::vector<int64_t>({0, 1, 2}));
+    ASSERT_EQ(helper.FinalSearchRecordsForTest().size(), 1);
+    ASSERT_EQ(helper.FinalSearchRecordsForTest()[0].size(), 1);
+    EXPECT_EQ(helper.FinalSearchRecordsForTest()[0][0],
+              std::vector<int64_t>({0, 1, 3}));
 }
 
 template <class TraitType>

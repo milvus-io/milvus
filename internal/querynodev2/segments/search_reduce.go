@@ -19,6 +19,25 @@ type SearchReduce interface {
 	ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error)
 }
 
+type elementSearchResultKey struct {
+	pk           interface{}
+	elementIndex int64
+}
+
+func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk interface{}, hasElementIndices bool) (interface{}, error) {
+	if !hasElementIndices {
+		return pk, nil
+	}
+	elementIndices := data.GetElementIndices()
+	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
+		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+	}
+	return elementSearchResultKey{
+		pk:           pk,
+		elementIndex: elementIndices.GetData()[idx],
+	}, nil
+}
+
 type SearchCommonReduce struct{}
 
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
@@ -101,7 +120,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, numResults)
-		idSet := make(map[interface{}]struct{})
+		dedupSet := make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
@@ -112,9 +131,13 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			score := searchResultData[sel].Scores[idx]
+			dedupKey, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+			if err != nil {
+				return nil, err
+			}
 
 			// remove duplicates
-			if _, ok := idSet[id]; !ok {
+			if _, ok := dedupSet[dedupKey]; !ok {
 				fieldsData := searchResultData[sel].FieldsData
 				fieldIdxs := idxComputers[sel].Compute(idx)
 				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
@@ -123,10 +146,10 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
 				}
-				idSet[id] = struct{}{}
+				dedupSet[dedupKey] = struct{}{}
 				j++
 			} else {
-				// skip entity with same id
+				// skip the same row-level entity or the same element-level hit
 				skipDupCnt++
 			}
 			offsets[sel]++
@@ -242,7 +265,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		idSet := make(map[interface{}]struct{})
+		dedupSet := make(map[interface{}]struct{})
 		groupByValueMap := make(map[interface{}]int64)
 
 		var j int64
@@ -256,7 +279,12 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
-			if _, ok := idSet[id]; !ok {
+			dedupKey, err := getSearchResultDedupKey(searchResultData[sel], idx, id, hasElementIndices)
+			if err != nil {
+				return nil, err
+			}
+
+			if _, ok := dedupSet[dedupKey]; !ok {
 				groupCount := groupByValueMap[groupByVal]
 				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
@@ -275,11 +303,11 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					}
 					gpFieldBuilder.Add(groupByVal)
 					groupByValueMap[groupByVal] += 1
-					idSet[id] = struct{}{}
+					dedupSet[dedupKey] = struct{}{}
 					j++
 				}
 			} else {
-				// skip entity with same pk
+				// skip the same row-level entity or the same element-level hit
 				filteredCount++
 			}
 			offsets[sel]++
