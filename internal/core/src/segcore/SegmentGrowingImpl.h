@@ -756,7 +756,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
      * @param manifest_path JSON string containing base_path and version fields
      */
     void
-    LoadColumnsGroups(std::string manifest_path);
+    LoadColumnsGroups(std::string manifest_path,
+                      milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Load a single column group and return field data
@@ -773,7 +774,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        milvus::OpContext* op_ctx = nullptr);
 
     void
     InitializeArrayOffsets();

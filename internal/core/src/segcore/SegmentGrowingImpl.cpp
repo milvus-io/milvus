@@ -2137,7 +2137,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto manifest_path = load_info_.manifest_path();
     if (manifest_path != "") {
-        LoadColumnsGroups(manifest_path);
+        LoadColumnsGroups(manifest_path, op_ctx);
         return;
     }
 
@@ -2193,9 +2193,12 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 }
 
 void
-SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
+SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path,
+                                      milvus::OpContext* op_ctx) {
     LOG_INFO(
         "Loading segment {} field data with manifest {}", id_, manifest_path);
+    CheckCancellation(op_ctx, id_, "SegmentGrowingImpl::LoadColumnsGroups()");
+
     // size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto num_rows = load_info_.num_of_rows();
     auto primary_field_id =
@@ -2215,8 +2218,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
-        auto future = pool.Submit([this, column_groups, properties, i] {
-            return LoadColumnGroup(column_groups, properties, i);
+        auto future = pool.Submit([this, column_groups, properties, i, op_ctx] {
+            CheckCancellation(
+                op_ctx, id_, i, "SegmentGrowingImpl::LoadColumnGroup()");
+            return LoadColumnGroup(column_groups, properties, i, op_ctx);
         });
         load_group_futures.emplace_back(std::move(future));
     }
@@ -2273,7 +2278,8 @@ std::unordered_map<FieldId, std::vector<FieldDataPtr>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    int64_t index) {
+    int64_t index,
+    milvus::OpContext* op_ctx) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
     auto column_group = column_groups->at(index);
@@ -2307,8 +2313,10 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto part_futures = std::vector<
         std::future<std::vector<std::shared_ptr<arrow::RecordBatch>>>>();
     for (const auto& part : split_result) {
-        part_futures.emplace_back(
-            thread_pool.Submit([chunk_reader = chunk_reader.get(), part]() {
+        part_futures.emplace_back(thread_pool.Submit(
+            [chunk_reader = chunk_reader.get(), part, op_ctx]() {
+                CheckCancellation(
+                    op_ctx, -1, "SegmentGrowingImpl::LoadColumnGroup()");
                 std::vector<int64_t> chunk_ids(part.count);
                 std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
 
@@ -2318,9 +2326,24 @@ SegmentGrowingImpl::LoadColumnGroup(
             }));
     }
 
-    std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
+    std::vector<std::vector<std::shared_ptr<arrow::RecordBatch>>> part_results;
+    part_results.reserve(part_futures.size());
+    std::vector<std::exception_ptr> load_exceptions;
     for (auto& future : part_futures) {
-        auto part_result = future.get();
+        try {
+            part_results.emplace_back(future.get());
+        } catch (...) {
+            load_exceptions.push_back(std::current_exception());
+        }
+    }
+    if (!load_exceptions.empty()) {
+        std::rethrow_exception(load_exceptions[0]);
+    }
+
+    CheckCancellation(
+        op_ctx, id_, index, "SegmentGrowingImpl::LoadColumnGroup()");
+    std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
+    for (auto& part_result : part_results) {
         for (auto& record_batch : part_result) {
             // result->emplace_back(std::move(record_batch));
             auto batch_num_rows = record_batch->num_rows();
