@@ -4756,7 +4756,7 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
     for (auto& [field_id, load_text_index_info] : text_indexes_to_load) {
         auto future = pool.Submit(
             [this, op_ctx, info = std::move(load_text_index_info)]() mutable
-                -> void { LoadTextIndex(op_ctx, std::move(info)); });
+            -> void { LoadTextIndex(op_ctx, std::move(info)); });
         load_index_futures.emplace_back(std::move(future));
     }
 
