@@ -237,6 +237,55 @@ def _assert_distance_order(results, metric_type):
             )
 
 
+def _assert_element_range_hits_ground_truth(
+    results,
+    data,
+    query_vectors,
+    metric_type,
+    elem_filter_fn,
+    low=None,
+    high=None,
+):
+    """
+    Verify every returned element-level range-search hit against inserted data.
+
+    This intentionally checks returned-hit correctness rather than exact recall:
+    HNSW search is approximate, but any returned (row id, element offset, distance)
+    must be independently valid.
+    """
+    assert len(results) == len(query_vectors), f"result nq={len(results)} != query nq={len(query_vectors)}"
+    data_by_id = {row["id"]: row for row in data}
+
+    for q_idx, (hits, query_vector) in enumerate(zip(results, query_vectors)):
+        for hit in hits:
+            row_id = hit["id"]
+            assert row_id in data_by_id, f"query {q_idx}: row id {row_id} not found in inserted data"
+            assert "offset" in hit, f"query {q_idx}: hit {row_id} has no element offset"
+
+            row = data_by_id[row_id]
+            offset = hit["offset"]
+            assert 0 <= offset < len(row["structA"]), (
+                f"query {q_idx}: row {row_id} offset {offset} out of range, structA length={len(row['structA'])}"
+            )
+
+            elem = row["structA"][offset]
+            assert elem_filter_fn(elem), f"query {q_idx}: row {row_id} offset {offset} violates element_filter"
+
+            expected_distance = _compute_similarity(query_vector, elem["embedding"], metric_type)
+            assert abs(hit["distance"] - expected_distance) <= epsilon, (
+                f"query {q_idx}: row {row_id} offset {offset} distance mismatch: "
+                f"milvus={hit['distance']}, expected={expected_distance}"
+            )
+            if low is not None:
+                assert hit["distance"] >= low - epsilon, (
+                    f"query {q_idx}: row {row_id} offset {offset} distance {hit['distance']} < low {low}"
+                )
+            if high is not None:
+                assert hit["distance"] <= high + epsilon, (
+                    f"query {q_idx}: row {row_id} offset {offset} distance {hit['distance']} > high {high}"
+                )
+
+
 def _generate_float16_vector(dim, seed=None):
     """Generate Float16 vector as np.ndarray(dtype=float16)."""
     rng = np.random.RandomState(seed)
@@ -4793,6 +4842,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0, "COSINE radius-only range search returned 0 rows"
         for hit in results[0]:
             assert hit["distance"] >= low - epsilon, f"COSINE distance {hit['distance']} < radius {low}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4823,6 +4880,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
         for hit in results[0]:
             assert hit["distance"] <= high + epsilon, f"L2 distance {hit['distance']} > radius {high}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            high=high,
+        )
         _assert_distance_order(results, "L2")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4853,6 +4918,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
         for hit in results[0]:
             assert hit["distance"] >= low - epsilon, f"IP distance {hit['distance']} < radius {low}"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "IP",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
         _assert_distance_order(results, "IP")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4886,6 +4959,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             assert low - epsilon <= hit["distance"] <= high + epsilon, (
                 f"L2 distance {hit['distance']} outside [{low}, {high}]"
             )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
         _assert_distance_order(results, "L2")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4919,6 +5001,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             assert low - epsilon <= hit["distance"] <= high + epsilon, (
                 f"COSINE distance {hit['distance']} outside [{low}, {high}]"
             )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4960,6 +5051,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             output_fields=["id", "structA"],
         )
         assert check
+        assert len(results[0]) > 0, "range search with element_filter returned 0 rows"
         for hit in results[0]:
             assert low - epsilon <= hit["distance"] <= high + epsilon, (
                 f"COSINE distance {hit['distance']} outside [{low}, {high}]"
@@ -4967,6 +5059,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             assert any(1000 < e["int_val"] < 40000 for e in hit["structA"]), (
                 f"row {hit['id']} has no element matching scalar filter"
             )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: 1000 < e["int_val"] < 40000,
+            low=low,
+            high=high,
+        )
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4994,8 +5095,18 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
+        assert len(results[0]) > 0, "range search on growing segment returned 0 rows"
         for hit in results[0]:
             assert low - epsilon <= hit["distance"] <= high + epsilon
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_mixed_segments(self):
@@ -5025,6 +5136,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         ids = [h["id"] for h in results[0]]
         for hit in results[0]:
             assert low - epsilon <= hit["distance"] <= high + epsilon
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
         # recall hits from both segments (may be weaker for growing due to serial scan)
         has_sealed = any(i < 3000 for i in ids)
         has_growing = any(i >= 3000 for i in ids)
@@ -5062,10 +5182,20 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         assert check
         assert len(results) == 3, f"expect 3 result lists for nq=3, got {len(results)}"
         for q_idx, hits in enumerate(results):
+            assert len(hits) > 0, f"query {q_idx}: range search returned 0 rows"
             for hit in hits:
                 assert low - epsilon <= hit["distance"] <= high + epsilon, (
                     f"query {q_idx}: distance {hit['distance']} outside [{low}, {high}]"
                 )
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            query_vectors,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_l2_invalid_radius_less_than_range_filter(self):
@@ -5575,6 +5705,15 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
             assert low - epsilon <= hit["distance"] <= high + epsilon, (
                 f"iterator+range hit distance {hit['distance']} outside [{low}, {high}]"
             )
+        _assert_element_range_hits_ground_truth(
+            [all_hits],
+            data,
+            [qv],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
         dists = [h["distance"] for h in all_hits]
         for k in range(len(dists) - 1):
             assert dists[k] >= dists[k + 1] - epsilon, f"iterator distances not descending at {k}"
