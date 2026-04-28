@@ -358,31 +358,30 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			NodeID:       7,
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
-		task := &importTask{
-			alloc: nil,
-			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewCachedSegmentsInfo(),
+		segments := NewCachedSegmentsInfo()
+		segments.SetSegment(5, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        5,
+				NumOfRows: 100,
 			},
+		}, 0)
+		segments.SetSegment(6, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        6,
+				NumOfRows: 100,
+			},
+		}, 0)
+		taskMeta := newTestMetaFromCache(t, segments, nil)
+		taskMeta.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		task := &importTask{
+			alloc:      nil,
+			meta:       taskMeta,
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
-
-		task.meta.segments.SetSegment(5, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:        5,
-				NumOfRows: 100,
-			},
-		}, 0)
-		task.meta.segments.SetSegment(6, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:        6,
-				NumOfRows: 100,
-			},
-		}, 0)
 
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
@@ -398,10 +397,6 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				},
 			},
 		}, nil)
-
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.meta.catalog = catalog
-
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 		assert.Equal(t, int64(100), task.meta.segments.GetSegment(5).GetNumOfRows())
@@ -435,31 +430,30 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			NodeID:       7,
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
-		task := &importTask{
-			alloc: nil,
-			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewCachedSegmentsInfo(),
+		segments := NewCachedSegmentsInfo()
+		segments.SetSegment(5, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        5,
+				NumOfRows: 100,
 			},
+		}, 0)
+		segments.SetSegment(6, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        6,
+				NumOfRows: 100,
+			},
+		}, 0)
+		taskMeta := newTestMetaFromCache(t, segments, nil)
+		taskMeta.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		task := &importTask{
+			alloc:      nil,
+			meta:       taskMeta,
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
-
-		task.meta.segments.SetSegment(5, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:        5,
-				NumOfRows: 100,
-			},
-		}, 0)
-		task.meta.segments.SetSegment(6, &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:        6,
-				NumOfRows: 100,
-			},
-		}, 0)
 
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
@@ -475,10 +469,6 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				},
 			},
 		}, nil)
-
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.meta.catalog = catalog
-
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
 		assert.Equal(t, int64(100), task.meta.segments.GetSegment(5).GetNumOfRows())

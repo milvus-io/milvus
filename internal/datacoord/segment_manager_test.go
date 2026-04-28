@@ -34,9 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -200,7 +198,8 @@ func TestLastExpireReset(t *testing.T) {
 	rootPath := "/test/segment/last/expire"
 	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	metaKV.RemoveWithPrefix(ctx, "")
-	catalog := datacoord.NewCatalog(metaKV, "", "")
+	catalog := datacoord.NewCatalog(metaKV, "", rootPath)
+	segmentPersist := NewSegmentTxnWrapper(NewOptimisticTxnEtcdPersist(etcdCli))
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.Nil(t, err)
 	broker := broker.NewMockBroker(t)
@@ -213,7 +212,7 @@ func TestLastExpireReset(t *testing.T) {
 			},
 		},
 	}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, segmentPersist, rootPath)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
@@ -266,8 +265,9 @@ func TestLastExpireReset(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(), Params.EtcdCfg.EtcdTLSCACert.GetValue(), Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
-	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker, newTestSegmentPersist(), "")
+	newCatalog := datacoord.NewCatalog(newMetaKV, "", rootPath)
+	newSegmentPersist := NewSegmentTxnWrapper(NewOptimisticTxnEtcdPersist(newEtcdCli))
+	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker, newSegmentPersist, rootPath)
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
@@ -725,11 +725,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
+		segmentManager.meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("failed")})
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())
 		assert.NoError(t, err)
@@ -756,11 +752,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
-		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
+		segmentManager.meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("failed")})
 
 		ts, err := segmentManager.allocator.AllocTimestamp(context.Background())
 		assert.NoError(t, err)
@@ -937,58 +929,49 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 		cpTs    Timestamp
 	}
 
-	mockCatalog := mocks.NewDataCoordCatalog(t)
-	mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	seg1 := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:             1,
-			PartitionID:    partitionID,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Sealed,
-			NumOfRows:      1,
-			LastExpireTime: 100,
-		},
-	}
-	seg2 := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:             2,
-			PartitionID:    partitionID,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Sealed,
-			NumOfRows:      0,
-			LastExpireTime: 100,
-		},
-	}
-	seg3 := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:             3,
-			PartitionID:    partitionID,
-			InsertChannel:  "ch1",
-			State:          commonpb.SegmentState_Sealed,
-			LastExpireTime: 90,
-		},
-	}
-	seg4 := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:             4,
-			PartitionID:    partitionID,
-			InsertChannel:  "ch2",
-			State:          commonpb.SegmentState_Growing,
-			NumOfRows:      1,
-			LastExpireTime: 100,
-		},
-	}
 	newMetaFunc := func() *meta {
-		return &meta{
-			catalog: mockCatalog,
-			segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
-				1: seg1,
-				2: seg2,
-				3: seg3,
-				4: seg4,
-			}),
-		}
+		segments := newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             1,
+					PartitionID:    partitionID,
+					InsertChannel:  "ch1",
+					State:          commonpb.SegmentState_Sealed,
+					NumOfRows:      1,
+					LastExpireTime: 100,
+				},
+			},
+			2: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             2,
+					PartitionID:    partitionID,
+					InsertChannel:  "ch1",
+					State:          commonpb.SegmentState_Sealed,
+					NumOfRows:      0,
+					LastExpireTime: 100,
+				},
+			},
+			3: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             3,
+					PartitionID:    partitionID,
+					InsertChannel:  "ch1",
+					State:          commonpb.SegmentState_Sealed,
+					LastExpireTime: 90,
+				},
+			},
+			4: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             4,
+					PartitionID:    partitionID,
+					InsertChannel:  "ch2",
+					State:          commonpb.SegmentState_Growing,
+					NumOfRows:      1,
+					LastExpireTime: 100,
+				},
+			},
+		})
+		return newTestMetaFromCache(t, segments, nil)
 	}
 
 	tests := []struct {
@@ -1111,7 +1094,7 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 		basePath, ver, unmarshalErr := packed.UnmarshalManifestPath(segment.ManifestPath)
 		assert.NoError(t, unmarshalErr)
 		assert.NotEmpty(t, basePath)
-		assert.Equal(t, int64(-1), ver)
+		assert.Equal(t, packed.ManifestEarliest, ver)
 	})
 
 	t.Run("StorageV2 segment has no manifest path", func(t *testing.T) {

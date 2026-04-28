@@ -506,11 +506,9 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 			},
 		}, 0)
 
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
@@ -544,11 +542,9 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 			}, 0)
 		}
 
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
@@ -565,19 +561,16 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 	})
 
 	t.Run("update_segments_failed", func(t *testing.T) {
-		catalog := &stubCatalog{
-			alterSegmentErr: errors.New("alter segments failed"),
-		}
+		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
 		// Create segments info
 		segments := NewCachedSegmentsInfo()
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
+		mt.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("alter segments failed")})
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
 			TaskId:         1001,
@@ -1336,10 +1329,8 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	assert.NoError(t, err)
 
 	segments := NewCachedSegmentsInfo()
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
@@ -1526,10 +1517,8 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 		},
 	}, 0)
 
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	protoTask := &datapb.ExternalCollectionRefreshTask{
@@ -1579,10 +1568,8 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 		}, 0)
 	}
 
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	protoTask := &datapb.ExternalCollectionRefreshTask{

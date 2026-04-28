@@ -2215,9 +2215,10 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		// Add segments to drop (timestamp <= flushTs)
 		seg1 := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
+				ID:            1,
+				CollectionID:  collectionID,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
 				DmlPosition: &msgpb.MsgPosition{
 					Timestamp: flushTs - 100, // less than flushTs
 				},
@@ -2229,9 +2230,10 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		// Add segment that should not be dropped (timestamp > flushTs)
 		seg2 := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
+				ID:            2,
+				CollectionID:  collectionID,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
 				DmlPosition: &msgpb.MsgPosition{
 					Timestamp: flushTs + 100, // greater than flushTs
 				},
@@ -2239,12 +2241,6 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		}
 		err = meta.AddSegment(ctx, seg2)
 		assert.NoError(t, err)
-
-		// Set segment channel
-		seg1.InsertChannel = channelName
-		seg2.InsertChannel = channelName
-		meta.segments.SetSegment(seg1.ID, seg1, 0)
-		meta.segments.SetSegment(seg2.ID, seg2, 0)
 
 		err = s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
 		assert.NoError(t, err)
