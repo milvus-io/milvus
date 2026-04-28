@@ -2255,6 +2255,11 @@ ChunkedSegmentSealedImpl::find_first_n_element(
         limit = static_cast<int64_t>(element_bitset.size());
     }
 
+    // We iterate matching elements by global element id, which maps back
+    // to (doc_offset, element_offset). The cursor, however, only tells us the
+    // last returned PK and element offset. Find the row for that PK first; the
+    // scan can then skip only elements from that row whose element offset has
+    // already been returned.
     std::optional<int64_t> cursor_doc_offset;
     if (cursor.has_value()) {
         auto pk_field_id =
@@ -2311,16 +2316,6 @@ ChunkedSegmentSealedImpl::find_first_n_element(
             element_indices.back().push_back(static_cast<int32_t>(elem_idx));
         }
         hit_num++;
-        elem_opt = element_bitset.find_next(elem_id, false);
-    }
-
-    while (elem_opt.has_value() && cursor_doc_offset.has_value()) {
-        int64_t elem_id = static_cast<int64_t>(elem_opt.value());
-        auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
-        if (doc_id != cursor_doc_offset.value() ||
-            elem_idx > cursor->last_element_offset) {
-            break;
-        }
         elem_opt = element_bitset.find_next(elem_id, false);
     }
 
