@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <limits>
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
@@ -2675,80 +2674,6 @@ NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
     return result;
 }
 
-// Narrow an arrow integer array to a smaller-width integer builder.
-// Required because some external sources (notably iceberg) only have
-// IntegerType / LongType and widen Int8/Int16 to Int32/Int64 on read.
-// Without explicit narrowing, downstream FillFieldData reinterpret_casts
-// the wider buffer as the narrower type and reads bytewise garbage.
-template <typename SrcArray, typename DstBuilder, typename DstT>
-static std::shared_ptr<arrow::Array>
-NarrowIntArray(const std::shared_ptr<arrow::Array>& src_arr,
-               const char* dst_name) {
-    auto src = std::static_pointer_cast<SrcArray>(src_arr);
-    DstBuilder builder;
-    auto status = builder.Reserve(src->length());
-    AssertInfo(status.ok(),
-               "NarrowIntArray reserve failed: " + status.ToString());
-    constexpr auto lo = std::numeric_limits<DstT>::min();
-    constexpr auto hi = std::numeric_limits<DstT>::max();
-    for (int64_t i = 0; i < src->length(); ++i) {
-        if (src->IsNull(i)) {
-            AssertInfo(builder.AppendNull().ok(), "AppendNull failed");
-            continue;
-        }
-        auto v = src->Value(i);
-        AssertInfo(v >= lo && v <= hi,
-                   "{} narrowing overflow: source value {} out of range "
-                   "[{}, {}]",
-                   dst_name,
-                   static_cast<int64_t>(v),
-                   static_cast<int64_t>(lo),
-                   static_cast<int64_t>(hi));
-        AssertInfo(builder.Append(static_cast<DstT>(v)).ok(),
-                   "Append narrowed int failed");
-    }
-    std::shared_ptr<arrow::Array> out;
-    AssertInfo(builder.Finish(&out).ok(), "NarrowIntArray finish failed");
-    return out;
-}
-
-// Dispatch wider-int arrow source to a narrower milvus int field by
-// matching (DataType, arrow::Type::type). Returns nullptr if no narrowing
-// applies; caller continues original dispatch.
-static std::shared_ptr<arrow::Array>
-MaybeNarrowInt(DataType data_type, const std::shared_ptr<arrow::Array>& array) {
-    auto type_id = array->type_id();
-    if (data_type == DataType::INT8) {
-        if (type_id == arrow::Type::INT16)
-            return NarrowIntArray<arrow::Int16Array,
-                                  arrow::Int8Builder,
-                                  int8_t>(array, "INT8");
-        if (type_id == arrow::Type::INT32)
-            return NarrowIntArray<arrow::Int32Array,
-                                  arrow::Int8Builder,
-                                  int8_t>(array, "INT8");
-        if (type_id == arrow::Type::INT64)
-            return NarrowIntArray<arrow::Int64Array,
-                                  arrow::Int8Builder,
-                                  int8_t>(array, "INT8");
-    }
-    if (data_type == DataType::INT16) {
-        if (type_id == arrow::Type::INT32)
-            return NarrowIntArray<arrow::Int32Array,
-                                  arrow::Int16Builder,
-                                  int16_t>(array, "INT16");
-        if (type_id == arrow::Type::INT64)
-            return NarrowIntArray<arrow::Int64Array,
-                                  arrow::Int16Builder,
-                                  int16_t>(array, "INT16");
-    }
-    if (data_type == DataType::INT32 && type_id == arrow::Type::INT64) {
-        return NarrowIntArray<arrow::Int64Array, arrow::Int32Builder, int32_t>(
-            array, "INT32");
-    }
-    return nullptr;
-}
-
 std::shared_ptr<arrow::DataType>
 ExpectedScalarArrowType(DataType data_type) {
     switch (data_type) {
@@ -2807,13 +2732,6 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array_in,
     // (recursive into list inner). Downstream branches only need to dispatch
     // on canonical type_ids.
     auto array = CanonicalizeArrowVariants(array_in);
-    // Integer narrowing: source readers (e.g. iceberg) may widen Int8/Int16
-    // to Int32/Int64 because their type system lacks narrow ints. Narrow
-    // explicitly so downstream FillFieldData reinterpret-cast doesn't read
-    // bytewise garbage.
-    if (auto narrowed = MaybeNarrowInt(data_type, array); narrowed != nullptr) {
-        array = narrowed;
-    }
     auto type_id = array->type_id();
 
     if (data_type == DataType::TIMESTAMPTZ) {

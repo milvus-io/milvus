@@ -1932,10 +1932,8 @@ TEST(NormalizeExternalArrow, VarcharFillFieldDataSucceedsWithString) {
     EXPECT_EQ(field_data->get_num_rows(), 3);
 }
 
-// FillFieldData for VARCHAR crashes with arrow::BINARY input (after normalize).
-// This is the exact bug scenario: internal binlog VARCHAR (STRING) gets
-// normalized to BINARY, then FillFieldData asserts STRING → crash.
-TEST(NormalizeExternalArrow, VarcharFillFieldDataFailsWithBinary) {
+// FillFieldData for VARCHAR accepts arrow::BINARY input after normalize.
+TEST(NormalizeExternalArrow, VarcharFillFieldDataSucceedsWithBinary) {
     auto str_array = MakeStringArray({"hello", "world"});
 
     // Simulate what NormalizeExternalArrow does: STRING → BINARY
@@ -1949,8 +1947,8 @@ TEST(NormalizeExternalArrow, VarcharFillFieldDataFailsWithBinary) {
 
     // Use base class pointer to avoid overload ambiguity.
     milvus::FieldDataBase* base = field_data.get();
-    // This must fail because FillFieldData asserts arrow::STRING for VARCHAR.
-    EXPECT_THROW(base->FillFieldData(chunked), std::exception);
+    EXPECT_NO_THROW(base->FillFieldData(chunked));
+    EXPECT_EQ(field_data->get_num_rows(), 2);
 }
 
 // JSON STRING passes through NormalizeExternalArrow → BINARY (expected).

@@ -89,10 +89,11 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 		Format:     "iceberg-table",
 		SnapshotID: tableInfo.SnapshotID,
 		Extfs: map[string]string{
+			"bucket_name":      bucket,
 			"region":           "us-east-1",
 			"use_ssl":          "false",
 			"use_virtual_host": "false",
-			"cloud_provider":   "aws",
+			"cloud_provider":   "minio",
 			"access_key_id":    minioAccessKey,
 			"access_key_value": minioSecretKey,
 		},
@@ -138,6 +139,7 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	refreshStart := time.Now()
 	refreshResult, err := mc.RefreshExternalCollection(ctx,
 		client.NewRefreshExternalCollectionOption(collName).
+			WithExternalSource(externalSource).
 			WithExternalSpec(externalSpec))
 	common.CheckErr(t, err, true)
 	jobID := refreshResult.JobID
@@ -208,6 +210,103 @@ refreshDone:
 	t.Logf("[Phase 5] Query returned %d rows", queryResult.GetColumn("pk").Len())
 
 	t.Log("=== Iceberg E2E Test PASSED ===")
+}
+
+// TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch verifies that
+// RefreshExternalCollection fails during sample when the collection schema
+// declares a different type from the external Arrow column type.
+func TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch(t *testing.T) {
+	if err := checkPythonDeps("python3", "pyarrow", "pyiceberg"); err != nil {
+		t.Skipf("Python deps for Iceberg unavailable, skipping: %v", err)
+	}
+
+	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
+	minioEndpoint := icebergEnvOrDefault("ICEBERG_MINIO_ENDPOINT", "http://"+minioAddr)
+	minioAccessKey := icebergEnvOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := icebergEnvOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
+	bucket := icebergEnvOrDefault("ICEBERG_MINIO_BUCKET", "a-bucket")
+	collName := common.GenRandomString("iceberg_schema_mismatch", 6)
+	tablePath := fmt.Sprintf("iceberg-test/%s", collName)
+
+	tableInfo := createIcebergTestTable(
+		t, minioEndpoint, minioAccessKey, minioSecretKey,
+		bucket, tablePath, "16", "4")
+
+	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
+	externalSource := toMilvusURI(tableInfo.MetadataLocation, minioHost)
+
+	type externalSpecJSON struct {
+		Format     string            `json:"format"`
+		SnapshotID int64             `json:"snapshot_id,string"`
+		Extfs      map[string]string `json:"extfs,omitempty"`
+	}
+	specObj := externalSpecJSON{
+		Format:     "iceberg-table",
+		SnapshotID: tableInfo.SnapshotID,
+		Extfs: map[string]string{
+			"bucket_name":      bucket,
+			"region":           "us-east-1",
+			"use_ssl":          "false",
+			"use_virtual_host": "false",
+			"cloud_provider":   "minio",
+			"access_key_id":    minioAccessKey,
+			"access_key_value": minioSecretKey,
+		},
+	}
+	specBytes, err := json.Marshal(specObj)
+	require.NoError(t, err)
+	externalSpec := string(specBytes)
+
+	ctx := hp.CreateContext(t, 10*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().WithName("pk").WithDataType(entity.FieldTypeInt64).WithExternalField("pk")).
+		// The external Iceberg column "label" is a string, but the Milvus
+		// schema intentionally declares it as Int64. Refresh should fail
+		// while sampling field sizes, before load/search.
+		WithField(entity.NewField().WithName("label_as_int").WithDataType(entity.FieldTypeInt64).WithExternalField("label")).
+		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(tableInfo.Dim)).WithExternalField("vector"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshResult, err := mc.RefreshExternalCollection(ctx,
+		client.NewRefreshExternalCollectionOption(collName).
+			WithExternalSource(externalSource).
+			WithExternalSpec(externalSpec))
+	common.CheckErr(t, err, true)
+
+	deadline := time.After(5 * time.Minute)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("refresh did not fail on schema type mismatch before timeout")
+		case <-ticker.C:
+			progress, err := mc.GetRefreshExternalCollectionProgress(ctx,
+				client.NewGetRefreshExternalCollectionProgressOption(refreshResult.JobID))
+			require.NoError(t, err)
+			t.Logf("schema mismatch refresh job %d: state=%s reason=%s",
+				refreshResult.JobID, progress.State, progress.Reason)
+			switch progress.State {
+			case entity.RefreshStateCompleted:
+				t.Fatalf("refresh unexpectedly completed despite label string -> Int64 schema mismatch")
+			case entity.RefreshStateFailed:
+				require.Contains(t, progress.Reason, "field type mismatch")
+				require.Contains(t, progress.Reason, "expected Arrow int64")
+				require.Contains(t, progress.Reason, "actual Arrow string")
+				return
+			}
+		}
+	}
 }
 
 // createIcebergTestTable runs the Python script to create an Iceberg table on MinIO.
