@@ -35,6 +35,7 @@
 #include "segcore/Collection.h"
 #include "segcore/ReduceStructure.h"
 #include "segcore/collection_c.h"
+#include "segcore/reduce/GroupReduce.h"
 #include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "segcore/segment_c.h"
@@ -119,6 +120,24 @@ class TestReduceHelper : public ReduceHelper {
     std::unordered_map<SearchResult*, bool>
         search_result_refine_enabled_by_result_for_test_;
 };
+
+class TestGroupReduceHelper : public GroupReduceHelper {
+ public:
+    using GroupReduceHelper::GroupReduceHelper;
+    using GroupReduceHelper::ReduceResultData;
+
+    const std::vector<std::vector<std::vector<int64_t>>>&
+    FinalSearchRecordsForTest() const {
+        return final_search_records_;
+    }
+};
+
+CompositeGroupKey
+MakeInt64CompositeKey(int64_t v) {
+    CompositeGroupKey key;
+    key.Add(GroupByValueType(std::in_place, v));
+    return key;
+}
 
 }  // namespace
 
@@ -366,6 +385,48 @@ TEST(CApiTest, ReduceKeepsDistinctElementLevelHitsWithSamePK) {
                             slice_topks.data(),
                             slice_nqs.size(),
                             nullptr);
+
+    helper.ReduceResultData();
+
+    EXPECT_EQ(seg0.result_offsets_, std::vector<int64_t>({0, 1, 2}));
+    ASSERT_EQ(helper.FinalSearchRecordsForTest().size(), 1);
+    ASSERT_EQ(helper.FinalSearchRecordsForTest()[0].size(), 1);
+    EXPECT_EQ(helper.FinalSearchRecordsForTest()[0][0],
+              std::vector<int64_t>({0, 1, 3}));
+}
+
+TEST(CApiTest, GroupReduceKeepsDistinctElementLevelHitsWithSamePK) {
+    SearchResult seg0;
+    seg0.total_nq_ = 1;
+    seg0.topk_per_nq_prefix_sum_ = {0, 4};
+    seg0.primary_keys_ = {
+        int64_t(5),
+        int64_t(5),
+        int64_t(5),
+        int64_t(6),
+    };
+    seg0.distances_ = {0.99f, 0.98f, 0.97f, 0.96f};
+    seg0.seg_offsets_ = {10, 10, 10, 11};
+    seg0.element_level_ = true;
+    seg0.element_indices_ = {0, 1, 1, 0};
+    seg0.group_size_ = 2;
+    seg0.composite_group_by_values_ = std::vector<CompositeGroupKey>{
+        MakeInt64CompositeKey(5),
+        MakeInt64CompositeKey(5),
+        MakeInt64CompositeKey(5),
+        MakeInt64CompositeKey(6),
+    };
+
+    std::vector<SearchResult*> search_results{&seg0};
+    std::vector<int64_t> slice_nqs{1};
+    std::vector<int64_t> slice_topks{2};
+    TestGroupReduceHelper helper(search_results,
+                                 nullptr,
+                                 nullptr,
+                                 slice_nqs.data(),
+                                 slice_topks.data(),
+                                 slice_nqs.size(),
+                                 nullptr);
 
     helper.ReduceResultData();
 
