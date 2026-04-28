@@ -1051,6 +1051,7 @@ func TestReplicaManagerConcurrent(t *testing.T) {
 
 func TestReplicaManagerIndexInvariant(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ReleaseReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1094,6 +1095,7 @@ func TestReplicaManagerIndexInvariant(t *testing.T) {
 
 func TestReplicaManagerCollectionViewAfterPartialUpdateAndRemove(t *testing.T) {
 	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ReleaseReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
