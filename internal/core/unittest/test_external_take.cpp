@@ -244,7 +244,7 @@ BuildExternalSchema() {
     info.vec_id = FieldId(108);
 
     // Scalar fields: FieldMeta(name, id, type, nullable, default_value, external_field)
-    // All external fields are nullable=true (forced by ValidateExternalCollectionSchema)
+    // External scalar fields are nullable=true (forced by ValidateExternalCollectionSchema)
     schema->AddField(FieldMeta(FieldName("bool_col"),
                                info.bool_id,
                                DataType::BOOL,
@@ -384,7 +384,7 @@ BuildExternalSchemaWithVirtualPK() {
                                DataType::INT64,
                                false,
                                std::nullopt));
-    // External fields (nullable=true, forced by ValidateExternalCollectionSchema)
+    // External scalar fields (nullable=true, forced by ValidateExternalCollectionSchema)
     schema->AddField(FieldMeta(FieldName("int32_col"),
                                info.int32_id,
                                DataType::INT32,
