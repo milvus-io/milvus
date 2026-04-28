@@ -14,7 +14,7 @@ Coverage:
        - scalar: INVERTED, BITMAP, STL_SORT, TRIE
        - mmap.enabled toggle on index and collection level
   6. DML blocked (insert / upsert / delete / flush)
-  7. DDL blocked (create/drop partition, compact, add_field, truncate xfail)
+  7. DDL blocked (create/drop partition, compact, add_field, truncate)
   8. Refresh semantics (basic / incremental / atomic source override /
      concurrent / job list / many files / flat-prefix-only / non-existent
      and normal-collection rejection / empty source / schema mismatch /
@@ -99,6 +99,43 @@ def build_external_source(cfg, key_prefix):
     return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
 
 
+def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra):
+    """Build an external_spec accepted by current master validation.
+
+    Current server-side validation requires external sources to carry a
+    self-contained extfs block. The tests use Milvus-form S3 URLs
+    (s3://<endpoint>/<bucket>/<prefix>/), so cloud_provider=minio keeps the
+    endpoint from the URI instead of deriving a cloud endpoint.
+    """
+    cfg = cfg or get_minio_config()
+    spec = {
+        "format": fmt,
+        "extfs": {
+            "cloud_provider": cloud_provider,
+            "region": "us-east-1",
+            "access_key_id": cfg["access_key"],
+            "access_key_value": cfg["secret_key"],
+            "use_ssl": "true" if cfg["secure"] else "false",
+        },
+    }
+    spec.update(extra)
+    return json.dumps(spec, separators=(",", ":"))
+
+
+def build_external_spec_for_scheme(scheme, cfg=None, fmt="parquet"):
+    """Build a validation-only spec whose cloud_provider matches the URI scheme."""
+    provider = {
+        "s3": "aws",
+        "s3a": "aws",
+        "aws": "aws",
+        "minio": "minio",
+        "oss": "aliyun",
+        "gs": "gcp",
+        "gcs": "gcp",
+    }[scheme]
+    return build_external_spec(cfg=cfg, fmt=fmt, cloud_provider=provider)
+
+
 def new_minio_client(cfg):
     return Minio(
         cfg["address"],
@@ -162,11 +199,13 @@ def gen_parquet_bytes(num_rows, start_id, scalar_name, arrow_type, value_fn, dim
     """Generate a Parquet file with columns: id, <scalar_name>, embedding (float_vec)."""
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        scalar_name: pa.array([value_fn(i) for i in ids], type=arrow_type),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            scalar_name: pa.array([value_fn(i) for i in ids], type=arrow_type),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -175,36 +214,84 @@ def gen_parquet_bytes(num_rows, start_id, scalar_name, arrow_type, value_fn, dim
 def gen_basic_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
     """Generate a Parquet file with columns: id, value (float), embedding."""
     return gen_parquet_bytes(
-        num_rows, start_id, "value", pa.float32(),
-        lambda i: float(i) * 1.5, dim=dim,
+        num_rows,
+        start_id,
+        "value",
+        pa.float32(),
+        lambda i: float(i) * 1.5,
+        dim=dim,
     )
+
+
+def gen_zero_row_basic_parquet_bytes(dim=TEST_DIM):
+    """Well-formed 0-row parquet with the basic external schema."""
+    table = pa.table(
+        {
+            "id": pa.array([], type=pa.int64()),
+            "value": pa.array([], type=pa.float32()),
+            "embedding": pa.FixedSizeListArray.from_arrays(
+                pa.array([], type=pa.float32()),
+                list_size=dim,
+            ),
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
 
 
 def gen_parquet_bytes_with_codec(num_rows, start_id, codec, dim=TEST_DIM):
     """Like gen_basic_parquet_bytes but with an explicit Parquet compression codec."""
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=codec)
     return buf.getvalue()
 
 
-def gen_array_parquet_bytes(num_rows, start_id, arr_name, arr_element_arrow_type,
-                            arr_value_fn, dim=TEST_DIM):
+def gen_array_parquet_bytes(num_rows, start_id, arr_name, arr_element_arrow_type, arr_value_fn, dim=TEST_DIM):
     """Parquet with an Array-typed column: id, <arr_name> (list<element>), embedding."""
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            arr_name: pa.array([arr_value_fn(i) for i in ids], type=pa.list_(arr_element_arrow_type)),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
+def gen_dtype_mismatch_parquet_bytes(
+    num_rows, start_id, mismatch_name, mismatch_array, dim=TEST_DIM, include_embedding=True
+):
+    """Parquet with a deliberately incompatible user column.
+
+    The id column and optional embedding are valid so failures can be
+    attributed to the requested Milvus type vs external Arrow type mapping.
+    """
+    ids = list(range(start_id, start_id + num_rows))
+    columns = {
         "id": pa.array(ids, type=pa.int64()),
-        arr_name: pa.array([arr_value_fn(i) for i in ids],
-                           type=pa.list_(arr_element_arrow_type)),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+        mismatch_name: mismatch_array,
+    }
+    if include_embedding:
+        vectors = _float_vectors(ids, dim)
+        columns["embedding"] = pa.FixedSizeListArray.from_arrays(
+            vectors.flatten(),
+            list_size=dim,
+        )
+    table = pa.table(columns)
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -221,31 +308,37 @@ def gen_vector_variant_parquet_bytes(num_rows, start_id, vec_field, vec_dtype, d
         # Milvus reads this back as float16 by reinterpreting the uint16 buffer.
         arr = _float16_vectors(ids, dim).view(np.uint16)
         parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()), list_size=dim,
+            pa.array(arr.flatten(), type=pa.uint16()),
+            list_size=dim,
         )
     elif vec_dtype == DataType.BFLOAT16_VECTOR:
         arr = _bfloat16_vectors(ids, dim)
         # Store as uint16; Milvus reader must interpret as bfloat16 raw bits.
         parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()), list_size=dim,
+            pa.array(arr.flatten(), type=pa.uint16()),
+            list_size=dim,
         )
     elif vec_dtype == DataType.INT8_VECTOR:
         arr = _int8_vectors(ids, dim)
         parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.int8()), list_size=dim,
+            pa.array(arr.flatten(), type=pa.int8()),
+            list_size=dim,
         )
     elif vec_dtype == DataType.BINARY_VECTOR:
         arr = _binary_vectors_bytes(ids, dim)
         parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint8()), list_size=dim // 8,
+            pa.array(arr.flatten(), type=pa.uint8()),
+            list_size=dim // 8,
         )
     else:
         raise ValueError(f"unsupported vec_dtype {vec_dtype}")
 
-    table = pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        vec_field: parquet_col,
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            vec_field: parquet_col,
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -259,19 +352,21 @@ def gen_all_scalar_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
     """
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id":          pa.array(ids, type=pa.int64()),
-        "val_bool":    pa.array([i % 2 == 0 for i in ids], type=pa.bool_()),
-        "val_int8":    pa.array([i % 100 for i in ids], type=pa.int8()),
-        "val_int16":   pa.array([i * 3 for i in ids], type=pa.int16()),
-        "val_int32":   pa.array([i * 7 for i in ids], type=pa.int32()),
-        "val_int64":   pa.array([i * 1000 for i in ids], type=pa.int64()),
-        "val_float":   pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-        "val_double":  pa.array([float(i) * 2.5 for i in ids], type=pa.float64()),
-        "val_varchar": pa.array([f"s_{i:05d}" for i in ids], type=pa.string()),
-        "val_json":    pa.array([json.dumps({"k": i, "g": i % 3}) for i in ids], type=pa.string()),
-        "embedding":   pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "val_bool": pa.array([i % 2 == 0 for i in ids], type=pa.bool_()),
+            "val_int8": pa.array([i % 100 for i in ids], type=pa.int8()),
+            "val_int16": pa.array([i * 3 for i in ids], type=pa.int16()),
+            "val_int32": pa.array([i * 7 for i in ids], type=pa.int32()),
+            "val_int64": pa.array([i * 1000 for i in ids], type=pa.int64()),
+            "val_float": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+            "val_double": pa.array([float(i) * 2.5 for i in ids], type=pa.float64()),
+            "val_varchar": pa.array([f"s_{i:05d}" for i in ids], type=pa.string()),
+            "val_json": pa.array([json.dumps({"k": i, "g": i % 3}) for i in ids], type=pa.string()),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -282,14 +377,17 @@ def gen_multi_vector_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
     ids = list(range(start_id, start_id + num_rows))
     float_arr = _float_vectors(ids, dim)
     bin_arr = _binary_vectors_bytes(ids, BINARY_DIM)
-    table = pa.table({
-        "id":        pa.array(ids, type=pa.int64()),
-        "value":     pa.array([float(i) for i in ids], type=pa.float32()),
-        "dense_vec": pa.FixedSizeListArray.from_arrays(float_arr.flatten(), list_size=dim),
-        "bin_vec":   pa.FixedSizeListArray.from_arrays(
-            pa.array(bin_arr.flatten(), type=pa.uint8()), list_size=BINARY_DIM // 8,
-        ),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "value": pa.array([float(i) for i in ids], type=pa.float32()),
+            "dense_vec": pa.FixedSizeListArray.from_arrays(float_arr.flatten(), list_size=dim),
+            "bin_vec": pa.FixedSizeListArray.from_arrays(
+                pa.array(bin_arr.flatten(), type=pa.uint8()),
+                list_size=BINARY_DIM // 8,
+            ),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -310,11 +408,32 @@ def gen_timestamptz_parquet_bytes(num_rows, start_id, dim=TEST_DIM, ts_unit="us"
         ts_vals = [(base + i) * 1_000 for i in ids]
     else:
         ts_vals = [base + i for i in ids]
-    table = pa.table({
-        "id":        pa.array(ids, type=pa.int64()),
-        "ts":        pa.array(ts_vals, type=pa.timestamp(ts_unit)),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "ts": pa.array(ts_vals, type=pa.timestamp(ts_unit)),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
+    return buf.getvalue()
+
+
+def gen_geometry_wkt_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
+    """Parquet with Geometry stored as WKT strings, matching user datasets."""
+    ids = list(range(start_id, start_id + num_rows))
+    vectors = _float_vectors(ids, dim)
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "geo": pa.array([f"POINT({i}.0 {i}.0)" for i in ids], type=pa.string()),
+            "embedding": pa.FixedSizeListArray.from_arrays(
+                vectors.flatten(),
+                list_size=dim,
+            ),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -330,14 +449,16 @@ def gen_all_null_columns_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
     """
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id":          pa.array(ids, type=pa.int64()),
-        "n_int":       pa.array([None] * num_rows, type=pa.int32()),
-        "n_float":     pa.array([None] * num_rows, type=pa.float32()),
-        "n_varchar":   pa.array([None] * num_rows, type=pa.string()),
-        "n_json":      pa.array([None] * num_rows, type=pa.string()),
-        "embedding":   pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "n_int": pa.array([None] * num_rows, type=pa.int32()),
+            "n_float": pa.array([None] * num_rows, type=pa.float32()),
+            "n_varchar": pa.array([None] * num_rows, type=pa.string()),
+            "n_json": pa.array([None] * num_rows, type=pa.string()),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
     return buf.getvalue()
@@ -353,14 +474,17 @@ def gen_large_parquet_with_row_groups(num_rows, start_id, row_group_size, dim=TE
     """
     ids = list(range(start_id, start_id + num_rows))
     vectors = _float_vectors(ids, dim)
-    table = pa.table({
-        "id":        pa.array(ids, type=pa.int64()),
-        "value":     pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-        "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-    })
+    table = pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
+        }
+    )
     buf = io.BytesIO()
     pq.write_table(
-        table, buf,
+        table,
+        buf,
         compression=_PARQUET_COMPRESSION,
         row_group_size=row_group_size,
     )
@@ -383,27 +507,27 @@ def gen_large_parquet_with_row_groups(num_rows, start_id, row_group_size, dim=TE
 
 FULL_MATRIX_SCALAR_FIELDS = [
     # (field_name, DataType,           pa type,            milvus add_field extras, value_fn)
-    ("b_inv",     DataType.BOOL,       pa.bool_(),         {},                    lambda i: i % 2 == 0),
-    ("i8_bmp",    DataType.INT8,       pa.int8(),          {},                    lambda i: i % 100),
-    ("i16_inv",   DataType.INT16,      pa.int16(),         {},                    lambda i: (i * 3) % 32000),
-    ("i32_stl",   DataType.INT32,      pa.int32(),         {},                    lambda i: i * 7),
-    ("i64_inv",   DataType.INT64,      pa.int64(),         {},                    lambda i: i * 1000),
-    ("f_inv",     DataType.FLOAT,      pa.float32(),       {},                    lambda i: float(i) * 1.5),
-    ("d_inv",     DataType.DOUBLE,     pa.float64(),       {},                    lambda i: float(i) * 2.5),
-    ("vc_trie",   DataType.VARCHAR,    pa.string(),        {"max_length": 64},    lambda i: f"s_{i:05d}"),
-    ("j",         DataType.JSON,       pa.string(),        {},                    lambda i: json.dumps({"k": i, "g": i % 3})),
-    ("ts",        DataType.TIMESTAMPTZ, pa.timestamp("us"), {},                   lambda i: (1_700_000_000 + i) * 1_000_000),
+    ("b_inv", DataType.BOOL, pa.bool_(), {}, lambda i: i % 2 == 0),
+    ("i8_bmp", DataType.INT8, pa.int8(), {}, lambda i: i % 100),
+    ("i16_inv", DataType.INT16, pa.int16(), {}, lambda i: (i * 3) % 32000),
+    ("i32_stl", DataType.INT32, pa.int32(), {}, lambda i: i * 7),
+    ("i64_inv", DataType.INT64, pa.int64(), {}, lambda i: i * 1000),
+    ("f_inv", DataType.FLOAT, pa.float32(), {}, lambda i: float(i) * 1.5),
+    ("d_inv", DataType.DOUBLE, pa.float64(), {}, lambda i: float(i) * 2.5),
+    ("vc_trie", DataType.VARCHAR, pa.string(), {"max_length": 64}, lambda i: f"s_{i:05d}"),
+    ("j", DataType.JSON, pa.string(), {}, lambda i: json.dumps({"k": i, "g": i % 3})),
+    ("ts", DataType.TIMESTAMPTZ, pa.timestamp("us"), {}, lambda i: (1_700_000_000 + i) * 1_000_000),
 ]
 
 # Scalar indexes wired per field. None means no scalar index built.
 FULL_MATRIX_SCALAR_INDEXES = {
-    "b_inv":   "INVERTED",
-    "i8_bmp":  "BITMAP",
+    "b_inv": "INVERTED",
+    "i8_bmp": "BITMAP",
     "i16_inv": "INVERTED",
     "i32_stl": "STL_SORT",
     "i64_inv": "INVERTED",
-    "f_inv":   "INVERTED",
-    "d_inv":   "INVERTED",
+    "f_inv": "INVERTED",
+    "d_inv": "INVERTED",
     "vc_trie": "TRIE",
     # j (JSON) and ts (Timestamptz) are stored without scalar index.
 }
@@ -429,22 +553,21 @@ FULL_MATRIX_BINARY_DIM = 128  # multiple of 8
 
 # Vector fields. Each entry: (name, DataType, dim, index_type, metric, params).
 FULL_MATRIX_VECTOR_FIELDS = [
-    ("fv_auto",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
-    ("fv_flat",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "FLAT",          "L2",      {}),
-    ("fv_hnsw",   DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "HNSW",          "L2",      {"M": 8, "efConstruction": 64}),
-    ("fv_ivf",    DataType.FLOAT_VECTOR,    FULL_MATRIX_DIM,        "IVF_FLAT",      "L2",      {"nlist": 8}),
-    ("f16v",      DataType.FLOAT16_VECTOR,  FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
-    ("bf16v",     DataType.BFLOAT16_VECTOR, FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
-    ("binv_flat", DataType.BINARY_VECTOR,   FULL_MATRIX_BINARY_DIM, "BIN_FLAT",      "HAMMING", {}),
-    ("binv_ivf",  DataType.BINARY_VECTOR,   FULL_MATRIX_BINARY_DIM, "BIN_IVF_FLAT",  "HAMMING", {"nlist": 8}),
-    ("i8v",       DataType.INT8_VECTOR,     FULL_MATRIX_DIM,        "AUTOINDEX",     "L2",      {}),
+    ("fv_auto", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
+    ("fv_flat", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "FLAT", "L2", {}),
+    ("fv_hnsw", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "HNSW", "L2", {"M": 8, "efConstruction": 64}),
+    ("fv_ivf", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "IVF_FLAT", "L2", {"nlist": 8}),
+    ("f16v", DataType.FLOAT16_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
+    ("bf16v", DataType.BFLOAT16_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
+    ("binv_flat", DataType.BINARY_VECTOR, FULL_MATRIX_BINARY_DIM, "BIN_FLAT", "HAMMING", {}),
+    ("binv_ivf", DataType.BINARY_VECTOR, FULL_MATRIX_BINARY_DIM, "BIN_IVF_FLAT", "HAMMING", {"nlist": 8}),
+    ("i8v", DataType.INT8_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
 ]
 
 
-def _full_matrix_arrow_columns(num_rows, start_id,
-                               dim=FULL_MATRIX_DIM,
-                               bin_dim=FULL_MATRIX_BINARY_DIM,
-                               excluded_fields=()):
+def _full_matrix_arrow_columns(
+    num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
+):
     """Build a dict {column_name → pyarrow.Array} that fits both parquet and
     Lance. Column layout matches FULL_MATRIX_SCALAR_FIELDS / VECTOR_FIELDS;
     each milvus field reads from a uniquely-named column.
@@ -465,8 +588,7 @@ def _full_matrix_arrow_columns(num_rows, start_id,
     # Array<Int64>
     arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
     if arr_name not in excluded:
-        columns[arr_name] = pa.array([arr_value_fn(i) for i in ids],
-                                     type=pa.list_(pa.int64()))
+        columns[arr_name] = pa.array([arr_value_fn(i) for i in ids], type=pa.list_(pa.int64()))
 
     # Geometry as binary (WKB).
     if "geo" not in excluded:
@@ -488,35 +610,37 @@ def _full_matrix_arrow_columns(num_rows, start_id,
             continue
         if vtype == DataType.FLOAT_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(fv_arr, type=pa.float32()), list_size=vdim,
+                pa.array(fv_arr, type=pa.float32()),
+                list_size=vdim,
             )
         elif vtype == DataType.FLOAT16_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(f16_arr, type=pa.uint16()), list_size=vdim,
+                pa.array(f16_arr, type=pa.uint16()),
+                list_size=vdim,
             )
         elif vtype == DataType.BFLOAT16_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bf16_arr, type=pa.uint16()), list_size=vdim,
+                pa.array(bf16_arr, type=pa.uint16()),
+                list_size=vdim,
             )
         elif vtype == DataType.INT8_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(i8_arr, type=pa.int8()), list_size=vdim,
+                pa.array(i8_arr, type=pa.int8()),
+                list_size=vdim,
             )
         elif vtype == DataType.BINARY_VECTOR:
             columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bin_arr, type=pa.uint8()), list_size=vdim // 8,
+                pa.array(bin_arr, type=pa.uint8()),
+                list_size=vdim // 8,
             )
         else:
             raise ValueError(f"unsupported vector dtype {vtype}")
     return columns
 
 
-def gen_full_matrix_parquet_bytes(num_rows, start_id,
-                                  dim=FULL_MATRIX_DIM,
-                                  bin_dim=FULL_MATRIX_BINARY_DIM):
+def gen_full_matrix_parquet_bytes(num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
     """Single parquet file with every full-matrix field."""
-    columns = _full_matrix_arrow_columns(num_rows, start_id, dim=dim,
-                                         bin_dim=bin_dim)
+    columns = _full_matrix_arrow_columns(num_rows, start_id, dim=dim, bin_dim=bin_dim)
     table = pa.table(columns)
     buf = io.BytesIO()
     pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
@@ -527,10 +651,13 @@ def gen_full_matrix_parquet_bytes(num_rows, start_id,
 # MinIO Helpers
 # ============================================================
 
+
 def upload_parquet(minio_client, bucket, key, data):
     minio_client.put_object(
-        bucket, key,
-        io.BytesIO(data), length=len(data),
+        bucket,
+        key,
+        io.BytesIO(data),
+        length=len(data),
         content_type="application/octet-stream",
     )
 
@@ -544,11 +671,12 @@ def cleanup_minio_prefix(minio_client, bucket, prefix):
 # Schema / Refresh / Load Helpers
 # ============================================================
 
-def build_basic_schema(client, ext_path, dim=TEST_DIM):
+
+def build_basic_schema(client, ext_path, dim=TEST_DIM, ext_spec=None):
     """Minimal external schema: id(Int64) + value(Float) + embedding(FloatVector)."""
     schema = client.create_schema(
         external_source=ext_path,
-        external_spec='{"format":"parquet"}',
+        external_spec=ext_spec or build_external_spec(),
     )
     schema.add_field("id", DataType.INT64, external_field="id")
     schema.add_field("value", DataType.FLOAT, external_field="value")
@@ -556,11 +684,11 @@ def build_basic_schema(client, ext_path, dim=TEST_DIM):
     return schema
 
 
-def build_typed_schema(client, ext_path, scalar_name, scalar_dtype, dim=TEST_DIM, **extra):
+def build_typed_schema(client, ext_path, scalar_name, scalar_dtype, dim=TEST_DIM, ext_spec=None, **extra):
     """External schema with id + one scalar field of the given type + FloatVector."""
     schema = client.create_schema(
         external_source=ext_path,
-        external_spec='{"format":"parquet"}',
+        external_spec=ext_spec or build_external_spec(),
     )
     schema.add_field("id", DataType.INT64, external_field="id")
     schema.add_field(scalar_name, scalar_dtype, external_field=scalar_name, **extra)
@@ -568,58 +696,56 @@ def build_typed_schema(client, ext_path, scalar_name, scalar_dtype, dim=TEST_DIM
     return schema
 
 
-def build_vector_variant_schema(client, ext_path, vec_field, vec_dtype, dim):
+def build_vector_variant_schema(client, ext_path, vec_field, vec_dtype, dim, ext_spec=None):
     """External schema with id + one vector field of the given dtype."""
     schema = client.create_schema(
         external_source=ext_path,
-        external_spec='{"format":"parquet"}',
+        external_spec=ext_spec or build_external_spec(),
     )
     schema.add_field("id", DataType.INT64, external_field="id")
     schema.add_field(vec_field, vec_dtype, dim=dim, external_field=vec_field)
     return schema
 
 
-def build_all_scalar_schema(client, ext_path, dim=TEST_DIM):
+def build_all_scalar_schema(client, ext_path, dim=TEST_DIM, ext_spec=None):
     schema = client.create_schema(
         external_source=ext_path,
-        external_spec='{"format":"parquet"}',
+        external_spec=ext_spec or build_external_spec(),
     )
-    schema.add_field("id",          DataType.INT64,   external_field="id")
-    schema.add_field("val_bool",    DataType.BOOL,    external_field="val_bool")
-    schema.add_field("val_int8",    DataType.INT8,    external_field="val_int8")
-    schema.add_field("val_int16",   DataType.INT16,   external_field="val_int16")
-    schema.add_field("val_int32",   DataType.INT32,   external_field="val_int32")
-    schema.add_field("val_int64",   DataType.INT64,   external_field="val_int64")
-    schema.add_field("val_float",   DataType.FLOAT,   external_field="val_float")
-    schema.add_field("val_double",  DataType.DOUBLE,  external_field="val_double")
+    schema.add_field("id", DataType.INT64, external_field="id")
+    schema.add_field("val_bool", DataType.BOOL, external_field="val_bool")
+    schema.add_field("val_int8", DataType.INT8, external_field="val_int8")
+    schema.add_field("val_int16", DataType.INT16, external_field="val_int16")
+    schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
+    schema.add_field("val_int64", DataType.INT64, external_field="val_int64")
+    schema.add_field("val_float", DataType.FLOAT, external_field="val_float")
+    schema.add_field("val_double", DataType.DOUBLE, external_field="val_double")
     schema.add_field("val_varchar", DataType.VARCHAR, max_length=64, external_field="val_varchar")
-    schema.add_field("val_json",    DataType.JSON,    external_field="val_json")
-    schema.add_field("embedding",   DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
+    schema.add_field("val_json", DataType.JSON, external_field="val_json")
+    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
     return schema
 
 
-def build_multi_vector_schema(client, ext_path, float_dim=TEST_DIM, bin_dim=BINARY_DIM):
+def build_multi_vector_schema(client, ext_path, float_dim=TEST_DIM, bin_dim=BINARY_DIM, ext_spec=None):
     schema = client.create_schema(
         external_source=ext_path,
-        external_spec='{"format":"parquet"}',
+        external_spec=ext_spec or build_external_spec(),
     )
-    schema.add_field("id",        DataType.INT64,  external_field="id")
-    schema.add_field("value",     DataType.FLOAT,  external_field="value")
+    schema.add_field("id", DataType.INT64, external_field="id")
+    schema.add_field("value", DataType.FLOAT, external_field="value")
     schema.add_field("dense_vec", DataType.FLOAT_VECTOR, dim=float_dim, external_field="dense_vec")
-    schema.add_field("bin_vec",   DataType.BINARY_VECTOR, dim=bin_dim, external_field="bin_vec")
+    schema.add_field("bin_vec", DataType.BINARY_VECTOR, dim=bin_dim, external_field="bin_vec")
     return schema
 
 
-def build_full_matrix_schema(client, ext_path, ext_spec='{"format":"parquet"}',
-                              dim=FULL_MATRIX_DIM,
-                              bin_dim=FULL_MATRIX_BINARY_DIM,
-                              excluded_fields=()):
+def build_full_matrix_schema(
+    client, ext_path, ext_spec=None, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
+):
     """Schema covering every supported DataType, with same-dtype duplicates
     wired to different index types. See FULL_MATRIX_SCALAR_FIELDS /
     FULL_MATRIX_VECTOR_FIELDS for the full layout.
     """
-    schema = client.create_schema(external_source=ext_path,
-                                  external_spec=ext_spec)
+    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
     schema.add_field("id", DataType.INT64, external_field="id")
     excluded = set(excluded_fields)
 
@@ -630,8 +756,7 @@ def build_full_matrix_schema(client, ext_path, ext_spec='{"format":"parquet"}',
 
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
     if arr_name not in excluded:
-        schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype,
-                         max_capacity=8, external_field=arr_name)
+        schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
 
     if "geo" not in excluded:
         schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
@@ -655,7 +780,8 @@ def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
         if field in excluded:
             continue
         index_params.add_index(
-            field_name=field, index_type=idx_type,
+            field_name=field,
+            index_type=idx_type,
         )
 
     # Vector indexes
@@ -674,8 +800,7 @@ def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
     client.create_index(collection_name, index_params)
 
 
-def refresh_and_wait(client, collection_name, timeout=REFRESH_TIMEOUT,
-                    external_source=None, external_spec=None):
+def refresh_and_wait(client, collection_name, timeout=REFRESH_TIMEOUT, external_source=None, external_spec=None):
     """Trigger refresh, poll until terminal state, return job_id."""
     kwargs = {"collection_name": collection_name}
     if external_source is not None:
@@ -703,11 +828,33 @@ def refresh_and_wait(client, collection_name, timeout=REFRESH_TIMEOUT,
     raise AssertionError(f"Refresh job {job_id} did not finish within {timeout}s")
 
 
-def add_vector_index(client, collection_name, vec_field="embedding",
-                     index_type="AUTOINDEX", metric_type="L2", **extra):
+def refresh_and_poll_terminal(client, collection_name, timeout=60, external_source=None, external_spec=None):
+    """Trigger refresh and return (job_id, progress) for completed or failed jobs."""
+    kwargs = {"collection_name": collection_name}
+    if external_source is not None:
+        kwargs["external_source"] = external_source
+    if external_spec is not None:
+        kwargs["external_spec"] = external_spec
+
+    job_id = client.refresh_external_collection(**kwargs)
+    assert job_id and job_id > 0, f"Expected positive job_id, got {job_id}"
+    deadline = time.time() + timeout
+    progress = None
+    while time.time() < deadline:
+        progress = client.get_refresh_external_collection_progress(job_id=job_id)
+        if progress.state in ("RefreshCompleted", "RefreshFailed"):
+            return job_id, progress
+        time.sleep(2)
+    state = progress.state if progress is not None else "<none>"
+    raise AssertionError(f"Refresh job {job_id} did not finish within {timeout}s; state={state}")
+
+
+def add_vector_index(client, collection_name, vec_field="embedding", index_type="AUTOINDEX", metric_type="L2", **extra):
     index_params = client.prepare_index_params()
     index_params.add_index(
-        field_name=vec_field, index_type=index_type, metric_type=metric_type,
+        field_name=vec_field,
+        index_type=index_type,
+        metric_type=metric_type,
         **extra,
     )
     client.create_index(collection_name, index_params)
@@ -723,12 +870,15 @@ def query_count(client, collection_name):
     return res[0]["count(*)"]
 
 
-def upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB, start_id=0,
-                      filename="data.parquet", dim=TEST_DIM):
+def upload_basic_data(
+    minio_client, cfg, ext_key, num_rows=DEFAULT_NB, start_id=0, filename="data.parquet", dim=TEST_DIM
+):
     """Upload a basic parquet file and return full minio key."""
     key = f"{ext_key}/{filename}"
     upload_parquet(
-        minio_client, cfg["bucket"], key,
+        minio_client,
+        cfg["bucket"],
+        key,
         gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
     )
     return key
@@ -737,6 +887,7 @@ def upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB, start_id=
 # ============================================================
 # Fixtures
 # ============================================================
+
 
 @pytest.fixture(scope="module")
 def minio_env():
@@ -758,7 +909,7 @@ def external_prefix(minio_env, request):
     # Sanitize node.name aggressively — parametrize IDs can contain chars MinIO or
     # Milvus's S3 URI parser rejects. Keep only [A-Za-z0-9_-].
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", request.node.name)
-    key = f"external-e2e-core/{safe}-{int(time.time() * 1000)}-{random.randint(1000,9999)}"
+    key = f"external-e2e-core/{safe}-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
     yield {"key": key, "url": build_external_source(cfg, key)}
     try:
         cleanup_minio_prefix(mc, cfg["bucket"], f"{key}/")
@@ -771,7 +922,7 @@ def external_prefix(minio_env, request):
 # ============================================================
 
 _PLACEHOLDER_SRC = "s3://test-bucket/placeholder/"
-_PLACEHOLDER_SPEC = '{"format":"parquet"}'
+_PLACEHOLDER_SPEC = build_external_spec(cloud_provider="aws")
 
 
 def _schema_with_user_pk(client):
@@ -790,7 +941,8 @@ def _schema_with_auto_id(client):
 
 def _schema_with_dynamic(client):
     schema = client.create_schema(
-        external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC,
+        external_source=_PLACEHOLDER_SRC,
+        external_spec=_PLACEHOLDER_SPEC,
         enable_dynamic_field=True,
     )
     schema.add_field("id", DataType.INT64, external_field="id")
@@ -816,6 +968,7 @@ def _schema_missing_external_field(client):
 # 1. Schema + Lifecycle
 # ============================================================
 
+
 class TestExternalTableSchema(TestMilvusClientV2Base):
     """Collection creation, describe, list, drop and schema validation."""
 
@@ -833,7 +986,7 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
 
             info = client.describe_collection(coll)
             assert info.get("external_source") == ext_url
-            assert info.get("external_spec") == '{"format":"parquet"}'
+            assert json.loads(info.get("external_spec", "{}")).get("format") == "parquet"
 
             field_names = [f["name"] for f in info["fields"]]
             assert "__virtual_pk__" in field_names, "virtual PK should be injected"
@@ -853,13 +1006,16 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
             assert not client.has_collection(coll), "collection should be gone after drop"
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("case_name,schema_builder,err_hint", [
-        ("user_primary_key",      lambda c: _schema_with_user_pk(c),              "primary key"),
-        ("auto_id_on_user_field", lambda c: _schema_with_auto_id(c),              "auto_id"),
-        ("dynamic_field_enabled", lambda c: _schema_with_dynamic(c),              "dynamic field"),
-        ("partition_key",         lambda c: _schema_with_partition_key(c),        "partition key"),
-        ("missing_external_field", lambda c: _schema_missing_external_field(c),   "external_field"),
-    ])
+    @pytest.mark.parametrize(
+        "case_name,schema_builder,err_hint",
+        [
+            ("user_primary_key", lambda c: _schema_with_user_pk(c), "primary key"),
+            ("auto_id_on_user_field", lambda c: _schema_with_auto_id(c), "auto_id"),
+            ("dynamic_field_enabled", lambda c: _schema_with_dynamic(c), "dynamic field"),
+            ("partition_key", lambda c: _schema_with_partition_key(c), "partition key"),
+            ("missing_external_field", lambda c: _schema_missing_external_field(c), "external_field"),
+        ],
+    )
     def test_schema_reject_forbidden(self, case_name, schema_builder, err_hint):
         """Forbidden schema shapes must be rejected at create_collection time."""
         client = self._client()
@@ -870,8 +1026,7 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
             client.create_collection(collection_name=coll, schema=schema)
 
         msg = str(exc_info.value).lower()
-        assert err_hint.lower() in msg, \
-            f"[{case_name}] expected {err_hint!r} in error, got: {exc_info.value}"
+        assert err_hint.lower() in msg, f"[{case_name}] expected {err_hint!r} in error, got: {exc_info.value}"
         log.info(f"[{case_name}] correctly rejected: {exc_info.value}")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -885,16 +1040,17 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(
-            external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC,
+            external_source=_PLACEHOLDER_SRC,
+            external_spec=_PLACEHOLDER_SPEC,
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("sv", DataType.SPARSE_FLOAT_VECTOR, external_field="sv")
         with pytest.raises(Exception) as exc_info:
             client.create_collection(collection_name=coll, schema=schema)
         msg = str(exc_info.value)
-        assert ("does not support field type" in msg
-                and "SparseFloatVector" in msg) or "sparse" in msg.lower(), \
+        assert ("does not support field type" in msg and "SparseFloatVector" in msg) or "sparse" in msg.lower(), (
             f"Expected SparseFloatVector type-block error, got: {exc_info.value}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("scheme", ["s3", "s3a", "aws", "minio", "oss", "gs", "gcs"])
@@ -903,9 +1059,14 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         should be accepted at create time."""
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
+        cfg = get_minio_config()
+        if scheme == "minio":
+            source = f"minio://{cfg['address']}/{cfg['bucket']}/prefix/"
+        else:
+            source = f"{scheme}://bucket/prefix/"
         schema = client.create_schema(
-            external_source=f"{scheme}://bucket/prefix/",
-            external_spec=_PLACEHOLDER_SPEC,
+            external_source=source,
+            external_spec=build_external_spec_for_scheme(scheme, cfg=cfg),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
@@ -916,28 +1077,34 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_external_source_relative_path_no_scheme(self):
-        """A relative path without scheme is accepted (same-bucket default)."""
+    def test_external_source_relative_path_no_scheme_rejected(self):
+        """A relative path without an explicit scheme is rejected."""
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(
-            external_source="my-data/parquet/", external_spec=_PLACEHOLDER_SPEC,
+            external_source="my-data/parquet/",
+            external_spec=build_external_spec(),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            assert client.has_collection(coll)
-        finally:
-            client.drop_collection(coll)
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=coll, schema=schema)
+        msg = str(exc_info.value).lower()
+        assert "explicit scheme" in msg or "external_source" in msg, (
+            f"Expected relative-path rejection, got: {exc_info.value}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("source", [
-        "http://169.254.169.254/metadata",
-        "ftp://example.com/data",
-        "xyz://bucket/prefix",
-        "file:///tmp/data",
-    ], ids=["http", "ftp", "unknown", "file"])
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "http://169.254.169.254/metadata",
+            "ftp://example.com/data",
+            "xyz://bucket/prefix",
+            "file:///tmp/data",
+        ],
+        ids=["http", "ftp", "unknown", "file"],
+    )
     def test_external_source_disallowed_schemes(self, source):
         """Schemes outside the allowlist must be rejected with 'not allowed'."""
         client = self._client()
@@ -948,8 +1115,7 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         with pytest.raises(Exception) as exc_info:
             client.create_collection(collection_name=coll, schema=schema)
         msg = str(exc_info.value).lower()
-        assert "not allowed" in msg or "not support" in msg, \
-            f"Expected scheme rejection, got: {exc_info.value}"
+        assert "not allowed" in msg or "not support" in msg, f"Expected scheme rejection, got: {exc_info.value}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_external_source_userinfo_rejected(self):
@@ -964,8 +1130,7 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
         with pytest.raises(Exception) as exc_info:
             client.create_collection(collection_name=coll, schema=schema)
-        assert "credentials" in str(exc_info.value).lower(), \
-            f"Expected userinfo rejection, got: {exc_info.value}"
+        assert "credentials" in str(exc_info.value).lower(), f"Expected userinfo rejection, got: {exc_info.value}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_user_fields_force_nullable(self):
@@ -974,7 +1139,8 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(
-            external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC,
+            external_source=_PLACEHOLDER_SRC,
+            external_spec=_PLACEHOLDER_SPEC,
         )
         # Intentionally do NOT pass nullable on any user field.
         schema.add_field("id", DataType.INT64, external_field="id")
@@ -985,16 +1151,28 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
             info = client.describe_collection(coll)
             by_name = {f["name"]: f for f in info["fields"]}
             for field in ("id", "v", "vec"):
-                assert by_name[field].get("nullable") is True, \
+                assert by_name[field].get("nullable") is True, (
                     f"user field '{field}' should be force-nullable, got {by_name[field]}"
+                )
             vpk = by_name.get("__virtual_pk__")
-            assert vpk is not None and vpk.get("is_primary") is True, \
-                "__virtual_pk__ should still be the primary key"
+            assert vpk is not None and vpk.get("is_primary") is True, "__virtual_pk__ should still be the primary key"
         finally:
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alter_collection_external_source_via_property_rejected(self):
+    @pytest.mark.parametrize(
+        "properties",
+        [
+            {"collection.external_source": "s3://bucket/new/"},
+            {"collection.external_spec": '{"format":"lance-table"}'},
+            {
+                "collection.external_source": "s3://bucket/new/",
+                "collection.external_spec": '{"format":"lance-table"}',
+            },
+        ],
+        ids=["source_only", "spec_only", "source_and_spec"],
+    )
+    def test_alter_collection_external_source_via_property_rejected(self, properties):
         """Setting collection.external_source / collection.external_spec via
         alter_collection_properties is rejected; the supported path for
         rebinding source is refresh_external_collection(external_source=,
@@ -1002,26 +1180,113 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
+        cfg = get_minio_config()
         schema = client.create_schema(
-            external_source="s3://bucket/old/", external_spec='{"format":"parquet"}',
+            external_source=build_external_source(cfg, "old"),
+            external_spec=build_external_spec(cfg),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
         client.create_collection(collection_name=coll, schema=schema)
         try:
+            before = client.describe_collection(coll)
             with pytest.raises(Exception) as exc_info:
                 client.alter_collection_properties(
-                    coll, properties={
-                        "collection.external_source": "s3://bucket/new/",
-                        "collection.external_spec": '{"format":"lance"}',
-                    },
+                    coll,
+                    properties=properties,
                 )
             msg = str(exc_info.value).lower()
-            assert ("refreshexternalcollection" in msg.replace(" ", "")
-                    or "external_source" in msg
-                    or "invalid parameter" in msg), \
-                f"unexpected error: {exc_info.value}"
+            assert (
+                "refreshexternalcollection" in msg.replace(" ", "")
+                or "external_source" in msg
+                or "external_spec" in msg
+                or "invalid parameter" in msg
+            ), f"unexpected error: {exc_info.value}"
+            after = client.describe_collection(coll)
+            assert after.get("external_source") == before.get("external_source")
+            assert after.get("external_spec") == before.get("external_spec")
             log.info(f"alter via property correctly rejected: {exc_info.value}")
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            [("__virtual_pk__", DataType.INT64, {"is_primary": True, "auto_id": False})],
+            [
+                ("id", DataType.INT64, {"is_primary": True, "auto_id": False}),
+                ("__virtual_pk__", DataType.INT64, {}),
+            ],
+            [
+                (
+                    "__virtual_pk__",
+                    DataType.VARCHAR,
+                    {
+                        "is_primary": True,
+                        "auto_id": False,
+                        "max_length": 64,
+                    },
+                )
+            ],
+        ],
+        ids=["as_int64_pk", "as_scalar", "as_varchar_pk"],
+    )
+    def test_regular_collection_rejects_virtual_pk_reserved_name(self, fields):
+        """milvus#49314: __virtual_pk__ is reserved even outside external collections."""
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema()
+        for name, dtype, kwargs in fields:
+            schema.add_field(name, dtype, **kwargs)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM)
+
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=coll, schema=schema)
+        msg = str(exc_info.value).lower()
+        assert "__virtual_pk__" in msg and "reserved" in msg, f"expected reserved-name rejection, got: {exc_info.value}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_duplicate_external_field_mapping_rejected(self):
+        """milvus#49235: one external column cannot back multiple user fields."""
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(
+            external_source=_PLACEHOLDER_SRC,
+            external_spec=_PLACEHOLDER_SPEC,
+        )
+        schema.add_field("id", DataType.INT64, external_field="same_col")
+        schema.add_field("value", DataType.FLOAT, external_field="same_col")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+        with pytest.raises(Exception) as exc_info:
+            client.create_collection(collection_name=coll, schema=schema)
+        msg = str(exc_info.value).lower()
+        assert "external_field" in msg and ("multiple" in msg or "duplicate" in msg), (
+            f"expected duplicate external_field rejection, got: {exc_info.value}"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"external_source": _PLACEHOLDER_SRC},
+            {"external_spec": _PLACEHOLDER_SPEC},
+        ],
+        ids=["source_only", "spec_only"],
+    )
+    def test_refresh_override_requires_source_spec_pair(self, kwargs, external_prefix):
+        """milvus#49230/#49335: refresh override source/spec must be atomic."""
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        schema = build_basic_schema(client, external_prefix["url"])
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            with pytest.raises(Exception) as exc_info:
+                client.refresh_external_collection(collection_name=coll, **kwargs)
+            msg = str(exc_info.value).lower()
+            assert "both" in msg or "external_source" in msg or "external_spec" in msg or "invalid" in msg, (
+                f"unexpected error: {exc_info.value}"
+            )
         finally:
             client.drop_collection(coll)
 
@@ -1030,25 +1295,29 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
 # 2. Data Types (Scalar + Vector)
 # ============================================================
 
+
 class TestExternalTableDataTypes(TestMilvusClientV2Base):
     """E2E coverage for every supported scalar and vector data type."""
 
     # ---- Scalar types ------------------------------------------------
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("type_name,dtype,extra,arrow_type,value_fn", [
-        ("bool",    DataType.BOOL,    {},                  pa.bool_(),    lambda i: i % 2 == 0),
-        ("int8",    DataType.INT8,    {},                  pa.int8(),     lambda i: i % 100),
-        ("int16",   DataType.INT16,   {},                  pa.int16(),    lambda i: i * 3),
-        ("int32",   DataType.INT32,   {},                  pa.int32(),    lambda i: i * 7),
-        ("int64",   DataType.INT64,   {},                  pa.int64(),    lambda i: i * 1000),
-        ("float",   DataType.FLOAT,   {},                  pa.float32(),  lambda i: float(i) * 1.5),
-        ("double",  DataType.DOUBLE,  {},                  pa.float64(),  lambda i: float(i) * 2.5),
-        ("varchar", DataType.VARCHAR, {"max_length": 64},  pa.string(),   lambda i: f"s_{i:05d}"),
-        ("json",    DataType.JSON,    {},                  pa.string(),   lambda i: json.dumps({"k": i, "g": i % 3})),
-    ], ids=lambda x: x if isinstance(x, str) else None)
-    def test_scalar_type_e2e(self, type_name, dtype, extra, arrow_type, value_fn,
-                             minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "type_name,dtype,extra,arrow_type,value_fn",
+        [
+            ("bool", DataType.BOOL, {}, pa.bool_(), lambda i: i % 2 == 0),
+            ("int8", DataType.INT8, {}, pa.int8(), lambda i: i % 100),
+            ("int16", DataType.INT16, {}, pa.int16(), lambda i: i * 3),
+            ("int32", DataType.INT32, {}, pa.int32(), lambda i: i * 7),
+            ("int64", DataType.INT64, {}, pa.int64(), lambda i: i * 1000),
+            ("float", DataType.FLOAT, {}, pa.float32(), lambda i: float(i) * 1.5),
+            ("double", DataType.DOUBLE, {}, pa.float64(), lambda i: float(i) * 2.5),
+            ("varchar", DataType.VARCHAR, {"max_length": 64}, pa.string(), lambda i: f"s_{i:05d}"),
+            ("json", DataType.JSON, {}, pa.string(), lambda i: json.dumps({"k": i, "g": i % 3})),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_scalar_type_e2e(self, type_name, dtype, extra, arrow_type, value_fn, minio_env, external_prefix):
         """End-to-end per supported scalar type."""
         minio_client, cfg = minio_env
         client = self._client()
@@ -1075,22 +1344,32 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 
             vectors = _float_vectors([0], TEST_DIM).tolist()
             search_res = client.search(
-                coll, data=vectors, limit=5,
-                anns_field="embedding", output_fields=["id", scalar_name],
+                coll,
+                data=vectors,
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id", scalar_name],
             )
             assert len(search_res) == 1 and len(search_res[0]) > 0
         finally:
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("elem_name,elem_dtype,elem_arrow,elem_extra,value_fn", [
-        ("int64",    DataType.INT64,   pa.int64(),  {"max_capacity": 8},
-         lambda i: [i, i + 1, i + 2]),
-        ("varchar",  DataType.VARCHAR, pa.string(), {"max_capacity": 8, "max_length": 32},
-         lambda i: [f"a_{i}", f"b_{i}"]),
-    ], ids=lambda x: x if isinstance(x, str) else None)
-    def test_array_type_e2e(self, elem_name, elem_dtype, elem_arrow, elem_extra, value_fn,
-                            minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "elem_name,elem_dtype,elem_arrow,elem_extra,value_fn",
+        [
+            ("int64", DataType.INT64, pa.int64(), {"max_capacity": 8}, lambda i: [i, i + 1, i + 2]),
+            (
+                "varchar",
+                DataType.VARCHAR,
+                pa.string(),
+                {"max_capacity": 8, "max_length": 32},
+                lambda i: [f"a_{i}", f"b_{i}"],
+            ),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_array_type_e2e(self, elem_name, elem_dtype, elem_arrow, elem_extra, value_fn, minio_env, external_prefix):
         """Array-of-<elem> field: upload, refresh, load, and query the array values."""
         minio_client, cfg = minio_env
         client = self._client()
@@ -1101,10 +1380,9 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         data = gen_array_parquet_bytes(DEFAULT_NB, 0, arr_field, elem_arrow, value_fn)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = client.create_schema(external_source=ext_url, external_spec='{"format":"parquet"}')
+        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
         schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field(arr_field, DataType.ARRAY, element_type=elem_dtype,
-                         external_field=arr_field, **elem_extra)
+        schema.add_field(arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra)
         schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
 
         client.create_collection(collection_name=coll, schema=schema)
@@ -1131,7 +1409,9 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 
         nb = 100
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_all_scalar_parquet_bytes(nb, 0),
         )
 
@@ -1154,10 +1434,19 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 
             # Verify specific row values for id=42
             row42 = client.query(
-                coll, filter="id == 42",
+                coll,
+                filter="id == 42",
                 output_fields=[
-                    "id", "val_bool", "val_int8", "val_int16", "val_int32", "val_int64",
-                    "val_float", "val_double", "val_varchar", "val_json",
+                    "id",
+                    "val_bool",
+                    "val_int8",
+                    "val_int16",
+                    "val_int32",
+                    "val_int64",
+                    "val_float",
+                    "val_double",
+                    "val_varchar",
+                    "val_json",
                 ],
             )
             assert len(row42) == 1
@@ -1175,17 +1464,328 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         finally:
             client.drop_collection(coll)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_geometry_wkt_parquet_round_trip(self, minio_env, external_prefix):
+        """milvus#48627: WKT-backed Geometry columns query back as geometry text."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_geometry_wkt_parquet_bytes(50, 0),
+        )
+        schema = client.create_schema(
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+
+            rows = client.query(
+                coll,
+                filter="id == 7",
+                output_fields=["id", "geo"],
+            )
+            assert len(rows) == 1
+            assert rows[0]["id"] == 7
+            assert "POINT" in str(rows[0]["geo"]).upper(), rows[0]
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "case_name,milvus_dtype,field_kwargs,arrow_builder,include_embedding,known_acceptance",
+        [
+            (
+                "int8_from_string",
+                DataType.INT8,
+                {},
+                lambda ids: pa.array(["abcd" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "int16_from_string",
+                DataType.INT16,
+                {},
+                lambda ids: pa.array(["abcd" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "int32_from_string",
+                DataType.INT32,
+                {},
+                lambda ids: pa.array(["abcd" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "int64_from_string",
+                DataType.INT64,
+                {},
+                lambda ids: pa.array(["abcd" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "float_from_string",
+                DataType.FLOAT,
+                {},
+                lambda ids: pa.array(["abc" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "double_from_string",
+                DataType.DOUBLE,
+                {},
+                lambda ids: pa.array(["abc" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "varchar_from_int64",
+                DataType.VARCHAR,
+                {"max_length": 64},
+                lambda ids: pa.array(ids, type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "json_from_int64",
+                DataType.JSON,
+                {},
+                lambda ids: pa.array(ids, type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "geometry_from_int64",
+                DataType.GEOMETRY,
+                {},
+                lambda ids: pa.array(ids, type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "timestamptz_from_string",
+                DataType.TIMESTAMPTZ,
+                {},
+                lambda ids: pa.array(["2026-04-27T00:00:00Z" for _ in ids], type=pa.string()),
+                True,
+                True,
+            ),
+            (
+                "int8_from_int64_overflow",
+                DataType.INT8,
+                {},
+                lambda ids: pa.array([128 + i for i in ids], type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "int16_from_int64_overflow",
+                DataType.INT16,
+                {},
+                lambda ids: pa.array([40000 + i for i in ids], type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "int32_from_int64_overflow",
+                DataType.INT32,
+                {},
+                lambda ids: pa.array([2147483648 + i for i in ids], type=pa.int64()),
+                True,
+                False,
+            ),
+            (
+                "float_from_int64",
+                DataType.FLOAT,
+                {},
+                lambda ids: pa.array(ids, type=pa.int64()),
+                True,
+                True,
+            ),
+            (
+                "double_from_int64",
+                DataType.DOUBLE,
+                {},
+                lambda ids: pa.array(ids, type=pa.int64()),
+                True,
+                True,
+            ),
+            (
+                "int64_from_double",
+                DataType.INT64,
+                {},
+                lambda ids: pa.array([float(i) + 0.5 for i in ids], type=pa.float64()),
+                True,
+                True,
+            ),
+            (
+                "array_int64_from_list_string",
+                DataType.ARRAY,
+                {"element_type": DataType.INT64, "max_capacity": 8},
+                lambda ids: pa.array([[f"s_{i}", f"s_{i + 1}"] for i in ids], type=pa.list_(pa.string())),
+                True,
+                True,
+            ),
+            (
+                "array_float_from_list_string",
+                DataType.ARRAY,
+                {"element_type": DataType.FLOAT, "max_capacity": 8},
+                lambda ids: pa.array([["1.5", "2.5"] for _ in ids], type=pa.list_(pa.string())),
+                True,
+                True,
+            ),
+            (
+                "array_bool_from_list_string",
+                DataType.ARRAY,
+                {"element_type": DataType.BOOL, "max_capacity": 8},
+                lambda ids: pa.array([["true", "false"] for _ in ids], type=pa.list_(pa.string())),
+                True,
+                True,
+            ),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_incompatible_external_arrow_type_rejected(
+        self,
+        case_name,
+        milvus_dtype,
+        field_kwargs,
+        arrow_builder,
+        include_embedding,
+        known_acceptance,
+        minio_env,
+        external_prefix,
+    ):
+        """Milvus field type vs external Arrow type mismatches must fail visibly.
+
+        The exact detection stage can vary by reader path and build:
+        create_collection, refresh, index/load, or query are all acceptable
+        rejection points. What must not happen is a silent successful query
+        with data decoded through an incompatible type mapping.
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        nb = 20
+        bad_field = "bad_col"
+        ids = list(range(nb))
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_dtype_mismatch_parquet_bytes(
+                nb,
+                0,
+                bad_field,
+                arrow_builder(ids),
+                include_embedding=include_embedding,
+            ),
+        )
+
+        schema = client.create_schema(
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )
+        schema.add_field("id", DataType.INT64, external_field="id")
+        schema.add_field(bad_field, milvus_dtype, external_field=bad_field, **field_kwargs)
+        if include_embedding:
+            schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+
+        try:
+            try:
+                client.create_collection(collection_name=coll, schema=schema)
+            except Exception as exc:
+                log.info(f"[{case_name}] create_collection rejected mismatch: {exc}")
+                return
+
+            job_id, progress = refresh_and_poll_terminal(client, coll, timeout=60)
+            if progress.state == "RefreshFailed":
+                assert progress.reason, f"[{case_name}] refresh job {job_id} failed without a reason"
+                log.info(f"[{case_name}] refresh rejected mismatch: job={job_id}, reason={progress.reason}")
+                return
+
+            assert progress.state == "RefreshCompleted", f"[{case_name}] unexpected refresh state: {progress.state}"
+
+            try:
+                if include_embedding:
+                    add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
+                    client.load_collection(coll, timeout=30)
+                    accepted_result = client.query(
+                        coll,
+                        filter="id >= 0",
+                        output_fields=["id", bad_field],
+                        limit=1,
+                    )
+                else:
+                    add_vector_index(client, coll, bad_field, "AUTOINDEX", "L2")
+                    client.load_collection(coll, timeout=30)
+                    accepted_result = client.query(
+                        coll,
+                        filter="id >= 0",
+                        output_fields=["id", bad_field],
+                        limit=1,
+                    )
+                    accepted_hits = client.search(
+                        coll,
+                        data=[[0.0] * TEST_DIM],
+                        limit=1,
+                        anns_field=bad_field,
+                        output_fields=["id"],
+                    )
+                    accepted_result = {
+                        "query": accepted_result,
+                        "search": accepted_hits,
+                    }
+            except Exception as exc:
+                log.info(f"[{case_name}] load/query rejected mismatch: {exc}")
+                return
+
+            if known_acceptance:
+                pytest.xfail(
+                    f"[{case_name}] current master accepts incompatible "
+                    f"external Arrow data; observed result: {accepted_result}"
+                )
+            pytest.fail(
+                f"[{case_name}] incompatible external Arrow type was accepted "
+                f"through refresh, load, and query; result={accepted_result}"
+            )
+        finally:
+            try:
+                client.drop_collection(coll)
+            except Exception:
+                pass
+
     # ---- Vector types -----------------------------------------------
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vec_kind,vec_dtype,metric,dim", [
-        ("float",     DataType.FLOAT_VECTOR,    "L2",      TEST_DIM),
-        ("float16",   DataType.FLOAT16_VECTOR,  "L2",      TEST_DIM),
-        ("bfloat16",  DataType.BFLOAT16_VECTOR, "L2",      TEST_DIM),
-        ("int8",      DataType.INT8_VECTOR,     "L2",      TEST_DIM),
-    ], ids=lambda x: x if isinstance(x, str) else None)
-    def test_float_family_vector_e2e(self, vec_kind, vec_dtype, metric, dim,
-                                     minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "vec_kind,vec_dtype,metric,dim",
+        [
+            ("float", DataType.FLOAT_VECTOR, "L2", TEST_DIM),
+            ("float16", DataType.FLOAT16_VECTOR, "L2", TEST_DIM),
+            ("bfloat16", DataType.BFLOAT16_VECTOR, "L2", TEST_DIM),
+            ("int8", DataType.INT8_VECTOR, "L2", TEST_DIM),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_float_family_vector_e2e(self, vec_kind, vec_dtype, metric, dim, minio_env, external_prefix):
         """Each float-family / int8 vector type: upload, refresh, index, load, search."""
         minio_client, cfg = minio_env
         client = self._client()
@@ -1224,8 +1824,11 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             else:
                 query_vec = [[0.0] * dim]
             search_res = client.search(
-                coll, data=query_vec, limit=5,
-                anns_field=vec_field, output_fields=["id"],
+                coll,
+                data=query_vec,
+                limit=5,
+                anns_field=vec_field,
+                output_fields=["id"],
             )
             assert len(search_res) == 1 and len(search_res[0]) > 0
         finally:
@@ -1240,12 +1843,20 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         data = gen_vector_variant_parquet_bytes(
-            DEFAULT_NB, 0, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM,
+            DEFAULT_NB,
+            0,
+            "bin_vec",
+            DataType.BINARY_VECTOR,
+            BINARY_DIM,
         )
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
         schema = build_vector_variant_schema(
-            client, ext_url, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM,
+            client,
+            ext_url,
+            "bin_vec",
+            DataType.BINARY_VECTOR,
+            BINARY_DIM,
         )
         client.create_collection(collection_name=coll, schema=schema)
         try:
@@ -1258,8 +1869,11 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             # Single query vector of correct length (BINARY_DIM bits → BINARY_DIM/8 bytes)
             query_vec = [b"\x00" * (BINARY_DIM // 8)]
             search_res = client.search(
-                coll, data=query_vec, limit=5,
-                anns_field="bin_vec", output_fields=["id"],
+                coll,
+                data=query_vec,
+                limit=5,
+                anns_field="bin_vec",
+                output_fields=["id"],
                 search_params={"metric_type": "HAMMING"},
             )
             assert len(search_res) == 1 and len(search_res[0]) > 0
@@ -1275,7 +1889,9 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_multi_vector_parquet_bytes(DEFAULT_NB, 0),
         )
         schema = build_multi_vector_schema(client, ext_url)
@@ -1292,12 +1908,18 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             assert query_count(client, coll) == DEFAULT_NB
 
             dense_res = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=3,
-                anns_field="dense_vec", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=3,
+                anns_field="dense_vec",
+                output_fields=["id"],
             )
             bin_res = client.search(
-                coll, data=[b"\x00" * (BINARY_DIM // 8)], limit=3,
-                anns_field="bin_vec", output_fields=["id"],
+                coll,
+                data=[b"\x00" * (BINARY_DIM // 8)],
+                limit=3,
+                anns_field="bin_vec",
+                output_fields=["id"],
                 search_params={"metric_type": "HAMMING"},
             )
             assert len(dense_res[0]) == 3 and len(bin_res[0]) == 3
@@ -1324,17 +1946,19 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 
         nb = DEFAULT_NB
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_timestamptz_parquet_bytes(nb, 0, ts_unit=ts_unit),
         )
 
         schema = client.create_schema(
-            external_source=ext_url, external_spec='{"format":"parquet"}',
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("ts", DataType.TIMESTAMPTZ, external_field="ts")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -1367,12 +1991,16 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url = external_prefix["url"]
         schema = client.create_schema(
-            external_source=ext_url, external_spec='{"format":"parquet"}',
+            external_source=ext_url,
+            external_spec=build_external_spec(),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field(
-            "vecs", DataType._ARRAY_OF_VECTOR,
-            element_type=DataType.FLOAT_VECTOR, dim=TEST_DIM, max_capacity=4,
+            "vecs",
+            DataType._ARRAY_OF_VECTOR,
+            element_type=DataType.FLOAT_VECTOR,
+            dim=TEST_DIM,
+            max_capacity=4,
             external_field="vecs",
         )
         with pytest.raises(Exception) as exc:
@@ -1385,6 +2013,7 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 # ============================================================
 # 2.5 Edge cases: nullable behavior + large files
 # ============================================================
+
 
 class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
     """External user fields are force-nullable (schema.go:2350). Probe edge
@@ -1405,21 +2034,22 @@ class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
 
         nb = 100
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_all_null_columns_parquet_bytes(nb, 0),
         )
 
         schema = client.create_schema(
-            external_source=ext_url, external_spec='{"format":"parquet"}',
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("n_int", DataType.INT32, external_field="n_int")
         schema.add_field("n_float", DataType.FLOAT, external_field="n_float")
-        schema.add_field("n_varchar", DataType.VARCHAR, max_length=64,
-                         external_field="n_varchar")
+        schema.add_field("n_varchar", DataType.VARCHAR, max_length=64, external_field="n_varchar")
         schema.add_field("n_json", DataType.JSON, external_field="n_json")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
 
         client.create_collection(collection_name=coll, schema=schema)
         try:
@@ -1429,7 +2059,8 @@ class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
 
             # Single-row peek: every user field should round-trip as None.
             rows = client.query(
-                coll, filter="id == 5",
+                coll,
+                filter="id == 5",
                 output_fields=["id", "n_int", "n_float", "n_varchar", "n_json"],
             )
             assert len(rows) == 1, f"missing id=5 in result: {rows}"
@@ -1442,8 +2073,10 @@ class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
 
             # `is null` filter should match every row.
             null_rows = client.query(
-                coll, filter="n_int is null",
-                output_fields=["id"], limit=nb,
+                coll,
+                filter="n_int is null",
+                output_fields=["id"],
+                limit=nb,
             )
             assert len(null_rows) == nb, f"is-null filter only matched {len(null_rows)}/{nb}"
         finally:
@@ -1455,12 +2088,20 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
     counts that can be split into multiple Milvus segments."""
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("num_rows,row_group_size", [
-        (5_000,  500),    # 10 row groups
-        (20_000, 1_000),  # 20 row groups
-    ], ids=["10rg", "20rg"])
+    @pytest.mark.parametrize(
+        "num_rows,row_group_size",
+        [
+            (5_000, 500),  # 10 row groups
+            (20_000, 1_000),  # 20 row groups
+        ],
+        ids=["10rg", "20rg"],
+    )
     def test_large_single_file_with_row_groups(
-        self, num_rows, row_group_size, minio_env, external_prefix,
+        self,
+        num_rows,
+        row_group_size,
+        minio_env,
+        external_prefix,
     ):
         """A single large parquet file with explicit row_group_size, verifying
         the multi-row-group reader path on a stable external table.
@@ -1474,7 +2115,9 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_large_parquet_with_row_groups(num_rows, 0, row_group_size),
         )
 
@@ -1488,15 +2131,19 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
             # Spot-check rows in the first, middle, and last row group.
             for sample in (0, num_rows // 2, num_rows - 1):
                 rows = client.query(
-                    coll, filter=f"id == {sample}",
+                    coll,
+                    filter=f"id == {sample}",
                     output_fields=["id", "value"],
                 )
                 assert len(rows) == 1, f"missing id={sample}"
                 assert abs(rows[0]["value"] - sample * 1.5) < 1e-3
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=10,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=10,
+                anns_field="embedding",
+                output_fields=["id"],
             )
             assert len(hits[0]) == 10
         finally:
@@ -1507,20 +2154,24 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
 # 3. Indexes (Vector + Scalar)
 # ============================================================
 
+
 class TestExternalTableIndexes(TestMilvusClientV2Base):
     """Index creation on external collections — vector + scalar + binary."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index_type,metric_type,params", [
-        ("AUTOINDEX",  "L2",     {}),
-        ("FLAT",       "L2",     {}),
-        ("HNSW",       "L2",     {"M": 16, "efConstruction": 200}),
-        ("IVF_FLAT",   "L2",     {"nlist": 16}),
-        ("HNSW",       "COSINE", {"M": 8}),
-        ("DISKANN",    "L2",     {}),
-    ], ids=lambda x: x if isinstance(x, str) else None)
-    def test_vector_index(self, index_type, metric_type, params,
-                          minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "index_type,metric_type,params",
+        [
+            ("AUTOINDEX", "L2", {}),
+            ("FLAT", "L2", {}),
+            ("HNSW", "L2", {"M": 16, "efConstruction": 200}),
+            ("IVF_FLAT", "L2", {"nlist": 16}),
+            ("HNSW", "COSINE", {"M": 8}),
+            ("DISKANN", "L2", {}),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_vector_index(self, index_type, metric_type, params, minio_env, external_prefix):
         """Create each supported vector index type on a FloatVector field and query.
 
         DISKANN requires the cluster to have a disk-backed index node. If the
@@ -1538,8 +2189,11 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             refresh_and_wait(client, coll)
             try:
                 add_vector_index(
-                    client, coll, "embedding",
-                    index_type=index_type, metric_type=metric_type,
+                    client,
+                    coll,
+                    "embedding",
+                    index_type=index_type,
+                    metric_type=metric_type,
                     **({"params": params} if params else {}),
                 )
             except Exception as e:
@@ -1549,24 +2203,29 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             client.load_collection(coll)
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 5
 
             idx_list = client.list_indexes(collection_name=coll)
-            assert any("embedding" in str(i) for i in idx_list), \
-                f"embedding index not in list: {idx_list}"
+            assert any("embedding" in str(i) for i in idx_list), f"embedding index not in list: {idx_list}"
         finally:
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index_type,params", [
-        ("HNSW",     {"M": 16, "efConstruction": 200}),
-        ("IVF_FLAT", {"nlist": 16}),
-    ], ids=lambda x: x if isinstance(x, str) else None)
-    def test_vector_index_mmap_enable(self, index_type, params,
-                                      minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "index_type,params",
+        [
+            ("HNSW", {"M": 16, "efConstruction": 200}),
+            ("IVF_FLAT", {"nlist": 16}),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    def test_vector_index_mmap_enable(self, index_type, params, minio_env, external_prefix):
         """Toggle mmap.enabled on the vector index via alter_index_properties;
         verify describe reflects the change and search still returns correct hits.
 
@@ -1588,7 +2247,8 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             # Alter mmap=True before load
             try:
                 client.alter_index_properties(
-                    collection_name=coll, index_name="embedding",
+                    collection_name=coll,
+                    index_name="embedding",
                     properties={"mmap.enabled": True},
                 )
             except Exception as e:
@@ -1596,20 +2256,23 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
 
             info = client.describe_index(collection_name=coll, index_name="embedding")
             log.info(f"[{index_type}] index info after mmap=True: {info}")
-            assert str(info.get("mmap.enabled", "")).lower() == "true", \
-                f"expected mmap.enabled=True, got {info}"
+            assert str(info.get("mmap.enabled", "")).lower() == "true", f"expected mmap.enabled=True, got {info}"
 
             client.load_collection(coll)
             hits_on = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits_on) == 5
 
             # Flip back to False
             client.release_collection(coll)
             client.alter_index_properties(
-                collection_name=coll, index_name="embedding",
+                collection_name=coll,
+                index_name="embedding",
                 properties={"mmap.enabled": False},
             )
             info_off = client.describe_index(collection_name=coll, index_name="embedding")
@@ -1617,8 +2280,11 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
 
             client.load_collection(coll)
             hits_off = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits_off) == 5
         finally:
@@ -1642,29 +2308,35 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
 
             try:
                 client.alter_collection_properties(
-                    collection_name=coll, properties={"mmap.enabled": True},
+                    collection_name=coll,
+                    properties={"mmap.enabled": True},
                 )
             except Exception as e:
                 pytest.skip(f"alter_collection_properties mmap not supported: {e}")
 
             desc = client.describe_collection(coll)
             props = desc.get("properties") or {}
-            assert str(props.get("mmap.enabled", "")).lower() == "true", \
+            assert str(props.get("mmap.enabled", "")).lower() == "true", (
                 f"expected collection mmap.enabled=True, got properties={props}"
+            )
 
             index_and_load(client, coll)
             assert query_count(client, coll) == DEFAULT_NB
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 5
 
             # Flip back
             client.release_collection(coll)
             client.alter_collection_properties(
-                collection_name=coll, properties={"mmap.enabled": False},
+                collection_name=coll,
+                properties={"mmap.enabled": False},
             )
             desc2 = client.describe_collection(coll)
             assert str((desc2.get("properties") or {}).get("mmap.enabled", "")).lower() == "false"
@@ -1681,23 +2353,25 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-            gen_vector_variant_parquet_bytes(DEFAULT_NB, 0, "bin_vec",
-                                             DataType.BINARY_VECTOR, BINARY_DIM),
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_vector_variant_parquet_bytes(DEFAULT_NB, 0, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM),
         )
-        schema = build_vector_variant_schema(client, ext_url, "bin_vec",
-                                             DataType.BINARY_VECTOR, BINARY_DIM)
+        schema = build_vector_variant_schema(client, ext_url, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM)
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
             params = {"nlist": 16} if index_type == "BIN_IVF_FLAT" else {}
-            add_vector_index(client, coll, "bin_vec", index_type, "HAMMING",
-                             **({"params": params} if params else {}))
+            add_vector_index(client, coll, "bin_vec", index_type, "HAMMING", **({"params": params} if params else {}))
             client.load_collection(coll)
 
             hits = client.search(
-                coll, data=[b"\x00" * (BINARY_DIM // 8)], limit=5,
-                anns_field="bin_vec", output_fields=["id"],
+                coll,
+                data=[b"\x00" * (BINARY_DIM // 8)],
+                limit=5,
+                anns_field="bin_vec",
+                output_fields=["id"],
                 search_params={"metric_type": "HAMMING"},
             )[0]
             assert len(hits) == 5
@@ -1705,13 +2379,15 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("scalar_index_type,field_name", [
-        ("INVERTED", "value"),
-        ("STL_SORT", "value"),
-        ("BITMAP",   "value"),
-    ])
-    def test_scalar_index(self, scalar_index_type, field_name,
-                          minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "scalar_index_type,field_name",
+        [
+            ("INVERTED", "value"),
+            ("STL_SORT", "value"),
+            ("BITMAP", "value"),
+        ],
+    )
+    def test_scalar_index(self, scalar_index_type, field_name, minio_env, external_prefix):
         """Create a scalar index on an external collection field."""
         minio_client, cfg = minio_env
         client = self._client()
@@ -1725,8 +2401,7 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             refresh_and_wait(client, coll)
 
             index_params = client.prepare_index_params()
-            index_params.add_index(field_name="embedding", index_type="AUTOINDEX",
-                                   metric_type="L2")
+            index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
             try:
                 index_params.add_index(field_name=field_name, index_type=scalar_index_type)
                 client.create_index(coll, index_params)
@@ -1775,8 +2450,11 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             client.load_collection(coll)
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=3,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=3,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 3
         finally:
@@ -1812,14 +2490,14 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
 # 4. Blocked Write Operations (DML + DDL)
 # ============================================================
 
+
 class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
     """All DML + partition/field DDL should be rejected on external collections."""
 
     @staticmethod
     def _prepared_collection(client, minio_client, cfg, ext_url, ext_key):
         """Create a refreshed, loaded external collection and return its name."""
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-                       gen_basic_parquet_bytes(50, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(50, 0))
         coll = cf.gen_collection_name_by_testcase_name()
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -1838,13 +2516,27 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
         try:
             with pytest.raises(Exception) as exc_info:
                 if op_name == "insert":
-                    client.insert(collection_name=coll, data=[{
-                        "id": 99999, "value": 1.0, "embedding": [0.0] * TEST_DIM,
-                    }])
+                    client.insert(
+                        collection_name=coll,
+                        data=[
+                            {
+                                "id": 99999,
+                                "value": 1.0,
+                                "embedding": [0.0] * TEST_DIM,
+                            }
+                        ],
+                    )
                 elif op_name == "upsert":
-                    client.upsert(collection_name=coll, data=[{
-                        "id": 0, "value": 0.0, "embedding": [0.0] * TEST_DIM,
-                    }])
+                    client.upsert(
+                        collection_name=coll,
+                        data=[
+                            {
+                                "id": 0,
+                                "value": 0.0,
+                                "embedding": [0.0] * TEST_DIM,
+                            }
+                        ],
+                    )
                 elif op_name == "delete":
                     client.delete(collection_name=coll, filter="id >= 0")
                 elif op_name == "flush":
@@ -1854,10 +2546,13 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
             # - server-side: "<op> operation is not supported for external collection"
             # - client-side: pymilvus requires all fields (including virtual_pk)
             #   before the RPC even leaves — upsert/insert fail with DataNotMatch.
-            assert ("external" in msg or "not support" in msg
-                    or "virtual_pk" in msg or "datanotmatch" in msg
-                    or "missed an field" in msg), \
-                f"[{op_name}] unexpected error: {exc_info.value}"
+            assert (
+                "external" in msg
+                or "not support" in msg
+                or "virtual_pk" in msg
+                or "datanotmatch" in msg
+                or "missed an field" in msg
+            ), f"[{op_name}] unexpected error: {exc_info.value}"
             log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
         finally:
             client.drop_collection(coll)
@@ -1873,8 +2568,7 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
             with pytest.raises(Exception) as exc_info:
                 client.create_partition(collection_name=coll, partition_name="p1")
             msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg, \
-                f"unexpected error: {exc_info.value}"
+            assert "external" in msg or "not support" in msg, f"unexpected error: {exc_info.value}"
             log.info(f"create_partition correctly rejected: {exc_info.value}")
         finally:
             client.drop_collection(coll)
@@ -1890,28 +2584,20 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
             with pytest.raises(Exception) as exc_info:
                 client.drop_partition(collection_name=coll, partition_name="_default")
             msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg or "default" in msg, \
-                f"unexpected error: {exc_info.value}"
+            assert "external" in msg or "not support" in msg or "default" in msg, f"unexpected error: {exc_info.value}"
             log.info(f"drop_partition correctly rejected: {exc_info.value}")
         finally:
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("op_name", [
-        "compact",
-        "add_collection_field",
-        pytest.param("truncate_collection", marks=pytest.mark.xfail(
-            reason=(
-                "Bug (milvus-io/milvus#49343): truncate_collection is a write "
-                "op and should be rejected on external collections (consistent "
-                "with insert/upsert/delete/flush/compact), but currently "
-                "succeeds silently and clears the external_source binding — "
-                "subsequent refresh reports 'no files found'. When fixed, "
-                "this xfail flips to XPASS (strict=True)."
-            ),
-            strict=True,
-        )),
-    ])
+    @pytest.mark.parametrize(
+        "op_name",
+        [
+            "compact",
+            "add_collection_field",
+            "truncate_collection",
+        ],
+    )
     def test_ddl_rejected(self, op_name, minio_env, external_prefix):
         """DDL / write operations that should be blocked on external collections.
 
@@ -1929,16 +2615,43 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
                     client.compact(collection_name=coll)
                 elif op_name == "add_collection_field":
                     client.add_collection_field(
-                        collection_name=coll, field_name="new_field",
-                        data_type=DataType.INT64, nullable=True,
+                        collection_name=coll,
+                        field_name="new_field",
+                        data_type=DataType.INT64,
+                        nullable=True,
                     )
                 elif op_name == "truncate_collection":
                     client.truncate_collection(collection_name=coll)
             msg = str(exc_info.value).lower()
-            assert ("external" in msg or "not support" in msg
-                    or "not allowed" in msg), \
+            assert "external" in msg or "not support" in msg or "not allowed" in msg, (
                 f"[{op_name}] unexpected error: {exc_info.value}"
+            )
             log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
+        finally:
+            try:
+                client.drop_collection(coll)
+            except Exception:
+                pass
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_truncate_reject_keeps_external_source(self, minio_env, external_prefix):
+        """milvus#49343: rejected truncate must not clear external_source metadata."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
+        try:
+            before = client.describe_collection(coll)
+            with pytest.raises(Exception):
+                client.truncate_collection(collection_name=coll)
+            after = client.describe_collection(coll)
+            assert after.get("external_source") == before.get("external_source")
+            assert after.get("external_spec") == before.get("external_spec")
+
+            client.release_collection(coll)
+            refresh_and_wait(client, coll)
+            client.load_collection(coll)
+            assert query_count(client, coll) == 50
         finally:
             try:
                 client.drop_collection(coll)
@@ -1949,6 +2662,7 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
 # ============================================================
 # 5. Refresh semantics + job management
 # ============================================================
+
 
 class TestExternalTableRefresh(TestMilvusClientV2Base):
     """External refresh: basic, incremental, atomic source override, concurrent, jobs."""
@@ -1961,8 +2675,7 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
-        upload_basic_data(minio_client, cfg, ext_key, filename="part0.parquet",
-                          num_rows=DEFAULT_NB, start_id=0)
+        upload_basic_data(minio_client, cfg, ext_key, filename="part0.parquet", num_rows=DEFAULT_NB, start_id=0)
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -1973,8 +2686,9 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
             # Append more data, re-refresh, require release+load.
             client.release_collection(coll)
-            upload_basic_data(minio_client, cfg, ext_key, filename="part1.parquet",
-                              num_rows=DEFAULT_NB, start_id=DEFAULT_NB)
+            upload_basic_data(
+                minio_client, cfg, ext_key, filename="part1.parquet", num_rows=DEFAULT_NB, start_id=DEFAULT_NB
+            )
             refresh_and_wait(client, coll)
             client.load_collection(coll)
 
@@ -1991,9 +2705,9 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         for idx, start in enumerate([0, 500]):
-            upload_parquet(minio_client, cfg["bucket"],
-                           f"{ext_key}/data_{idx}.parquet",
-                           gen_basic_parquet_bytes(500, start))
+            upload_parquet(
+                minio_client, cfg["bucket"], f"{ext_key}/data_{idx}.parquet", gen_basic_parquet_bytes(500, start)
+            )
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2004,19 +2718,14 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
             client.release_collection(coll)
             minio_client.remove_object(cfg["bucket"], f"{ext_key}/data_1.parquet")
-            upload_parquet(minio_client, cfg["bucket"],
-                           f"{ext_key}/data_2.parquet",
-                           gen_basic_parquet_bytes(300, 2000))
+            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data_2.parquet", gen_basic_parquet_bytes(300, 2000))
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
 
             assert query_count(client, coll) == 800
-            assert len(client.query(coll, filter="id >= 0 && id < 500",
-                                    output_fields=["id"])) == 500
-            assert len(client.query(coll, filter="id >= 500 && id < 1000",
-                                    output_fields=["id"])) == 0
-            assert len(client.query(coll, filter="id >= 2000 && id < 2300",
-                                    output_fields=["id"])) == 300
+            assert len(client.query(coll, filter="id >= 0 && id < 500", output_fields=["id"])) == 500
+            assert len(client.query(coll, filter="id >= 500 && id < 1000", output_fields=["id"])) == 0
+            assert len(client.query(coll, filter="id >= 2000 && id < 2300", output_fields=["id"])) == 300
         finally:
             client.drop_collection(coll)
 
@@ -2031,31 +2740,40 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         key_a, key_b = f"{ext_key}/src_a", f"{ext_key}/src_b"
         url_a = build_external_source(cfg, key_a)
         url_b = build_external_source(cfg, key_b)
-        upload_parquet(minio_client, cfg["bucket"], f"{key_a}/data.parquet",
-                       gen_basic_parquet_bytes(100, 0))
-        upload_parquet(minio_client, cfg["bucket"], f"{key_b}/data.parquet",
-                       gen_basic_parquet_bytes(100, 5000))
+        upload_parquet(minio_client, cfg["bucket"], f"{key_a}/data.parquet", gen_basic_parquet_bytes(100, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{key_b}/data.parquet", gen_basic_parquet_bytes(100, 5000))
 
         schema = build_basic_schema(client, url_a)
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
-            ids_a = sorted(r["id"] for r in client.query(
-                coll, filter="id >= 0", output_fields=["id"], limit=200))
+            ids_a = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
             assert ids_a == list(range(0, 100))
 
             client.release_collection(coll)
-            refresh_and_wait(client, coll, external_source=url_b,
-                             external_spec='{"format":"parquet"}')
+            refresh_and_wait(client, coll, external_source=url_b, external_spec=build_external_spec(cfg))
             client.load_collection(coll)
 
-            ids_b = sorted(r["id"] for r in client.query(
-                coll, filter="id >= 0", output_fields=["id"], limit=200))
+            ids_b = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
             assert ids_b == list(range(5000, 5100))
 
             info = client.describe_collection(coll)
-            log.info(f"persisted external_source after override: {info.get('external_source')!r}")
+            assert info.get("external_source") == url_b, (
+                f"override source was not persisted: {info.get('external_source')!r}"
+            )
+
+            fresh_client = self._client()
+            fresh_info = fresh_client.describe_collection(coll)
+            assert fresh_info.get("external_source") == url_b, (
+                f"fresh client sees stale source: {fresh_info.get('external_source')!r}"
+            )
+
+            client.release_collection(coll)
+            refresh_and_wait(client, coll)
+            client.load_collection(coll)
+            ids_reuse = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
+            assert ids_reuse == list(range(5000, 5100)), "reuse refresh reverted to the pre-override source"
         finally:
             client.drop_collection(coll)
 
@@ -2066,8 +2784,7 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-                       gen_basic_parquet_bytes(500, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(500, 0))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2113,8 +2830,7 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-                       gen_basic_parquet_bytes(100, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(100, 0))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2129,13 +2845,16 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("num_files,rows_per_file", [
-        (1,  500),     # single large file
-        (5,  100),     # small uniform files
-        (10, 50),      # many tiny files
-    ], ids=lambda x: str(x) if isinstance(x, int) else None)
-    def test_refresh_many_files(self, num_files, rows_per_file,
-                                minio_env, external_prefix):
+    @pytest.mark.parametrize(
+        "num_files,rows_per_file",
+        [
+            (1, 500),  # single large file
+            (5, 100),  # small uniform files
+            (10, 50),  # many tiny files
+        ],
+        ids=lambda x: str(x) if isinstance(x, int) else None,
+    )
+    def test_refresh_many_files(self, num_files, rows_per_file, minio_env, external_prefix):
         """Refresh aggregates rows correctly across many parquet files in one prefix."""
         minio_client, cfg = minio_env
         client = self._client()
@@ -2145,7 +2864,8 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         # Upload num_files sibling parquet files at <prefix>/file_<n>.parquet
         for idx in range(num_files):
             upload_parquet(
-                minio_client, cfg["bucket"],
+                minio_client,
+                cfg["bucket"],
                 f"{ext_key}/file_{idx:03d}.parquet",
                 gen_basic_parquet_bytes(rows_per_file, idx * rows_per_file),
             )
@@ -2163,7 +2883,9 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             for idx in range(num_files):
                 first_id = idx * rows_per_file
                 rows = client.query(
-                    coll, filter=f"id == {first_id}", output_fields=["id", "value"],
+                    coll,
+                    filter=f"id == {first_id}",
+                    output_fields=["id", "value"],
                 )
                 assert len(rows) == 1, f"row id={first_id} missing after refresh"
                 assert abs(rows[0]["value"] - first_id * 1.5) < 1e-4
@@ -2218,9 +2940,77 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
                 if state in ("RefreshCompleted", "RefreshFailed"):
                     break
                 time.sleep(2)
-            assert state in ("RefreshCompleted", "RefreshFailed"), \
+            assert state in ("RefreshCompleted", "RefreshFailed"), (
                 f"empty-source refresh stuck in {state} (expected terminal state)"
+            )
             log.info(f"empty-source refresh terminal state={state}")
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_refresh_zero_row_parquet_terminal(self, minio_env, external_prefix):
+        """milvus#49225: 0-row parquet must not crash DataNode or hang refresh."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/empty.parquet",
+            gen_zero_row_basic_parquet_bytes(),
+        )
+
+        schema = build_basic_schema(client, ext_url)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            job_id = client.refresh_external_collection(collection_name=coll)
+            deadline = time.time() + 60
+            progress = None
+            while time.time() < deadline:
+                progress = client.get_refresh_external_collection_progress(job_id=job_id)
+                if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                    break
+                time.sleep(2)
+            assert progress is not None
+            assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
+                f"zero-row refresh stuck in {progress.state}"
+            )
+
+            if progress.state == "RefreshCompleted":
+                index_and_load(client, coll)
+                assert query_count(client, coll) == 0
+            else:
+                assert progress.reason, "failed zero-row refresh should expose a reason"
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_refresh_nonexistent_bucket_fails_terminal(self, minio_env):
+        """milvus#49233: NoSuchBucket must fail terminally, not retry forever."""
+        _minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+        ext_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
+
+        schema = build_basic_schema(client, ext_url, ext_spec=build_external_spec(cfg))
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            job_id = client.refresh_external_collection(collection_name=coll)
+            deadline = time.time() + 60
+            progress = None
+            while time.time() < deadline:
+                progress = client.get_refresh_external_collection_progress(job_id=job_id)
+                if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                    break
+                time.sleep(2)
+            assert progress is not None
+            assert progress.state == "RefreshFailed", (
+                f"NoSuchBucket refresh should fail terminally, got {progress.state}"
+            )
+            reason = (progress.reason or "").lower()
+            assert "bucket" in reason or "no_such_bucket" in reason or "nosuchbucket" in reason, progress.reason
         finally:
             client.drop_collection(coll)
 
@@ -2240,10 +3030,9 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
         # Mismatched mappings — parquet has columns id/value/embedding;
         # the schema points at wrong_col_a/wrong_col_b.
-        schema = client.create_schema(external_source=ext_url, external_spec='{"format":"parquet"}')
+        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
         schema.add_field("x", DataType.INT64, external_field="wrong_col_a")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="wrong_col_b")
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="wrong_col_b")
 
         try:
             client.create_collection(collection_name=coll, schema=schema)
@@ -2287,6 +3076,51 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
                 pass
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_case_mismatched_external_fields_rejected(self, minio_env, external_prefix):
+        """milvus#49232: case-mismatched parquet column names must not load silently."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        upload_basic_data(minio_client, cfg, ext_key, num_rows=50)
+
+        schema = client.create_schema(
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
+        )
+        schema.add_field("id", DataType.INT64, external_field="ID")
+        schema.add_field("value", DataType.FLOAT, external_field="Value")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="Embedding")
+
+        try:
+            client.create_collection(collection_name=coll, schema=schema)
+        except Exception as e:
+            log.info(f"case mismatch rejected at create_collection: {e}")
+            return
+
+        try:
+            job_id = client.refresh_external_collection(collection_name=coll)
+            deadline = time.time() + 60
+            progress = None
+            while time.time() < deadline:
+                progress = client.get_refresh_external_collection_progress(job_id=job_id)
+                if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                    break
+                time.sleep(2)
+            assert progress is not None
+            if progress.state == "RefreshFailed":
+                return
+            assert progress.state == "RefreshCompleted", f"case-mismatch refresh stuck in {progress.state}"
+
+            with pytest.raises(Exception):
+                index_and_load(client, coll)
+        finally:
+            try:
+                client.drop_collection(coll)
+            except Exception:
+                pass
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_schemaless_reader_extra_columns_ignored(self, minio_env, external_prefix):
         """Parquet has 9 scalar columns plus embedding; the external schema
         only projects 3 of them. The reader must silently drop the unmapped
@@ -2300,17 +3134,18 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         nb = 100
         # gen_all_scalar_parquet_bytes writes id + 9 scalars + embedding.
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_all_scalar_parquet_bytes(nb, 0),
         )
 
         # Project only id, val_int32, embedding — the other 7 scalar columns
         # exist in the file but are not declared in the schema.
-        schema = client.create_schema(external_source=ext_url, external_spec='{"format":"parquet"}')
+        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -2342,17 +3177,15 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             ("flat_c.parquet", 100, 200),
         ]
         for name, nrows, start_id in flat_files:
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{name}",
-                           gen_basic_parquet_bytes(nrows, start_id))
+            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{name}", gen_basic_parquet_bytes(nrows, start_id))
 
         # 2 files inside subdirs — should be ignored by refresh
         nested_files = [
             ("year=2025/month=01/nested_a.parquet", 100, 10000),
-            ("subdir/nested_b.parquet",              100, 20000),
+            ("subdir/nested_b.parquet", 100, 20000),
         ]
         for rel, nrows, start_id in nested_files:
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{rel}",
-                           gen_basic_parquet_bytes(nrows, start_id))
+            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{rel}", gen_basic_parquet_bytes(nrows, start_id))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2366,11 +3199,12 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             # Nested-file id ranges must be absent
             for _, _, start_id in nested_files:
                 got = client.query(
-                    coll, filter=f"id >= {start_id} && id < {start_id + 100}",
-                    output_fields=["id"], limit=200,
+                    coll,
+                    filter=f"id >= {start_id} && id < {start_id + 100}",
+                    output_fields=["id"],
+                    limit=200,
                 )
-                assert len(got) == 0, \
-                    f"ids [{start_id}..{start_id + 100}) unexpectedly present (subdir ingested)"
+                assert len(got) == 0, f"ids [{start_id}..{start_id + 100}) unexpectedly present (subdir ingested)"
         finally:
             client.drop_collection(coll)
 
@@ -2379,17 +3213,21 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 # 6. DQL — query / search / hybrid_search / iterators / get / pagination
 # ============================================================
 
+
 class TestExternalTableDQL(TestMilvusClientV2Base):
     """Read-side operations on external collections."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("filter_expr,expected", [
-        ("",                                      DEFAULT_NB),
-        ("id < 10",                               10),
-        ("id >= 100 && id < 150",                 50),
-        ("value > 0.0 && id < 50",                49),   # value=1.5*id, id==0 excluded
-        ("id in [0, 1, 2, 3, 99]",                5),
-    ])
+    @pytest.mark.parametrize(
+        "filter_expr,expected",
+        [
+            ("", DEFAULT_NB),
+            ("id < 10", 10),
+            ("id >= 100 && id < 150", 50),
+            ("value > 0.0 && id < 50", 49),  # value=1.5*id, id==0 excluded
+            ("id in [0, 1, 2, 3, 99]", 5),
+        ],
+    )
     def test_query_filter(self, filter_expr, expected, minio_env, external_prefix):
         """Scalar filters return the expected row count."""
         minio_client, cfg = minio_env
@@ -2407,8 +3245,7 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             if filter_expr == "":
                 assert query_count(client, coll) == expected
             else:
-                res = client.query(coll, filter=filter_expr, output_fields=["id"],
-                                   limit=DEFAULT_NB)
+                res = client.query(coll, filter=filter_expr, output_fields=["id"], limit=DEFAULT_NB)
                 assert len(res) == expected
         finally:
             client.drop_collection(coll)
@@ -2430,8 +3267,11 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             index_and_load(client, coll, metric_type=metric)
 
             hits = client.search(
-                coll, data=_float_vectors([0], TEST_DIM).tolist(), limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=_float_vectors([0], TEST_DIM).tolist(),
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 5
             distances = [h["distance"] for h in hits]
@@ -2458,13 +3298,15 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             index_and_load(client, coll)
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=10,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=10,
+                anns_field="embedding",
+                output_fields=["id"],
                 filter="id >= 50 && id < 100",
             )[0]
             assert len(hits) == 10
-            assert all(50 <= h["id"] < 100 for h in hits), \
-                f"filter violated: {[h['id'] for h in hits]}"
+            assert all(50 <= h["id"] < 100 for h in hits), f"filter violated: {[h['id'] for h in hits]}"
         finally:
             client.drop_collection(coll)
 
@@ -2475,8 +3317,9 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-                       gen_multi_vector_parquet_bytes(DEFAULT_NB, 0))
+        upload_parquet(
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_multi_vector_parquet_bytes(DEFAULT_NB, 0)
+        )
 
         schema = build_multi_vector_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2489,19 +3332,25 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             client.load_collection(coll)
 
             req1 = AnnSearchRequest(
-                data=[[0.0] * TEST_DIM], anns_field="dense_vec", limit=10,
+                data=[[0.0] * TEST_DIM],
+                anns_field="dense_vec",
+                limit=10,
                 param={"metric_type": "L2"},
             )
             req2 = AnnSearchRequest(
-                data=[b"\x00" * (BINARY_DIM // 8)], anns_field="bin_vec", limit=10,
+                data=[b"\x00" * (BINARY_DIM // 8)],
+                anns_field="bin_vec",
+                limit=10,
                 param={"metric_type": "HAMMING"},
             )
             hits = client.hybrid_search(
-                collection_name=coll, reqs=[req1, req2],
-                ranker=RRFRanker(), limit=5, output_fields=["id"],
+                collection_name=coll,
+                reqs=[req1, req2],
+                ranker=RRFRanker(),
+                limit=5,
+                output_fields=["id"],
             )
-            assert len(hits) == 1 and len(hits[0]) == 5, \
-                f"hybrid_search returned {hits}"
+            assert len(hits) == 1 and len(hits[0]) == 5, f"hybrid_search returned {hits}"
         finally:
             client.drop_collection(coll)
 
@@ -2521,8 +3370,10 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             index_and_load(client, coll)
 
             it = client.query_iterator(
-                collection_name=coll, filter="id >= 0",
-                batch_size=50, output_fields=["id"],
+                collection_name=coll,
+                filter="id >= 0",
+                batch_size=50,
+                output_fields=["id"],
             )
             total = 0
             while True:
@@ -2552,8 +3403,11 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             index_and_load(client, coll)
 
             it = client.search_iterator(
-                collection_name=coll, data=[[0.0] * TEST_DIM],
-                anns_field="embedding", batch_size=20, limit=80,
+                collection_name=coll,
+                data=[[0.0] * TEST_DIM],
+                anns_field="embedding",
+                batch_size=20,
+                limit=80,
                 output_fields=["id"],
             )
             total = 0
@@ -2584,8 +3438,10 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
 
             # Resolve virtual PKs of the first 5 rows via query
             first_five = client.query(
-                coll, filter="id >= 0 && id < 5",
-                output_fields=["id", "__virtual_pk__"], limit=5,
+                coll,
+                filter="id >= 0 && id < 5",
+                output_fields=["id", "__virtual_pk__"],
+                limit=5,
             )
             vpks = [r["__virtual_pk__"] for r in first_five]
             assert len(vpks) == 5
@@ -2611,10 +3467,8 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
 
-            page1 = client.query(coll, filter="id >= 0", output_fields=["id"],
-                                 offset=0, limit=10)
-            page2 = client.query(coll, filter="id >= 0", output_fields=["id"],
-                                 offset=10, limit=10)
+            page1 = client.query(coll, filter="id >= 0", output_fields=["id"], offset=0, limit=10)
+            page2 = client.query(coll, filter="id >= 0", output_fields=["id"], offset=10, limit=10)
             assert len(page1) == 10 and len(page2) == 10
             ids1 = {r["id"] for r in page1}
             ids2 = {r["id"] for r in page2}
@@ -2627,6 +3481,7 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
 # 7. Lifecycle: alias, release/reload, drop+recreate
 # ============================================================
 
+
 class TestExternalTableLifecycle(TestMilvusClientV2Base):
     """Alias lifecycle and coarse lifecycle edges."""
 
@@ -2638,10 +3493,8 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         coll_a = cf.gen_collection_name_by_testcase_name() + "_a"
         coll_b = cf.gen_collection_name_by_testcase_name() + "_b"
         ext_key = external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/a/data.parquet",
-                       gen_basic_parquet_bytes(30, 0))
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/b/data.parquet",
-                       gen_basic_parquet_bytes(40, 10000))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/a/data.parquet", gen_basic_parquet_bytes(30, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/b/data.parquet", gen_basic_parquet_bytes(40, 10000))
 
         url_a = build_external_source(cfg, f"{ext_key}/a")
         url_b = build_external_source(cfg, f"{ext_key}/b")
@@ -2650,7 +3503,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         client.create_collection(collection_name=coll_a, schema=schema_a)
         client.create_collection(collection_name=coll_b, schema=schema_b)
 
-        alias = f"alias_{random.randint(10000,99999)}"
+        alias = f"alias_{random.randint(10000, 99999)}"
         try:
             refresh_and_wait(client, coll_a)
             refresh_and_wait(client, coll_b)
@@ -2684,8 +3537,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part0.parquet",
-                       gen_basic_parquet_bytes(100, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part0.parquet", gen_basic_parquet_bytes(100, 0))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2694,8 +3546,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
             index_and_load(client, coll)
             assert query_count(client, coll) == 100
 
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part1.parquet",
-                           gen_basic_parquet_bytes(100, 100))
+            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part1.parquet", gen_basic_parquet_bytes(100, 100))
             refresh_and_wait(client, coll)
 
             stale = query_count(client, coll)
@@ -2717,8 +3568,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet",
-                       gen_basic_parquet_bytes(500, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet", gen_basic_parquet_bytes(500, 0))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2748,8 +3598,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
 
             # Upload a new file and run the refresh+release+load cycle while the
             # query thread keeps polling.
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet",
-                           gen_basic_parquet_bytes(300, 500))
+            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(300, 500))
             refresh_and_wait(client, coll)
             client.release_collection(coll)
             time.sleep(1)
@@ -2759,8 +3608,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
             stop.set()
             t.join(timeout=10)
             log.info(f"concurrent: ok={ok['n']} fail={fail['n']} last={last['v']}")
-            assert last["v"] == 800, \
-                f"expected 800 rows after refresh+reload, got {last['v']}"
+            assert last["v"] == 800, f"expected 800 rows after refresh+reload, got {last['v']}"
         finally:
             client.drop_collection(coll)
 
@@ -2775,10 +3623,8 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet",
-                       gen_basic_parquet_bytes(100, 0))
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet",
-                       gen_basic_parquet_bytes(100, 100))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet", gen_basic_parquet_bytes(100, 0))
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(100, 100))
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2796,8 +3642,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
                 client.load_collection(coll, timeout=60)
                 count_after = query_count(client, coll)
                 log.info(f"reload-after-deletion served {count_after} rows")
-                assert count_after in (100, 200), \
-                    f"unexpected row count after deletion+reload: {count_after}"
+                assert count_after in (100, 200), f"unexpected row count after deletion+reload: {count_after}"
             except Exception as e:
                 # Acceptable: load fails because the manifest references a
                 # missing file. The test passes as long as it surfaces cleanly.
@@ -2837,6 +3682,7 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
 # 8. Cross-bucket external sources
 # ============================================================
 
+
 class TestExternalTableCrossBucket(TestMilvusClientV2Base):
     """External data living in a separate MinIO bucket from Milvus's own."""
 
@@ -2844,8 +3690,8 @@ class TestExternalTableCrossBucket(TestMilvusClientV2Base):
     def test_cross_bucket_source(self, minio_env):
         """End-to-end refresh/load/query against a different bucket.
 
-        Uses the s3:///<bucket>/<path> empty-host form so resolve_config
-        matches by bucket, independent of which endpoint is configured.
+        Uses Milvus-form s3://<endpoint>/<bucket>/<path>/ because current
+        validation rejects empty-host external_source URIs.
         """
         minio_client, cfg = minio_env
         cross_bucket = "external-cross-bucket"
@@ -2859,18 +3705,22 @@ class TestExternalTableCrossBucket(TestMilvusClientV2Base):
         try:
             for i in range(2):
                 upload_parquet(
-                    minio_client, cross_bucket,
+                    minio_client,
+                    cross_bucket,
                     f"{key_prefix}/data{i}.parquet",
                     gen_basic_parquet_bytes(nb, i * nb),
                 )
-            external_source = f"s3:///{cross_bucket}/{key_prefix}"
-            schema = build_basic_schema(client, external_source)
+            external_source = f"s3://{cfg['address']}/{cross_bucket}/{key_prefix}/"
+            schema = build_basic_schema(
+                client,
+                external_source,
+                ext_spec=build_external_spec(cfg),
+            )
             client.create_collection(collection_name=coll, schema=schema)
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
             assert query_count(client, coll) == nb * 2
-            log.info(f"cross-bucket: {nb*2} rows loaded from {cross_bucket} "
-                     f"while milvus uses {cfg['bucket']}")
+            log.info(f"cross-bucket: {nb * 2} rows loaded from {cross_bucket} while milvus uses {cfg['bucket']}")
         finally:
             try:
                 client.drop_collection(coll)
@@ -2882,6 +3732,7 @@ class TestExternalTableCrossBucket(TestMilvusClientV2Base):
 # ============================================================
 # 9. Parquet compression codecs
 # ============================================================
+
 
 class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
     """Parquet compression codec compatibility for external collections.
@@ -2926,16 +3777,15 @@ class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
 # 10. Read-only / admin operations allowed on external collections
 # ============================================================
 
+
 class TestExternalTableReadOps(TestMilvusClientV2Base):
     """Operations normal collections support that should also work on
     external collections: stats, state, partitions, segments, rename,
     refresh_load, property alter/drop, database scoping."""
 
     @staticmethod
-    def _prepared_collection(client, minio_client, cfg, ext_url, ext_key,
-                             num_rows=DEFAULT_NB):
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
-                       gen_basic_parquet_bytes(num_rows, 0))
+    def _prepared_collection(client, minio_client, cfg, ext_url, ext_key, num_rows=DEFAULT_NB):
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(num_rows, 0))
         coll = cf.gen_collection_name_by_testcase_name()
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
@@ -2954,8 +3804,7 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
             parts = client.list_partitions(collection_name=coll)
             assert list(parts) == ["_default"], f"expected only _default, got {parts}"
             assert client.has_partition(collection_name=coll, partition_name="_default") is True
-            assert client.has_partition(
-                collection_name=coll, partition_name="nonexistent_xyz") is False
+            assert client.has_partition(collection_name=coll, partition_name="nonexistent_xyz") is False
         finally:
             client.drop_collection(coll)
 
@@ -2970,8 +3819,7 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
             stats = client.get_collection_stats(collection_name=coll)
             log.info(f"collection stats: {stats}")
             row_count = int(stats.get("row_count", 0))
-            assert row_count == DEFAULT_NB, \
-                f"expected row_count={DEFAULT_NB}, got {row_count}"
+            assert row_count == DEFAULT_NB, f"expected row_count={DEFAULT_NB}, got {row_count}"
         finally:
             client.drop_collection(coll)
 
@@ -2984,8 +3832,7 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
         coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
         try:
             try:
-                stats = client.get_partition_stats(
-                    collection_name=coll, partition_name="_default")
+                stats = client.get_partition_stats(collection_name=coll, partition_name="_default")
             except Exception as e:
                 pytest.skip(f"get_partition_stats not supported: {e}")
             log.info(f"partition stats: {stats}")
@@ -3087,8 +3934,7 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
         minio_client, cfg = minio_env
         client = self._client()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key,
-                                         num_rows=50)
+        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key, num_rows=50)
         new_name = coll + "_renamed"
         try:
             try:
@@ -3175,7 +4021,8 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
             client.release_collection(coll)
             try:
                 client.alter_index_properties(
-                    collection_name=coll, index_name="embedding",
+                    collection_name=coll,
+                    index_name="embedding",
                     properties={"mmap.enabled": True},
                 )
             except Exception as e:
@@ -3186,7 +4033,8 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
 
             try:
                 client.drop_index_properties(
-                    collection_name=coll, index_name="embedding",
+                    collection_name=coll,
+                    index_name="embedding",
                     property_keys=["mmap.enabled"],
                 )
             except Exception as e:
@@ -3240,19 +4088,21 @@ class TestExternalTableReadOps(TestMilvusClientV2Base):
 # 9. External file formats — parquet / lance-table / vortex
 # ============================================================
 
-def _write_lance_to_minio(minio_client, bucket, key_prefix, num_rows, start_id,
-                          dim=TEST_DIM):
+
+def _write_lance_to_minio(minio_client, bucket, key_prefix, num_rows, start_id, dim=TEST_DIM):
     """Build a Lance dataset locally and upload every file under its folder
     to MinIO, preserving the relative layout Lance uses (versions/, data/, etc).
     """
     return _write_lance_to_minio_batches(
-        minio_client, bucket, key_prefix,
-        batches=[(start_id, num_rows)], dim=dim,
+        minio_client,
+        bucket,
+        key_prefix,
+        batches=[(start_id, num_rows)],
+        dim=dim,
     )
 
 
-def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches,
-                                  dim=TEST_DIM):
+def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim=TEST_DIM):
     """Multi-fragment variant: each (start_id, count) tuple in `batches` is
     appended into the same Lance dataset, producing one fragment file per
     batch under data/. Used to exercise multi-data-file refresh.
@@ -3269,22 +4119,23 @@ def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches,
         for idx, (start_id, num_rows) in enumerate(batches):
             ids = list(range(start_id, start_id + num_rows))
             vectors = _float_vectors(ids, dim)
-            table = pa.table({
-                "id":        pa.array(ids, type=pa.int64()),
-                "value":     pa.array([float(i) * 1.5 for i in ids],
-                                      type=pa.float32()),
-                "embedding": pa.FixedSizeListArray.from_arrays(
-                    vectors.flatten(), list_size=dim,
-                ),
-            })
+            table = pa.table(
+                {
+                    "id": pa.array(ids, type=pa.int64()),
+                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
+                    "embedding": pa.FixedSizeListArray.from_arrays(
+                        vectors.flatten(),
+                        list_size=dim,
+                    ),
+                }
+            )
             mode = "create" if idx == 0 else "append"
             lance.write_dataset(table, local_path, mode=mode)
         for root, _dirs, files in os.walk(local_path):
             for fname in files:
                 absolute = os.path.join(root, fname)
                 relative = os.path.relpath(absolute, local_path)
-                minio_client.fput_object(bucket, f"{key_prefix}/{relative}",
-                                         absolute)
+                minio_client.fput_object(bucket, f"{key_prefix}/{relative}", absolute)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -3297,6 +4148,7 @@ def _find_vortex_sidecar_python():
     Returns the interpreter path or None if the sidecar is missing.
     """
     import os
+
     # tests/python_client/ → walk up to find .venv-vortex/
     here = os.path.dirname(os.path.abspath(__file__))
     for _ in range(4):
@@ -3307,8 +4159,7 @@ def _find_vortex_sidecar_python():
     return None
 
 
-def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id,
-                           dim=TEST_DIM, filename="data.vortex"):
+def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id, dim=TEST_DIM, filename="data.vortex"):
     """Write a Vortex dataset to MinIO via the `.venv-vortex` sidecar
     (Python 3.11+ required for vortex-data >= 0.35).
 
@@ -3328,37 +4179,40 @@ def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id,
             "Vortex sidecar venv missing. Create it once with:\n"
             "  uv venv .venv-vortex -p python3.12\n"
             "  source .venv-vortex/bin/activate && uv pip install "
-            "'vortex-data==0.67.0' 'pyarrow>=16' 'numpy>=2.0' minio"
+            "'vortex-data==0.56.0' 'pyarrow>=16' 'numpy>=2.0' minio"
         )
 
     here = os.path.dirname(os.path.abspath(__file__))
     helper = os.path.join(here, "_vortex_gen.py")
 
     env = os.environ.copy()
-    env.update({
-        "VT_NUM_ROWS": str(num_rows),
-        "VT_START_ID": str(start_id),
-        "VT_DIM": str(dim),
-        "MINIO_ADDRESS": cfg["address"],
-        "MINIO_BUCKET": bucket,
-        "MINIO_ACCESS_KEY": cfg["access_key"],
-        "MINIO_SECRET_KEY": cfg["secret_key"],
-        "VT_MINIO_KEY": f"{key_prefix}/{filename}",
-    })
+    env.update(
+        {
+            "VT_NUM_ROWS": str(num_rows),
+            "VT_START_ID": str(start_id),
+            "VT_DIM": str(dim),
+            "MINIO_ADDRESS": cfg["address"],
+            "MINIO_BUCKET": bucket,
+            "MINIO_ACCESS_KEY": cfg["access_key"],
+            "MINIO_SECRET_KEY": cfg["secret_key"],
+            "VT_MINIO_KEY": f"{key_prefix}/{filename}",
+        }
+    )
     result = subprocess.run(
         [sidecar, helper],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"vortex helper failed (code {result.returncode}): "
-            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            f"vortex helper failed (code {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
         )
     log.info(f"[vortex] wrote {result.stdout.strip()} to {key_prefix}/data.vortex")
 
 
-def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *,
-                                 filename="data.vortex"):
+def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *, filename="data.vortex"):
     """Write an arbitrary pyarrow Table to MinIO as a vortex file via the
     sidecar venv. The table is serialized to an Arrow IPC stream and piped
     to the sidecar over stdin; the sidecar deserializes and hands the
@@ -3377,7 +4231,7 @@ def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *,
             "Vortex sidecar venv missing. Create it once with:\n"
             "  uv venv .venv-vortex -p python3.12\n"
             "  source .venv-vortex/bin/activate && uv pip install "
-            "'vortex-data==0.67.0' 'pyarrow>=16' 'numpy>=2.0' minio"
+            "'vortex-data==0.56.0' 'pyarrow>=16' 'numpy>=2.0' minio"
         )
 
     here = os.path.dirname(os.path.abspath(__file__))
@@ -3389,25 +4243,28 @@ def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *,
     ipc_bytes = buf.getvalue()
 
     env = os.environ.copy()
-    env.update({
-        "VT_INPUT_FROM_STDIN": "1",
-        "MINIO_ADDRESS":     cfg["address"],
-        "MINIO_BUCKET":      bucket,
-        "MINIO_ACCESS_KEY":  cfg["access_key"],
-        "MINIO_SECRET_KEY":  cfg["secret_key"],
-        "VT_MINIO_KEY":      f"{key_prefix}/{filename}",
-    })
+    env.update(
+        {
+            "VT_INPUT_FROM_STDIN": "1",
+            "MINIO_ADDRESS": cfg["address"],
+            "MINIO_BUCKET": bucket,
+            "MINIO_ACCESS_KEY": cfg["access_key"],
+            "MINIO_SECRET_KEY": cfg["secret_key"],
+            "VT_MINIO_KEY": f"{key_prefix}/{filename}",
+        }
+    )
     result = subprocess.run(
         [sidecar, helper],
-        input=ipc_bytes, env=env, capture_output=True, timeout=180,
+        input=ipc_bytes,
+        env=env,
+        capture_output=True,
+        timeout=180,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"vortex helper failed (code {result.returncode}): "
-            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            f"vortex helper failed (code {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
         )
-    log.info(f"[vortex] wrote {result.stdout.decode().strip()} "
-             f"to {key_prefix}/{filename}")
+    log.info(f"[vortex] wrote {result.stdout.decode().strip()} to {key_prefix}/{filename}")
 
 
 def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
@@ -3447,12 +4304,12 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
         cat = SqlCatalog(
             "milvus_test",
             **{
-                "uri":                  f"sqlite:///{tmp}/cat.db",
-                "warehouse":            f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint":          f"http://{cfg['address']}",
-                "s3.access-key-id":     cfg["access_key"],
+                "uri": f"sqlite:///{tmp}/cat.db",
+                "warehouse": f"s3://{cfg['bucket']}/{prefix}",
+                "s3.endpoint": f"http://{cfg['address']}",
+                "s3.access-key-id": cfg["access_key"],
                 "s3.secret-access-key": cfg["secret_key"],
-                "s3.region":            "us-east-1",
+                "s3.region": "us-east-1",
                 "s3.path-style-access": "true",
             },
         )
@@ -3462,23 +4319,24 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
             NestedField(1, "id", LongType(), required=False),
             NestedField(2, "embedding", BinaryType(), required=False),
         )
-        arrow_schema = pa.schema([
-            pa.field("id", pa.int64(), nullable=True),
-            pa.field("embedding", pa.binary(), nullable=True),
-        ])
+        arrow_schema = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=True),
+                pa.field("embedding", pa.binary(), nullable=True),
+            ]
+        )
         tbl = cat.create_table("ext.t", schema=ibg_schema)
 
         for start_id, num_rows in batches:
             ids = list(range(start_id, start_id + num_rows))
-            vec_bytes = [
-                struct.pack(f"<{dim}f",
-                            *[float(i + j * 0.1) for j in range(dim)])
-                for i in ids
-            ]
-            arrow_table = pa.table({
-                "id":        pa.array(ids, type=pa.int64()),
-                "embedding": pa.array(vec_bytes, type=pa.binary()),
-            }, schema=arrow_schema)
+            vec_bytes = [struct.pack(f"<{dim}f", *[float(i + j * 0.1) for j in range(dim)]) for i in ids]
+            arrow_table = pa.table(
+                {
+                    "id": pa.array(ids, type=pa.int64()),
+                    "embedding": pa.array(vec_bytes, type=pa.binary()),
+                },
+                schema=arrow_schema,
+            )
             tbl.append(arrow_table)
 
         snap = tbl.current_snapshot().snapshot_id
@@ -3487,7 +4345,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
         meta_loc = tbl.metadata_location
         if not meta_loc.startswith("s3://"):
             raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
-        bucket_and_key = meta_loc[len("s3://"):]
+        bucket_and_key = meta_loc[len("s3://") :]
         ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
         return snap, ext_url
     finally:
@@ -3502,29 +4360,34 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
 ICEBERG_FULL_MATRIX_SCALAR_FIELDS = [
     # (field_name, milvus DataType, iceberg type ctor (lambda field_id: type),
     #  arrow type, milvus add_field extras, value_fn)
-    ("b_inv",     DataType.BOOL,   lambda fid: ("BooleanType",), pa.bool_(),     {},                 lambda i: i % 2 == 0),
-    ("i32_stl",   DataType.INT32,  lambda fid: ("IntegerType",), pa.int32(),     {},                 lambda i: i * 7),
-    ("i64_inv",   DataType.INT64,  lambda fid: ("LongType",),    pa.int64(),     {},                 lambda i: i * 1000),
-    ("f_inv",     DataType.FLOAT,  lambda fid: ("FloatType",),   pa.float32(),   {},                 lambda i: float(i) * 1.5),
-    ("d_inv",     DataType.DOUBLE, lambda fid: ("DoubleType",),  pa.float64(),   {},                 lambda i: float(i) * 2.5),
-    ("vc_trie",   DataType.VARCHAR, lambda fid: ("StringType",), pa.string(),    {"max_length": 64}, lambda i: f"s_{i:05d}"),
-    ("j",         DataType.JSON,   lambda fid: ("StringType",),  pa.string(),    {},                 lambda i: json.dumps({"k": i, "g": i % 3})),
-    ("ts",        DataType.TIMESTAMPTZ, lambda fid: ("TimestamptzType",), pa.timestamp("us", tz="UTC"), {}, lambda i: (1_700_000_000 + i) * 1_000_000),
+    ("b_inv", DataType.BOOL, lambda fid: ("BooleanType",), pa.bool_(), {}, lambda i: i % 2 == 0),
+    ("i32_stl", DataType.INT32, lambda fid: ("IntegerType",), pa.int32(), {}, lambda i: i * 7),
+    ("i64_inv", DataType.INT64, lambda fid: ("LongType",), pa.int64(), {}, lambda i: i * 1000),
+    ("f_inv", DataType.FLOAT, lambda fid: ("FloatType",), pa.float32(), {}, lambda i: float(i) * 1.5),
+    ("d_inv", DataType.DOUBLE, lambda fid: ("DoubleType",), pa.float64(), {}, lambda i: float(i) * 2.5),
+    ("vc_trie", DataType.VARCHAR, lambda fid: ("StringType",), pa.string(), {"max_length": 64}, lambda i: f"s_{i:05d}"),
+    ("j", DataType.JSON, lambda fid: ("StringType",), pa.string(), {}, lambda i: json.dumps({"k": i, "g": i % 3})),
+    (
+        "ts",
+        DataType.TIMESTAMPTZ,
+        lambda fid: ("TimestamptzType",),
+        pa.timestamp("us", tz="UTC"),
+        {},
+        lambda i: (1_700_000_000 + i) * 1_000_000,
+    ),
 ]
 
 ICEBERG_FULL_MATRIX_SCALAR_INDEXES = {
-    "b_inv":   "INVERTED",
+    "b_inv": "INVERTED",
     "i32_stl": "STL_SORT",
     "i64_inv": "INVERTED",
-    "f_inv":   "INVERTED",
-    "d_inv":   "INVERTED",
+    "f_inv": "INVERTED",
+    "d_inv": "INVERTED",
     "vc_trie": "TRIE",
 }
 
 
-def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
-                                     dim=FULL_MATRIX_DIM,
-                                     bin_dim=FULL_MATRIX_BINARY_DIM):
+def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
     """Iceberg variant of the full-matrix dataset.
 
     Vectors are stored as raw binary blobs because Iceberg has no
@@ -3551,17 +4414,17 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
     )
 
     iceberg_type_lookup = {
-        "BooleanType":     BooleanType(),
-        "IntegerType":     IntegerType(),
-        "LongType":        LongType(),
-        "FloatType":       FloatType(),
-        "DoubleType":      DoubleType(),
-        "StringType":      StringType(),
+        "BooleanType": BooleanType(),
+        "IntegerType": IntegerType(),
+        "LongType": LongType(),
+        "FloatType": FloatType(),
+        "DoubleType": DoubleType(),
+        "StringType": StringType(),
         "TimestamptzType": TimestamptzType(),
     }
 
     ids = list(range(num_rows))
-    next_field_id = [3]   # field-id assignment, id=1, schema starts at 2 then bumps
+    next_field_id = [3]  # field-id assignment, id=1, schema starts at 2 then bumps
 
     def fid():
         x = next_field_id[0]
@@ -3583,16 +4446,14 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
     arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
     nested_fields.append(
         NestedField(
-            fid(), arr_name,
-            ListType(element_id=fid(), element_type=LongType(),
-                     element_required=False),
+            fid(),
+            arr_name,
+            ListType(element_id=fid(), element_type=LongType(), element_required=False),
             required=False,
         ),
     )
     arrow_fields.append(
-        pa.field(arr_name,
-                 pa.list_(pa.field("element", pa.int64(), nullable=True)),
-                 nullable=True),
+        pa.field(arr_name, pa.list_(pa.field("element", pa.int64(), nullable=True)), nullable=True),
     )
     arrow_columns[arr_name] = pa.array(
         [arr_value_fn(i) for i in ids],
@@ -3602,8 +4463,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
     # Geometry → BinaryType (WKB)
     nested_fields.append(NestedField(fid(), "geo", BinaryType(), required=False))
     arrow_fields.append(pa.field("geo", pa.binary(), nullable=True))
-    arrow_columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows,
-                                    type=pa.binary())
+    arrow_columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
 
     # Vector fields → BinaryType blobs of dim*sizeof(elem) bytes.
     fv_arr = _float_vectors(ids, dim)
@@ -3614,8 +4474,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
 
     def vec_blobs(name, vtype, vdim):
         if vtype == DataType.FLOAT_VECTOR:
-            return [struct.pack(f"<{vdim}f", *fv_arr[i].tolist())
-                    for i in range(num_rows)]
+            return [struct.pack(f"<{vdim}f", *fv_arr[i].tolist()) for i in range(num_rows)]
         if vtype == DataType.FLOAT16_VECTOR:
             return [f16_arr[i].astype(np.uint16).tobytes() for i in range(num_rows)]
         if vtype == DataType.BFLOAT16_VECTOR:
@@ -3629,8 +4488,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         nested_fields.append(NestedField(fid(), name, BinaryType(), required=False))
         arrow_fields.append(pa.field(name, pa.binary(), nullable=True))
-        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim),
-                                       type=pa.binary())
+        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim), type=pa.binary())
 
     ibg_schema = IbgSchema(*nested_fields)
     arrow_schema = pa.schema(arrow_fields)
@@ -3638,15 +4496,18 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
 
     tmp = tempfile.mkdtemp(prefix="ibg_fm_")
     try:
-        cat = SqlCatalog("milvus_test_fm", **{
-            "uri":                  f"sqlite:///{tmp}/cat.db",
-            "warehouse":            f"s3://{cfg['bucket']}/{prefix}",
-            "s3.endpoint":          f"http://{cfg['address']}",
-            "s3.access-key-id":     cfg["access_key"],
-            "s3.secret-access-key": cfg["secret_key"],
-            "s3.region":            "us-east-1",
-            "s3.path-style-access": "true",
-        })
+        cat = SqlCatalog(
+            "milvus_test_fm",
+            **{
+                "uri": f"sqlite:///{tmp}/cat.db",
+                "warehouse": f"s3://{cfg['bucket']}/{prefix}",
+                "s3.endpoint": f"http://{cfg['address']}",
+                "s3.access-key-id": cfg["access_key"],
+                "s3.secret-access-key": cfg["secret_key"],
+                "s3.region": "us-east-1",
+                "s3.path-style-access": "true",
+            },
+        )
         cat.create_namespace("ext")
         tbl = cat.create_table("ext.t", schema=ibg_schema)
         tbl.append(arrow_table)
@@ -3655,28 +4516,24 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows,
         meta_loc = tbl.metadata_location
         if not meta_loc.startswith("s3://"):
             raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
-        bucket_and_key = meta_loc[len("s3://"):]
+        bucket_and_key = meta_loc[len("s3://") :]
         ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
         return snap, ext_url
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def build_iceberg_full_matrix_schema(client, ext_path, ext_spec,
-                                     dim=FULL_MATRIX_DIM,
-                                     bin_dim=FULL_MATRIX_BINARY_DIM):
+def build_iceberg_full_matrix_schema(client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
     """Milvus schema for the iceberg full-matrix dataset. Matches
     ICEBERG_FULL_MATRIX_SCALAR_FIELDS for scalars and FULL_MATRIX_VECTOR_FIELDS
     for vectors (vectors are stored as iceberg binary blobs but exposed as
     Milvus vector types; NormalizeExternalArrow reinterprets the bytes)."""
-    schema = client.create_schema(external_source=ext_path,
-                                  external_spec=ext_spec)
+    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
     schema.add_field("id", DataType.INT64, external_field="id")
     for name, dtype, _ibg, _arrow, extra, _value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
         schema.add_field(name, dtype, external_field=name, **extra)
     arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
-    schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype,
-                     max_capacity=8, external_field=arr_name)
+    schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
     schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
     for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         schema.add_field(name, vtype, dim=vdim, external_field=name)
@@ -3725,8 +4582,11 @@ def _iceberg_full_matrix_assert(client, coll, expected_count):
     for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
         query_vec = _full_matrix_query_vec(name, vdim)
         hits = client.search(
-            coll, data=query_vec, limit=3,
-            anns_field=name, output_fields=["id"],
+            coll,
+            data=query_vec,
+            limit=3,
+            anns_field=name,
+            output_fields=["id"],
             search_params={"metric_type": metric},
         )[0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
@@ -3750,20 +4610,22 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 
         for idx in range(FORMAT_NUM_FILES):
             upload_parquet(
-                minio_client, cfg["bucket"],
+                minio_client,
+                cfg["bucket"],
                 f"{ext_key}/file_{idx:03d}.parquet",
                 gen_basic_parquet_bytes(
-                    FORMAT_ROWS_PER_FILE, idx * FORMAT_ROWS_PER_FILE,
+                    FORMAT_ROWS_PER_FILE,
+                    idx * FORMAT_ROWS_PER_FILE,
                 ),
             )
 
         schema = client.create_schema(
-            external_source=ext_url, external_spec='{"format":"parquet"}',
+            external_source=ext_url,
+            external_spec=build_external_spec(cfg),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -3774,7 +4636,8 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             for idx in range(FORMAT_NUM_FILES):
                 first_id = idx * FORMAT_ROWS_PER_FILE
                 rows = client.query(
-                    coll, filter=f"id == {first_id}",
+                    coll,
+                    filter=f"id == {first_id}",
                     output_fields=["id", "value"],
                 )
                 assert len(rows) == 1, f"row id={first_id} missing"
@@ -3802,22 +4665,21 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
-        batches = [
-            (idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE)
-            for idx in range(FORMAT_NUM_FILES)
-        ]
+        batches = [(idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE) for idx in range(FORMAT_NUM_FILES)]
         _write_lance_to_minio_batches(
-            minio_client, cfg["bucket"], ext_key, batches,
+            minio_client,
+            cfg["bucket"],
+            ext_key,
+            batches,
         )
 
         schema = client.create_schema(
             external_source=ext_url,
-            external_spec='{"format":"lance-table"}',
+            external_spec=build_external_spec(cfg, fmt="lance-table"),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -3829,15 +4691,19 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             for idx in range(FORMAT_NUM_FILES):
                 first_id = idx * FORMAT_ROWS_PER_FILE
                 rows = client.query(
-                    coll, filter=f"id == {first_id}",
+                    coll,
+                    filter=f"id == {first_id}",
                     output_fields=["id", "value"],
                 )
                 assert len(rows) == 1, f"row id={first_id} missing"
                 assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 5
         finally:
@@ -3863,7 +4729,9 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 
         for idx in range(FORMAT_NUM_FILES):
             _write_vortex_to_minio(
-                cfg["bucket"], cfg, ext_key,
+                cfg["bucket"],
+                cfg,
+                ext_key,
                 num_rows=FORMAT_ROWS_PER_FILE,
                 start_id=idx * FORMAT_ROWS_PER_FILE,
                 filename=f"data_{idx:03d}.vortex",
@@ -3871,12 +4739,11 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 
         schema = client.create_schema(
             external_source=ext_url,
-            external_spec='{"format":"vortex"}',
+            external_spec=build_external_spec(cfg, fmt="vortex"),
         )
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -3888,15 +4755,19 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             for idx in range(FORMAT_NUM_FILES):
                 first_id = idx * FORMAT_ROWS_PER_FILE
                 rows = client.query(
-                    coll, filter=f"id == {first_id}",
+                    coll,
+                    filter=f"id == {first_id}",
                     output_fields=["id", "value"],
                 )
                 assert len(rows) == 1, f"row id={first_id} missing"
                 assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=5,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=5,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 5
         finally:
@@ -3936,35 +4807,26 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 
         # Multiple appends → multiple data files under data/. The final
         # snapshot includes every batch.
-        batches = [
-            (idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE)
-            for idx in range(FORMAT_NUM_FILES)
-        ]
+        batches = [(idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE) for idx in range(FORMAT_NUM_FILES)]
         snapshot_id, ext_url = _build_iceberg_table_in_minio(
-            ext_key, cfg, batches=batches,
+            ext_key,
+            cfg,
+            batches=batches,
         )
         log.info(f"[iceberg] snapshot={snapshot_id} ext_url={ext_url}")
 
         # Iceberg requires explicit credentials in extfs because the iceberg
         # reader path runs in the Rust opendal layer, which does not pick up
         # AKSK from the Milvus root configuration.
-        ext_spec = json.dumps({
-            "format":      "iceberg-table",
-            "snapshot_id": int(snapshot_id),
-            "extfs": {
-                "access_key_id":    cfg["access_key"],
-                "access_key_value": cfg["secret_key"],
-                "cloud_provider":   "aws",
-                "storage_type":     "remote",
-                "region":           "us-east-1",
-                "use_ssl":          "false",
-            },
-        })
+        ext_spec = build_external_spec(
+            cfg,
+            fmt="iceberg-table",
+            snapshot_id=int(snapshot_id),
+        )
 
         schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
         schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM,
-                         external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -3977,7 +4839,8 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             for idx in range(FORMAT_NUM_FILES):
                 first_id = idx * FORMAT_ROWS_PER_FILE
                 rows = client.query(
-                    coll, filter=f"id == {first_id}",
+                    coll,
+                    filter=f"id == {first_id}",
                     output_fields=["id", "embedding"],
                 )
                 assert len(rows) == 1, f"row id={first_id} missing"
@@ -3985,13 +4848,14 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
                 assert len(vec) == TEST_DIM
                 for j, v in enumerate(vec):
                     expected = float(first_id) + j * 0.1
-                    assert abs(v - expected) < 1e-2, (
-                        f"vec[{j}] for id={first_id} = {v}, expected {expected}"
-                    )
+                    assert abs(v - expected) < 1e-2, f"vec[{j}] for id={first_id} = {v}, expected {expected}"
 
             hits = client.search(
-                coll, data=[[0.0] * TEST_DIM], limit=3,
-                anns_field="embedding", output_fields=["id"],
+                coll,
+                data=[[0.0] * TEST_DIM],
+                limit=3,
+                anns_field="embedding",
+                output_fields=["id"],
             )[0]
             assert len(hits) == 3
             # NOTE: AUTOINDEX (IVF-family) on 9k rows can miss the true
@@ -4010,40 +4874,10 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
 # builds 21 fields with 10+ scalar indexes and 9 vector indexes.
 FULL_MATRIX_NB = 200
 
-# Vortex reader limitations identified by exhaustive per-field probing on
-# master-20260424-5409a81. Two distinct server-side bugs share the same
-# root cause — the vortex C++ reader assumes Arrow types use a 2-buffer
-# (validity + flat data) layout, which only holds for fixed-width
-# primitives. Variable-length Arrow types have 3 buffers (validity +
-# offsets + data), and the reader misreads them:
-#
-# 1. milvus#49352 — refresh-time sampler raises "Expected 2 buffers,
-#    got 3" on Arrow `string`, so VARCHAR and JSON fields cannot be
-#    ingested via vortex (refresh fails).
-# 2. milvus#49353 — load-time column-group loader SIGSEGVs at
-#    SI_ADDR=0x8 (null-pointer + offset deref) when it tries to decode
-#    an Arrow `binary` cell, which is what GEOMETRY is stored as.
-#
-# Probe results (1 FV + 1 scalar each, vortex on master-20260424):
-#   bool / int8 / int16 / int32 / int64 / float / double / timestamp /
-#   array<int64>                      → load OK
-#   string  (VARCHAR / JSON)          → refresh fails (#49352)
-#   binary  (GEOMETRY)                → load SIGSEGV (#49353)
-# All vector dtypes (FloatVector / Float16 / BFloat16 / Int8 / Binary)
-# load fine on their own and in any combination — the trigger is the
-# scalar layout, not the vector set.
-#
-# Until both are fixed, the vortex full-matrix excludes only the three
-# affected scalar fields. Every other DataType (Bool, all integer
-# widths, Float, Double, Timestamptz, Array<Int64>) and every vector
-# type/index combination (FloatVector × {AUTOINDEX, FLAT, HNSW,
-# IVF_FLAT}, Float16, BFloat16, Int8, BinaryVector × {BIN_FLAT,
-# BIN_IVF_FLAT}) is still covered.
-_VORTEX_EXCLUDED_FIELDS = {
-    "vc_trie",  # VARCHAR — refresh fails per milvus#49352
-    "j",        # JSON    — refresh fails per milvus#49352
-    "geo",      # GEOMETRY — load SIGSEGV per milvus#49353
-}
+# Vortex regression coverage includes the formerly problematic variable-length
+# fields. milvus#49352 covered Arrow string columns (VARCHAR / JSON) and
+# milvus#49353 covered Arrow binary-backed GEOMETRY.
+_VORTEX_EXCLUDED_FIELDS = set()
 
 
 def _full_matrix_query_vec(vec_field, dim):
@@ -4073,8 +4907,7 @@ def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
 
     # Spot-check id=42: every scalar field round-trips with the expected
     # value derived from the same value_fn used to build the parquet.
-    output_fields = ["id"] + [f for f, _, _, _, _ in FULL_MATRIX_SCALAR_FIELDS
-                              if f not in excluded]
+    output_fields = ["id"] + [f for f, _, _, _, _ in FULL_MATRIX_SCALAR_FIELDS if f not in excluded]
     arr_name = FULL_MATRIX_ARRAY_FIELD[0]
     if arr_name not in excluded:
         output_fields.append(arr_name)
@@ -4111,8 +4944,11 @@ def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
             continue
         query_vec = _full_matrix_query_vec(name, vdim)
         hits = client.search(
-            coll, data=query_vec, limit=3,
-            anns_field=name, output_fields=["id"],
+            coll,
+            data=query_vec,
+            limit=3,
+            anns_field=name,
+            output_fields=["id"],
             search_params={"metric_type": metric},
         )[0]
         assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
@@ -4134,7 +4970,9 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet",
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
             gen_full_matrix_parquet_bytes(FULL_MATRIX_NB, 0),
         )
         schema = build_full_matrix_schema(client, ext_url)
@@ -4183,13 +5021,17 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
                     absolute = os.path.join(root, fname)
                     relative = os.path.relpath(absolute, local_path)
                     minio_client.fput_object(
-                        cfg["bucket"], f"{ext_key}/{relative}", absolute,
+                        cfg["bucket"],
+                        f"{ext_key}/{relative}",
+                        absolute,
                     )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
         schema = build_full_matrix_schema(
-            client, ext_url, ext_spec='{"format":"lance-table"}',
+            client,
+            ext_url,
+            ext_spec=build_external_spec(cfg, fmt="lance-table"),
         )
         client.create_collection(collection_name=coll, schema=schema)
         try:
@@ -4210,17 +5052,6 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
         to the sidecar via Arrow IPC over stdin so the schema (including
         FixedSizeList vector dims) is preserved verbatim.
 
-        VARCHAR / JSON / GEOMETRY columns are omitted because Milvus's
-        vortex C++ reader mishandles Arrow's variable-length 3-buffer
-        layout (validity + offsets + data):
-            - milvus#49352: refresh-time sampler raises "Expected 2
-              buffers, got 3" on Arrow `string` (VARCHAR + JSON).
-            - milvus#49353: load-time column-group loader SIGSEGVs on
-              Arrow `binary` (GEOMETRY).
-        Every other scalar (Bool / Int{8,16,32,64} / Float / Double /
-        Timestamptz / Array<Int64>) and every vector type/index
-        combination is still covered.
-
         Splits the full row set into FORMAT_NUM_FILES sibling .vortex
         files to also exercise multi-file ingestion through the vortex
         reader path.
@@ -4237,18 +5068,25 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
         for idx in range(FORMAT_NUM_FILES):
             n = rows_per_file + (1 if idx < remainder else 0)
             columns = _full_matrix_arrow_columns(
-                n, offset, excluded_fields=excluded,
+                n,
+                offset,
+                excluded_fields=excluded,
             )
             table = pa.table(columns)
             _write_vortex_table_to_minio(
-                cfg["bucket"], cfg, ext_key, table,
+                cfg["bucket"],
+                cfg,
+                ext_key,
+                table,
                 filename=f"data_{idx:03d}.vortex",
             )
             offset += n
         assert offset == FULL_MATRIX_NB
 
         schema = build_full_matrix_schema(
-            client, ext_url, ext_spec='{"format":"vortex"}',
+            client,
+            ext_url,
+            ext_spec=build_external_spec(cfg, fmt="vortex"),
             excluded_fields=excluded,
         )
         client.create_collection(collection_name=coll, schema=schema)
@@ -4257,7 +5095,10 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
             create_full_matrix_indexes(client, coll, excluded_fields=excluded)
             client.load_collection(coll)
             _full_matrix_assert_basic(
-                client, coll, FULL_MATRIX_NB, excluded_fields=excluded,
+                client,
+                coll,
+                FULL_MATRIX_NB,
+                excluded_fields=excluded,
             )
         finally:
             client.drop_collection(coll)
@@ -4274,10 +5115,7 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
         try:
             from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
         except ImportError:
-            pytest.skip(
-                "pyiceberg not installed. Install with:\n"
-                "  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'"
-            )
+            pytest.skip("pyiceberg not installed. Install with:\n  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'")
 
         _minio_client, cfg = minio_env
         client = self._client()
@@ -4285,20 +5123,15 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
         ext_key = external_prefix["key"]
 
         snapshot_id, ext_url = _build_iceberg_full_matrix_table(
-            ext_key, cfg, num_rows=FULL_MATRIX_NB,
+            ext_key,
+            cfg,
+            num_rows=FULL_MATRIX_NB,
         )
-        ext_spec = json.dumps({
-            "format":      "iceberg-table",
-            "snapshot_id": int(snapshot_id),
-            "extfs": {
-                "access_key_id":    cfg["access_key"],
-                "access_key_value": cfg["secret_key"],
-                "cloud_provider":   "aws",
-                "storage_type":     "remote",
-                "region":           "us-east-1",
-                "use_ssl":          "false",
-            },
-        })
+        ext_spec = build_external_spec(
+            cfg,
+            fmt="iceberg-table",
+            snapshot_id=int(snapshot_id),
+        )
         schema = build_iceberg_full_matrix_schema(client, ext_url, ext_spec)
         client.create_collection(collection_name=coll, schema=schema)
         try:

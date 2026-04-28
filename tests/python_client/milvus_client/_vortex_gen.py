@@ -21,6 +21,7 @@ Two operating modes:
 Writes the vortex file bytes to MinIO at the given key. Prints "OK <bytes>".
 Exits non-zero on failure.
 """
+
 import io
 import os
 import struct
@@ -52,13 +53,16 @@ def _build_basic_table() -> pa.Table:
     for i in ids:
         flat.extend(struct.pack(f"{dim}f", *[float(i) * 0.1 + j for j in range(dim)]))
 
-    return pa.table({
-        "id": pa.array(ids, type=pa.int64()),
-        "value": pa.array(values, type=pa.float32()),
-        "embedding": pa.FixedSizeListArray.from_arrays(
-            pa.array(bytes(flat), type=pa.uint8()), byte_width,
-        ),
-    })
+    return pa.table(
+        {
+            "id": pa.array(ids, type=pa.int64()),
+            "value": pa.array(values, type=pa.float32()),
+            "embedding": pa.FixedSizeListArray.from_arrays(
+                pa.array(bytes(flat), type=pa.uint8()),
+                byte_width,
+            ),
+        }
+    )
 
 
 def main():
@@ -87,8 +91,10 @@ def main():
 
     client = Minio(minio_addr, access_key=access_key, secret_key=secret_key, secure=False)
     client.put_object(
-        bucket, key,
-        io.BytesIO(data), length=len(data),
+        bucket,
+        key,
+        io.BytesIO(data),
+        length=len(data),
         content_type="application/octet-stream",
     )
     print(f"OK {len(data)}")
