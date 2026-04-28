@@ -1154,8 +1154,7 @@ struct TantivyIndexWrapper {
                 for (size_t i = 0; i < n; ++i)
                     i64_values[i] = static_cast<int64_t>(values[i]);
                 auto res_i64 = tantivy_json_terms_query_i64(
-                    reader_, json_path.c_str(),
-                    i64_values.data(), n, bitset);
+                    reader_, json_path.c_str(), i64_values.data(), n, bitset);
                 AssertInfo(res_i64.success,
                            "TantivyIndexWrapper.json_terms_query i64: {}",
                            res_i64.error);
@@ -1166,8 +1165,7 @@ struct TantivyIndexWrapper {
                 for (size_t i = 0; i < n; ++i)
                     f64_values[i] = static_cast<double>(values[i]);
                 return tantivy_json_terms_query_f64(
-                    reader_, json_path.c_str(),
-                    f64_values.data(), n, bitset);
+                    reader_, json_path.c_str(), f64_values.data(), n, bitset);
             }
 
             if constexpr (std::is_floating_point_v<T>) {
@@ -1180,26 +1178,30 @@ struct TantivyIndexWrapper {
                     }
                 }
                 if (!int_values.empty()) {
-                    auto res_i64 = tantivy_json_terms_query_i64(
-                        reader_, json_path.c_str(),
-                        int_values.data(), int_values.size(), bitset);
+                    auto res_i64 =
+                        tantivy_json_terms_query_i64(reader_,
+                                                     json_path.c_str(),
+                                                     int_values.data(),
+                                                     int_values.size(),
+                                                     bitset);
                     AssertInfo(res_i64.success,
                                "TantivyIndexWrapper.json_terms_query i64: {}",
                                res_i64.error);
                     free_rust_result(res_i64);
                 }
                 return tantivy_json_terms_query_f64(
-                    reader_, json_path.c_str(),
-                    reinterpret_cast<const double*>(values), n, bitset);
+                    reader_,
+                    json_path.c_str(),
+                    reinterpret_cast<const double*>(values),
+                    n,
+                    bitset);
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
                 std::vector<const char*> c_strs(n);
-                for (size_t i = 0; i < n; ++i)
-                    c_strs[i] = values[i].c_str();
+                for (size_t i = 0; i < n; ++i) c_strs[i] = values[i].c_str();
                 return tantivy_json_terms_query_keyword(
-                    reader_, json_path.c_str(),
-                    c_strs.data(), n, bitset);
+                    reader_, json_path.c_str(), c_strs.data(), n, bitset);
             }
 
             throw fmt::format(
