@@ -367,6 +367,16 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 				NumOfRows: 12,
 			},
 		},
+		StartPositions: []*datapb.SegmentStartPosition{
+			{
+				SegmentID: 1,
+				StartPosition: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{4, 5, 6},
+					Timestamp:   0,
+				},
+			},
+		},
 		Flushed: true,
 	})
 	s.NoError(err)
@@ -375,6 +385,57 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
+	s.EqualValues(12, segment.GetNumOfRows())
+	s.Require().Len(segment.GetDeltalogs(), 1)
+	s.Require().Len(segment.GetDeltalogs()[0].GetBinlogs(), 2)
+	s.NotNil(segment.GetDmlPosition())
+	s.EqualValues([]byte{1, 2, 3}, segment.GetDmlPosition().GetMsgID())
+	s.NotNil(segment.GetStartPosition())
+	s.EqualValues([]byte{4, 5, 6}, segment.GetStartPosition().GetMsgID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    1,
+		PartitionID:  1,
+		CollectionID: 0,
+		SegLevel:     datapb.SegmentLevel_L0,
+		Channel:      "ch1",
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/3",
+						EntriesNum: 1,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 1,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{7, 8, 9},
+					Timestamp:   1,
+				},
+				NumOfRows: 13,
+			},
+		},
+		Flushed: true,
+	})
+	s.NoError(err)
+	s.EqualValues(commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.NotNil(segment)
+	s.EqualValues(13, segment.GetNumOfRows())
+	s.Require().Len(segment.GetDeltalogs(), 1)
+	s.Require().Len(segment.GetDeltalogs()[0].GetBinlogs(), 3)
+	s.NotNil(segment.GetDmlPosition())
+	s.EqualValues([]byte{7, 8, 9}, segment.GetDmlPosition().GetMsgID())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
