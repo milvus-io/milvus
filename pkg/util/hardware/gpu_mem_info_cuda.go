@@ -16,7 +16,7 @@ typedef struct {
 } GPUMemoryInfo;
 
 // Function to get memory info for all GPUs
-int getAllGPUMemoryInfo(GPUMemoryInfo** infos) {
+static int getAllGPUMemoryInfo(GPUMemoryInfo** infos) {
     int deviceCount = 0;
     cudaError_t err = cudaGetDeviceCount(&deviceCount);
     if (err != cudaSuccess || deviceCount == 0) {
