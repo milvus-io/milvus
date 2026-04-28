@@ -93,6 +93,38 @@ TEST(LoadCancellationSegment, CreateTextIndexCancellationSealed) {
         SegcoreError);
 }
 
+TEST(LoadCancellationSegment, ExternalManifestLoadCancellationSealed) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_external_source("s3://bucket/path");
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(1);
+    load_info.set_num_of_rows(1);
+    load_info.set_manifest_path("not-json");
+    segment->SetLoadInfo(load_info);
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext op_ctx(source.getToken());
+    tracer::TraceContext trace_ctx;
+    EXPECT_THROW(
+        {
+            try {
+                segment->Load(trace_ctx, &op_ctx);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
+}
+
 // Test for Segment CreateTextIndex cancellation (growing segment)
 TEST(LoadCancellationSegment, CreateTextIndexCancellationGrowing) {
     auto schema = std::make_shared<Schema>();

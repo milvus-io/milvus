@@ -607,14 +607,18 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
 }
 
 void
-ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
+ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
+                                           milvus::OpContext* op_ctx) {
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     LOG_INFO(
         "[LoadColumnGroups] segment {} start, manifest {}", id_, manifest_path);
+
     auto properties = std::make_shared<milvus_storage::api::Properties>(
         *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
              .GetProperties());
     auto load_info = std::atomic_load(&segment_load_info_);
+    CheckCancellation(
+        op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups(manifest)");
     auto column_groups = load_info->GetColumnGroups();
 
     // External collections: inject extfs.{collectionID}.* derived from
@@ -656,6 +660,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
                                                       needed_columns,
                                                       *properties);
     }
+    CheckCancellation(
+        op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups(manifest)");
 
     auto reader_create_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -752,13 +758,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
                                    properties,
                                    cg_index = task.cg_index,
                                    field_ids = std::move(task.field_ids),
-                                   eager_load = task.eager_load] {
+                                   eager_load = task.eager_load,
+                                   op_ctx] {
+            CheckCancellation(op_ctx,
+                              id_,
+                              cg_index,
+                              "ChunkedSegmentSealedImpl::LoadColumnGroup()");
             LoadColumnGroup(column_groups,
                             properties,
                             cg_index,
                             field_ids,
                             eager_load,
-                            /*op_ctx=*/nullptr,
+                            op_ctx,
                             /*is_replace=*/false);
         });
         load_group_futures.emplace_back(std::move(future));
@@ -4164,7 +4175,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     // load column groups
     if (diff.load_external_manifest) {
         // External collections: load via manifest path
-        LoadColumnGroups(segment_load_info.GetManifestPath());
+        LoadColumnGroups(segment_load_info.GetManifestPath(), op_ctx);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||
