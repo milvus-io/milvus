@@ -393,9 +393,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_first_n(int64_t limit, const BitsetTypeView& bitset) const override;
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(int64_t limit,
-                         const BitsetTypeView& element_bitset,
-                         const IArrayOffsets* array_offsets) const override;
+    find_first_n_element(
+        int64_t limit,
+        const BitsetTypeView& element_bitset,
+        const IArrayOffsets* array_offsets,
+        const std::optional<QueryIteratorCursor>& cursor) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
@@ -725,6 +727,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (start_idx < end_idx) {
             bitset.set(start_idx, end_idx - start_idx, true);
         }
+    }
+
+    template <typename PK>
+    std::optional<int64_t>
+    find_sorted_pk_doc_offset(
+        const PK& pk,
+        const std::shared_ptr<ChunkedColumnInterface>& pk_column) const {
+        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        auto [chunk_id, in_chunk_offset, exact_match] =
+            this->pk_lower_bound<PK>(pk, pk_column.get(), all_chunk_pins, 0);
+        if (!exact_match) {
+            return std::nullopt;
+        }
+        return pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
     }
 
     template <typename PK>
