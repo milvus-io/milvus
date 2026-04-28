@@ -2241,17 +2241,48 @@ std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
 ChunkedSegmentSealedImpl::find_first_n_element(
     int64_t limit,
     const BitsetTypeView& element_bitset,
-    const IArrayOffsets* array_offsets) const {
+    const IArrayOffsets* array_offsets,
+    const std::optional<QueryIteratorCursor>& cursor) const {
     if (!is_sorted_by_pk_) {
         // Not sorted by PK, use pk2offset_ to iterate in PK order
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets);
+            limit, element_bitset, array_offsets, cursor);
     }
 
     // Sorted by PK, element_id order = (PK, element_index) order
     // Directly iterate element_bitset in order
     if (limit == Unlimited || limit == NoLimit) {
         limit = static_cast<int64_t>(element_bitset.size());
+    }
+
+    // We iterate matching elements by global element id, which maps back
+    // to (doc_offset, element_offset). The cursor, however, only tells us the
+    // last returned PK and element offset. Find the row for that PK first; the
+    // scan can then skip only elements from that row whose element offset has
+    // already been returned.
+    std::optional<int64_t> cursor_doc_offset;
+    if (cursor.has_value()) {
+        auto pk_field_id =
+            schema_->get_primary_field_id().value_or(FieldId(-1));
+        AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+        auto pk_column = get_column(pk_field_id);
+        AssertInfo(pk_column != nullptr, "primary key column not loaded");
+        switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+            case DataType::INT64:
+                cursor_doc_offset = find_sorted_pk_doc_offset<int64_t>(
+                    std::get<int64_t>(cursor->last_pk), pk_column);
+                break;
+            case DataType::VARCHAR:
+                cursor_doc_offset = find_sorted_pk_doc_offset<std::string>(
+                    std::get<std::string>(cursor->last_pk), pk_column);
+                break;
+            default:
+                ThrowInfo(
+                    DataTypeInvalid,
+                    fmt::format(
+                        "unsupported type {}",
+                        schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
     }
 
     int64_t hit_num = 0;
@@ -2268,6 +2299,12 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     while (elem_opt.has_value() && hit_num < limit) {
         int64_t elem_id = static_cast<int64_t>(elem_opt.value());
         auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
+        if (cursor_doc_offset.has_value() &&
+            doc_id == cursor_doc_offset.value() &&
+            elem_idx <= cursor->last_element_offset) {
+            elem_opt = element_bitset.find_next(elem_id, false);
+            continue;
+        }
 
         if (doc_id != current_doc_id) {
             // New document - start a new entry
