@@ -3839,6 +3839,7 @@ type dataCoordConfig struct {
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
+	ChannelStoreMaxBytesPerTxn   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -4032,6 +4033,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
+
+	p.ChannelStoreMaxBytesPerTxn = ParamItem{
+		Key:          "dataCoord.channel.storeMaxBytesPerTxn",
+		Version:      "2.5.26",
+		DefaultValue: "1048576",
+		Doc:          "Maximum bytes per transaction in channel store operations (in bytes).",
+		Export:       true,
+	}
+	p.ChannelStoreMaxBytesPerTxn.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
