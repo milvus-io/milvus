@@ -20,6 +20,7 @@ default_growing_nb = 500
 insert_batch_size = 500
 default_capacity = 100
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
+HNSW_SEARCH_PARAMS = {"ef": 1000}
 COLORS = ["Red", "Blue", "Green"]
 SIZES = ["S", "M", "L", "XL"]
 CATEGORIES = ["A", "B", "C", "D"]
@@ -286,6 +287,65 @@ def _assert_element_range_hits_ground_truth(
                 )
 
 
+def _expected_element_range_hits(data, query_vector, metric_type, elem_filter_fn, low=None, high=None):
+    """Compute exact element-level range-search candidates from inserted data."""
+    expected = []
+    for row in data:
+        for offset, elem in enumerate(row["structA"]):
+            if not elem_filter_fn(elem):
+                continue
+            distance = _compute_similarity(query_vector, elem["embedding"], metric_type)
+            if low is not None and distance < low:
+                continue
+            if high is not None and distance > high:
+                continue
+            expected.append((row["id"], offset, distance))
+    expected.sort(key=lambda x: x[2], reverse=_is_descending(metric_type))
+    return expected
+
+
+def _assert_no_missing_range_hits(results, expected_hits):
+    """Assert returned element hits exactly match the expected element candidates."""
+    actual_pairs = {(hit["id"], hit["offset"]) for hit in results[0]}
+    expected_pairs = {(row_id, offset) for row_id, offset, _ in expected_hits}
+    missing = expected_pairs - actual_pairs
+    extra = actual_pairs - expected_pairs
+    assert not missing and not extra, (
+        f"range search result mismatch: missing={sorted(missing)[:20]}, "
+        f"extra={sorted(extra)[:20]}, expected={len(expected_pairs)}, actual={len(actual_pairs)}"
+    )
+
+
+def _assert_range_recall(hits, expected_hits, limit, recall_threshold=0.8, context="range search"):
+    """Assert ANN range-search results recall enough exact top candidates."""
+    expected_top = expected_hits[: min(limit, len(expected_hits))]
+    assert expected_top, f"{context}: exact expected range candidates should not be empty"
+
+    actual_pairs = {(hit["id"], hit["offset"]) for hit in hits}
+    expected_pairs = {(row_id, offset) for row_id, offset, _ in expected_top}
+    overlap = actual_pairs & expected_pairs
+    recall = len(overlap) / len(expected_pairs)
+    assert recall >= recall_threshold, (
+        f"{context}: recall {recall:.2f} < {recall_threshold}; "
+        f"overlap={len(overlap)}, expected={len(expected_pairs)}, actual={len(actual_pairs)}, "
+        f"missing={sorted(expected_pairs - actual_pairs)[:20]}"
+    )
+
+
+def _hnsw_search_params(**params):
+    """Compose HNSW search params with a recall-oriented ef value."""
+    merged = dict(HNSW_SEARCH_PARAMS)
+    merged.update(params)
+    return merged
+
+
+def _diskann_search_params(**params):
+    """Compose DISKANN search params with a recall-oriented search_list value."""
+    merged = {"search_list": 1000}
+    merged.update(params)
+    return merged
+
+
 def _generate_float16_vector(dim, seed=None):
     """Generate Float16 vector as np.ndarray(dtype=float16)."""
     rng = np.random.RandomState(seed)
@@ -442,7 +502,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE"},
+            search_params={"metric_type": "COSINE", "params": HNSW_SEARCH_PARAMS},
             filter="element_filter(structA, $[int_val] >= 0)",
             limit=10,
             output_fields=["id", "structA"],
@@ -4709,7 +4769,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
     """
 
     def _setup_collection(
-        self, client, collection_name, sealed_nb=3000, growing_nb=500, metric_type="COSINE", elems_per_row=None
+        self,
+        client,
+        collection_name,
+        sealed_nb=3000,
+        growing_nb=500,
+        metric_type="COSINE",
+        elems_per_row=None,
+        index_type="HNSW",
     ):
         """Create collection + insert `sealed_nb` rows (flushed → sealed) then `growing_nb`
         rows (no flush → growing). Default totals 3500 rows (3000 sealed + 500 growing).
@@ -4743,9 +4810,9 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
         )
         index_params.add_index(
             field_name="structA[embedding]",
-            index_type="HNSW",
+            index_type=index_type,
             metric_type=metric_type,
-            params=INDEX_PARAMS,
+            params=INDEX_PARAMS if index_type == "HNSW" else {},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
@@ -4792,7 +4859,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": metric_type},
+            search_params={"metric_type": metric_type, "params": HNSW_SEARCH_PARAMS},
             filter=filter_expr,
             limit=200,
             output_fields=["id"],
@@ -4815,6 +4882,141 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             assert low - epsilon <= d <= high + epsilon, f"{metric_type} distance {d} not in window [{low}, {high}]"
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_range_search_flat_no_missing_results(self):
+        """
+        target: FLAT range search returns every exact element candidate in the range window
+        method: use one struct element per row, compute exact ground truth from inserted data,
+                then compare returned (id, offset) pairs with the full expected set
+        expected: no missing or extra element hits
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_flat_exact")
+        data = self._setup_collection(
+            client,
+            collection_name,
+            sealed_nb=300,
+            growing_nb=0,
+            metric_type="COSINE",
+            elems_per_row=1,
+            index_type="FLAT",
+        )
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+
+        all_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+        )
+        start = 30
+        end = 80
+        upper_bound = (all_hits[start - 1][2] + all_hits[start][2]) / 2
+        lower_bound = (all_hits[end - 1][2] + all_hits[end][2]) / 2
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        assert 0 < len(expected_hits) < 100, f"unexpected exact candidate count: {len(expected_hits)}"
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE", "params": {"radius": lower_bound, "range_filter": upper_bound}},
+            filter=filter_expr,
+            limit=len(expected_hits) + 10,
+            output_fields=["id"],
+        )
+        assert check
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        _assert_no_missing_range_hits(results, expected_hits)
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_diskann_recall(self):
+        """
+        target: DISKANN range search on struct array element-level vectors has acceptable recall
+        method: build DISKANN on structA[embedding], compute exact range candidates from inserted data,
+                then require at least 70% overlap with the expected top candidates
+        expected: returned hits are valid range hits and recall is not too low
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_range_diskann")
+        data = self._setup_collection(
+            client,
+            collection_name,
+            sealed_nb=1000,
+            growing_nb=0,
+            metric_type="COSINE",
+            elems_per_row=1,
+            index_type="DISKANN",
+        )
+        query_vector = data[0]["structA"][0]["embedding"]
+        filter_expr = "element_filter(structA, $[int_val] >= 0)"
+
+        all_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+        )
+        start = 50
+        end = 150
+        upper_bound = (all_hits[start - 1][2] + all_hits[start][2]) / 2
+        lower_bound = (all_hits[end - 1][2] + all_hits[end][2]) / 2
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        assert expected_hits, "DISKANN range exact candidates should not be empty"
+
+        limit = 100
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={
+                "metric_type": "COSINE",
+                "params": _diskann_search_params(radius=lower_bound, range_filter=upper_bound),
+            },
+            filter=filter_expr,
+            limit=limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0, "DISKANN range search returned 0 rows"
+        _assert_element_range_hits_ground_truth(
+            results,
+            data,
+            [query_vector],
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=lower_bound,
+            high=upper_bound,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="DISKANN COSINE range search")
+        _assert_distance_order(results, "COSINE")
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_range_search_cosine_radius_only(self):
         """
         target: COSINE range search with radius only (lower bound)
@@ -4833,7 +5035,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low)},
             filter=filter_expr,
             limit=100,
             output_fields=["id"],
@@ -4850,6 +5052,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             elem_filter_fn=lambda e: e["int_val"] >= 0,
             low=low,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="COSINE radius-only range search")
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4871,7 +5081,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "L2", "params": {"radius": high}},
+            search_params={"metric_type": "L2", "params": _hnsw_search_params(radius=high)},
             filter=filter_expr,
             limit=100,
             output_fields=["id"],
@@ -4888,6 +5098,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             elem_filter_fn=lambda e: e["int_val"] >= 0,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="L2 radius-only range search")
         _assert_distance_order(results, "L2")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4909,7 +5127,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "IP", "params": {"radius": low}},
+            search_params={"metric_type": "IP", "params": _hnsw_search_params(radius=low)},
             filter=filter_expr,
             limit=100,
             output_fields=["id"],
@@ -4926,6 +5144,14 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             elem_filter_fn=lambda e: e["int_val"] >= 0,
             low=low,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "IP",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="IP radius-only range search")
         _assert_distance_order(results, "IP")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4948,7 +5174,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "L2", "params": {"radius": high, "range_filter": low}},
+            search_params={"metric_type": "L2", "params": _hnsw_search_params(radius=high, range_filter=low)},
             filter=filter_expr,
             limit=limit,
             output_fields=["id"],
@@ -4968,6 +5194,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "L2",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="L2 bounded range search")
         _assert_distance_order(results, "L2")
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -4990,7 +5225,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=filter_expr,
             limit=limit,
             output_fields=["id"],
@@ -5010,6 +5245,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=limit, context="COSINE bounded range search")
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5030,7 +5274,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE"},
+            search_params={"metric_type": "COSINE", "params": HNSW_SEARCH_PARAMS},
             filter="element_filter(structA, $[int_val] >= 0)",
             limit=200,
             output_fields=["id"],
@@ -5045,7 +5289,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[query_vector],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=tight_filter,
             limit=100,
             output_fields=["id", "structA"],
@@ -5068,6 +5312,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            query_vector,
+            "COSINE",
+            elem_filter_fn=lambda e: 1000 < e["int_val"] < 40000,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=100, context="COSINE range search with element_filter")
         _assert_distance_order(results, "COSINE")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5089,7 +5342,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[qv],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=filter_expr,
             limit=200,
             output_fields=["id"],
@@ -5107,6 +5360,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=200, context="COSINE growing range search")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_mixed_segments(self):
@@ -5127,7 +5389,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=[qv],
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=filter_expr,
             limit=400,
             output_fields=["id"],
@@ -5145,6 +5407,15 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(results[0], expected_hits, limit=400, context="COSINE mixed-segment range search")
         # recall hits from both segments (may be weaker for growing due to serial scan)
         has_sealed = any(i < 3000 for i in ids)
         has_growing = any(i >= 3000 for i in ids)
@@ -5174,7 +5445,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             collection_name,
             data=query_vectors,
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=filter_expr,
             limit=100,
             output_fields=["id"],
@@ -5196,6 +5467,21 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        for q_idx, query_vector in enumerate(query_vectors):
+            expected_hits = _expected_element_range_hits(
+                data,
+                query_vector,
+                "COSINE",
+                elem_filter_fn=lambda e: e["int_val"] >= 0,
+                low=low,
+                high=high,
+            )
+            _assert_range_recall(
+                results[q_idx],
+                expected_hits,
+                limit=100,
+                context=f"COSINE nq={q_idx} range search",
+            )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_l2_invalid_radius_less_than_range_filter(self):
@@ -5687,7 +5973,7 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
             data=[qv],
             batch_size=30,
             anns_field="structA[embedding]",
-            search_params={"metric_type": "COSINE", "params": {"radius": low, "range_filter": high}},
+            search_params={"metric_type": "COSINE", "params": _hnsw_search_params(radius=low, range_filter=high)},
             filter=filter_expr,
             limit=200,
             output_fields=["id"],
@@ -5714,6 +6000,15 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
             low=low,
             high=high,
         )
+        expected_hits = _expected_element_range_hits(
+            data,
+            qv,
+            "COSINE",
+            elem_filter_fn=lambda e: e["int_val"] >= 0,
+            low=low,
+            high=high,
+        )
+        _assert_range_recall(all_hits, expected_hits, limit=200, context="iterator COSINE range search")
         dists = [h["distance"] for h in all_hits]
         for k in range(len(dists) - 1):
             assert dists[k] >= dists[k + 1] - epsilon, f"iterator distances not descending at {k}"
