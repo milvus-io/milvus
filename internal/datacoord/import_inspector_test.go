@@ -235,7 +235,6 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
-	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Importing, IsImporting: true},
@@ -248,7 +247,6 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 		s.NotNil(segment)
 	}
 
-	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	s.inspector.inspect()
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := s.meta.GetSegment(context.TODO(), id)
