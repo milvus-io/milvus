@@ -749,6 +749,8 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.EnableDynamicField = newColl.EnableDynamicField
 	oldCollClone.SchemaVersion = newColl.SchemaVersion
 	oldCollClone.ShardInfos = newColl.ShardInfos
+	oldCollClone.ExternalSource = newColl.ExternalSource
+	oldCollClone.ExternalSpec = newColl.ExternalSpec
 
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)
 	value, err := proto.Marshal(model.MarshalCollectionModel(oldCollClone))

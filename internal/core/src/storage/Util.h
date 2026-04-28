@@ -483,7 +483,8 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 
 // Convert ListArray<Scalar> → BinaryArray (protobuf-serialized ScalarFieldProto).
 arrow::ArrayVector
-ConvertListToProtobufBinary(const arrow::ArrayVector& arrays);
+ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
+                            DataType element_type);
 
 // Unified vector normalization: List/FSList → final format.
 // Non-nullable → FixedSizeBinaryArray; nullable → BinaryArray.
