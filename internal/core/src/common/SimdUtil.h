@@ -18,9 +18,50 @@
 #include <cstdint>
 #include <type_traits>
 #include <xsimd/xsimd.hpp>
-#include "common/BitUtil.h"
 
 namespace milvus {
+namespace bits {
+
+constexpr inline uint64_t
+lowMask(int32_t bits) {
+    if (bits >= 64) {
+        return ~0ULL;
+    }
+    if (bits <= 0) {
+        return 0ULL;
+    }
+    return (1ULL << bits) - 1;
+}
+
+template <typename T>
+inline T
+extractBits(T a, T mask) {
+    static_assert(std::is_unsigned_v<T>, "extractBits requires unsigned type");
+
+#ifdef __BMI2__
+    if constexpr (sizeof(T) == 8) {
+        return _pext_u64(static_cast<uint64_t>(a), static_cast<uint64_t>(mask));
+    } else {
+        return static_cast<T>(
+            _pext_u32(static_cast<uint32_t>(a), static_cast<uint32_t>(mask)));
+    }
+#else
+    T dst = 0;
+    for (int k = 0; mask != 0; ++k) {
+        int shift;
+        if constexpr (sizeof(T) <= sizeof(unsigned int)) {
+            shift = __builtin_ctz(static_cast<unsigned int>(mask));
+        } else {
+            shift = __builtin_ctzll(static_cast<unsigned long long>(mask));
+        }
+        dst |= ((a >> shift) & 1) << k;
+        mask &= mask - 1;
+    }
+    return dst;
+#endif
+}
+
+}  // namespace bits
 
 // Generic fallback implementation for toBitMask when no architecture-specific
 // implementation is available
