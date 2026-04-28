@@ -1442,7 +1442,11 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	// Altering the dynamic field flag modifies the schema (add/remove $meta and
 	// bumps SchemaVersion), so it must share the same gates as AlterCollectionSchema
 	// to avoid racing with an in-flight physical backfill.
-	if isAlterDynamic, _, _ := common.IsEnableDynamicSchema(request.GetProperties()); isAlterDynamic {
+	isAlterDynamic, _, err := common.IsEnableDynamicSchema(request.GetProperties())
+	if err != nil {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid dynamic schema property value: %s", err.Error())), nil
+	}
+	if isAlterDynamic {
 		collKey := request.GetDbName() + "/" + request.GetCollectionName()
 		if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
 			return merr.Status(merr.WrapErrParameterInvalidMsg(

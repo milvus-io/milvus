@@ -1063,21 +1063,41 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	return nil
 }
 
-// validateDropStructArrayField validates that a whole struct array field can
-// be dropped. Struct array fields are never PK / partition key / clustering
-// key / dynamic and are not referenced by functions (schema.proto TODO), so
-// the only cross-cutting invariant is "at least one vector remains".
 func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemapb.StructArrayFieldSchema) error {
 	removedVectors := 0
-	for _, sub := range sf.Fields {
-		if typeutil.IsVectorType(sub.DataType) {
+	for _, sub := range sf.GetFields() {
+		if sub.GetIsPrimaryKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is primary key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsPartitionKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is partition key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsClusteringKey() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is clustering key", sf.GetName(), sub.GetName())
+		}
+		if sub.GetIsDynamic() {
+			return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is dynamic", sf.GetName(), sub.GetName())
+		}
+		for _, fn := range schema.GetFunctions() {
+			for _, inputName := range fn.GetInputFieldNames() {
+				if inputName == sub.GetName() {
+					return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as input", sf.GetName(), sub.GetName(), fn.GetName())
+				}
+			}
+			for _, outputName := range fn.GetOutputFieldNames() {
+				if outputName == sub.GetName() {
+					return merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as output", sf.GetName(), sub.GetName(), fn.GetName())
+				}
+			}
+		}
+		if typeutil.IsVectorType(sub.GetDataType()) {
 			removedVectors++
 		}
 	}
 	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop struct array field %s: it would leave no vector field in the collection",
-			sf.Name)
+			sf.GetName())
 	}
 	return nil
 }

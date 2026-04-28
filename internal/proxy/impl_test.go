@@ -2898,6 +2898,26 @@ func TestProxy_AlterCollection_DynamicFieldGate(t *testing.T) {
 		})
 	})
 
+	t.Run("invalid dynamic alter value rejected before gate", func(t *testing.T) {
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		collKey := "db/test_coll"
+		node.alterSchemaInFlight.Store(collKey, struct{}{})
+		defer node.alterSchemaInFlight.Delete(collKey)
+
+		resp, err := node.AlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+			DbName:         "db",
+			CollectionName: "test_coll",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.EnableDynamicSchemaKey, Value: "garbage"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "invalid dynamic schema property value")
+	})
+
 	t.Run("dynamic alter rejected when another in flight", func(t *testing.T) {
 		mockey.PatchConvey("second concurrent dynamic alter is rejected", t, func() {
 			node := createTestProxy()

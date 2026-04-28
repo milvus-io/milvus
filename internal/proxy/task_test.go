@@ -7574,6 +7574,51 @@ func TestValidateDropField(t *testing.T) {
 		assert.Contains(t, err.Error(), "would leave no vector field")
 	})
 
+	t.Run("reject drop struct array field with protected sub-field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_key", DataType: schemapb.DataType_Array, IsPartitionKey: true},
+					},
+				},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sub-field para_key is partition key")
+	})
+
+	t.Run("reject drop struct array field referenced by function", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102, Name: "paragraphs",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "embed_func", InputFieldNames: []string{"para_text"}, OutputFieldNames: []string{"vec"}},
+			},
+		}
+		err := validateDropField(schema, "paragraphs")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sub-field para_text is referenced by function embed_func as input")
+	})
+
 	t.Run("reject drop sub-field of struct array field by name", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_collection",
