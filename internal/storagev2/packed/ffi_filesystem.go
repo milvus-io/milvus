@@ -30,6 +30,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
+func writePathForStorage(storageConfig *indexpb.StorageConfig, filePath string) string {
+	if storageConfig == nil || storageConfig.GetStorageType() != "local" {
+		return filePath
+	}
+
+	rootPath := strings.TrimRight(storageConfig.GetRootPath(), "/")
+	if rootPath == "" {
+		return filePath
+	}
+
+	if filePath == rootPath {
+		return ""
+	}
+
+	if strings.HasPrefix(filePath, rootPath+"/") {
+		return strings.TrimPrefix(filePath, rootPath+"/")
+	}
+
+	return filePath
+}
+
 // WriteFile writes raw bytes to a file using milvus-storage filesystem FFI.
 // filePath is the full storage path (rootPath/basePath/...).
 func WriteFile(
@@ -43,9 +64,11 @@ func WriteFile(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cPath := C.CString(filePath)
+	storagePath := writePathForStorage(storageConfig, filePath)
+
+	cPath := C.CString(storagePath)
 	defer C.free(unsafe.Pointer(cPath))
-	pathLen := C.uint32_t(len(filePath))
+	pathLen := C.uint32_t(len(storagePath))
 
 	// Get filesystem handle (LRU-cached by C++ side)
 	var fsHandle C.FileSystemHandle
@@ -58,8 +81,8 @@ func WriteFile(
 	// Local filesystem requires parent directories to exist before writing.
 	// Object stores (S3/MinIO/GCS) don't have real directories.
 	if storageConfig.GetStorageType() == "local" {
-		if idx := strings.LastIndex(filePath, "/"); idx > 0 {
-			dir := filePath[:idx]
+		if idx := strings.LastIndex(storagePath, "/"); idx > 0 {
+			dir := storagePath[:idx]
 			cDir := C.CString(dir)
 			defer C.free(unsafe.Pointer(cDir))
 			result = C.loon_filesystem_create_dir(fsHandle, cDir, C.uint32_t(len(dir)), true)
