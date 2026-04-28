@@ -1,6 +1,6 @@
 {
     "packages": {
-        "msgpb": "github.com/milvus-io/milvus-proto/go-api/v2/msgpb",
+        "msgpb": "github.com/milvus-io/milvus-proto/go-api/v3/msgpb",
         "messagespb": "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
     },
     "consts": {
