@@ -92,18 +92,17 @@ $ ./e2e-k8s.sh
 
 ### Python Code Quality (ruff via uv)
 
-Ruff is configured at `tests/pyproject.toml` and covers all Python code under `tests/`
+Ruff is configured at `tests/ruff.toml` and covers all Python code under `tests/`
 (`python_client/`, `restful_client/`, `restful_client_v2/`, `benchmark/`, `scripts/`).
-[uv](https://docs.astral.sh/uv/) is only used to host the lint/format toolchain; each
-sub-directory continues to manage its runtime dependencies via its own `requirements.txt`.
+Each sub-directory continues to manage its runtime dependencies via its own
+`requirements.txt`.
 
 ```shell
 $ cd tests/
-$ uv sync                       # install ruff into a local .venv
-$ uv run ruff check .           # lint
-$ uv run ruff check . --fix     # lint with auto-fix
-$ uv run ruff format .          # format in place
-$ uv run ruff format --check .  # format check only (CI-friendly)
+$ ruff check .                  # lint
+$ ruff check . --fix            # lint with auto-fix
+$ ruff format .                 # format in place
+$ ruff format --check .         # format check only (CI-friendly)
 ```
 
 Rules enabled: `E`, `F`, `W`, `I`, `UP`. Target Python version: `3.10`.

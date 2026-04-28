@@ -90,20 +90,18 @@ $ ./e2e-k8s.sh
 > $ ./e2e-k8s.sh --help
 > ```
 
-### Python 代码质量 (通过 uv 使用 ruff)
+### Python 代码质量 (ruff)
 
-Ruff 配置位于 `tests/pyproject.toml`，覆盖 `tests/` 下所有 Python 代码
+Ruff 配置位于 `tests/ruff.toml`，覆盖 `tests/` 下所有 Python 代码
 （`python_client/`、`restful_client/`、`restful_client_v2/`、`benchmark/`、`scripts/`）。
-[uv](https://docs.astral.sh/uv/) 仅用于托管 lint/format 工具链，各子目录的运行时依赖
-仍通过各自的 `requirements.txt` 管理。
+各子目录的运行时依赖仍通过各自的 `requirements.txt` 管理。
 
 ```shell
 $ cd tests/
-$ uv sync                       # 将 ruff 安装到本地 .venv
-$ uv run ruff check .           # lint 检查
-$ uv run ruff check . --fix     # lint 检查并自动修复
-$ uv run ruff format .          # 原地格式化
-$ uv run ruff format --check .  # 只检查不修改 (CI 友好)
+$ ruff check .                  # lint 检查
+$ ruff check . --fix            # lint 检查并自动修复
+$ ruff format .                 # 原地格式化
+$ ruff format --check .         # 只检查不修改 (CI 友好)
 ```
 
 启用的规则：`E`、`F`、`W`、`I`、`UP`；目标 Python 版本：`3.10`。

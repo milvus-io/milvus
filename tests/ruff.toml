@@ -1,16 +1,3 @@
-[project]
-name = "milvus-tests"
-version = "0.0.0"
-description = "Milvus integration/e2e test suite tooling (ruff config host)"
-requires-python = ">=3.10"
-dependencies = []
-
-[dependency-groups]
-dev = [
-    "ruff>=0.6.0",
-]
-
-[tool.ruff]
 line-length = 120
 target-version = "py310"
 extend-exclude = [
@@ -20,7 +7,7 @@ extend-exclude = [
     "*.ipynb_checkpoints",
 ]
 
-[tool.ruff.lint]
+[lint]
 select = [
     "E",   # pycodestyle errors
     "F",   # pyflakes
@@ -33,13 +20,13 @@ ignore = [
     "E741",  # ambiguous variable names (l, I, O) common in test code
 ]
 
-[tool.ruff.lint.per-file-ignores]
+[lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
 "conftest.py" = ["F401", "F811"]
 "**/testcases/**/*.py" = ["E402"]
 "**/chaos/**/*.py" = ["E402"]
 
-[tool.ruff.format]
+[format]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"

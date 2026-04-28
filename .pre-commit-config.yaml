@@ -13,9 +13,9 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff-check (tests/)
-        args: [--config=tests/pyproject.toml, --fix]
+        args: [--config=tests/ruff.toml, --fix]
         files: ^tests/.*\.py$
       - id: ruff-format
         name: ruff-format (tests/)
-        args: [--config=tests/pyproject.toml]
+        args: [--config=tests/ruff.toml]
         files: ^tests/.*\.py$
