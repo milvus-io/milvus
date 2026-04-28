@@ -827,7 +827,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	session.Stop()
 
-	common.Version = semver.MustParse("2.6.4")
+	common.Version = semver.MustParse("3.0.0-beta")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
@@ -839,7 +839,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	session.Stop()
 
-	common.Version = semver.MustParse("2.6.7")
+	common.Version = semver.MustParse("3.1.0")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
@@ -850,7 +850,7 @@ func (s *SessionSuite) TestVersionKey() {
 	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
 	session.Stop()
 
-	common.Version = semver.MustParse("3.0.0")
+	common.Version = semver.MustParse("4.0.0")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
