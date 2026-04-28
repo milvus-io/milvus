@@ -17,11 +17,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
@@ -279,7 +280,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
+		expectedSize := int64(100 * 1024 * 1024)
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex("DISKANN") {
+			expectedSize = int64(200 * 1024 * 1024)
+		}
+		s.Equal(expectedSize, getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
 	})
 
 	s.Run("HNSW & DISKANN", func() {

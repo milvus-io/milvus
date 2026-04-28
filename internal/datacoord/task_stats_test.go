@@ -81,30 +81,28 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
-	s.mt = &meta{
-		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
-			s.segID: {
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            s.segID,
-					CollectionID:  s.collID,
-					PartitionID:   s.partID,
-					InsertChannel: "ch1",
-					NumOfRows:     65535,
-					State:         commonpb.SegmentState_Flushed,
-					MaxRowNum:     65535,
-					Level:         datapb.SegmentLevel_L2,
-				},
-				size: *atomic.NewInt64(512 * 1024 * 1024),
+	segments := newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+		s.segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            s.segID,
+				CollectionID:  s.collID,
+				PartitionID:   s.partID,
+				InsertChannel: "ch1",
+				NumOfRows:     65535,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     65535,
+				Level:         datapb.SegmentLevel_L2,
 			},
-		}),
-
-		statsTaskMeta: &statsTaskMeta{
-			keyLock:         lock.NewKeyLock[UniqueID](),
-			ctx:             context.Background(),
-			catalog:         nil,
-			tasks:           tasks,
-			segmentID2Tasks: secondaryIndex,
+			size: *atomic.NewInt64(512 * 1024 * 1024),
 		},
+	})
+	s.mt = newTestMetaFromCache(s.T(), segments, nil)
+	s.mt.statsTaskMeta = &statsTaskMeta{
+		keyLock:         lock.NewKeyLock[UniqueID](),
+		ctx:             context.Background(),
+		catalog:         nil,
+		tasks:           tasks,
+		segmentID2Tasks: secondaryIndex,
 	}
 }
 
@@ -284,7 +282,6 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 	s.Run("empty segment", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
 		st.meta.catalog = catalog
 		s.NoError(s.mt.statsTaskMeta.AddStatsTask(st.StatsTask))
@@ -394,10 +391,6 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 		NodeID:     100,
 	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mt.catalog = catalog
-
 	s.Run("query task success", func() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(&workerpb.StatsResults{
@@ -485,28 +478,7 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		NumRows:      1000,
 	}
 
-	// Temporarily replace the segment with one we control
-	origSegments := s.mt.segments
-
-	// Create test segment for testing
-	testSegment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            s.segID,
-			CollectionID:  s.collID,
-			PartitionID:   s.partID,
-			InsertChannel: "ch1",
-		},
-	}
-
-	s.mt.segments.SetSegment(s.segID, testSegment, 0)
-
 	s.Run("set job info success for different sub job types", func() {
-		// Create mock catalog
-		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		s.mt.statsTaskMeta.catalog = catalog
-		s.mt.catalog = catalog
-
 		st.SubJobType = indexpb.StatsSubJob_JsonKeyIndexJob
 		err := st.SetJobInfo(context.Background(), result)
 		s.NoError(err)
@@ -521,9 +493,6 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		err = st.SetJobInfo(context.Background(), result)
 		s.NoError(err)
 	})
-
-	// Restore original segments
-	s.mt.segments = origSegments
 }
 
 // TestPrepareJobRequest tests edge cases of prepareJobRequest

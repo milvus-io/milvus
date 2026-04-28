@@ -221,10 +221,6 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 			s.Equal(true, segment.GetIsImporting())
 		}
 	}
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	// AlterSegments is no longer called from checkIndexBuildingJob (unsetSegmentImporting removed);
-	// the upstream checkImportingJob path may still invoke it. Loosen to .Maybe().
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
@@ -735,10 +731,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	log.Info("job importing")
 
 	// check importing
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	// AlterSegments was previously driven by unsetSegmentImporting (removed in 2PC);
-	// the remaining segment writes in this flow may or may not hit it.
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()

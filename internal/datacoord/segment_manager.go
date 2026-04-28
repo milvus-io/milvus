@@ -321,7 +321,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 	// filter segments
 	segmentInfos := make([]*SegmentInfo, 0)
-	growing, _ := s.channel2Growing.Get(channelName)
+	growing, _ := s.channel2Growing.GetOrInsert(channelName, typeutil.NewConcurrentSet[int64]())
 	growing.Range(func(segmentID int64) bool {
 		segment := s.meta.GetHealthySegment(ctx, segmentID)
 		if segment == nil {
