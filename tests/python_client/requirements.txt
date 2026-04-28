@@ -1,4 +1,4 @@
---extra-index-url https://test.pypi.org/simple/
+--find-links https://test.pypi.org/simple/pymilvus/
 pytest-cov==2.8.1
 requests>=2.32.4
 scikit-learn>=1.5.2
