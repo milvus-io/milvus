@@ -401,8 +401,10 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             self.insert(client, collection_name, rows)
             # 3. search
             null_expr = nullable_field_name + "[0]" + " " + null_expr_op
-            error = {ct.err_code: 65535,
-                    ct.err_msg: "unsupported data type: ARRAY"}
+            error = {
+                ct.err_code: 1100,
+                ct.err_msg: "IsNull/IsNotNull operations are not supported on array element access",
+            }
             self.search(client, collection_name, [vectors[0]],
                         filter=null_expr,
                         check_task=CheckTasks.err_res, check_items=error)
@@ -4794,4 +4796,3 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                                  "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
-
