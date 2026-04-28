@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
+	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 )
 
 func TestOldVersionLastConfirmedTracker_DefaultWindowSize(t *testing.T) {

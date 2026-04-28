@@ -3,7 +3,7 @@ package agg
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 type SumAggregate struct {

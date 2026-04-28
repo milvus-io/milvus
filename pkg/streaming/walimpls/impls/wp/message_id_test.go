@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	woodpecker "github.com/zilliztech/woodpecker/woodpecker/log"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestMessageID(t *testing.T) {

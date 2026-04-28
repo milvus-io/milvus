@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 func TestRequestV2_GetCollectionName(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"reflect"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 // Export consts

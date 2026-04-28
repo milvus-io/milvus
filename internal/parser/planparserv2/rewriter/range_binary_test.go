@@ -7,7 +7,7 @@ import (
 
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 // Test BinaryRangeExpr AND BinaryRangeExpr - intersection

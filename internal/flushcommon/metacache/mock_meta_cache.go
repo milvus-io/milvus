@@ -3,12 +3,12 @@
 package metacache
 
 import (
-	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
 
 	pkoracle "github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )

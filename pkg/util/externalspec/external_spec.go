@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // File formats supported by external collections. Mirror of LOON_FORMAT_*

@@ -19,7 +19,7 @@ package datacoord
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 )
 
 var _ RWChannel = &channelMeta{}

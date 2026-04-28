@@ -5,12 +5,12 @@ package mock_wal
 import (
 	context "context"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
-	ratelimit "github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
+	ratelimit "github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )
