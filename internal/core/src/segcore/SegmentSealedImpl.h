@@ -364,7 +364,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     bool
     is_system_field_ready() const {
-        return system_ready_count_ == 2;
+        return timestamp_field_ready_.load() && rowid_field_ready_.load();
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -392,7 +392,8 @@ class SegmentSealedImpl : public SegmentSealed {
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
     BitsetType binlog_index_bitset_;
-    std::atomic<int> system_ready_count_ = 0;
+    std::atomic<bool> timestamp_field_ready_ = false;
+    std::atomic<bool> rowid_field_ready_ = false;
     // segment data
 
     // TODO: generate index for scalar
