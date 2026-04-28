@@ -341,6 +341,7 @@ proxy:
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
+  maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.

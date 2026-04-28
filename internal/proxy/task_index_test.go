@@ -405,6 +405,140 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	})
 }
 
+func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, strconv.Itoa(100*1024))
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+
+	params, err := json.Marshal(map[string]any{
+		"custom_param": strings.Repeat("A", 1024),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.NoError(t, err)
+	assert.Contains(t, cit.newIndexParams, &commonpb.KeyValuePair{Key: "custom_param", Value: strings.Repeat("A", 1024)})
+}
+
+func Test_parseIndexParamsRejectsConfiguredMaxIndexParamsSize(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "64")
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+
+	params, err := json.Marshal(map[string]any{
+		"custom_param": strings.Repeat("A", 128),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+	assert.Contains(t, err.Error(), "64")
+}
+
+func Test_parseIndexParamsRejectsOversizedParams(t *testing.T) {
+	params, err := json.Marshal(map[string]any{
+		"malicious_padding": strings.Repeat("A", 100*1024),
+	})
+	assert.NoError(t, err)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: string(params)},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err = cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParamsRejectsOversizedRawParams(t *testing.T) {
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+				{Key: common.ParamsKey, Value: strings.Repeat(" ", 100*1024) + `{"custom_param":"A"}`},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_VarChar,
+		},
+	}
+
+	err := cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.MaxIndexParamsSize.Key, "128")
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE", "large_config": "`+strings.Repeat("A", 128)+`"}`)
+	defer Params.Reset(Params.ProxyCfg.MaxIndexParamsSize.Key)
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+
+	cit := &createIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		},
+	}
+
+	err := cit.parseIndexParams(context.TODO())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index params size")
+}
+
 func Test_parseIndexParams(t *testing.T) {
 	cit := &createIndexTask{
 		Condition: nil,

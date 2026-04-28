@@ -2034,6 +2034,7 @@ type proxyConfig struct {
 	ResolveAliasForPrivilege        ParamItem `refreshable:"true"`
 	MaxVarCharLength                ParamItem `refreshable:"false"`
 	MaxTextLength                   ParamItem `refreshable:"false"`
+	MaxIndexParamsSize              ParamItem `refreshable:"true"`
 	MaxResultEntries                ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider     ParamItem `refreshable:"true"`
 
@@ -2498,6 +2499,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxIndexParamsSize = ParamItem{
+		Key:          "proxy.maxIndexParamsSize",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(100 * 1024),
+		Doc:          "maximum total size of index params in bytes for create index requests",
+		Export:       true,
+	}
+	p.MaxIndexParamsSize.Init(base.mgr)
 
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",
