@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -48,16 +49,21 @@ type catalog struct {
 
 // GetCChannel returns the control channel
 func (c *catalog) GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error) {
-	value, err := c.metaKV.Load(ctx, CChannelMetaPrefix)
+	value, needRepair, found, err := c.loadMetaWithLegacyTrailingSlash(ctx, CChannelMetaKey)
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, nil
-		}
 		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 	info := &streamingpb.CChannelMeta{}
 	if err = proto.Unmarshal([]byte(value), info); err != nil {
 		return nil, errors.Wrapf(err, "unmarshal cchannel meta failed")
+	}
+	if needRepair {
+		if err = c.saveAndRemoveLegacyMeta(ctx, CChannelMetaKey, value); err != nil {
+			return nil, err
+		}
 	}
 	return info, nil
 }
@@ -68,21 +74,26 @@ func (c *catalog) SaveCChannel(ctx context.Context, info *streamingpb.CChannelMe
 	if err != nil {
 		return errors.Wrapf(err, "marshal cchannel meta failed")
 	}
-	return c.metaKV.Save(ctx, CChannelMetaPrefix, string(v))
+	return c.saveAndRemoveLegacyMeta(ctx, CChannelMetaKey, string(v))
 }
 
 // GetVersion returns the streaming version
 func (c *catalog) GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
-	value, err := c.metaKV.Load(ctx, VersionPrefix)
+	value, needRepair, found, err := c.loadMetaWithLegacyTrailingSlash(ctx, VersionKey)
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, nil
-		}
 		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 	info := &streamingpb.StreamingVersion{}
 	if err = proto.Unmarshal([]byte(value), info); err != nil {
 		return nil, errors.Wrapf(err, "unmarshal streaming version failed")
+	}
+	if needRepair {
+		if err = c.saveAndRemoveLegacyMeta(ctx, VersionKey, value); err != nil {
+			return nil, err
+		}
 	}
 	return info, nil
 }
@@ -96,7 +107,34 @@ func (c *catalog) SaveVersion(ctx context.Context, version *streamingpb.Streamin
 	if err != nil {
 		return errors.Wrapf(err, "marshal streaming version failed")
 	}
-	return c.metaKV.Save(ctx, VersionPrefix, string(v))
+	return c.saveAndRemoveLegacyMeta(ctx, VersionKey, string(v))
+}
+
+func (c *catalog) loadMetaWithLegacyTrailingSlash(ctx context.Context, key string) (string, bool, bool, error) {
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, key)
+	if err != nil {
+		return "", false, false, err
+	}
+	var canonicalValue, legacyValue string
+	foundCanonical, foundLegacy := false, false
+	for i, loadedKey := range keys {
+		switch {
+		case strings.HasSuffix(loadedKey, key):
+			canonicalValue = values[i]
+			foundCanonical = true
+		case strings.HasSuffix(loadedKey, "/"):
+			legacyValue = values[i]
+			foundLegacy = true
+		}
+	}
+	if foundCanonical {
+		return canonicalValue, foundLegacy, true, nil
+	}
+	return legacyValue, foundLegacy, foundLegacy, nil
+}
+
+func (c *catalog) saveAndRemoveLegacyMeta(ctx context.Context, key, value string) error {
+	return c.metaKV.MultiSaveAndRemove(ctx, map[string]string{key: value}, []string{key + "/"})
 }
 
 // ListPChannels returns all pchannels
