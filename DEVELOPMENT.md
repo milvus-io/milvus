@@ -167,7 +167,35 @@ Install Conan
 pip install conan==1.64.1
 ```
 
-Note: Conan version 2.x is not currently supported, please use version 1.61.
+Note: Conan version 2.x is not currently supported on this branch, please use version 1.x.
+
+##### Working on master and 2.5 / 2.6 on the same machine
+
+master has migrated to Conan 2.x while this branch still uses Conan 1.x.
+If you switch between branches on the same machine, keep Conan 2.x as
+your default `conan` (as recommended by master) and install Conan 1.x
+alongside with a `-1` suffix via `pipx`:
+
+```shell
+# Default conan stays 2.x (for master)
+pipx install conan==2.25.1
+
+# Add Conan 1.x for 2.5 / 2.6 work
+pipx install conan==1.66.0 --suffix=-1
+```
+
+Then build this branch by pointing the script at the 1.x binary:
+
+```shell
+CONAN_CMD=conan-1 make
+
+# Or export once per shell session:
+#   export CONAN_CMD=conan-1
+#   make
+```
+
+If `CONAN_CMD` is unset, the build scripts fall back to the default
+`conan` binary on your `PATH`, preserving the existing behavior.
 
 #### Go
 
