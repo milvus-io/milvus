@@ -110,6 +110,30 @@ func (t *l0CompactionTask) processPipelining() bool {
 		return t.processFailed()
 	}
 
+	if len(t.GetPlan().GetSegmentBinlogs()) == len(t.GetTaskProto().GetInputSegments()) {
+		log.Info("l0CompactionTask fast finish: no target segments, directly marking L0 segments as dropped",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+		t.result = &datapb.CompactionPlanResult{
+			PlanID: t.GetTaskProto().GetPlanID(),
+			State:  datapb.CompactionTaskState_completed,
+		}
+		if err := t.saveSegmentMeta(); err != nil {
+			log.Warn("l0CompactionTask fast finish failed to save segment meta", zap.Error(err))
+			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			if err != nil {
+				log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				return false
+			}
+			return t.processFailed()
+		}
+		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn("l0CompactionTask fast finish failed to save task meta_saved state", zap.Error(err))
+			return false
+		}
+		log.Info("l0CompactionTask fast finish completed", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+		return t.processMetaSaved()
+	}
+
 	err = t.sessions.Compaction(context.TODO(), t.GetTaskProto().GetNodeID(), t.GetPlan())
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
@@ -354,9 +378,9 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 
 	sealedSegments, sealedSegBinlogs := t.selectSealedSegment()
 	if len(sealedSegments) == 0 {
-		// TODO fast finish l0 segment, just drop l0 segment
-		log.Info("l0Compaction available non-L0 Segments is empty ")
-		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
+		log.Info("l0Compaction available non-L0 Segments is empty, will fast finish",
+			zap.Any("target position", taskProto.GetPos()))
+		return plan, nil
 	}
 
 	for _, seg := range sealedSegments {
