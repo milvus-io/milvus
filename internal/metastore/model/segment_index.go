@@ -32,7 +32,8 @@ type SegmentIndex struct {
 	FinishedUTCTime           uint64
 	CurrentScalarIndexVersion int32
 	IndexType                 string
-	IndexStorePathVersion     indexpb.IndexStorePathVersion
+	// Zero value is the legacy build-rooted layout and remains wire-compatible with old metadata.
+	IndexStorePathVersion indexpb.IndexStorePathVersion
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {

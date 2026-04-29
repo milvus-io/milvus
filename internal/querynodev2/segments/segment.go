@@ -1077,9 +1077,6 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 	indexStoreVersion := indexInfo.GetIndexStoreVersion()
 	indexStorePathVersion := indexInfo.GetIndexStorePathVersion()
-	if indexStoreVersion <= 0 {
-		indexStoreVersion = int64(indexStorePathVersion)
-	}
 
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:              loadInfo.GetCollectionID(),
