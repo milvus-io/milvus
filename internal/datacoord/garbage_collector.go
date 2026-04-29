@@ -1140,6 +1140,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 	// Resolve snapshotMeta once. Both IsBuildIDGCBlocked paths below are O(1) so
 	// no caching of intermediate state is needed.
 	snapshotMeta := gc.meta.GetSnapshotMeta()
+	collectionRootedCollections := gc.meta.indexMeta.ListCollectionRootedIndexCollections()
 
 	// list dir first
 	keyCount := 0
@@ -1166,9 +1167,12 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			// parsedID not found as a buildID — could be:
 			// 1. Orphan legacy buildID dir (should be removed)
 			// 2. CollectionID dir from v1 path format (should NOT be removed)
-			if gc.meta.indexMeta.HasCollectionWithPathVersion(buildID, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+			if _, ok := collectionRootedCollections[buildID]; ok {
 				// This is a collectionID dir for v1 format — skip here,
 				// v1 cleanup is handled by recycleUnusedIndexFilesV1.
+				// TODO: v1 files written before SegmentIndex metadata commit are not
+				// discovered by this collection-dir skip. Full cleanup needs a follow-up
+				// bounded scan under known collection/partition/segment prefixes.
 				logger.Info("skip collectionID dir, handled by v1 recycler",
 					zap.Int64("collectionID", buildID))
 				return true
@@ -1279,7 +1283,9 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 	}
 
 	log.Info("start recycleUnusedIndexFilesV1", zap.Int("deletedCount", len(deletedIndexes)))
+	futures := make([]*conc.Future[struct{}], 0, len(deletedIndexes))
 	for _, segIdx := range deletedIndexes {
+		segIdx := segIdx
 		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 			log.Info("skip GC v1 index files since buildID is protected by snapshot",
 				zap.Int64("collectionID", segIdx.CollectionID),
@@ -1287,22 +1293,36 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 			continue
 		}
 
-		builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
-			segIdx.IndexStorePathVersion, segIdx.CollectionID,
-			segIdx.PartitionID, segIdx.SegmentID,
-			segIdx.BuildID, segIdx.IndexVersion)
-		prefix := builder.BuildPrefix() + "/"
+		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+			builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+				segIdx.IndexStorePathVersion, segIdx.CollectionID,
+				segIdx.PartitionID, segIdx.SegmentID,
+				segIdx.BuildID, segIdx.IndexVersion)
+			prefix := builder.BuildPrefix() + "/"
 
-		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
-			log.Warn("recycleUnusedIndexFilesV1 remove failed",
+			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
+				log.Warn("recycleUnusedIndexFilesV1 remove failed",
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+				log.Warn("recycleUnusedIndexFilesV1 remove segment index meta failed",
+					zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("collectionID", segIdx.CollectionID),
+					zap.Error(err))
+				return struct{}{}, err
+			}
+			log.Info("recycleUnusedIndexFilesV1 removed index files and meta",
 				zap.Int64("buildID", segIdx.BuildID),
-				zap.Int64("collectionID", segIdx.CollectionID),
-				zap.Error(err))
-			continue
-		}
-		log.Info("recycleUnusedIndexFilesV1 removed index files",
-			zap.Int64("buildID", segIdx.BuildID),
-			zap.Int64("collectionID", segIdx.CollectionID))
+				zap.Int64("collectionID", segIdx.CollectionID))
+			return struct{}{}, nil
+		})
+		futures = append(futures, future)
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		log.Warn("some task failure in remove object pool", zap.Error(err))
 	}
 }
 

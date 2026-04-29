@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -1202,11 +1203,33 @@ func (m *indexMeta) HasCollectionWithPathVersion(collectionID int64, pathVersion
 		return false
 	}
 	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.CollectionID == collectionID && segIdx.IndexStorePathVersion >= pathVersion {
+		if segIdx.CollectionID != collectionID {
+			continue
+		}
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+			if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+				return true
+			}
+			continue
+		}
+		if segIdx.IndexStorePathVersion >= pathVersion {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *indexMeta) ListCollectionRootedIndexCollections() map[int64]struct{} {
+	collections := make(map[int64]struct{})
+	if m.segmentBuildInfo == nil {
+		return collections
+	}
+	for _, segIdx := range m.segmentBuildInfo.List() {
+		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+			collections[segIdx.CollectionID] = struct{}{}
+		}
+	}
+	return collections
 }
 
 // GetDeletedIndexesWithPathVersion returns SegmentIndex entries that are deleted and have pathVersion >= ver.
@@ -1217,7 +1240,16 @@ func (m *indexMeta) GetDeletedIndexesWithPathVersion(pathVersion indexpb.IndexSt
 	}
 	var result []*model.SegmentIndex
 	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.IsDeleted && segIdx.IndexStorePathVersion >= pathVersion {
+		if !segIdx.IsDeleted {
+			continue
+		}
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+			if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+				result = append(result, model.CloneSegmentIndex(segIdx))
+			}
+			continue
+		}
+		if segIdx.IndexStorePathVersion >= pathVersion {
 			result = append(result, model.CloneSegmentIndex(segIdx))
 		}
 	}

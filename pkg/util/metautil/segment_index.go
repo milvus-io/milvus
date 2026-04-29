@@ -36,6 +36,10 @@ func NewIndexPathBuilder(rootPath string, pathVersion indexpb.IndexStorePathVers
 	}
 }
 
+func IsCollectionRooted(pathVersion indexpb.IndexStorePathVersion) bool {
+	return pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+}
+
 // BuildFilePath returns the full path for a single index file.
 func (b *IndexPathBuilder) BuildFilePath(fileKey string) string {
 	return path.Join(b.BuildPrefix(), fileKey)
@@ -54,7 +58,7 @@ func (b *IndexPathBuilder) BuildFilePaths(fileKeys []string) []string {
 // v0: {root}/index_files/{buildID}/{indexVersion}/{partID}/{segID}
 // v1: {root}/index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}
 func (b *IndexPathBuilder) BuildPrefix() string {
-	if b.pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+	if IsCollectionRooted(b.pathVersion) {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)
 		return path.Join(b.rootPath, common.SegmentIndexPath, k)
 	}
@@ -66,7 +70,7 @@ func (b *IndexPathBuilder) BuildPrefix() string {
 // v0: no collection prefix exists, returns index_files root.
 // v1: {root}/index_files/{collID}
 func (b *IndexPathBuilder) BuildCollectionPrefix() string {
-	if b.pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+	if IsCollectionRooted(b.pathVersion) {
 		return path.Join(b.rootPath, common.SegmentIndexPath, strconv.FormatInt(b.collID, 10))
 	}
 	return path.Join(b.rootPath, common.SegmentIndexPath)
