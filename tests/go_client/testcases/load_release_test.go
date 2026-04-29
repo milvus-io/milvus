@@ -515,8 +515,10 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 
 	// load parName partition with different partial fields
 	diffFields := []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultVarcharFieldName}
-	_, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(diffFields...))
+	taskDiff, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(diffFields...))
 	common.CheckErr(t, errPar, true)
+	err = taskDiff.Await(ctx)
+	common.CheckErr(t, err, true)
 	queryPar, errPar := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(diffFields...).WithPartitions(parName).WithLimit(common.DefaultLimit))
 	common.CheckErr(t, errPar, true)
 	common.CheckOutputFields(t, diffFields, queryPar.Fields)

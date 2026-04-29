@@ -336,6 +336,7 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
