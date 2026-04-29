@@ -268,10 +268,9 @@ TEST(CoerceToBinary, AllVariantsToBinary) {
     }
 }
 
-// ===== Integer narrowing (via NormalizeExternalArrow) =====
-// MaybeNarrowInt is exercised through NormalizeExternalArrow because the
-// helper itself is static. These tests build wider arrow ints and assert the
-// returned array is the narrower target type with values intact.
+// ===== Scalar numeric mismatch rejection (via NormalizeExternalArrow) =====
+// External Arrow numeric types must match the Milvus scalar type exactly.
+// Wider integer inputs are rejected instead of implicitly narrowed.
 
 #include "common/FieldMeta.h"
 
@@ -325,49 +324,41 @@ MakeDoubleArray(const std::vector<double>& vals,
 }
 }  // namespace
 
-TEST(IntegerNarrowing, Int32ToInt8) {
+TEST(ScalarNumericMismatch, Int32RejectsInt8) {
     auto in =
         MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT8);
-    auto ia = std::static_pointer_cast<arrow::Int8Array>(out);
-    EXPECT_EQ(ia->Value(0), 0);
-    EXPECT_EQ(ia->Value(1), 1);
-    EXPECT_EQ(ia->Value(2), 99);
-    EXPECT_EQ(ia->Value(3), -128);
-    EXPECT_EQ(ia->Value(4), 127);
-}
-
-TEST(IntegerNarrowing, Int32ToInt16) {
-    auto in =
-        MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT16);
-    auto ia = std::static_pointer_cast<arrow::Int16Array>(out);
-    EXPECT_EQ(ia->Value(2), -32768);
-    EXPECT_EQ(ia->Value(3), 32767);
-}
-
-TEST(IntegerNarrowing, Int32ToInt8WithNulls) {
-    auto in = MakeInt32Array({5, 0, 7}, {true, false, true});
-    auto out = milvus::storage::NormalizeExternalArrow(
-        in, milvus::DataType::INT8, 0, true, milvus::DataType::NONE);
-    ASSERT_EQ(out->type_id(), arrow::Type::INT8);
-    EXPECT_EQ(out->null_count(), 1);
-    EXPECT_TRUE(out->IsNull(1));
-}
-
-TEST(IntegerNarrowing, OverflowAsserts) {
-    auto in = MakeInt32Array({999}, {true});  // > INT8_MAX
     EXPECT_THROW(
         milvus::storage::NormalizeExternalArrow(
             in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
         std::exception);
 }
 
-TEST(IntegerNarrowing, NoNarrowOnExactMatch) {
+TEST(ScalarNumericMismatch, Int32RejectsInt16) {
+    auto in =
+        MakeInt32Array({0, 1000, -32768, 32767}, {true, true, true, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT16, 0, false, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, Int32RejectsInt8WithNulls) {
+    auto in = MakeInt32Array({5, 0, 7}, {true, false, true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT8, 0, true, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, Int32RejectsInt8EvenWhenInRange) {
+    auto in = MakeInt32Array({5}, {true});
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(
+            in, milvus::DataType::INT8, 0, false, milvus::DataType::NONE),
+        std::exception);
+}
+
+TEST(ScalarNumericMismatch, ExactMatchPassesThrough) {
     arrow::Int8Builder b;
     ASSERT_TRUE(b.Append(int8_t{5}).ok());
     std::shared_ptr<arrow::Array> in;
