@@ -42,6 +42,7 @@ struct LoadIndexInfo {
     int64_t index_id;
     int64_t index_build_id;
     int64_t index_version;
+    int64_t index_store_version;
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
     index::IndexBasePtr index;
@@ -80,6 +81,7 @@ struct LoadIndexInfo {
           index_id(other.index_id),
           index_build_id(other.index_build_id),
           index_version(other.index_version),
+          index_store_version(other.index_store_version),
           index_params(other.index_params),
           index_files(other.index_files),
           index(nullptr),
@@ -108,6 +110,7 @@ struct LoadIndexInfo {
             index_id = other.index_id;
             index_build_id = other.index_build_id;
             index_version = other.index_version;
+            index_store_version = other.index_store_version;
             index_params = other.index_params;
             index_files = other.index_files;
             index = nullptr;

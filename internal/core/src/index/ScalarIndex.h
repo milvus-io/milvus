@@ -145,12 +145,12 @@ class ScalarIndex : public IndexBase {
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
-    Range(T value, OpType op) = 0;
+    Range(const T& value, OpType op) = 0;
 
     virtual const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) = 0;
 
     virtual std::optional<T>
@@ -177,6 +177,11 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::MARISA_TRIE ||
                index_type_ == milvus::index::MARISA_TRIE_UPPER ||
                index_type_ == milvus::index::ASCENDING_SORT;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return false;
     }
 
     virtual int64_t

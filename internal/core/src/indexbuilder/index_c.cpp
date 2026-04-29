@@ -182,7 +182,8 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     }
     config[INDEX_NUM_ROWS_KEY] = info->num_rows();
     config[STORAGE_VERSION_KEY] = info->storage_version();
-    if (info->storage_version() == STORAGE_V2) {
+    if (info->storage_version() == STORAGE_V2 ||
+        info->storage_version() == STORAGE_V3) {
         config[SEGMENT_INSERT_FILES_KEY] =
             get_segment_insert_files(info->segment_insert_files());
         config[SEGMENT_MANIFEST_KEY] = info->manifest();
@@ -190,6 +191,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
     config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
+    if (!info->stats_base_path().empty()) {
+        config[STATS_BASE_PATH_KEY] = info->stats_base_path();
+    }
 
     if (!info->analyzer_extra_info().empty()) {
         config["analyzer_extra_info"] = info->analyzer_extra_info();
@@ -264,6 +268,10 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        if (!build_index_info->stats_base_path().empty()) {
+            fileManagerContext.set_stats_base_path(
+                build_index_info->stats_base_path());
+        }
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
@@ -370,6 +378,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
@@ -424,6 +434,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
     }
 }
 
+CStatus
 DeleteIndex(CIndex index) {
     SCOPE_CGO_CALL_METRIC();
 

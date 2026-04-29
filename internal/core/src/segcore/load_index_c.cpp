@@ -317,6 +317,8 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->index_id = info_proto->indexid();
             load_index_info->index_build_id = info_proto->index_buildid();
             load_index_info->index_version = info_proto->index_version();
+            load_index_info->index_store_version =
+                info_proto->index_store_version();
             for (const auto& [k, v] : info_proto->index_params()) {
                 load_index_info->index_params[k] = v;
             }

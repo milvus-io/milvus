@@ -102,6 +102,11 @@ struct FileManagerContext {
         loon_ffi_properties = std::move(properties);
     }
 
+    void
+    set_stats_base_path(const std::string& path) {
+        stats_base_path = path;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
@@ -109,6 +114,7 @@ struct FileManagerContext {
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    std::string stats_base_path;
 };
 
 #define FILEMANAGER_TRY try {
@@ -206,7 +212,7 @@ class FileManagerImpl : public milvus::FileManager {
         // Ensure parent directory exists before opening the output stream.
         // Only needed for local filesystems; object stores don't require
         // explicit directory creation and the call would waste I/O.
-        if (milvus_storage::IsLocalFileSystem(fs_)) {
+        if (fs_->type_name() == "local") {
             auto dir_path =
                 remote_file_path.substr(0, remote_file_path.find_last_of('/'));
             if (!dir_path.empty()) {
@@ -356,6 +362,7 @@ class FileManagerImpl : public milvus::FileManager {
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
+    std::string stats_base_path_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

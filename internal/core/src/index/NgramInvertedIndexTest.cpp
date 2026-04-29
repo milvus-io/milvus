@@ -89,6 +89,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
+namespace {
+struct LikePatternMatcher : public RegexMatcher {
+    explicit LikePatternMatcher(const std::string& pattern)
+        : RegexMatcher(translate_pattern_match_to_regex(pattern)) {
+    }
+};
+}  // namespace
+
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,

@@ -42,6 +42,7 @@ MemFileManagerImpl::MemFileManagerImpl(
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 bool

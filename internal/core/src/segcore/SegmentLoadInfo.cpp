@@ -140,6 +140,50 @@ SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
     return request.has_raw_data;
 }
 
+std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
+    const proto::segcore::TextIndexStats& text_index_stats,
+    FieldId field_id) const {
+    auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+
+    info->set_fieldid(text_index_stats.fieldid());
+    info->set_version(text_index_stats.version());
+    info->set_buildid(text_index_stats.buildid());
+    for (const auto& file : text_index_stats.files()) {
+        info->add_files(file);
+    }
+
+    const auto& field_meta = schema_->operator[](field_id);
+    *info->mutable_schema() = field_meta.ToProto();
+
+    info->set_collectionid(GetCollectionID());
+    info->set_partitionid(GetPartitionID());
+    info->set_load_priority(GetPriority());
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto [field_has_setting, field_mmap_enabled] =
+        schema_->MmapEnabled(field_id);
+    bool enable_mmap = field_has_setting
+                           ? field_mmap_enabled
+                           : mmap_config.GetScalarFieldEnableMmap();
+    info->set_enable_mmap(enable_mmap);
+    info->set_index_size(text_index_stats.memory_size());
+    info->set_current_scalar_index_version(
+        text_index_stats.current_scalar_index_version());
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    if (field_has_warmup) {
+        info->set_warmup_policy(field_warmup_policy);
+    }
+
+    if (!text_index_stats.base_path().empty()) {
+        info->set_base_path(text_index_stats.base_path());
+    }
+
+    return info;
+}
+
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current index IDs from converted cache

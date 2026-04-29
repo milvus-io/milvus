@@ -418,7 +418,8 @@ NgramInvertedIndex::ApplyIterativeNgramFilter(
 
     for (size_t i = 0; i < std::min(sorted_terms.size(), max_iterations); i++) {
         TargetBitmap term_bitset{total_count};
-        wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
+        wrapper_->ngram_match_query(
+            sorted_terms[i], min_gram_, max_gram_, &term_bitset);
         bitset &= term_bitset;
 
         double current_hit_rate = 1.0 * bitset.count() / total_count;
@@ -502,12 +503,7 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
             candidates &= ngram_bitset;
         }
     } else {
-        // Iterative strategy: query terms one by one, sorted by doc_freq
-        auto sorted_terms =
-            wrapper_->ngram_tokenize(literals_vec, min_gram_, max_gram_);
-        AssertInfo(!sorted_terms.empty(),
-                   "ngram_tokenize should not return empty for valid literal");
-        ApplyIterativeNgramFilter(sorted_terms, total_count, candidates);
+        ApplyIterativeNgramFilter(literals_vec, total_count, candidates);
     }
 
     // Set tracing attributes
@@ -672,6 +668,13 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 break;
         }
     }
+}
+
+std::optional<TargetBitmap>
+NgramInvertedIndex::ExecuteQuery(const std::string& literal,
+                                 proto::plan::OpType op_type,
+                                 exec::SegmentExpr* segment) {
+    return ExecuteQueryForUT(literal, op_type, segment);
 }
 
 std::optional<TargetBitmap>

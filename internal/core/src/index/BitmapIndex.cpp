@@ -785,7 +785,7 @@ BitmapIndex<T>::IsNotNull() {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
+BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
@@ -847,7 +847,7 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
 
 template <typename T>
 const TargetBitmap
-BitmapIndex<T>::Range(const T value, OpType op) {
+BitmapIndex<T>::Range(const T& value, OpType op) {
     if (is_mmap_) {
         return std::move(RangeForMmap(value, op));
     }
@@ -859,7 +859,7 @@ BitmapIndex<T>::Range(const T value, OpType op) {
 }
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
+BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
@@ -923,7 +923,7 @@ BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
+BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
                           tracer::GetRootSpan());
 
@@ -987,9 +987,9 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForBitset(const T lower_value,
+BitmapIndex<T>::RangeForBitset(const T& lower_value,
                                bool lb_inclusive,
-                               const T upper_value,
+                               const T& upper_value,
                                bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
 
@@ -1046,9 +1046,9 @@ BitmapIndex<T>::RangeForBitset(const T lower_value,
 
 template <typename T>
 const TargetBitmap
-BitmapIndex<T>::Range(const T lower_value,
+BitmapIndex<T>::Range(const T& lower_value,
                       bool lb_inclusive,
-                      const T upper_value,
+                      const T& upper_value,
                       bool ub_inclusive) {
     if (is_mmap_) {
         return RangeForMmap(
@@ -1065,9 +1065,9 @@ BitmapIndex<T>::Range(const T lower_value,
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForMmap(const T lower_value,
+BitmapIndex<T>::RangeForMmap(const T& lower_value,
                              bool lb_inclusive,
-                             const T upper_value,
+                             const T& upper_value,
                              bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
 
@@ -1126,9 +1126,9 @@ BitmapIndex<T>::RangeForMmap(const T lower_value,
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForRoaring(const T lower_value,
+BitmapIndex<T>::RangeForRoaring(const T& lower_value,
                                 bool lb_inclusive,
-                                const T upper_value,
+                                const T& upper_value,
                                 bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
                           tracer::GetRootSpan());
@@ -1439,7 +1439,18 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     // V3 format: meta is in __meta__ entry
     auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    valid_bitset_ = TargetBitmap(total_num_rows_, !schema_.nullable());
+    bool rebuild_validity_from_postings = schema_.nullable();
+
+    auto entry_names = reader.GetEntryNames();
+    if (std::find(entry_names.begin(),
+                  entry_names.end(),
+                  BITMAP_INDEX_VALID_BITSET) != entry_names.end()) {
+        auto valid_bitset_entry = reader.ReadEntry(BITMAP_INDEX_VALID_BITSET);
+        DeserializeValidBitsetData(valid_bitset_entry.data.data(),
+                                   valid_bitset_entry.data.size());
+        rebuild_validity_from_postings = false;
+    }
 
     auto data_entry = reader.ReadEntry(BITMAP_INDEX_DATA);
 
@@ -1459,9 +1470,12 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                       data_entry.data.data(),
                       data_entry.data.size(),
                       index_length,
-                      priority);
+                      priority,
+                      rebuild_validity_from_postings);
     } else {
-        DeserializeIndexData(data_entry.data.data(), index_length);
+        DeserializeIndexData(data_entry.data.data(),
+                             index_length,
+                             rebuild_validity_from_postings);
     }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {

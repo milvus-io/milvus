@@ -126,7 +126,8 @@ ConfigureTieredStorage(
     const float max_disk_usage_percentage,
     const char* disk_path,
     const int64_t loading_timeout_ms,
-    const int64_t warmup_loading_timeout_ms);
+    const int64_t warmup_loading_timeout_ms,
+    const uint32_t prefetch_pool_threads);
 
 void
 UpdateTieredStorageConfig(const int64_t loading_timeout_ms,

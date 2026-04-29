@@ -61,6 +61,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {

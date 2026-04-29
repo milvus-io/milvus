@@ -29,6 +29,7 @@ message TextIndexStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int32 current_scalar_index_version = 7;
+  string base_path = 8;  // remote base path; files are relative to this path
 }
 
 message JsonKeyStats {

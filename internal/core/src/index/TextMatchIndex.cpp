@@ -61,9 +61,11 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                uint32_t tantivy_index_version,
                                const char* tokenizer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_params,
+                               const char* analyzer_extra_info)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
+    (void)analyzer_extra_info;
     schema_ = ctx.fieldDataMeta.field_schema;
     this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);

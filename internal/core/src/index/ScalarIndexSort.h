@@ -16,19 +16,28 @@
 
 #pragma once
 
-#include <algorithm>
+#include <assert.h>
+#include <stdint.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <chrono>
+#include <cstddef>
+#include <iterator>
 #include <memory>
-#include <utility>
-#include <vector>
+#include <optional>
 #include <string>
-#include <map>
+#include <vector>
 
+#include "common/FieldData.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
-#include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/FileWriter.h"
-#include "common/File.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
 
 #if defined(__clang__) || defined(__GNUC__)
 #define ALWAYS_INLINE inline __attribute__((always_inline))
@@ -48,7 +57,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
  public:
     explicit ScalarIndexSort(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     ~ScalarIndexSort() {
         if (is_mmap_ && mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
@@ -76,6 +86,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return ScalarIndexType::STLSORT;
     }
 
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
+
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
@@ -95,12 +110,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     std::optional<T>
@@ -150,6 +165,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
  private:
+    void
+    BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
+
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
@@ -226,6 +244,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     int64_t field_id_ = 0;
 
+    bool is_nested_index_ = false;
     bool is_built_ = false;
     Config config_;
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
@@ -262,7 +281,9 @@ namespace milvus::index {
 template <typename T>
 inline ScalarIndexSortPtr<T>
 CreateScalarIndexSort(const storage::FileManagerContext& file_manager_context =
-                          storage::FileManagerContext()) {
-    return std::make_unique<ScalarIndexSort<T>>(file_manager_context);
+                          storage::FileManagerContext(),
+                      bool is_nested_index = false) {
+    return std::make_unique<ScalarIndexSort<T>>(file_manager_context,
+                                                is_nested_index);
 }
 }  // namespace milvus::index
