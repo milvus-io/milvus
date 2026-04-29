@@ -114,7 +114,7 @@ minio:
   secretAccessKey: minioadmin
   useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
-    tlsCACert: /path/to/public.crt # path to your CACert file
+    tlsCACert:  # path to your CACert file
     # TLS minimum version for MinIO/S3 SSL connections.
     # Optional values: "default", "1.0", "1.1", "1.2", "1.3".
     # When set to "default", the SDK/runtime default is used (typically TLS 1.2).
