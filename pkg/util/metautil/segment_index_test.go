@@ -3,6 +3,7 @@ package metautil
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,4 +79,10 @@ func TestIndexPathBuilder_FutureVersion_TreatedAsV1(t *testing.T) {
 	b := NewIndexPathBuilder("files", 2, 100, 200, 300, 1000, 1)
 	path := b.BuildFilePath("data")
 	assert.Equal(t, "files/index_files/100/200/300/1000/1/data", path)
+}
+
+func TestIsCollectionRooted(t *testing.T) {
+	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED))
+	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED))
+	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion(2)))
 }

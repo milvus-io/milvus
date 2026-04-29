@@ -2431,6 +2431,30 @@ func TestIndexMeta_HasCollectionWithPathVersion(t *testing.T) {
 	assert.True(t, m.HasCollectionWithPathVersion(100, 0))
 }
 
+func TestIndexMeta_ListCollectionRootedIndexCollections(t *testing.T) {
+	m := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               1,
+		CollectionID:          100,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               2,
+		CollectionID:          200,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	})
+	m.segmentBuildInfo.Add(&model.SegmentIndex{
+		BuildID:               3,
+		CollectionID:          300,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion(2),
+	})
+
+	collections := m.ListCollectionRootedIndexCollections()
+	assert.NotContains(t, collections, int64(100))
+	assert.Contains(t, collections, int64(200))
+	assert.Contains(t, collections, int64(300))
+}
+
 func TestIndexMeta_GetDeletedIndexesWithPathVersion(t *testing.T) {
 	m := &indexMeta{
 		segmentBuildInfo: newSegmentIndexBuildInfo(),

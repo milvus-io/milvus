@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // SegmentFiles organizes source files by type for copy operations.
@@ -884,7 +885,7 @@ func generateTargetIndexPath(
 	var buildIDOffset int
 	switch indexType {
 	case IndexTypeVectorScalar:
-		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
+		if metautil.IsCollectionRooted(pathVersion) {
 			collectionOffset = 1
 			partitionOffset = 2
 			segmentOffset = 3
