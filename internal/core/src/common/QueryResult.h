@@ -322,6 +322,8 @@ struct SearchResult {
         element_iterators_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
+    // Must outlive knowhere iterators (async thread pool) that hold a BitsetView into it.
+    TargetBitmap dedup_bitset_holder_{};
 
     bool
     HasIterators() const {

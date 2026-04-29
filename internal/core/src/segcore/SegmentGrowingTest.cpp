@@ -1574,3 +1574,141 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
 }
+
+// Reproduce issue #48916:
+// When two batches with duplicate PKs both reside in the same growing segment
+// (no flush between them), BruteForce search may return fewer results than topK.
+//
+// Root cause: stale versions of duplicate PKs are not filtered before BruteForce,
+// so both old and new versions of the same PK can occupy topK slots. After
+// PK dedup in reduce phase, the final count is less than topK.
+TEST(Growing, SearchTopKWithDuplicatePKsInGrowingSegment) {
+    using namespace milvus::query;
+
+    // Schema: pk (INT64) + embeddings (FLOAT VECTOR)
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    const int64_t dim = 16;
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->set_primary_field_id(pk_fid);
+
+    // Use no interim index so that brute-force path is always taken.
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(65536);
+    config.set_enable_interim_segment_index(false);
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+
+    // Enough rows to keep extra candidates outside topK while making the
+    // duplicate-PK ordering deterministic.
+    const int64_t nb = 100;
+    const int64_t topk = 10;
+
+    auto set_float_vectors = [&](GeneratedData& dataset,
+                                 const std::vector<float>& vectors) {
+        ASSERT_EQ(vectors.size(), nb * dim);
+        for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+            if (field_data.field_id() == vec_fid.get()) {
+                auto* data = field_data.mutable_vectors()
+                                 ->mutable_float_vector()
+                                 ->mutable_data();
+                data->Clear();
+                data->Add(vectors.begin(), vectors.end());
+                return;
+            }
+        }
+        FAIL() << "vector field not found in generated data";
+    };
+
+    const std::vector<float> query_vec(dim, 0.0f);
+    auto make_far_vectors = [&]() {
+        std::vector<float> vectors(nb * dim, 1000.0f);
+        // PK 0 is the duplicate PK that must occupy two raw topK slots.
+        std::fill_n(vectors.begin(), dim, 0.0f);
+        return vectors;
+    };
+
+    // ---- Batch 1: PKs 0 ~ nb-1. Only PK 0 is close to the query. ----
+    auto dataset1 = DataGen(schema, nb, /*seed=*/42, /*ts_offset=*/0);
+    auto batch1_vectors = make_far_vectors();
+    set_float_vectors(dataset1, batch1_vectors);
+    {
+        auto offset = segment->PreInsert(nb);
+        segment->Insert(offset,
+                        nb,
+                        dataset1.row_ids_.data(),
+                        dataset1.timestamps_.data(),
+                        dataset1.raw_);
+    }
+
+    // ---- Batch 2: same PKs 0 ~ nb-1. PK 0 plus PK 1..8 are close. ----
+    // The raw top10 should be PK0(old), PK0(new), PK1(new)..PK8(new):
+    // 10 rows but only 9 distinct PKs.
+    auto dataset2 = DataGen(schema, nb, /*seed=*/123, /*ts_offset=*/nb);
+    auto batch2_vectors = make_far_vectors();
+    for (int64_t pk = 1; pk <= 8; ++pk) {
+        auto* vec = batch2_vectors.data() + pk * dim;
+        std::fill_n(vec, dim, 0.0f);
+        vec[0] = static_cast<float>(pk);
+    }
+    set_float_vectors(dataset2, batch2_vectors);
+    {
+        auto offset = segment->PreInsert(nb);
+        segment->Insert(offset,
+                        nb,
+                        dataset2.row_ids_.data(),
+                        dataset2.timestamps_.data(),
+                        dataset2.raw_);
+    }
+
+    // Both batches are in the same growing segment (no flush).
+    // active_count == 2*nb; pk2offset_ has nb entries each with 2 offsets.
+
+    // ---- Build search plan ----
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "", "embeddings", topk, metric_type, R"({"nprobe": 16})", -1);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(1, dim, query_vec.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    Timestamp timestamp = 1000000;
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+
+    ASSERT_NE(sr, nullptr);
+    ASSERT_EQ(sr->total_nq_, 1);
+    ASSERT_EQ(sr->unity_topK_, topk);
+
+    // Count valid (non-INVALID_SEG_OFFSET) results for the single query.
+    int valid_count = 0;
+    for (int i = 0; i < topk; ++i) {
+        if (sr->seg_offsets_[i] != INVALID_SEG_OFFSET) {
+            ++valid_count;
+        }
+    }
+
+    // Verify all returned offsets refer to the *newer* (batch-2) version.
+    // Batch 1 offsets are in [0, nb); batch 2 offsets are in [nb, 2*nb).
+    for (int i = 0; i < valid_count; ++i) {
+        int64_t offset = sr->seg_offsets_[i];
+        EXPECT_GE(offset, nb)
+            << "Result offset " << offset
+            << " points to stale batch-1 row; expected batch-2 row (>= " << nb
+            << ")";
+    }
+
+    // Segment-level raw search still has topK offsets. The 9/10 symptom happens
+    // later in reduce after PK dedup, when no extra candidate is available to
+    // backfill the skipped duplicate.
+    EXPECT_EQ(valid_count, topk)
+        << "Search returned " << valid_count << " results instead of " << topk
+        << " — duplicate PK stale-version filtering is broken in growing "
+           "segment";
+}

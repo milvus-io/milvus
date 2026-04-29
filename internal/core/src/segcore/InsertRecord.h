@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -272,6 +273,9 @@ class OffsetMap {
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_n(int64_t limit, const BitsetTypeView& bitset) const = 0;
 
+    virtual void
+    mask_old_offsets(BitsetTypeView& bitset) const = 0;
+
     // Element-level version of find_first_n.
     // Find first N elements that pass filter, ordered by PK then element_index.
     // Returns:
@@ -291,6 +295,9 @@ class OffsetMap {
 
     virtual size_t
     memory_size() const = 0;
+
+    virtual bool
+    has_duplicates() const = 0;
 };
 
 template <typename T>
@@ -381,7 +388,16 @@ class OffsetOrderedMap : public OffsetMap {
     insert(const PkType& pk, int64_t offset) override {
         std::unique_lock<std::shared_mutex> lck(mtx_);
 
-        map_[std::get<T>(pk)].emplace_back(offset);
+        auto& vec = map_[std::get<T>(pk)];
+        if (!has_duplicates_ && !vec.empty()) {
+            has_duplicates_ = true;
+        }
+        vec.emplace_back(offset);
+    }
+
+    bool
+    has_duplicates() const override {
+        return has_duplicates_;
     }
 
     void
@@ -409,6 +425,27 @@ class OffsetOrderedMap : public OffsetMap {
         // TODO: we can't retrieve pk by offset very conveniently.
         //      Selectivity should be done outside.
         return find_first_n_by_index(limit, bitset);
+    }
+
+    void
+    mask_old_offsets(BitsetTypeView& bitset) const override {
+        std::shared_lock<std::shared_mutex> lck(mtx_);
+        auto size = bitset.size();
+        for (const auto& [pk, offsets] : map_) {
+            (void)pk;
+            bool keep_latest_visible = false;
+            for (auto iter = offsets.rbegin(); iter != offsets.rend(); ++iter) {
+                auto offset = *iter;
+                if (offset >= size || bitset[offset]) {
+                    continue;
+                }
+                if (!keep_latest_visible) {
+                    keep_latest_visible = true;
+                    continue;
+                }
+                bitset[offset] = true;
+            }
+        }
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
@@ -563,6 +600,7 @@ class OffsetOrderedMap : public OffsetMap {
  private:
     OrderedMap map_;
     mutable std::shared_mutex mtx_;
+    std::atomic<bool> has_duplicates_{false};
 };
 
 template <typename T>
@@ -697,6 +735,35 @@ class OffsetOrderedArray : public OffsetMap {
         return find_first_n_by_index(limit, bitset);
     }
 
+    void
+    mask_old_offsets(BitsetTypeView& bitset) const override {
+        check_search();
+        auto size = bitset.size();
+        auto iter = array_.begin();
+        while (iter != array_.end()) {
+            auto next = iter + 1;
+            while (next != array_.end() && next->first == iter->first) {
+                ++next;
+            }
+
+            bool keep_latest_visible = false;
+            for (auto reverse = std::make_reverse_iterator(next);
+                 reverse != std::make_reverse_iterator(iter);
+                 ++reverse) {
+                auto offset = reverse->second;
+                if (offset >= size || bitset[offset]) {
+                    continue;
+                }
+                if (!keep_latest_visible) {
+                    keep_latest_visible = true;
+                    continue;
+                }
+                bitset[offset] = true;
+            }
+            iter = next;
+        }
+    }
+
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
     find_first_n_element(
         int64_t limit,
@@ -722,6 +789,11 @@ class OffsetOrderedArray : public OffsetMap {
     size_t
     memory_size() const override {
         return sizeof(std::pair<T, int32_t>) * array_.capacity();
+    }
+
+    bool
+    has_duplicates() const override {
+        return false;
     }
 
  private:
@@ -963,6 +1035,13 @@ class VirtualPKOffsetMap : public OffsetMap {
                     static_cast<int64_t>(seg_offsets.size()) >= limit};
     }
 
+    void
+    mask_old_offsets(BitsetTypeView& bitset) const override {
+        // Virtual PKs are one-to-one with offsets, so there are no stale
+        // duplicate offsets to mask.
+        (void)bitset;
+    }
+
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
     find_first_n_element(
         int64_t limit,
@@ -1026,6 +1105,11 @@ class VirtualPKOffsetMap : public OffsetMap {
         auto last_pk = std::get_if<int64_t>(&cursor->last_pk);
         return last_pk != nullptr && *last_pk == (shifted_segment_id_ | doc) &&
                element_offset <= cursor->last_element_offset;
+    }
+
+    bool
+    has_duplicates() const override {
+        return false;
     }
 
  private:
@@ -1434,9 +1518,16 @@ class InsertRecordGrowing {
     }
 
     void
-    insert_pks(const std::vector<FieldDataPtr>& field_datas) {
+    mask_old_duplicate_pks(BitsetTypeView& bitset) const {
+        std::shared_lock<std::shared_mutex> lck(shared_mutex_);
+        pk2offset_->mask_old_offsets(bitset);
+    }
+
+    void
+    insert_pks(const std::vector<FieldDataPtr>& field_datas,
+               int64_t reserved_offset) {
         std::lock_guard lck(shared_mutex_);
-        int64_t offset = 0;
+        int64_t offset = reserved_offset;
         for (auto& data : field_datas) {
             int64_t row_count = data->get_num_rows();
             auto data_type = data->get_data_type();
@@ -1470,6 +1561,11 @@ class InsertRecordGrowing {
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
         return pk2offset_->empty();
+    }
+
+    bool
+    has_duplicate_pks() const {
+        return pk2offset_->has_duplicates();
     }
 
     void
@@ -1655,6 +1751,14 @@ class InsertRecordGrowing {
     insert_pk(const PkType& pk, int64_t offset) {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->insert(pk, offset);
+    }
+
+    void
+    insert_pks(const std::vector<PkType>& pks, int64_t offset_begin) {
+        std::lock_guard lck(shared_mutex_);
+        for (size_t i = 0; i < pks.size(); ++i) {
+            pk2offset_->insert(pks[i], offset_begin + i);
+        }
     }
 
     // get data without knowing the type

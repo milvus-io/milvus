@@ -124,6 +124,25 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     auto metric_type = info.metric_type_;
     auto round_decimal = info.round_decimal_;
 
+    auto active_count = segment.get_active_count(timestamp);
+    BitsetView dedup_bitset = bitset;
+    if (active_count > 0 && record.has_duplicate_pks()) {
+        // Cap at caller's bitset size to avoid out-of-bounds if active_count
+        // advanced past the bitset that was built by the caller's snapshot.
+        auto safe_count =
+            bitset.empty()
+                ? active_count
+                : std::min(active_count, static_cast<int64_t>(bitset.size()));
+        search_result.dedup_bitset_holder_.resize(active_count);
+        for (int64_t i = 0; i < active_count; ++i) {
+            search_result.dedup_bitset_holder_[i] =
+                !bitset.empty() && i < safe_count && bitset.test(i);
+        }
+        BitsetTypeView dedup_bitset_view(search_result.dedup_bitset_holder_);
+        record.mask_old_duplicate_pks(dedup_bitset_view);
+        dedup_bitset = BitsetView(search_result.dedup_bitset_holder_);
+    }
+
     // step 2: small indexing search
     if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
         AssertInfo(
@@ -135,7 +154,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                 info,
                                 query_data,
                                 num_queries,
-                                bitset,
+                                dedup_bitset,
                                 op_context,
                                 search_result);
     } else {
@@ -151,7 +170,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                            info,
                                            query_data,
                                            num_queries,
-                                           bitset,
+                                           dedup_bitset,
                                            op_context,
                                            search_result);
         }
@@ -183,19 +202,18 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
 
         TargetBitmap transformed_bitset;
-        BitsetView search_bitset = bitset;
+        BitsetView search_bitset = dedup_bitset;
         if (offset_mapping.IsEnabled()) {
-            transformed_bitset = TransformBitset(bitset, offset_mapping);
+            transformed_bitset = TransformBitset(dedup_bitset, offset_mapping);
             search_bitset = BitsetView(transformed_bitset);
         }
 
-        auto active_count = offset_mapping.IsEnabled()
+        auto search_count = offset_mapping.IsEnabled()
                                 ? offset_mapping.GetValidCount()
-                                : std::min(int64_t(bitset.size()),
-                                           segment.get_active_count(timestamp));
+                                : active_count;
 
         // Check for nullable vector field with all null values
-        if (active_count == 0) {
+        if (search_count == 0) {
             // All vectors are null, return empty result
             auto total_num = num_queries * info.topk_;
             search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
@@ -224,7 +242,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
-                                             active_count,
+                                             search_count,
                                              info,
                                              index_info,
                                              search_bitset,
@@ -236,7 +254,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-        auto max_chunk = upper_div(active_count, vec_size_per_chunk);
+        auto max_chunk = upper_div(search_count, vec_size_per_chunk);
 
         // Track cumulative element offset for element-level search.
         // begin_id must be the cumulative element count (not row offset),
@@ -250,7 +268,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             auto row_begin = chunk_id * vec_size_per_chunk;
             auto row_end =
-                std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
+                std::min(search_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = row_end - row_begin;
 
             query::dataset::RawDataset sub_data;

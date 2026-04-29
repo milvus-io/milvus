@@ -681,9 +681,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     ParsePksFromFieldData(pks,
                           *insert_record_proto->mutable_fields_data(
                               field_id_to_offset[field_id]));
-    for (int i = 0; i < num_rows; ++i) {
-        insert_record_.insert_pk(pks[i], reserved_offset + i);
-    }
+    insert_record_.insert_pks(pks, reserved_offset);
 
     // step 5: update the resource usage
     UpdateResourceTracking();
@@ -818,7 +816,7 @@ SegmentGrowingImpl::load_field_data_common(
     try_remove_chunks(field_id);
 
     if (field_id == primary_field_id) {
-        insert_record_.insert_pks(field_data);
+        insert_record_.insert_pks(field_data, reserved_offset);
     }
 
     // update average row data size

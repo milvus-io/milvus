@@ -702,8 +702,12 @@ TEST(GroupBY, GrowingRawData) {
     int64_t rows_per_batch = 512;
     int n_batch = 3;
     for (int i = 0; i < n_batch; i++) {
+        // Use unique seed and random_pk per batch to avoid duplicate PKs across
+        // batches. Duplicate PKs would be masked by growing-segment dedup,
+        // leaving all visible rows in the last batch's chunks only, which breaks
+        // the GroupBy iterator merge across chunks.
         auto data_set =
-            DataGen(schema, rows_per_batch, 42, 0, 8, 10, 1, false, false);
+            DataGen(schema, rows_per_batch, 42 + i, 0, 8, 10, 1, true, false);
         auto offset = segment_growing_impl->PreInsert(rows_per_batch);
         segment_growing_impl->Insert(offset,
                                      rows_per_batch,
@@ -805,8 +809,12 @@ TEST(GroupBY, GrowingIndex) {
     int64_t rows_per_batch = 1024;
     int n_batch = 10;
     for (int i = 0; i < n_batch; i++) {
+        // Use unique seed and random_pk per batch so all rows have unique PKs.
+        // Without this, duplicate PKs across batches are masked by
+        // growing-segment dedup, leaving only 1 visible row per PK and making
+        // group_size=3 impossible to satisfy.
         auto data_set =
-            DataGen(schema, rows_per_batch, 42, 0, 8, 10, 10, false, false);
+            DataGen(schema, rows_per_batch, 42 + i, 0, 8, 10, 10, true, false);
         auto offset = segment_growing_impl->PreInsert(rows_per_batch);
         segment_growing_impl->Insert(offset,
                                      rows_per_batch,
@@ -1009,10 +1017,12 @@ TEST(GroupBY, CompositeKeyGrowing) {
     //   int8[i] = i/10 => 6 unique (0..5)
     //   int32[i] = i/10 => 6 unique (0..5) — same values
     //   composite (int8, int32): 6 unique combos, each repeated 10 times
+    // random_pk=true: 60 unique PKs so growing-segment dedup keeps all 60 rows.
+    // Without this, each of the 6 PK groups (i/repeat_count) has repeat_count
+    // copies but dedup retains only 1, making group_size=3 impossible.
     size_t N = 60;
     int repeat_count = 10;
-    auto raw_data =
-        DataGen(schema, N, 42, 0, repeat_count, 10, 1, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, repeat_count, 10, 1, true, false);
 
     auto segment_growing = CreateGrowingSegment(schema, empty_index_meta);
     segment_growing->PreInsert(N);
