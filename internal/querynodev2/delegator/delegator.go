@@ -271,6 +271,7 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 		FromShardLeader: req.FromShardLeader,
 		TotalChannelNum: req.TotalChannelNum,
 		FilterOnly:      req.FilterOnly,
+		EnableExprCache: req.EnableExprCache,
 	}
 	return nodeReq
 }

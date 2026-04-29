@@ -1972,7 +1972,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         }
 
         // Insert into process-level cache
-        if (exec::ExprResCacheManager::IsEnabled() &&
+        if (enable_sub_expr_cache_write_ &&
+            exec::ExprResCacheManager::IsEnabled() &&
             segment_->type() == SegmentType::Sealed) {
             exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
                                                this->ToString()};
