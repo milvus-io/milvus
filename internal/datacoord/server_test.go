@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -2007,6 +2008,8 @@ func TestHandleSessionEvent(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
+		svr.indexEngineVersionManager = newIndexEngineVersionManager()
+
 		// None event
 		evt := &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionNoneEvent,
@@ -2026,10 +2029,11 @@ func TestHandleSessionEvent(t *testing.T) {
 			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   101,
-					ServerName: "DN101",
-					Address:    "DN127.0.0.101",
-					Exclusive:  false,
+					ServerID:                 101,
+					ServerName:               "DN101",
+					Address:                  "DN127.0.0.101",
+					Exclusive:                false,
+					MaxIndexStorePathVersion: 1,
 				},
 			},
 		}
@@ -2037,20 +2041,53 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.nodeManager.GetClientIDs()
 		assert.EqualValues(t, 1, len(dataNodes))
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
-			EventType: sessionutil.SessionDelEvent,
+			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   101,
-					ServerName: "DN101",
-					Address:    "DN127.0.0.101",
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
 					Exclusive:  false,
 				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionUpdateEvent,
+			Session: &sessionutil.Session{
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:                 102,
+					ServerName:               "DN102",
+					Address:                  "DN127.0.0.102",
+					Exclusive:                false,
+					MaxIndexStorePathVersion: 1,
+				},
+			},
+		}
+		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session: &sessionutil.Session{
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID:   102,
+					ServerName: "DN102",
+					Address:    "DN127.0.0.102",
+					Exclusive:  false,
+				},
+			},
+		}
+		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
+		assert.NoError(t, err)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 		_ = svr.nodeManager.GetClientIDs()
 	})
 
@@ -2419,16 +2456,18 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 	sessions := map[string]*sessionutil.Session{
 		"session1": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID: 1,
-				Address:  "localhost:9001",
-				Version:  "2.3.0",
+				ServerID:                 1,
+				Address:                  "localhost:9001",
+				Version:                  "2.3.0",
+				MaxIndexStorePathVersion: 1,
 			},
 		},
 		"session2": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID: 2,
-				Address:  "localhost:9002",
-				Version:  "2.2.0", // legacy version
+				ServerID:                 2,
+				Address:                  "localhost:9002",
+				Version:                  "2.2.0", // legacy version
+				MaxIndexStorePathVersion: 1,
 			},
 		},
 	}
@@ -2446,6 +2485,7 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
 func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {

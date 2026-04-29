@@ -488,6 +488,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 func (s *Server) initServiceDiscovery() error {
 	log := log.Ctx(s.ctx)
 	r := semver.MustParseRange(">=2.2.3")
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -516,7 +519,6 @@ func (s *Server) initServiceDiscovery() error {
 		s.dnSessionWatcher = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
 	}
 
-	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
@@ -538,6 +540,9 @@ func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) err
 // rewatchDataNodes is used to rewatch data nodes when datacoord is started or reconnected to etcd
 // Note: may apply same node multiple times, so rewatchDataNodes must be idempotent
 func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) error {
+	if s.indexEngineVersionManager == nil {
+		s.indexEngineVersionManager = newIndexEngineVersionManager()
+	}
 	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
@@ -562,6 +567,7 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		log.Warn("DataCoord failed to add datanode", zap.Error(err))
 		return err
 	}
+	s.indexEngineVersionManager.StartupByRole(typeutil.DataNodeRole, sessions)
 	return nil
 }
 
@@ -865,6 +871,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			if s.fileResourceObserver != nil {
 				s.fileResourceObserver.Notify()
 			}
+			s.indexEngineVersionManager.AddByRole(typeutil.DataNodeRole, event.Session)
 			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
@@ -879,6 +886,12 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return nil
 			}
 			s.nodeManager.RemoveNode(event.Session.ServerID)
+			s.indexEngineVersionManager.RemoveByRole(typeutil.DataNodeRole, event.Session)
+		case sessionutil.SessionUpdateEvent:
+			log.Info("received datanode SessionUpdateEvent",
+				zap.String("address", info.Address),
+				zap.Int64("serverID", info.Version))
+			s.indexEngineVersionManager.UpdateByRole(typeutil.DataNodeRole, event.Session)
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))
