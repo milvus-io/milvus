@@ -613,12 +613,16 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path,
     LOG_INFO(
         "[LoadColumnGroups] segment {} start, manifest {}", id_, manifest_path);
 
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
-    auto load_info = std::atomic_load(&segment_load_info_);
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups(manifest)");
+    auto base_properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetProperties();
+    AssertInfo(base_properties != nullptr,
+               "Loon FFI properties are not initialized");
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(*base_properties);
+    auto load_info = std::atomic_load(&segment_load_info_);
     auto column_groups = load_info->GetColumnGroups();
 
     // External collections: inject extfs.{collectionID}.* derived from
