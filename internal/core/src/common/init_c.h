@@ -83,7 +83,16 @@ void
 SetExprResCacheEnable(bool val);
 
 void
-SetExprResCacheCapacityBytes(int64_t bytes);
+SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
+                      const char* disk_base_path,  // disk mode: file path
+                      // Memory mode params
+                      int64_t mem_max_bytes,
+                      bool compression_enabled,
+                      int32_t admission_threshold,
+                      int64_t mem_min_eval_duration_us,
+                      // Disk mode params
+                      int64_t disk_max_file_size,
+                      int64_t disk_min_eval_duration_us);
 
 // Set the capacity of arrow's internal IO thread pool. This pool runs
 // async range reads (ReadRangeCache) that issue actual S3 GetObject

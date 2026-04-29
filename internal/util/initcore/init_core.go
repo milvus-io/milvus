@@ -637,17 +637,25 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateExprResCacheEnable(enable)
+			if enable {
+				UpdateExprResCacheConfig()
+			}
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			capacity, err := strconv.Atoi(newValue)
-			if err != nil {
-				return err
+		updateExprResCacheConfigCallback := func(ctx context.Context, key, oldValue, newValue string) error {
+			if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+				UpdateExprResCacheConfig()
 			}
-			UpdateExprResCacheCapacityBytes(capacity)
 			return nil
-		})
+		}
+		paramtable.Get().QueryNodeCfg.ExprResCacheMode.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemMaxBytes.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemCompressionEnabled.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemAdmissionThreshold.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheMemMinEvalDurationUs.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.RegisterCallback(updateExprResCacheConfigCallback)
+		paramtable.Get().QueryNodeCfg.ExprResCacheDiskMinEvalDurationUs.RegisterCallback(updateExprResCacheConfigCallback)
 
 		updateTieredStorageConfigCallback := func(ctx context.Context, key, oldValue, newValue string) error {
 			return UpdateTieredStorageConfig(paramtable.Get())

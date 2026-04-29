@@ -651,8 +651,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     ValueType val1 = GetValueWithCastNumber<ValueType>(expr_->lower_val_);
     ValueType val2 = GetValueWithCastNumber<ValueType>(expr_->upper_val_);
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto index = segment->GetJsonStats(op_ctx_, field_id);
@@ -811,6 +813,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
+        CachePut();
     }
 
     auto res = MoveOrSliceBitmap(

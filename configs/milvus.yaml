@@ -577,7 +577,15 @@ queryNode:
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   exprCache:
     enabled: false # enable expression result cache
-    capacityBytes: 268435456 # max capacity in bytes for expression result cache
+    mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
+    memory:
+      maxBytes: 2147483648 # max memory for expression cache in memory mode (default 2GB)
+      compressionEnabled: true # enable Roaring/Raw adaptive compression in memory mode
+      admissionThreshold: 2 # frequency admission: cache after N+ occurrences (1=no gating)
+      minEvalDurationUs: 100 # latency filter: skip expressions that eval faster than this (0=disabled)
+    disk:
+      maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
+      minEvalDurationUs: 200 # latency filter for disk mode (higher threshold due to disk IO cost)
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
