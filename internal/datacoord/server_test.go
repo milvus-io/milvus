@@ -2537,6 +2537,41 @@ func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "cluster startup failed")
 }
 
+func TestServer_initServiceDiscovery_BindIndexNodeSeedsConservativePathVersion(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.BindIndexNodeMode.Key, "true")
+	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeID.Key, "10001")
+	paramtable.Get().Save(Params.DataCoordCfg.IndexNodeAddress.Key, "localhost:10001")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.BindIndexNodeMode.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeID.Key)
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexNodeAddress.Key)
+
+	mockSession := sessionutil.NewMockSession(t)
+	mockSession.EXPECT().
+		GetSessionsWithVersionRange(typeutil.DataNodeRole, mock.Anything).
+		Return(map[string]*sessionutil.Session{}, int64(10), nil)
+	mockSession.EXPECT().
+		GetSessions(mock.Anything, typeutil.QueryNodeRole).
+		Return(map[string]*sessionutil.Session{
+			"qn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 1, MaxIndexStorePathVersion: 1}},
+		}, int64(20), nil)
+	mockSession.EXPECT().
+		WatchServicesWithVersionRange(typeutil.QueryNodeRole, mock.Anything, int64(21), mock.Anything).
+		Return(sessionutil.EmptySessionWatcher())
+
+	server := &Server{
+		ctx:                       context.Background(),
+		session:                   mockSession,
+		indexEngineVersionManager: newIndexEngineVersionManager(),
+	}
+	server.nodeManager = session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		return nil, nil
+	})
+
+	err := server.initServiceDiscovery()
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+}
+
 func Test_CheckHealth(t *testing.T) {
 	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	collections.Insert(449684528748778322, &collectionInfo{
