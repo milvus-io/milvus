@@ -547,6 +547,123 @@ func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	defer FreeProperties(props)
 }
 
+func TestNormalizeExternalPathForStorage_UsesInjectedExtfsEndpoint(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://liyiyang-test/all_types_v2/",
+		Spec:         `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	got, err := normalizeExternalPathForStorage(extfs.Source, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/", got)
+
+	got, err = normalizeExternalPathForStorage("s3://liyiyang-test/a/b/file.parquet?versionId=1", props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/a/b/file.parquet?versionId=1", got)
+}
+
+func TestNormalizeExternalPathForStorage_EndpointFormUnchanged(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	source := "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/"
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       source,
+		Spec:         `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	got, err := normalizeExternalPathForStorage(source, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, source, got)
+}
+
+func TestNormalizeExternalPathForStorage_NoRewriteCases(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	prefix := ExtfsPrefixForCollection(42)
+	props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		prefix + "address":     "https://s3.us-west-2.amazonaws.com",
+		prefix + "bucket_name": "liyiyang-test",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(props)
+
+	path := "s3://liyiyang-test/all_types_v2/"
+
+	got, err := normalizeExternalPathForStorage(path, props, ExternalSpecContext{CollectionID: 42})
+	require.NoError(t, err)
+	assert.Equal(t, path, got)
+
+	got, err = normalizeExternalPathForStorage(
+		path,
+		nil,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, path, got)
+
+	got, err = normalizeExternalPathForStorage(
+		"relative/path",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "relative/path", got)
+
+	got, err = normalizeExternalPathForStorage(
+		"s3://other-bucket/all_types_v2/",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://other-bucket/all_types_v2/", got)
+}
+
+func TestNormalizeExternalPathForStorage_BareAddress(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	prefix := ExtfsPrefixForCollection(42)
+	props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		prefix + "address":     "s3.us-west-2.amazonaws.com",
+		prefix + "bucket_name": "liyiyang-test",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(props)
+
+	got, err := normalizeExternalPathForStorage(
+		"s3://liyiyang-test/all_types_v2/",
+		props,
+		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/", got)
+}
+
 // ==================== SampleExternalFieldSizes Tests ====================
 
 func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {

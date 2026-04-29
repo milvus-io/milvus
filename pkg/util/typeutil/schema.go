@@ -2247,10 +2247,10 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 }
 
 // NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
-// disabled for external collections AND mutates each user field to set
-// nullable=true. The mutation is intentional: external Parquet sources may
-// contain nulls in any column, and a non-nullable field would silently produce
-// incorrect results when reading those nulls. The function is named
+// disabled for external collections AND mutates each non-vector user field to
+// set nullable=true. The mutation is intentional: external Parquet sources may
+// contain nulls in scalar columns, and a non-nullable scalar field would silently
+// produce incorrect results when reading those nulls. The function is named
 // "NormalizeAndValidate" so callers know it has a write-back side effect.
 //
 // Validation runs in two passes: pass 1 checks every field; pass 2 mutates
@@ -2341,10 +2341,15 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	}
 
 	// Pass 2: normalize. All fields passed validation; safe to mutate.
-	// Force nullable for external fields: Parquet columns can contain nulls,
-	// and a non-nullable field would silently produce incorrect results.
+	// Force nullable for external scalar fields: Parquet columns can contain
+	// nulls, and non-nullable scalars would silently produce incorrect results.
 	for _, field := range schema.GetFields() {
 		if isExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		if IsVectorType(field.GetDataType()) {
+			// External nullable vectors currently build incorrect offset mapping.
+			// Restore forced nullable after the offset mapping path is fixed.
 			continue
 		}
 		if !field.GetNullable() {
