@@ -18,6 +18,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -112,6 +113,15 @@ func NewCluster(nm NodeManager) Cluster {
 		nm: nm,
 	}
 	return c
+}
+
+func hasTaskResultPayload(resp *workerpb.QueryTaskResponse) bool {
+	return len(resp.GetPayload()) > 0
+}
+
+func errTerminalEmptyPayload(taskType taskcommon.Type, taskID int64, state taskcommon.State, reason string) error {
+	return fmt.Errorf("%s task %d is terminal with empty result payload, state=%s, reason=%s",
+		taskType, taskID, state.String(), reason)
 }
 
 func (c *cluster) createTask(nodeID int64, in proto.Message, properties taskcommon.Properties) error {
@@ -260,15 +270,18 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		panic("the compaction result payload must not be empty with Finished/Failed state")
+		reason := taskcommon.NewProperties(resp.GetProperties()).GetTaskReason()
+		log.Warn("the compaction result payload is empty",
+			zap.Int64("taskID", in.GetPlanID()), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.Compaction, in.GetPlanID(), state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -332,17 +345,17 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the preImport result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
-		panic("the preImport result payload must not be empty with Finished/Failed state")
+		log.Warn("the preImport result payload is empty",
+			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.PreImport, in.GetTaskID(), state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -379,17 +392,17 @@ func (c *cluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*dat
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the import result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
-		panic("the import result payload must not be empty with Finished/Failed state")
+		log.Warn("the import result payload is empty",
+			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.Import, in.GetTaskID(), state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -454,17 +467,17 @@ func (c *cluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the index result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
-		panic("the index result payload must not be empty with Finished/Failed state")
+		log.Warn("the index result payload is empty",
+			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.Index, in.GetTaskIDs()[0], state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -529,18 +542,18 @@ func (c *cluster) QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the stats result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
-		panic("the stats result payload must not be empty with Finished/Failed state")
+		log.Warn("the stats result payload is empty",
+			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.Stats, in.GetTaskIDs()[0], state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -603,17 +616,17 @@ func (c *cluster) QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*wo
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the analyze result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()))
-		panic("the analyze result payload must not be empty with Finished/Failed state")
+		log.Warn("the analyze result payload is empty",
+			zap.Int64("taskID", in.GetTaskIDs()[0]), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.Analyze, in.GetTaskIDs()[0], state, reason)
 	default:
 		panic("should not happen")
 	}
@@ -679,6 +692,20 @@ func (c *cluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64)
 		return nil, err
 	}
 
+	if !hasTaskResultPayload(resp) {
+		resProperties := taskcommon.NewProperties(resp.GetProperties())
+		state, err := resProperties.GetTaskState()
+		if err != nil {
+			return nil, err
+		}
+		reason := resProperties.GetTaskReason()
+		if state == taskcommon.Finished || state == taskcommon.Failed {
+			log.Warn("the refresh external collection result payload is empty",
+				zap.Int64("taskID", taskID), zap.String("state", state.String()), zap.String("reason", reason))
+			return nil, errTerminalEmptyPayload(taskcommon.RefreshExternalCollection, taskID, state, reason)
+		}
+	}
+
 	// Unmarshal the response payload
 	result := &datapb.RefreshExternalCollectionTaskResponse{}
 	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
@@ -739,17 +766,17 @@ func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequ
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
 		return defaultResult, nil
 	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+		if hasTaskResultPayload(resp) {
 			return payloadResultF()
 		}
-		log.Warn("the copy segment result payload must not be empty",
-			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
-		panic("the copy segment result payload must not be empty with Finished/Failed state")
+		log.Warn("the copy segment result payload is empty",
+			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()), zap.String("reason", reason))
+		return nil, errTerminalEmptyPayload(taskcommon.CopySegment, in.GetTaskID(), state, reason)
 	default:
 		panic("should not happen")
 	}
