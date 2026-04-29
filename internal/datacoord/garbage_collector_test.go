@@ -1002,6 +1002,52 @@ func TestGarbageCollector_recycleUnusedIndexFiles_MixedV0V1SkipsCollectionDirOnl
 	assert.Equal(t, []string{"root/index_files/999/"}, removedPrefixes)
 }
 
+func TestGarbageCollector_recycleUnusedIndexFiles_RecheckCollectionRootedMetadataOnCacheMiss(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			catalog:          catalog,
+			segmentIndexes:   segIndexes,
+			indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			keyLock:          lock.NewKeyLock[UniqueID](),
+		},
+	}
+	meta.snapshotMeta = &snapshotMeta{}
+
+	removedPrefixes := make([]string, 0)
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root")
+	cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_files/", false, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
+				BuildID:               3000,
+				CollectionID:          100,
+				PartitionID:           200,
+				SegmentID:             300,
+				IndexVersion:          1,
+				IndexStorePathVersion: 1,
+				IndexState:            commonpb.IndexState_Finished,
+				IndexFileKeys:         []string{"file1"},
+			})
+			cowf(&storage.ChunkObjectInfo{FilePath: "root/index_files/100/"})
+			return nil
+		})
+	cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string) error {
+			removedPrefixes = append(removedPrefixes, s)
+			return nil
+		}).Maybe()
+
+	gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+	gc.recycleUnusedIndexFiles(context.TODO())
+
+	assert.NotContains(t, removedPrefixes, "root/index_files/100/")
+}
+
 func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 	t.Run("clean deleted v1 index", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
