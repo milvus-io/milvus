@@ -442,6 +442,11 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            if (enable_expr_cache_) {
+                query_context->set_enable_expr_cache(true);
+                query_context->set_enable_sub_expr_cache_write(false);
+            }
+
             auto result = ExecuteTask(plan_fragment, query_context);
 
             if (result != nullptr && !result->childrens().empty()) {
@@ -491,6 +496,10 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
+    if (enable_expr_cache_) {
+        query_context->set_enable_expr_cache(true);
+        query_context->set_enable_sub_expr_cache_write(false);
+    }
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
