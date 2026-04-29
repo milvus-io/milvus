@@ -122,9 +122,7 @@ impl IndexWriterWrapper {
                     "add json batch with tantivy index version 5 is not supported".into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => {
-                writer.add_json_batch(datas, offset_begin as u32)
-            }
+            IndexWriterWrapper::V7(writer) => writer.add_json_batch(datas, offset_begin as u32),
         }
     }
 

@@ -389,7 +389,11 @@ pub extern "C" fn tantivy_json_terms_query_i64(
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
     let terms = unsafe { convert_to_rust_slice!(terms, len) };
-    unsafe { (*real).json_terms_query_i64(json_path, terms, bitset).into() }
+    unsafe {
+        (*real)
+            .json_terms_query_i64(json_path, terms, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]
@@ -403,7 +407,11 @@ pub extern "C" fn tantivy_json_terms_query_f64(
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
     let terms = unsafe { convert_to_rust_slice!(terms, len) };
-    unsafe { (*real).json_terms_query_f64(json_path, terms, bitset).into() }
+    unsafe {
+        (*real)
+            .json_terms_query_f64(json_path, terms, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]
@@ -417,7 +425,11 @@ pub extern "C" fn tantivy_json_terms_query_bool(
     let real = ptr as *mut IndexReaderWrapper;
     let json_path = cstr_to_str!(json_path);
     let terms = unsafe { convert_to_rust_slice!(terms, len) };
-    unsafe { (*real).json_terms_query_bool(json_path, terms, bitset).into() }
+    unsafe {
+        (*real)
+            .json_terms_query_bool(json_path, terms, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]
