@@ -21,7 +21,7 @@ Coverage:
      schemaless reader column projection)
   9. Cross-bucket external sources (s3:///bucket/path empty-host form)
  10. Parquet compression codec matrix (snappy, lz4, gzip, zstd, none)
- 11. External file formats (parquet, lance-table, vortex)
+ 11. External file formats (parquet, lance-table, vortex, iceberg-table)
  12. DQL surface (query filter / search metric / hybrid_search / search_iterator /
                   query_iterator / get by virtual PK / offset-limit pagination)
  13. Read-only / admin operations that normal collections support
@@ -78,6 +78,29 @@ FORMAT_NUM_FILES = 3
 FORMAT_ROWS_PER_FILE = 3000
 FORMAT_TOTAL_ROWS = FORMAT_NUM_FILES * FORMAT_ROWS_PER_FILE
 
+SCHEME_PROVIDER_CASES = {
+    "s3": "aws",
+    "s3a": "aws",
+    "aws": "aws",
+    "minio": "minio",
+    "oss": "aliyun",
+    "gs": "gcp",
+    "gcs": "gcp",
+    "cos": "tencent",
+    "obs": "huawei",
+    "azure": "azure",
+}
+ALLOWED_EXTERNAL_SOURCE_SCHEMES = tuple(SCHEME_PROVIDER_CASES)
+
+FORMAT_CASES = {
+    "parquet": {"id": "parquet", "has_value": True},
+    "lance-table": {"id": "lance", "has_value": True},
+    "vortex": {"id": "vortex", "has_value": True},
+    "iceberg-table": {"id": "iceberg", "has_value": False},
+}
+BASIC_FORMATS = tuple(FORMAT_CASES)
+BASIC_FORMAT_IDS = [FORMAT_CASES[fmt]["id"] for fmt in BASIC_FORMATS]
+
 
 def _env(key, default):
     return os.environ.get(key, default)
@@ -97,6 +120,20 @@ def build_external_source(cfg, key_prefix):
     """Build a full s3:// URL that Milvus's extfs resolver can use directly."""
     # Trailing slash matters — refresh lists objects under the prefix.
     return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
+
+
+def build_validation_source_for_scheme(scheme, cfg, key_prefix="prefix"):
+    """Build a create-time validation source for every allowlisted scheme."""
+    if scheme == "minio":
+        return f"minio://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
+    if scheme == "azure":
+        return f"azure://account.blob.core.windows.net/{cfg['bucket']}/{key_prefix}/"
+    return f"{scheme}://bucket/{key_prefix}/"
+
+
+def minio_endpoint_url(cfg):
+    scheme = "https" if cfg["secure"] else "http"
+    return f"{scheme}://{cfg['address']}"
 
 
 def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra):
@@ -122,17 +159,25 @@ def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra
     return json.dumps(spec, separators=(",", ":"))
 
 
+def assert_external_spec_persisted(actual_spec, expected_spec, context):
+    actual = json.loads(actual_spec or "{}")
+    expected = json.loads(expected_spec or "{}")
+    assert actual.get("format") == expected.get("format"), f"{context}: format mismatch: {actual}"
+
+    actual_extfs = actual.get("extfs") or {}
+    expected_extfs = expected.get("extfs") or {}
+    for key in ("cloud_provider", "region", "use_ssl"):
+        assert actual_extfs.get(key) == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
+
+    for key in ("access_key_id", "access_key_value"):
+        value = actual_extfs.get(key)
+        assert value, f"{context}: extfs.{key} missing: {actual_extfs}"
+        assert value == "***" or value == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
+
+
 def build_external_spec_for_scheme(scheme, cfg=None, fmt="parquet"):
     """Build a validation-only spec whose cloud_provider matches the URI scheme."""
-    provider = {
-        "s3": "aws",
-        "s3a": "aws",
-        "aws": "aws",
-        "minio": "minio",
-        "oss": "aliyun",
-        "gs": "gcp",
-        "gcs": "gcp",
-    }[scheme]
+    provider = SCHEME_PROVIDER_CASES[scheme]
     return build_external_spec(cfg=cfg, fmt=fmt, cloud_provider=provider)
 
 
@@ -849,6 +894,30 @@ def refresh_and_poll_terminal(client, collection_name, timeout=60, external_sour
     raise AssertionError(f"Refresh job {job_id} did not finish within {timeout}s; state={state}")
 
 
+def refresh_and_expect_failed(
+    client,
+    collection_name,
+    timeout=60,
+    external_source=None,
+    external_spec=None,
+    reason_terms=(),
+):
+    """Trigger refresh and require a terminal RefreshFailed with a useful reason."""
+    job_id, progress = refresh_and_poll_terminal(
+        client,
+        collection_name,
+        timeout=timeout,
+        external_source=external_source,
+        external_spec=external_spec,
+    )
+    assert progress.state == "RefreshFailed", f"Refresh job {job_id} should fail terminally, got {progress.state}"
+    assert progress.reason, f"Refresh job {job_id} failed without a reason"
+    if reason_terms:
+        reason = progress.reason.lower()
+        assert any(term.lower() in reason for term in reason_terms), progress.reason
+    return job_id, progress
+
+
 def add_vector_index(client, collection_name, vec_field="embedding", index_type="AUTOINDEX", metric_type="L2", **extra):
     index_params = client.prepare_index_params()
     index_params.add_index(
@@ -882,6 +951,89 @@ def upload_basic_data(
         gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
     )
     return key
+
+
+def require_format_dependencies(fmt):
+    if fmt == "lance-table":
+        try:
+            import lance  # noqa: F401
+        except ImportError:
+            pytest.skip("lance package not installed in this environment")
+    elif fmt == "iceberg-table":
+        try:
+            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
+        except ImportError:
+            pytest.skip("pyiceberg not installed. Install with:\n  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'")
+
+
+def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=TEST_DIM):
+    """Write the basic id/value/embedding dataset for one external format.
+
+    Returns (external_source, external_spec). Iceberg rewrites external_source
+    to the metadata.json URI and has no value column.
+    """
+    require_format_dependencies(fmt)
+    if fmt == "parquet":
+        for idx, (start_id, num_rows) in enumerate(batches):
+            upload_parquet(
+                minio_client,
+                cfg["bucket"],
+                f"{ext_key}/file_{idx:03d}.parquet",
+                gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
+            )
+        return ext_url, build_external_spec(cfg, fmt=fmt)
+
+    if fmt == "lance-table":
+        _write_lance_to_minio_batches(minio_client, cfg["bucket"], ext_key, batches, dim=dim)
+        return ext_url, build_external_spec(cfg, fmt=fmt)
+
+    if fmt == "vortex":
+        for idx, (start_id, num_rows) in enumerate(batches):
+            _write_vortex_to_minio(
+                cfg["bucket"],
+                cfg,
+                ext_key,
+                num_rows=num_rows,
+                start_id=start_id,
+                dim=dim,
+                filename=f"data_{idx:03d}.vortex",
+            )
+        return ext_url, build_external_spec(cfg, fmt=fmt)
+
+    if fmt == "iceberg-table":
+        snapshot_id, iceberg_url = _build_iceberg_table_in_minio(ext_key, cfg, batches=batches, dim=dim)
+        return iceberg_url, build_external_spec(cfg, fmt=fmt, snapshot_id=int(snapshot_id))
+
+    raise AssertionError(f"unsupported format: {fmt}")
+
+
+def build_basic_format_schema(client, fmt, ext_url, ext_spec, dim=TEST_DIM):
+    schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
+    schema.add_field("id", DataType.INT64, external_field="id")
+    if FORMAT_CASES[fmt]["has_value"]:
+        schema.add_field("value", DataType.FLOAT, external_field="value")
+    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
+    return schema
+
+
+def assert_basic_format_rows(client, coll, fmt, batches, dim=TEST_DIM):
+    total = sum(num_rows for _start_id, num_rows in batches)
+    assert query_count(client, coll) == total
+    for start_id, num_rows in batches:
+        if num_rows == 0:
+            continue
+        rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "embedding"])
+        assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
+        vec = rows[0]["embedding"]
+        assert len(vec) == dim
+        if fmt == "iceberg-table":
+            for j, v in enumerate(vec):
+                expected = float(start_id) + j * 0.1
+                assert abs(v - expected) < 1e-2, f"[{fmt}] vec[{j}] for id={start_id} = {v}"
+        if FORMAT_CASES[fmt]["has_value"]:
+            rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "value"])
+            assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
+            assert abs(rows[0]["value"] - start_id * 1.5) < 1e-3
 
 
 # ============================================================
@@ -1053,17 +1205,14 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("scheme", ["s3", "s3a", "aws", "minio", "oss", "gs", "gcs"])
+    @pytest.mark.parametrize("scheme", ALLOWED_EXTERNAL_SOURCE_SCHEMES)
     def test_external_source_allowed_schemes(self, scheme):
         """All schemes in the allowlist (RootCoord ValidateSourceAndSpec)
         should be accepted at create time."""
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         cfg = get_minio_config()
-        if scheme == "minio":
-            source = f"minio://{cfg['address']}/{cfg['bucket']}/prefix/"
-        else:
-            source = f"{scheme}://bucket/prefix/"
+        source = build_validation_source_for_scheme(scheme, cfg)
         schema = client.create_schema(
             external_source=source,
             external_spec=build_external_spec_for_scheme(scheme, cfg=cfg),
@@ -1073,6 +1222,30 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         client.create_collection(collection_name=coll, schema=schema)
         try:
             assert client.has_collection(coll)
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_secure_minio_smoke(self, minio_env, external_prefix):
+        """MINIO_SECURE=true should flow through source upload and extfs.use_ssl."""
+        minio_client, cfg = minio_env
+        if not cfg["secure"]:
+            pytest.skip("set MINIO_SECURE=true to run secure MinIO smoke")
+
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        ext_spec = build_external_spec(cfg)
+        upload_basic_data(minio_client, cfg, ext_key, num_rows=20)
+
+        schema = build_basic_schema(client, ext_url, ext_spec=ext_spec)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert query_count(client, coll) == 20
+            info = client.describe_collection(coll)
+            assert_external_spec_persisted(info.get("external_spec"), ext_spec, "secure minio external_spec")
         finally:
             client.drop_collection(coll)
 
@@ -1773,6 +1946,50 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
                 pass
 
     # ---- Vector types -----------------------------------------------
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "case_name,external_dim",
+        [
+            ("external_dim_larger_than_schema", TEST_DIM * 2),
+            ("external_dim_smaller_than_schema", TEST_DIM // 2),
+        ],
+        ids=lambda x: x if isinstance(x, str) else None,
+    )
+    @pytest.mark.xfail(
+        reason="milvus#49388: vector dim mismatch is not rejected during refresh yet",
+        raises=AssertionError,
+    )
+    def test_float_vector_external_dim_mismatch_rejected(
+        self,
+        case_name,
+        external_dim,
+        minio_env,
+        external_prefix,
+    ):
+        """milvus#49388: external FloatVector width must match schema dim."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_basic_parquet_bytes(20, 0, dim=external_dim),
+        )
+
+        schema = build_basic_schema(client, ext_url, dim=TEST_DIM, ext_spec=build_external_spec(cfg))
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            _job_id, progress = refresh_and_expect_failed(client, coll, timeout=60)
+            log.info(f"[{case_name}] refresh rejected vector dim mismatch: {progress.reason}")
+        finally:
+            try:
+                client.drop_collection(coll)
+            except Exception:
+                pass
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -2634,16 +2851,20 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
                 pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_truncate_reject_keeps_external_source(self, minio_env, external_prefix):
-        """milvus#49343: rejected truncate must not clear external_source metadata."""
+    def test_truncate_collection_rejected_keeps_external_source(self, minio_env, external_prefix):
+        """milvus#49343: truncate_collection is forbidden for external collections."""
         minio_client, cfg = minio_env
         client = self._client()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
         try:
             before = client.describe_collection(coll)
-            with pytest.raises(Exception):
+            with pytest.raises(Exception) as exc_info:
                 client.truncate_collection(collection_name=coll)
+            msg = str(exc_info.value).lower()
+            assert "external" in msg or "not support" in msg or "forbidden" in msg or "1100" in msg, (
+                f"truncate_collection should be rejected as an external collection write op: {exc_info.value}"
+            )
             after = client.describe_collection(coll)
             assert after.get("external_source") == before.get("external_source")
             assert after.get("external_spec") == before.get("external_spec")
@@ -2743,7 +2964,8 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         upload_parquet(minio_client, cfg["bucket"], f"{key_a}/data.parquet", gen_basic_parquet_bytes(100, 0))
         upload_parquet(minio_client, cfg["bucket"], f"{key_b}/data.parquet", gen_basic_parquet_bytes(100, 5000))
 
-        schema = build_basic_schema(client, url_a)
+        expected_spec = build_external_spec(cfg)
+        schema = build_basic_schema(client, url_a, ext_spec=expected_spec)
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
@@ -2752,7 +2974,7 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             assert ids_a == list(range(0, 100))
 
             client.release_collection(coll)
-            refresh_and_wait(client, coll, external_source=url_b, external_spec=build_external_spec(cfg))
+            refresh_and_wait(client, coll, external_source=url_b, external_spec=expected_spec)
             client.load_collection(coll)
 
             ids_b = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
@@ -2762,12 +2984,14 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             assert info.get("external_source") == url_b, (
                 f"override source was not persisted: {info.get('external_source')!r}"
             )
+            assert_external_spec_persisted(info.get("external_spec"), expected_spec, "override external_spec")
 
             fresh_client = self._client()
             fresh_info = fresh_client.describe_collection(coll)
             assert fresh_info.get("external_source") == url_b, (
                 f"fresh client sees stale source: {fresh_info.get('external_source')!r}"
             )
+            assert_external_spec_persisted(fresh_info.get("external_spec"), expected_spec, "fresh external_spec")
 
             client.release_collection(coll)
             refresh_and_wait(client, coll)
@@ -2777,27 +3001,94 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         finally:
             client.drop_collection(coll)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_failed_refresh_override_keeps_previous_data_and_spec(self, minio_env, external_prefix):
+        """A failed source override must not publish new metadata or drop old data."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_key = external_prefix["key"]
+
+        good_key = f"{ext_key}/good"
+        good_url = build_external_source(cfg, good_key)
+        expected_spec = build_external_spec(cfg)
+        upload_basic_data(minio_client, cfg, good_key, num_rows=100, start_id=0)
+
+        schema = build_basic_schema(client, good_url, ext_spec=expected_spec)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert sorted(
+                r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=100)
+            ) == list(range(100))
+
+            client.release_collection(coll)
+            missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+            bad_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
+            try:
+                refresh_and_expect_failed(
+                    client,
+                    coll,
+                    timeout=60,
+                    external_source=bad_url,
+                    external_spec=expected_spec,
+                    reason_terms=("bucket", "nosuchbucket", "no_such_bucket"),
+                )
+            except AssertionError:
+                raise
+            except Exception as exc:
+                msg = str(exc).lower()
+                assert "bucket" in msg or "nosuchbucket" in msg or "external" in msg, (
+                    f"failed override rejected with unexpected error: {exc}"
+                )
+
+            info = client.describe_collection(coll)
+            assert info.get("external_source") == good_url, (
+                f"failed refresh override polluted external_source: {info.get('external_source')!r}"
+            )
+            assert_external_spec_persisted(info.get("external_spec"), expected_spec, "failed override external_spec")
+
+            client.load_collection(coll)
+            ids = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=100))
+            assert ids == list(range(100)), f"old data unavailable after failed override: {ids[:10]}"
+        finally:
+            client.drop_collection(coll)
+
     @pytest.mark.tags(CaseLabel.L2)
-    def test_refresh_second_concurrent_not_both_succeed(self, minio_env, external_prefix):
-        """Two refreshes issued back-to-back: at most one Completes."""
+    def test_refresh_second_concurrent_returns_existing_or_rejects(self, minio_env, external_prefix):
+        """milvus#49231: duplicate refresh must not return a dropped new job_id."""
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(500, 0))
+        upload_parquet(
+            minio_client,
+            cfg["bucket"],
+            f"{ext_key}/data.parquet",
+            gen_large_parquet_with_row_groups(20_000, 0, row_group_size=500),
+        )
 
         schema = build_basic_schema(client, ext_url)
         client.create_collection(collection_name=coll, schema=schema)
         try:
             job_first = client.refresh_external_collection(collection_name=coll)
-            job_second = None
-            second_rejected = False
             try:
                 job_second = client.refresh_external_collection(collection_name=coll)
                 log.info(f"second refresh accepted job_id={job_second}")
-            except Exception as e:
-                second_rejected = True
-                log.info(f"second refresh rejected at RPC: {e}")
+                assert job_second == job_first, (
+                    f"duplicate refresh returned a different positive job_id: first={job_first}, second={job_second}"
+                )
+            except Exception as exc:
+                msg = str(exc).lower()
+                assert (
+                    "already" in msg
+                    or "duplicate" in msg
+                    or "in progress" in msg
+                    or "precondition" in msg
+                    or "exist" in msg
+                ), f"second refresh was rejected with an unexpected error: {exc}"
+                log.info(f"second refresh rejected at RPC: {exc}")
 
             deadline = time.time() + REFRESH_TIMEOUT
             first_state = None
@@ -2808,18 +3099,6 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
                     break
                 time.sleep(2)
             assert first_state == "RefreshCompleted"
-
-            if not second_rejected:
-                deadline = time.time() + REFRESH_TIMEOUT
-                second_state = None
-                while time.time() < deadline:
-                    p = client.get_refresh_external_collection_progress(job_id=job_second)
-                    second_state = p.state
-                    if second_state in ("RefreshCompleted", "RefreshFailed"):
-                        break
-                    time.sleep(2)
-                log.info(f"second job terminal state={second_state}")
-                assert second_state in ("RefreshFailed", "RefreshCompleted")
         finally:
             client.drop_collection(coll)
 
@@ -2948,20 +3227,65 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             client.drop_collection(coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_zero_row_parquet_terminal(self, minio_env, external_prefix):
-        """milvus#49225: 0-row parquet must not crash DataNode or hang refresh."""
+    def test_refresh_empty_external_source_rejected_or_failed(self, external_prefix):
+        """milvus#49230: external_source="" must not leave refresh Pending forever."""
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        schema = build_basic_schema(client, external_prefix["url"])
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            try:
+                job_id, progress = refresh_and_poll_terminal(
+                    client,
+                    coll,
+                    timeout=60,
+                    external_source="",
+                    external_spec=build_external_spec(),
+                )
+            except Exception as exc:
+                msg = str(exc).lower()
+                assert (
+                    "external_source" in msg
+                    or "external source" in msg
+                    or "empty" in msg
+                    or "invalid" in msg
+                    or "no files found" in msg
+                ), f"empty external_source rejected with unexpected error: {exc}"
+                log.info(f"empty external_source refresh rejected at RPC: {exc}")
+                return
+
+            assert progress.state == "RefreshFailed", (
+                f"empty external_source refresh job {job_id} should fail terminally, got {progress.state}"
+            )
+            assert progress.reason, "empty external_source refresh failed without a reason"
+            reason = progress.reason.lower()
+            assert "external" in reason or "source" in reason or "empty" in reason, progress.reason
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "fmt",
+        BASIC_FORMATS,
+        ids=BASIC_FORMAT_IDS,
+    )
+    def test_refresh_zero_row_format_terminal(self, fmt, minio_env, external_prefix):
+        """milvus#49225: 0-row external files must not crash or hang refresh."""
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(
-            minio_client,
-            cfg["bucket"],
-            f"{ext_key}/empty.parquet",
-            gen_zero_row_basic_parquet_bytes(),
-        )
 
-        schema = build_basic_schema(client, ext_url)
+        source, ext_spec = write_basic_format_dataset(
+            fmt,
+            minio_client,
+            cfg,
+            ext_url,
+            ext_key,
+            batches=[(0, 0)],
+        )
+        schema = build_basic_format_schema(client, fmt, source, ext_spec)
+
         client.create_collection(collection_name=coll, schema=schema)
         try:
             job_id = client.refresh_external_collection(collection_name=coll)
@@ -2974,14 +3298,14 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
                 time.sleep(2)
             assert progress is not None
             assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
-                f"zero-row refresh stuck in {progress.state}"
+                f"[{fmt}] zero-row refresh stuck in {progress.state}"
             )
 
             if progress.state == "RefreshCompleted":
                 index_and_load(client, coll)
                 assert query_count(client, coll) == 0
             else:
-                assert progress.reason, "failed zero-row refresh should expose a reason"
+                assert progress.reason, f"[{fmt}] failed zero-row refresh should expose a reason"
         finally:
             client.drop_collection(coll)
 
@@ -3264,7 +3588,8 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
-            index_and_load(client, coll, metric_type=metric)
+            add_vector_index(client, coll, index_type="FLAT", metric_type=metric)
+            client.load_collection(coll)
 
             hits = client.search(
                 coll,
@@ -3279,6 +3604,10 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
                 assert distances == sorted(distances)
             else:
                 assert distances == sorted(distances, reverse=True)
+            expected_top_id = DEFAULT_NB - 1 if metric == "IP" else 0
+            assert hits[0]["id"] == expected_top_id, (
+                f"{metric} top hit mismatch: got id={hits[0]['id']}, expected {expected_top_id}"
+            )
         finally:
             client.drop_collection(coll)
 
@@ -3351,6 +3680,9 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
                 output_fields=["id"],
             )
             assert len(hits) == 1 and len(hits[0]) == 5, f"hybrid_search returned {hits}"
+            ids = [h["id"] for h in hits[0]]
+            assert len(set(ids)) == len(ids), f"hybrid_search returned duplicate ids: {ids}"
+            assert all(0 <= row_id < DEFAULT_NB for row_id in ids), f"hybrid_search ids out of range: {ids}"
         finally:
             client.drop_collection(coll)
 
@@ -3473,6 +3805,7 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
             ids1 = {r["id"] for r in page1}
             ids2 = {r["id"] for r in page2}
             assert ids1.isdisjoint(ids2), "paginated pages should not overlap"
+            assert all(0 <= row_id < 50 for row_id in ids1 | ids2), f"paginated ids out of range: {ids1 | ids2}"
         finally:
             client.drop_collection(coll)
 
@@ -4195,6 +4528,7 @@ def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id, dim=TEST
             "MINIO_BUCKET": bucket,
             "MINIO_ACCESS_KEY": cfg["access_key"],
             "MINIO_SECRET_KEY": cfg["secret_key"],
+            "MINIO_SECURE": "true" if cfg["secure"] else "false",
             "VT_MINIO_KEY": f"{key_prefix}/{filename}",
         }
     )
@@ -4250,6 +4584,7 @@ def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *, filename="da
             "MINIO_BUCKET": bucket,
             "MINIO_ACCESS_KEY": cfg["access_key"],
             "MINIO_SECRET_KEY": cfg["secret_key"],
+            "MINIO_SECURE": "true" if cfg["secure"] else "false",
             "VT_MINIO_KEY": f"{key_prefix}/{filename}",
         }
     )
@@ -4306,7 +4641,7 @@ def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
             **{
                 "uri": f"sqlite:///{tmp}/cat.db",
                 "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": f"http://{cfg['address']}",
+                "s3.endpoint": minio_endpoint_url(cfg),
                 "s3.access-key-id": cfg["access_key"],
                 "s3.secret-access-key": cfg["secret_key"],
                 "s3.region": "us-east-1",
@@ -4501,7 +4836,7 @@ def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM,
             **{
                 "uri": f"sqlite:///{tmp}/cat.db",
                 "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": f"http://{cfg['address']}",
+                "s3.endpoint": minio_endpoint_url(cfg),
                 "s3.access-key-id": cfg["access_key"],
                 "s3.secret-access-key": cfg["secret_key"],
                 "s3.region": "us-east-1",
@@ -4595,260 +4930,30 @@ def _iceberg_full_matrix_assert(client, coll, expected_count):
 class TestExternalTableFormats(TestMilvusClientV2Base):
     """Coverage for the `external_spec.format` string values."""
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_parquet_format_explicit(self, minio_env, external_prefix):
-        """Explicit `{"format":"parquet"}` round-trip.
-
-        Writes FORMAT_NUM_FILES sibling parquet files (each
-        FORMAT_ROWS_PER_FILE rows) under the prefix to exercise multi-file
-        refresh on the explicit-format path.
-        """
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-
-        for idx in range(FORMAT_NUM_FILES):
-            upload_parquet(
-                minio_client,
-                cfg["bucket"],
-                f"{ext_key}/file_{idx:03d}.parquet",
-                gen_basic_parquet_bytes(
-                    FORMAT_ROWS_PER_FILE,
-                    idx * FORMAT_ROWS_PER_FILE,
-                ),
-            )
-
-        schema = client.create_schema(
-            external_source=ext_url,
-            external_spec=build_external_spec(cfg),
-        )
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
-
-            # Spot-check the first row of each file survived ingestion.
-            for idx in range(FORMAT_NUM_FILES):
-                first_id = idx * FORMAT_ROWS_PER_FILE
-                rows = client.query(
-                    coll,
-                    filter=f"id == {first_id}",
-                    output_fields=["id", "value"],
-                )
-                assert len(rows) == 1, f"row id={first_id} missing"
-                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
-        finally:
-            client.drop_collection(coll)
-
     @pytest.mark.tags(CaseLabel.L1)
-    def test_lance_table_format(self, minio_env, external_prefix):
-        """Lance-table format E2E with multi-fragment dataset.
-
-        Builds a single Lance dataset by sequentially appending
-        FORMAT_NUM_FILES batches (each FORMAT_ROWS_PER_FILE rows). Each
-        append produces a new fragment file under data/, so the iceberg-
-        like multi-file refresh path is exercised even though Lance presents
-        a unified dataset to the reader.
-        """
-        try:
-            import lance  # noqa: F401
-        except ImportError:
-            pytest.skip("lance package not installed in this environment")
-
+    @pytest.mark.parametrize("fmt", BASIC_FORMATS, ids=BASIC_FORMAT_IDS)
+    def test_basic_format_matrix(self, fmt, minio_env, external_prefix):
+        """Every format uses the shared writer/spec/source registry."""
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         batches = [(idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE) for idx in range(FORMAT_NUM_FILES)]
-        _write_lance_to_minio_batches(
+        source, ext_spec = write_basic_format_dataset(
+            fmt,
             minio_client,
-            cfg["bucket"],
+            cfg,
+            ext_url,
             ext_key,
             batches,
         )
-
-        schema = client.create_schema(
-            external_source=ext_url,
-            external_spec=build_external_spec(cfg, fmt="lance-table"),
-        )
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+        schema = build_basic_format_schema(client, fmt, source, ext_spec)
         client.create_collection(collection_name=coll, schema=schema)
         try:
             refresh_and_wait(client, coll)
             index_and_load(client, coll)
-
-            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
-
-            # Spot-check a row from each fragment survived ingestion.
-            for idx in range(FORMAT_NUM_FILES):
-                first_id = idx * FORMAT_ROWS_PER_FILE
-                rows = client.query(
-                    coll,
-                    filter=f"id == {first_id}",
-                    output_fields=["id", "value"],
-                )
-                assert len(rows) == 1, f"row id={first_id} missing"
-                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
-
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 5
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_vortex_format(self, minio_env, external_prefix):
-        """Vortex format E2E with multiple sibling .vortex files.
-
-        Vortex file generation happens in a Python 3.12 sidecar venv
-        (`.venv-vortex/`) because vortex-data >= 0.35 requires Python >= 3.11
-        while the main test venv is pinned to 3.10. The embedding is written
-        as a raw-byte FixedSizeList<uint8, dim*4>; Milvus's vortex reader
-        reinterprets those bytes as the Float32 vector column.
-
-        Writes FORMAT_NUM_FILES sibling vortex files each carrying
-        FORMAT_ROWS_PER_FILE rows.
-        """
-        _minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-
-        for idx in range(FORMAT_NUM_FILES):
-            _write_vortex_to_minio(
-                cfg["bucket"],
-                cfg,
-                ext_key,
-                num_rows=FORMAT_ROWS_PER_FILE,
-                start_id=idx * FORMAT_ROWS_PER_FILE,
-                filename=f"data_{idx:03d}.vortex",
-            )
-
-        schema = client.create_schema(
-            external_source=ext_url,
-            external_spec=build_external_spec(cfg, fmt="vortex"),
-        )
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("value", DataType.FLOAT, external_field="value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
-
-            # Spot-check a row from each vortex file survived ingestion.
-            for idx in range(FORMAT_NUM_FILES):
-                first_id = idx * FORMAT_ROWS_PER_FILE
-                rows = client.query(
-                    coll,
-                    filter=f"id == {first_id}",
-                    output_fields=["id", "value"],
-                )
-                assert len(rows) == 1, f"row id={first_id} missing"
-                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-3
-
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 5
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_iceberg_table_format(self, minio_env, external_prefix):
-        """Iceberg-table format E2E: write an Iceberg dataset to MinIO via
-        pyiceberg, then refresh / index / load / query / search through
-        Milvus's iceberg reader path.
-
-        Vector field is stored as raw binary blobs (dim * 4 bytes per row)
-        because (a) Iceberg has no native fixed-size-list, and (b) Milvus's
-        NormalizeVectorArraysToFixedSizeBinary (Util.cpp:1693-1779)
-        explicitly accepts arrow Binary as a vector source.
-
-        external_source must point at the metadata.json file (not a
-        directory) — the iceberg reader's PlanFiles entry point parses
-        that URI directly. Source comes from pyiceberg's
-        `tbl.metadata_location` after append.
-
-        Skipped when pyiceberg is unavailable in the test environment:
-            uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'
-        """
-        try:
-            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
-        except ImportError:
-            pytest.skip(
-                "pyiceberg not installed. Install in this venv with:\n"
-                "  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'"
-            )
-
-        _minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_key = external_prefix["key"]
-
-        # Multiple appends → multiple data files under data/. The final
-        # snapshot includes every batch.
-        batches = [(idx * FORMAT_ROWS_PER_FILE, FORMAT_ROWS_PER_FILE) for idx in range(FORMAT_NUM_FILES)]
-        snapshot_id, ext_url = _build_iceberg_table_in_minio(
-            ext_key,
-            cfg,
-            batches=batches,
-        )
-        log.info(f"[iceberg] snapshot={snapshot_id} ext_url={ext_url}")
-
-        # Iceberg requires explicit credentials in extfs because the iceberg
-        # reader path runs in the Rust opendal layer, which does not pick up
-        # AKSK from the Milvus root configuration.
-        ext_spec = build_external_spec(
-            cfg,
-            fmt="iceberg-table",
-            snapshot_id=int(snapshot_id),
-        )
-
-        schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            assert query_count(client, coll) == FORMAT_TOTAL_ROWS
-
-            # Spot-check the first row of each batch's data file: the
-            # vector for row id=N encodes [N.0, N.1, N.2, ...] up to dim.
-            for idx in range(FORMAT_NUM_FILES):
-                first_id = idx * FORMAT_ROWS_PER_FILE
-                rows = client.query(
-                    coll,
-                    filter=f"id == {first_id}",
-                    output_fields=["id", "embedding"],
-                )
-                assert len(rows) == 1, f"row id={first_id} missing"
-                vec = rows[0]["embedding"]
-                assert len(vec) == TEST_DIM
-                for j, v in enumerate(vec):
-                    expected = float(first_id) + j * 0.1
-                    assert abs(v - expected) < 1e-2, f"vec[{j}] for id={first_id} = {v}, expected {expected}"
+            assert_basic_format_rows(client, coll, fmt, batches)
 
             hits = client.search(
                 coll,
@@ -4858,10 +4963,32 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
                 output_fields=["id"],
             )[0]
             assert len(hits) == 3
-            # NOTE: AUTOINDEX (IVF-family) on 9k rows can miss the true
-            # nearest neighbor (recall < 1.0); we don't assert id==0 here.
-            # Per-row vector content is already verified above via direct
-            # query on the spot-checked ids.
+            assert all(0 <= hit["id"] < FORMAT_TOTAL_ROWS for hit in hits), f"[{fmt}] invalid search ids: {hits}"
+        finally:
+            client.drop_collection(coll)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("fmt", ["vortex", "iceberg-table"], ids=["vortex", "iceberg"])
+    def test_cluster_nightly_heavy_format_smoke(self, fmt, minio_env, external_prefix):
+        """Opt-in cluster/nightly smoke for formats that have exposed QueryNode-only bugs."""
+        if _env("EXTERNAL_TABLE_CLUSTER_SMOKE", "false").lower() != "true":
+            pytest.skip("set EXTERNAL_TABLE_CLUSTER_SMOKE=true on a cluster deployment")
+
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        batches = [(0, DEFAULT_NB), (DEFAULT_NB, DEFAULT_NB)]
+        source, ext_spec = write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches)
+        schema = build_basic_format_schema(client, fmt, source, ext_spec)
+        client.create_collection(collection_name=coll, schema=schema)
+        try:
+            refresh_and_wait(client, coll)
+            index_and_load(client, coll)
+            assert_basic_format_rows(client, coll, fmt, batches)
+            client.release_collection(coll)
+            client.load_collection(coll)
+            assert query_count(client, coll) == DEFAULT_NB * 2
         finally:
             client.drop_collection(coll)
 

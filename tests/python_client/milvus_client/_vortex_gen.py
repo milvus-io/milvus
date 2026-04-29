@@ -70,6 +70,7 @@ def main():
     bucket = os.environ["MINIO_BUCKET"]
     access_key = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
     secret_key = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+    secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
     key = os.environ["VT_MINIO_KEY"]
 
     if os.environ.get("VT_INPUT_FROM_STDIN") == "1":
@@ -89,7 +90,7 @@ def main():
         except OSError:
             pass
 
-    client = Minio(minio_addr, access_key=access_key, secret_key=secret_key, secure=False)
+    client = Minio(minio_addr, access_key=access_key, secret_key=secret_key, secure=secure)
     client.put_object(
         bucket,
         key,
