@@ -132,6 +132,42 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitset) {
     EXPECT_TRUE(elem_bitset[5]);
 }
 
+TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitset) {
+    // row 0: elem 0
+    // row 1: elem 1,2
+    // row 2: elem 3,4
+    // row 3: empty
+    // row 4: elem 5
+    ArrayOffsetsSealed offsets({0, 1, 3, 5, 5, 6});
+
+    // Search bitset convention: true means filtered out.
+    TargetBitmap element_bitset(6);
+    element_bitset[0] = false;  // row 0 has a matching element
+    element_bitset[1] = true;
+    element_bitset[2] = false;  // row 1 has one matching element
+    element_bitset[3] = true;
+    element_bitset[4] = true;   // row 2 has no matching element
+    element_bitset[5] = false;  // invalid element should not keep row 4
+
+    TargetBitmap valid_element_bitset(6, true);
+    valid_element_bitset[5] = false;
+
+    TargetBitmapView element_view(element_bitset.data(), element_bitset.size());
+    TargetBitmapView valid_view(valid_element_bitset.data(),
+                                valid_element_bitset.size());
+
+    auto [row_bitset, valid_row_bitset] =
+        offsets.ElementBitsetToRowBitset(element_view, valid_view, 0, 5);
+
+    EXPECT_EQ(row_bitset.size(), 5);
+    EXPECT_FALSE(row_bitset[0]);
+    EXPECT_FALSE(row_bitset[1]);
+    EXPECT_TRUE(row_bitset[2]);
+    EXPECT_TRUE(row_bitset[3]);
+    EXPECT_TRUE(row_bitset[4]);
+    EXPECT_TRUE(valid_row_bitset.all());
+}
+
 TEST_F(ArrayOffsetsTest, SealedEmptyArrays) {
     // Test with some rows having empty arrays
     // row 0: 2 elements, row 1: 0 elements, row 2: 3 elements, row 3: 0 elements
@@ -322,6 +358,39 @@ TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitset) {
     EXPECT_FALSE(elem_bitset[3]);
     EXPECT_FALSE(elem_bitset[4]);
     EXPECT_TRUE(elem_bitset[5]);
+}
+
+TEST_F(ArrayOffsetsTest, GrowingElementBitsetToRowBitset) {
+    ArrayOffsetsGrowing offsets;
+
+    std::vector<int32_t> lens = {1, 2, 2, 0, 1};
+    offsets.Insert(0, lens.data(), 5);
+
+    TargetBitmap element_bitset(6);
+    element_bitset[0] = false;
+    element_bitset[1] = true;
+    element_bitset[2] = false;
+    element_bitset[3] = true;
+    element_bitset[4] = true;
+    element_bitset[5] = false;
+
+    TargetBitmap valid_element_bitset(6, true);
+    valid_element_bitset[5] = false;
+
+    TargetBitmapView element_view(element_bitset.data(), element_bitset.size());
+    TargetBitmapView valid_view(valid_element_bitset.data(),
+                                valid_element_bitset.size());
+
+    auto [row_bitset, valid_row_bitset] =
+        offsets.ElementBitsetToRowBitset(element_view, valid_view, 0, 5);
+
+    EXPECT_EQ(row_bitset.size(), 5);
+    EXPECT_FALSE(row_bitset[0]);
+    EXPECT_FALSE(row_bitset[1]);
+    EXPECT_TRUE(row_bitset[2]);
+    EXPECT_TRUE(row_bitset[3]);
+    EXPECT_TRUE(row_bitset[4]);
+    EXPECT_TRUE(valid_row_bitset.all());
 }
 
 TEST_F(ArrayOffsetsTest, GrowingConcurrentRead) {

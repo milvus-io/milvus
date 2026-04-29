@@ -123,10 +123,10 @@ PhyVectorSearchNode::GetOutput() {
         // For **pre-filter**: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
         // For **iterative filter**: MvccNode -> VectorSearchNode -> IterativeElementFilterNode -> IterativeFilterNode -> ...
         //
-        // When element_level_ is true, we need to transform doc-level bitset
-        // to element-level bitset.  In pre-filter path, ElementFilterBitsNode
-        // already does this.  We only need to do it here for the iterative
-        // path or when ElementFilterBitsNode is not present.
+        // When the vector field and input bitset have different granularities,
+        // normalize the bitset before handing it to vector search. Knowhere
+        // interprets bit offsets in the same coordinate system as the searched
+        // vector field.
         if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
             auto col_input = GetColumnVector(input_);
             TargetBitmapView view(col_input->GetRawData(), col_input->size());
@@ -141,6 +141,27 @@ PhyVectorSearchNode::GetOutput() {
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
+            input_ = std::make_shared<RowVector>(col_res);
+        } else if (!ph.element_level_ &&
+                   query_context_->bitset_is_element_level()) {
+            auto array_offsets = query_context_->get_array_offsets();
+            AssertInfo(array_offsets != nullptr, "Array offsets not available");
+
+            auto col_input = GetColumnVector(input_);
+            TargetBitmapView view(col_input->GetRawData(), col_input->size());
+            TargetBitmapView valid_view(col_input->GetValidRawData(),
+                                        col_input->size());
+
+            auto [row_bitset, valid_row_bitset] =
+                array_offsets->ElementBitsetToRowBitset(
+                    view, valid_view, 0, active_count_);
+
+            query_context_->set_bitset_is_element_level(false);
+            query_context_->set_active_element_count(0);
+
+            std::vector<VectorPtr> col_res;
+            col_res.push_back(std::make_shared<ColumnVector>(
+                std::move(row_bitset), std::move(valid_row_bitset)));
             input_ = std::make_shared<RowVector>(col_res);
         }
 

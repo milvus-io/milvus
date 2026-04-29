@@ -94,6 +94,50 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
     return {std::move(element_bitset), std::move(valid_element_bitset)};
 }
 
+std::pair<TargetBitmap, TargetBitmap>
+ArrayOffsetsSealed::ElementBitsetToRowBitset(
+    const TargetBitmapView& element_bitset,
+    const TargetBitmapView& valid_element_bitset,
+    int64_t row_start,
+    int64_t row_count) const {
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    int64_t element_start = row_to_element_start_[row_start];
+    int64_t element_end = row_to_element_start_[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+    AssertInfo(element_bitset.size() == element_count,
+               "element bitset size mismatch: {} vs {}",
+               element_bitset.size(),
+               element_count);
+    AssertInfo(valid_element_bitset.size() == element_count,
+               "valid element bitset size mismatch: {} vs {}",
+               valid_element_bitset.size(),
+               element_count);
+
+    TargetBitmap row_bitset(row_count);
+    TargetBitmap valid_row_bitset(row_count, true);
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = row_to_element_start_[row_id] - element_start;
+        int64_t end = row_to_element_start_[row_id + 1] - element_start;
+        bool has_unfiltered_element = false;
+        for (int64_t elem_id = start; elem_id < end; ++elem_id) {
+            if (valid_element_bitset[elem_id] && !element_bitset[elem_id]) {
+                has_unfiltered_element = true;
+                break;
+            }
+        }
+        row_bitset[i] = !has_unfiltered_element;
+    }
+
+    return {std::move(row_bitset), std::move(valid_row_bitset)};
+}
+
 FixedVector<int32_t>
 ArrayOffsetsSealed::RowBitsetToElementOffsets(
     const TargetBitmapView& row_bitset, int64_t row_start) const {
@@ -329,6 +373,52 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+std::pair<TargetBitmap, TargetBitmap>
+ArrayOffsetsGrowing::ElementBitsetToRowBitset(
+    const TargetBitmapView& element_bitset,
+    const TargetBitmapView& valid_element_bitset,
+    int64_t row_start,
+    int64_t row_count) const {
+    std::shared_lock lock(mutex_);
+
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    int64_t element_start = row_to_element_start_[row_start];
+    int64_t element_end = row_to_element_start_[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+    AssertInfo(element_bitset.size() == element_count,
+               "element bitset size mismatch: {} vs {}",
+               element_bitset.size(),
+               element_count);
+    AssertInfo(valid_element_bitset.size() == element_count,
+               "valid element bitset size mismatch: {} vs {}",
+               valid_element_bitset.size(),
+               element_count);
+
+    TargetBitmap row_bitset(row_count);
+    TargetBitmap valid_row_bitset(row_count, true);
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = row_to_element_start_[row_id] - element_start;
+        int64_t end = row_to_element_start_[row_id + 1] - element_start;
+        bool has_unfiltered_element = false;
+        for (int64_t elem_id = start; elem_id < end; ++elem_id) {
+            if (valid_element_bitset[elem_id] && !element_bitset[elem_id]) {
+                has_unfiltered_element = true;
+                break;
+            }
+        }
+        row_bitset[i] = !has_unfiltered_element;
+    }
+
+    return {std::move(row_bitset), std::move(valid_row_bitset)};
 }
 
 FixedVector<int32_t>

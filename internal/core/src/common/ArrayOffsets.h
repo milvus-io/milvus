@@ -61,6 +61,15 @@ class IArrayOffsets {
                              const TargetBitmapView& valid_row_bitset,
                              int64_t row_start) const = 0;
 
+    // Convert element-level filter bitsets to row-level filter bitsets.
+    // Both input and output use Milvus search bitset convention:
+    // true means filtered out, false means visible.
+    virtual std::pair<TargetBitmap, TargetBitmap>
+    ElementBitsetToRowBitset(const TargetBitmapView& element_bitset,
+                             const TargetBitmapView& valid_element_bitset,
+                             int64_t row_start,
+                             int64_t row_count) const = 0;
+
     // Convert row-level bitset to element offsets
     // Returns element IDs for all rows where row_bitset[row_id] is true
     virtual FixedVector<int32_t>
@@ -126,6 +135,12 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                              const TargetBitmapView& valid_row_bitset,
                              int64_t row_start) const override;
 
+    std::pair<TargetBitmap, TargetBitmap>
+    ElementBitsetToRowBitset(const TargetBitmapView& element_bitset,
+                             const TargetBitmapView& valid_element_bitset,
+                             int64_t row_start,
+                             int64_t row_count) const override;
+
     FixedVector<int32_t>
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
                               int64_t row_start) const override;
@@ -176,6 +191,12 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
                              const TargetBitmapView& valid_row_bitset,
                              int64_t row_start) const override;
+
+    std::pair<TargetBitmap, TargetBitmap>
+    ElementBitsetToRowBitset(const TargetBitmapView& element_bitset,
+                             const TargetBitmapView& valid_element_bitset,
+                             int64_t row_start,
+                             int64_t row_count) const override;
 
     FixedVector<int32_t>
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
