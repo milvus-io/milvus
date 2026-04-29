@@ -554,6 +554,7 @@ func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {
 		`{"base_path":"/tmp","ver":1}`, 100, 42,
 		"s3://bucket/data/", `{"format":"parquet"}`,
 		nil,
+		nil,
 	)
 	assert.Nil(t, result)
 	assert.Error(t, err)
@@ -569,6 +570,7 @@ func TestSampleExternalFieldSizes_EmptyManifestPath(t *testing.T) {
 	result, err := SampleExternalFieldSizes(
 		"", 100, 42,
 		"", "",
+		nil,
 		config,
 	)
 	assert.Nil(t, result)
@@ -586,6 +588,7 @@ func TestSampleExternalFieldSizes_InvalidManifestPath(t *testing.T) {
 	result, err := SampleExternalFieldSizes(
 		`{"base_path":"/nonexistent/path","ver":1}`, 100, 42,
 		"", "",
+		nil,
 		config,
 	)
 	assert.Nil(t, result)
@@ -604,6 +607,7 @@ func TestSampleExternalFieldSizes_WithSpec(t *testing.T) {
 		`{"base_path":"/nonexistent","ver":1}`, 100, 42,
 		"s3://s3.us-west-2.amazonaws.com/ext-bucket/data/",
 		`{"format":"parquet","extfs":{"region":"us-west-2","use_ssl":"true"}}`,
+		nil,
 		config,
 	)
 	assert.Nil(t, result)
