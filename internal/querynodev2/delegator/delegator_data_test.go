@@ -694,6 +694,52 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
 
+	s.Run("load_scope_reopen_skips_post_load", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+			return req.GetLoadScope() == querypb.LoadScope_Reopen
+		})).Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			LoadScope:    querypb.LoadScope_Reopen,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     101,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.NoError(err)
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		hasReopenSegment := lo.SomeBy(sealed, func(info SnapshotItem) bool {
+			return lo.SomeBy(info.Segments, func(segment SegmentEntry) bool {
+				return segment.SegmentID == 101
+			})
+		})
+		s.False(hasReopenSegment)
+	})
+
 	s.Run("load_segments_with_delete", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
