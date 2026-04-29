@@ -166,6 +166,16 @@ func extractIndexFiles(indexInfos []*indexpb.IndexFilePathInfo) []string {
 	return paths
 }
 
+func buildIndexPathVersionByFile(source *datapb.CopySegmentSource) map[string]indexpb.IndexStorePathVersion {
+	versions := make(map[string]indexpb.IndexStorePathVersion)
+	for _, indexInfo := range source.GetIndexFiles() {
+		for _, filePath := range indexInfo.GetIndexFilePaths() {
+			versions[filePath] = indexInfo.GetIndexStorePathVersion()
+		}
+	}
+	return versions
+}
+
 // extractTextIndexFiles extracts text index file paths.
 func extractTextIndexFiles(textIndexInfos map[int64]*datapb.TextIndexStats) []string {
 	var paths []string
@@ -289,6 +299,7 @@ func generateMappingsFromFiles(
 	target *datapb.CopySegmentTarget,
 ) (map[string]string, error) {
 	mappings := make(map[string]string)
+	indexPathVersions := buildIndexPathVersionByFile(source)
 
 	// Helper to add mappings with error handling
 	addMappings := func(srcPaths []string, fileType string) error {
@@ -299,7 +310,7 @@ func generateMappingsFromFiles(
 			// Determine path generation logic based on file type
 			switch fileType {
 			case IndexTypeVectorScalar, IndexTypeText, IndexTypeJSONKey, IndexTypeJSONStats:
-				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType)
+				dstPath, err = generateTargetIndexPath(srcPath, source, target, fileType, indexPathVersions[srcPath])
 			case FileTypeLOB:
 				dstPath, err = generateTargetLOBPath(srcPath, source, target)
 			default:
@@ -846,6 +857,7 @@ func generateTargetIndexPath(
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	indexType string,
+	pathVersion indexpb.IndexStorePathVersion,
 ) (string, error) {
 	// Split path into parts
 	parts := strings.Split(sourcePath, "/")
@@ -872,18 +884,12 @@ func generateTargetIndexPath(
 	var buildIDOffset int
 	switch indexType {
 	case IndexTypeVectorScalar:
-		// Detect path format by counting segments after "index_files"
-		// Legacy (v0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey} — 5 segments
-		// New (v1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey} — 6 segments
-		remainingParts := len(parts) - keywordIdx - 1
-		if remainingParts >= 6 {
-			// New format (v1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
 			collectionOffset = 1
 			partitionOffset = 2
 			segmentOffset = 3
 			buildIDOffset = 4
 		} else {
-			// Legacy format (v0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
 			collectionOffset = -1
 			partitionOffset = 3
 			segmentOffset = 4

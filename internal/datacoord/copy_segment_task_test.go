@@ -552,6 +552,53 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
 }
 
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePathVersion() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "idx_v0"},
+		301: {CollectionID: collectionID, FieldID: 102, IndexID: 301, IndexName: "idx_v1"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{indexMeta: im}
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			2001: {
+				FieldId:               101,
+				IndexId:               1001,
+				BuildId:               2001,
+				IndexName:             "idx_v0",
+				IndexFilePaths:        []string{"v0_file"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			},
+			2002: {
+				FieldId:               102,
+				IndexId:               1002,
+				BuildId:               2002,
+				IndexName:             "idx_v1",
+				IndexFilePaths:        []string{"v1_file"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	segIdxV0, ok := im.segmentBuildInfo.Get(2001)
+	s.True(ok)
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdxV0.IndexStorePathVersion)
+
+	segIdxV1, ok := im.segmentBuildInfo.Get(2002)
+	s.True(ok)
+	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, segIdxV1.IndexStorePathVersion)
+}
+
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerField() {
 	collectionID := int64(1)
 	segmentID := int64(100)
