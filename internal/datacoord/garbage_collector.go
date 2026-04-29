@@ -1177,6 +1177,12 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 					zap.Int64("collectionID", buildID))
 				return true
 			}
+			if gc.meta.indexMeta.HasCollectionWithPathVersion(buildID, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
+				collectionRootedCollections[buildID] = struct{}{}
+				logger.Info("skip collectionID dir after live metadata recheck",
+					zap.Int64("collectionID", buildID))
+				return true
+			}
 
 			// Orphan buildID walk: no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
