@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -122,8 +121,11 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}
 	}
 
+	// Build new collection schema.
+	schema := coll.ToCollectionSchemaPB()
+
 	// Assign new field and function IDs.
-	fieldIDStart := nextFieldID(coll)
+	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	for i, fieldSchema := range fieldSchemas {
 		fieldSchema.FieldID = fieldIDStart + int64(i)
 	}
@@ -154,12 +156,12 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		functionSchema.OutputFieldIds[idx] = fieldID
 	}
 
-	// Build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
 	schema.DoPhysicalBackfill = addRequest.GetDoPhysicalBackfill()
 	schema.Fields = append(schema.Fields, fieldSchemas...)
 	schema.Functions = append(schema.Functions, functionSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
+	schema.Properties = properties
 
 	// Broadcast.
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
@@ -175,13 +177,14 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -234,12 +237,12 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
+			DroppedFieldIds:  droppedFieldIds,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema:          schema,
-				Properties:      properties,
-				DroppedFieldIds: droppedFieldIds,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -273,7 +276,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		return fieldID > 0 && sf.FieldID == fieldID
 	}
 
-	// Top-level field path: remove from coll.Fields, droppedFieldIds has one ID.
+	// Top-level field path: remove from fields.
 	var droppedField *model.Field
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
 	for _, f := range coll.Fields {
@@ -284,8 +287,9 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newFields = append(newFields, model.MarshalFieldModel(f))
 	}
 	if droppedField != nil {
-		properties = updateMaxFieldIDProperty(coll.Properties, nextFieldID(coll)-1)
 		schema = coll.ToCollectionSchemaPB()
+		maxFieldID := maxAssignedFieldIDFromSchema(schema)
+		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.Fields = newFields
 		schema.Properties = properties
 		schema.Version = coll.SchemaVersion + 1
@@ -308,17 +312,17 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		newStructs = append(newStructs, model.MarshalStructArrayFieldModel(s))
 	}
 	if droppedStruct != nil {
-		droppedIDs := make([]int64, 0, 1+len(droppedStruct.Fields))
-		droppedIDs = append(droppedIDs, droppedStruct.FieldID)
-		for _, sub := range droppedStruct.Fields {
-			droppedIDs = append(droppedIDs, sub.FieldID)
-		}
-		properties = updateMaxFieldIDProperty(coll.Properties, nextFieldID(coll)-1)
 		schema = coll.ToCollectionSchemaPB()
+		maxFieldID := maxAssignedFieldIDFromSchema(schema)
+		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.StructArrayFields = newStructs
 		schema.Properties = properties
 		schema.Version = coll.SchemaVersion + 1
-		return schema, properties, droppedIDs, nil
+		droppedFieldIds = append(droppedFieldIds, droppedStruct.FieldID)
+		for _, subField := range droppedStruct.Fields {
+			droppedFieldIds = append(droppedFieldIds, subField.FieldID)
+		}
+		return schema, properties, droppedFieldIds, nil
 	}
 
 	if fieldName != "" {
@@ -346,14 +350,11 @@ func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 	}
 
+	droppedFieldIds = append(droppedFieldIds, targetFunc.OutputFieldIDs...)
 	outputFieldIDSet := make(map[int64]struct{}, len(targetFunc.OutputFieldIDs))
 	for _, fid := range targetFunc.OutputFieldIDs {
 		outputFieldIDSet[fid] = struct{}{}
 	}
-	droppedFieldIds = targetFunc.OutputFieldIDs
-
-	maxFieldID := nextFieldID(coll) - 1
-	properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
 	for _, field := range coll.Fields {
@@ -370,36 +371,12 @@ func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
 	}
 
 	schema = coll.ToCollectionSchemaPB()
+	maxFieldID := maxAssignedFieldIDFromSchema(schema)
+	properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 	schema.Fields = newFields
 	schema.Functions = newFunctions
 	schema.Properties = properties
 	schema.Version = coll.SchemaVersion + 1
 
 	return schema, properties, droppedFieldIds, nil
-}
-
-// updateMaxFieldIDProperty returns a new properties slice with max_field_id set.
-// The original slice is not modified.
-func updateMaxFieldIDProperty(properties []*commonpb.KeyValuePair, maxFieldID int64) []*commonpb.KeyValuePair {
-	val := strconv.FormatInt(maxFieldID, 10)
-	result := make([]*commonpb.KeyValuePair, 0, len(properties)+1)
-	found := false
-	for _, kv := range properties {
-		if kv.Key == common.MaxFieldIDKey {
-			result = append(result, &commonpb.KeyValuePair{
-				Key:   common.MaxFieldIDKey,
-				Value: val,
-			})
-			found = true
-		} else {
-			result = append(result, kv)
-		}
-	}
-	if !found {
-		result = append(result, &commonpb.KeyValuePair{
-			Key:   common.MaxFieldIDKey,
-			Value: val,
-		})
-	}
-	return result
 }

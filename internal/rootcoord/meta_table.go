@@ -261,6 +261,7 @@ func (mt *MetaTable) reload() error {
 				)
 			}
 			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
+			ensureCollectionMaxFieldIDProperty(collection)
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
@@ -331,6 +332,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	}
 
 	for _, collection := range oldCollections {
+		ensureCollectionMaxFieldIDProperty(collection)
 		mt.collID2Meta[collection.CollectionID] = collection
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)

@@ -282,7 +282,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, ct.default_dim, consistency_level="Strong")
         self.load_collection(client, collection_name)
         res1 = self.describe_collection(client, collection_name)[0]
-        assert len(res1.get("properties", {})) == 1
+        assert len(res1.get("properties", {})) >= 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
         error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
@@ -303,9 +303,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
             check_items=error,
         )
         self.describe_collection(client, collection_name)[0]
-        assert len(res1.get("properties", {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
-        assert len(res1.get("properties", {})) == 1
         # 2. alter collection properties after release
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
@@ -317,8 +315,9 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.drop_collection_properties(
             client, collection_name, property_keys=["mmap.enabled", "collection.ttl.seconds"]
         )
-        self.describe_collection(client, collection_name)[0]
-        assert len(res1.get("properties", {})) == 1
+        res3 = self.describe_collection(client, collection_name)[0]
+        assert "mmap.enabled" not in res3.get("properties", {})
+        assert "collection.ttl.seconds" not in res3.get("properties", {})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alter_enable_dynamic_collection_field(self):

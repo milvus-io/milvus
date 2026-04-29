@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -455,9 +456,9 @@ func TestIsSubsetOfProperties(t *testing.T) {
 	}
 }
 
-func Test_nextFieldID(t *testing.T) {
+func Test_maxAssignedFieldIDFromSchema(t *testing.T) {
 	type args struct {
-		coll *model.Collection
+		schema *schemapb.CollectionSchema
 	}
 	tests := []struct {
 		name string
@@ -467,14 +468,14 @@ func Test_nextFieldID(t *testing.T) {
 		{
 			name: "collection with max field ID in struct array sub-field",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 								{FieldID: common.StartOfUserFieldID + 10},
 							},
@@ -482,25 +483,25 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 11,
+			want: common.StartOfUserFieldID + 10,
 		},
 		{
 			name: "collection with multiple struct array fields",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 							},
 						},
 						{
 							FieldID: common.StartOfUserFieldID + 5,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 6},
 								{FieldID: common.StartOfUserFieldID + 7},
 							},
@@ -508,13 +509,13 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 8,
+			want: common.StartOfUserFieldID + 7,
 		},
 		{
 			name: "collection with max_field_id property after field drop",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},     // 100
 						{FieldID: common.StartOfUserFieldID + 1}, // 101
 					},
@@ -523,13 +524,13 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 3, // 103, not 102
+			want: common.StartOfUserFieldID + 2, // 102, not 101
 		},
 		{
 			name: "max_field_id property smaller than current fields",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},     // 100
 						{FieldID: common.StartOfUserFieldID + 5}, // 105
 					},
@@ -538,12 +539,12 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 6, // 106, current fields dominate
+			want: common.StartOfUserFieldID + 5, // 105, current fields dominate
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nextFieldID(tt.args.coll)
+			got := maxAssignedFieldIDFromSchema(tt.args.schema)
 			assert.Equal(t, tt.want, got)
 		})
 	}

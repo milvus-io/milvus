@@ -245,11 +245,13 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return err
 	}
 
-	fieldSchema.FieldID = nextFieldID(coll)
 	schema := coll.ToCollectionSchemaPB()
+	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
 	schema.Version = coll.SchemaVersion + 1
 	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
+	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
+	schema.Properties = properties
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -264,13 +266,14 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -298,8 +301,9 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		return merr.WrapErrParameterInvalidMsg("dynamic field not found")
 	}
 
-	properties := updateMaxFieldIDProperty(coll.Properties, nextFieldID(coll)-1)
 	schema := coll.ToCollectionSchemaPB()
+	maxFieldID := maxAssignedFieldIDFromSchema(schema)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 	schema.Fields = newFields
 	schema.EnableDynamicField = false
 	schema.Properties = properties
@@ -323,12 +327,12 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 				},
 			},
 			CacheExpirations: cacheExpirations,
+			DroppedFieldIds:  []int64{dynamicFieldID},
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema:          schema,
-				Properties:      properties,
-				DroppedFieldIds: []int64{dynamicFieldID},
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -442,9 +446,7 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 // Cannot use DropIndex RPC here because it would deadlock on the resource key lock.
 func (c *DDLCallback) cascadeDropFieldIndexesInline(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
-	body := result.Message.MustBody()
-
-	droppedFieldIDs := body.Updates.GetDroppedFieldIds()
+	droppedFieldIDs := header.GetDroppedFieldIds()
 	if len(droppedFieldIDs) == 0 {
 		return nil
 	}

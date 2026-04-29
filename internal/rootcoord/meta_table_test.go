@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -2729,4 +2730,53 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 1, len(coll.ShardInfos))
 	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+}
+
+func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10) + "/meta"
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	catalog := rootcoord.NewCatalog(catalogKV)
+
+	allocator := mocktso.NewAllocator(t)
+	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	meta, err := NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	err = meta.AddCollection(context.Background(), &model.Collection{
+		CollectionID:         1,
+		DBID:                 util.DefaultDBID,
+		DBName:               util.DefaultDBName,
+		Name:                 "test_reload_max_field_id",
+		PhysicalChannelNames: []string{"pchannel1"},
+		VirtualChannelNames:  []string{"vchannel1"},
+		State:                pb.CollectionState_CollectionCreated,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			{FieldID: 105, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+		Properties: common.NewKeyValuePairs(map[string]string{
+			common.CollectionReplicaNumber: "1",
+		}),
+		ShardInfos: map[string]*model.ShardInfo{
+			"vchannel1": {
+				VChannelName:         "vchannel1",
+				PChannelName:         "pchannel1",
+				LastTruncateTimeTick: 0,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "105", props[common.MaxFieldIDKey])
 }

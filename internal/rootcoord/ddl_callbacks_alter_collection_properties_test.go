@@ -466,6 +466,7 @@ func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	dynamicField := coll.Fields[len(coll.Fields)-1]
 	require.True(t, dynamicField.IsDynamic)
 	require.Equal(t, int64(102), dynamicField.FieldID)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 102)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *testing.T) {

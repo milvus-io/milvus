@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -405,6 +406,7 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	require.NoError(t, merr.CheckRPCCall(addResp, err))
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 4)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
 
 	// drop field3 successfully
 	resp, err = core.AlterCollectionSchema(ctx, dropFieldReq("field3"))
@@ -479,8 +481,9 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			SchemaVersion: 5,
 		}
 
-		schema, properties, droppedFieldIds, err := buildSchemaForDropFunction(coll, "embedding_func")
+		schema, properties, droppedFieldIDs, err := buildSchemaForDropFunction(coll, "embedding_func")
 		require.NoError(t, err)
+		require.Equal(t, []int64{103}, droppedFieldIDs)
 
 		// output field removed
 		require.Equal(t, 3, len(schema.Fields))
@@ -490,9 +493,6 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 
 		// function removed
 		require.Equal(t, 0, len(schema.Functions))
-
-		// droppedFieldIds contains output field
-		require.Equal(t, []int64{103}, droppedFieldIds)
 
 		// max_field_id updated
 		require.NotNil(t, properties)
@@ -527,8 +527,9 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 			SchemaVersion: 3,
 		}
 
-		schema, _, droppedFieldIds, err := buildSchemaForDropFunction(coll, "bm25_func")
+		schema, _, droppedFieldIDs, err := buildSchemaForDropFunction(coll, "bm25_func")
 		require.NoError(t, err)
+		require.Equal(t, []int64{102}, droppedFieldIDs)
 
 		// only sparse_vec removed, text and dense_vec preserved
 		fieldNames := make([]string, 0, len(schema.Fields))
@@ -543,8 +544,6 @@ func TestBuildSchemaForDropFunction(t *testing.T) {
 		// only bm25_func removed, embed_func preserved
 		require.Equal(t, 1, len(schema.Functions))
 		require.Equal(t, "embed_func", schema.Functions[0].Name)
-
-		require.Equal(t, []int64{102}, droppedFieldIds)
 	})
 }
 
@@ -562,19 +561,19 @@ func TestBuildSchemaForDropField(t *testing.T) {
 	}
 
 	t.Run("drop by field name", func(t *testing.T) {
-		schema, properties, droppedFieldIds, err := buildSchemaForDropField(baseColl(), "extra", 0)
+		schema, properties, droppedFieldIDs, err := buildSchemaForDropField(baseColl(), "extra", 0)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(schema.Fields))
-		require.Equal(t, []int64{102}, droppedFieldIds)
 		require.NotNil(t, properties)
+		require.Equal(t, []int64{102}, droppedFieldIDs)
 		require.Equal(t, int32(4), schema.Version)
 	})
 
 	t.Run("drop by field id", func(t *testing.T) {
-		schema, _, droppedFieldIds, err := buildSchemaForDropField(baseColl(), "", 101)
+		schema, _, droppedFieldIDs, err := buildSchemaForDropField(baseColl(), "", 101)
 		require.NoError(t, err)
+		require.Equal(t, []int64{101}, droppedFieldIDs)
 		require.Equal(t, 2, len(schema.Fields))
-		require.Equal(t, []int64{101}, droppedFieldIds)
 		// remaining fields should be pk and extra
 		fieldNames := make([]string, 0, len(schema.Fields))
 		for _, f := range schema.Fields {
@@ -634,19 +633,19 @@ func TestBuildSchemaForDropField(t *testing.T) {
 	}
 
 	t.Run("drop whole struct array field by name", func(t *testing.T) {
-		schema, _, droppedFieldIds, err := buildSchemaForDropField(collWithStruct(), "paragraphs", 0)
+		schema, _, droppedFieldIDs, err := buildSchemaForDropField(collWithStruct(), "paragraphs", 0)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(schema.Fields))            // pk + vec unchanged
 		require.Equal(t, 0, len(schema.StructArrayFields)) // struct removed
-		require.ElementsMatch(t, []int64{102, 103, 104}, droppedFieldIds)
+		require.Equal(t, []int64{102, 103, 104}, droppedFieldIDs)
 		require.Equal(t, int32(4), schema.Version)
 	})
 
 	t.Run("drop whole struct array field by id", func(t *testing.T) {
-		schema, _, droppedFieldIds, err := buildSchemaForDropField(collWithStruct(), "", 102)
+		schema, _, droppedFieldIDs, err := buildSchemaForDropField(collWithStruct(), "", 102)
 		require.NoError(t, err)
 		require.Equal(t, 0, len(schema.StructArrayFields))
-		require.ElementsMatch(t, []int64{102, 103, 104}, droppedFieldIds)
+		require.Equal(t, []int64{102, 103, 104}, droppedFieldIDs)
 	})
 }
 
@@ -654,12 +653,11 @@ func TestCascadeDropFieldIndexesInline(t *testing.T) {
 	buildResult := func(droppedFieldIDs []int64) message.BroadcastResultAlterCollectionMessageV2 {
 		raw := message.NewAlterCollectionMessageBuilderV2().
 			WithHeader(&messagespb.AlterCollectionMessageHeader{
-				CollectionId: 1,
+				CollectionId:    1,
+				DroppedFieldIds: droppedFieldIDs,
 			}).
 			WithBody(&messagespb.AlterCollectionMessageBody{
-				Updates: &messagespb.AlterCollectionMessageUpdates{
-					DroppedFieldIds: droppedFieldIDs,
-				},
+				Updates: &messagespb.AlterCollectionMessageUpdates{},
 			}).
 			WithBroadcast([]string{funcutil.GetControlChannel("test")}).
 			MustBuildBroadcast()
@@ -719,4 +717,52 @@ func TestCascadeDropFieldIndexesInline(t *testing.T) {
 		err := cb.cascadeDropFieldIndexesInline(context.Background(), buildResult([]int64{101}))
 		require.NoError(t, err)
 	})
+}
+
+func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionSchema},
+			},
+			CacheExpirations: &messagespb.CacheExpirations{},
+			DroppedFieldIds:  []int64{101},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{
+					Name:    "test",
+					Version: 2,
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+
+	meta := &mockMetaTable{}
+	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		return nil
+	}
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
+		&indexpb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexInfos: []*indexpb.IndexInfo{
+				{FieldID: 200, IndexID: 1, IndexName: "idx_other"},
+			},
+		}, nil,
+	)
+
+	broker := newValidMockBroker()
+	c := newTestCore(withMeta(meta), withMixCoord(mixc), withBroker(broker))
+	cb := &DDLCallback{Core: c}
+	err := cb.alterCollectionV2AckCallback(context.Background(), message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{
+			funcutil.GetControlChannel("test"): {TimeTick: 100},
+		},
+	})
+	require.NoError(t, err)
 }

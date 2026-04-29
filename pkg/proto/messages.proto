@@ -289,6 +289,7 @@ message AlterCollectionMessageHeader {
     google.protobuf.FieldMask update_mask = 3;
     CacheExpirations cache_expirations = 4;
     repeated int64 flushed_segment_ids = 5; // will be filled by wal shard manager.
+    repeated int64 dropped_field_ids = 6; // field IDs removed by this alter operation, used to cascade-delete indexes in ack callback.
 }
 
 // AlterCollectionMessageBody is the body of alter collection message.
@@ -306,7 +307,6 @@ message AlterCollectionMessageUpdates {
     common.ConsistencyLevel consistency_level = 6; // consistency level should be updated.
     repeated common.KeyValuePair properties   = 7; // collection properties should be updated.
     AlterLoadConfigOfAlterCollection alter_load_config = 8; // alter load config of alter collection.
-    repeated int64 dropped_field_ids                   = 9; // field IDs dropped from schema, used to cascade-delete indexes in ack callback.
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.
@@ -805,4 +805,3 @@ message BatchUpdateManifestItem {
 message BatchUpdateManifestV2ColumnGroups {
     map<int64, data.FieldBinlog> column_groups = 1;
 }
-

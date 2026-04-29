@@ -529,45 +529,83 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 	return nil
 }
 
-func nextFieldID(coll *model.Collection) int64 {
+func maxAssignedFieldIDFromSchema(schema *schemapb.CollectionSchema) int64 {
 	maxFieldID := int64(common.StartOfUserFieldID)
-	for _, field := range coll.Fields {
-		if field.FieldID > maxFieldID {
-			maxFieldID = field.FieldID
+	if schema == nil {
+		return maxFieldID
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() > maxFieldID {
+			maxFieldID = field.GetFieldID()
 		}
 	}
-
-	// Also check StructArrayFields and their sub-fields to avoid ID conflicts
-	for _, structField := range coll.StructArrayFields {
-		if structField.FieldID > maxFieldID {
-			maxFieldID = structField.FieldID
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() > maxFieldID {
+			maxFieldID = structField.GetFieldID()
 		}
-		for _, subField := range structField.Fields {
-			if subField.FieldID > maxFieldID {
-				maxFieldID = subField.FieldID
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() > maxFieldID {
+				maxFieldID = subField.GetFieldID()
 			}
 		}
 	}
+	for _, kv := range schema.GetProperties() {
+		if kv.GetKey() != common.MaxFieldIDKey {
+			continue
+		}
+		v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
+		if err != nil {
+			log.Warn("failed to parse max_field_id property, metadata may be corrupted",
+				zap.String("value", kv.GetValue()),
+				zap.Error(err),
+			)
+		} else if v > maxFieldID {
+			maxFieldID = v
+		}
+		break
+	}
+	return maxFieldID
+}
 
-	// Check persisted max_field_id in Properties to handle dropped fields.
-	// When a field is dropped, its ID may have been the highest; without this
-	// check, a subsequent AddField could reuse the dropped field's ID.
-	for _, kv := range coll.Properties {
-		if kv.Key == common.MaxFieldIDKey {
-			v, err := strconv.ParseInt(kv.Value, 10, 64)
+// updateMaxFieldIDProperty returns a new properties slice with max_field_id set.
+// The original slice is not modified.
+func updateMaxFieldIDProperty(properties []*commonpb.KeyValuePair, maxFieldID int64) []*commonpb.KeyValuePair {
+	result := make([]*commonpb.KeyValuePair, 0, len(properties)+1)
+	found := false
+	for _, kv := range properties {
+		if kv.GetKey() == common.MaxFieldIDKey {
+			v, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 			if err != nil {
 				log.Warn("failed to parse max_field_id property, metadata may be corrupted",
-					zap.String("value", kv.Value),
+					zap.String("value", kv.GetValue()),
 					zap.Error(err),
 				)
 			} else if v > maxFieldID {
 				maxFieldID = v
 			}
-			break
+			result = append(result, &commonpb.KeyValuePair{
+				Key:   common.MaxFieldIDKey,
+				Value: strconv.FormatInt(maxFieldID, 10),
+			})
+			found = true
+			continue
 		}
+		result = append(result, kv)
 	}
+	if !found {
+		result = append(result, &commonpb.KeyValuePair{
+			Key:   common.MaxFieldIDKey,
+			Value: strconv.FormatInt(maxFieldID, 10),
+		})
+	}
+	return result
+}
 
-	return maxFieldID + 1
+func ensureCollectionMaxFieldIDProperty(coll *model.Collection) {
+	if coll == nil {
+		return
+	}
+	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()))
 }
 
 func nextFunctionID(coll *model.Collection) int64 {

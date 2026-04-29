@@ -1776,9 +1776,10 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		}
 		task.Req.ShardsNum = common.DefaultShardsNum
 		err := task.Prepare(context.Background())
-		assert.Len(t, task.body.CollectionSchema.Properties, 2)
+		require.NoError(t, err)
+		assert.Len(t, task.body.CollectionSchema.Properties, 3)
+		assert.Equal(t, "100", common.CloneKeyValuePairs(task.body.CollectionSchema.Properties).ToMap()[common.MaxFieldIDKey])
 		assert.Len(t, task.Req.Properties, 2)
-		assert.NoError(t, err)
 	})
 }
 
