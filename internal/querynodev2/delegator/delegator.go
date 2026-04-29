@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -392,6 +393,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
+	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
+		PruneSealedSegmentsByPKFilter(ctx,
+			req.GetReq().GetSerializedExprPlan(),
+			req.GetReq().GetPkFilter(),
+			sealed,
+			req.GetReq().GetCollectionID(),
+			metrics.SearchLabel,
+		)
+	}
+
 	if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
 		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
 			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
@@ -433,10 +444,28 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, false, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
+	}
+
+	// Compute per-segment filter strategy hints when the adaptive strategy is enabled.
+	var advisedHints AdvisedHints
+	if paramtable.Get().QueryNodeCfg.EnableAdaptiveFilterStrategy.GetAsBool() &&
+		req.GetReq().GetSerializedExprPlan() != nil {
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			plan := &planpb.PlanNode{}
+			if err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan); err == nil {
+				exprPb := extractFilterExpr(plan)
+				if exprPb != nil {
+					threshold := paramtable.Get().QueryNodeCfg.AdaptiveFilterStrategyThreshold.GetAsFloat()
+					advisedHints = AdviseFilterStrategy(exprPb, sd.partitionStats, sealed, threshold)
+				}
+			}
+		}()
 	}
 	// Build the modify function: if we have per-segment hints, wrap modifySearchRequest
 	// so that requests targeting segments that need iterative filter get an updated plan.
