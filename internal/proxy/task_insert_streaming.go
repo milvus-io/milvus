@@ -124,7 +124,7 @@ func repackInsertDataForStreamingService(
 							BinarySize:  0, // TODO: current not used, message estimate size is used.
 						},
 					},
-					SchemaVersion: schemaVersion,
+					SchemaVersion: &schemaVersion,
 				}).
 				WithBody(insertRequest).
 				WithCipher(ez).
@@ -207,7 +207,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 								BinarySize:  0, // TODO: current not used, message estimate size is used.
 							},
 						},
-						SchemaVersion: schemaVersion,
+						SchemaVersion: &schemaVersion,
 					}).
 					WithBody(insertRequest).
 					WithCipher(ez).
