@@ -18,6 +18,7 @@
 
 #include <boost/align/aligned_allocator.hpp>
 #include <folly/FBVector.h>
+#include <folly/small_vector.h>
 #include <stdint.h>
 #include <cstddef>
 #include <limits>
@@ -47,6 +48,7 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "BitUtil.h"
 #include "type_c.h"
 
 namespace milvus {
@@ -110,6 +112,11 @@ using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 using DefaultValueType = proto::schema::ValueField;
+
+struct QueryIteratorCursor {
+    PkType last_pk;
+    int64_t last_element_offset = -1;
+};
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
@@ -375,6 +382,91 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     int64_t,
                                                     bool,
                                                     std::string>>;
+
+// Hash function for GroupByValueType
+struct GroupByValueHash {
+    size_t
+    operator()(const GroupByValueType& value) const {
+        if (!value.has_value()) {
+            return std::hash<int>{}(0);
+        }
+        return std::visit(
+            [](const auto& v) -> size_t {
+                using T = std::decay_t<decltype(v)>;
+                if constexpr (std::is_same_v<T, std::monostate>) {
+                    return std::hash<int>{}(0);
+                } else {
+                    return std::hash<T>{}(v);
+                }
+            },
+            value.value());
+    }
+};
+
+// Composite key for multi-field group by.
+// Uses folly::small_vector with inline storage for N=4, which covers >99%
+// of real requests (typical group_by has 1-4 fields). Avoids heap alloc
+// on the hot scan path and preserves scratch-key inline storage across
+// moves (see GroupIteratorResult's scratch_key reuse pattern).
+struct CompositeGroupKey {
+    folly::small_vector<GroupByValueType, 4> values_;
+
+    CompositeGroupKey() = default;
+
+    explicit CompositeGroupKey(size_t reserve_size) {
+        values_.reserve(reserve_size);
+    }
+
+    void
+    Add(GroupByValueType value) {
+        values_.push_back(std::move(value));
+    }
+
+    void
+    Clear() {
+        values_.clear();
+    }
+
+    // Reserve capacity for n elements. Idempotent guard avoids the (already
+    // cheap) reserve call when capacity is sufficient; kept explicit so future
+    // callers do not need to know std::vector::reserve no-op semantics.
+    void
+    Reserve(size_t n) {
+        if (values_.capacity() < n) {
+            values_.reserve(n);
+        }
+    }
+
+    size_t
+    Size() const {
+        return values_.size();
+    }
+
+    const GroupByValueType&
+    operator[](size_t i) const {
+        return values_[i];
+    }
+
+    bool
+    operator==(const CompositeGroupKey& other) const {
+        return values_ == other.values_;
+    }
+};
+
+// Hash function for CompositeGroupKey
+// Uses bits::hashMix for consistency with VectorHasher in HashTable.h
+struct CompositeGroupKeyHash {
+    size_t
+    operator()(const CompositeGroupKey& key) const {
+        uint64_t hash = 0;
+        GroupByValueHash value_hash;
+        for (const auto& v : key.values_) {
+            hash = bits::hashMix(hash, value_hash(v));
+        }
+        return hash;
+    }
+};
+
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
 using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;

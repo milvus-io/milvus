@@ -149,67 +149,15 @@ func TestReplicateConfigValidator_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "config cannot be nil")
 	})
 
-	t.Run("success - empty config drop with single-cluster current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				{
-					ClusterId:       "cluster-1",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "test-token"},
-					Pchannels:       []string{"channel-1", "channel-2"},
-				},
-			},
+	t.Run("error - empty clusters", func(t *testing.T) {
+		config := &commonpb.ReplicateConfiguration{
+			Clusters:             []*commonpb.MilvusCluster{},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		}
-		currentPChannels := []string{"channel-1", "channel-2"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
-		err := validator.Validate()
-		assert.NoError(t, err)
-		assert.True(t, validator.IsDropConfig())
-	})
-
-	t.Run("success - empty config drop with nil current config (idempotent)", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		validator := NewReplicateConfigValidator(incomingConfig, nil, "cluster-1", []string{"channel-1"})
-		err := validator.Validate()
-		assert.NoError(t, err)
-		assert.True(t, validator.IsDropConfig())
-	})
-
-	t.Run("error - empty config drop with multi-cluster current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := createValidValidatorConfig()
-		currentPChannels := []string{"channel-1", "channel-2"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
+		validator := NewReplicateConfigValidator(config, nil, "cluster-1", []string{})
 		err := validator.Validate()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "drop replicate configuration requires current config to be single-cluster with no topology")
-	})
-
-	t.Run("error - empty config drop with topology in current config", func(t *testing.T) {
-		incomingConfig := &commonpb.ReplicateConfiguration{}
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				{
-					ClusterId:       "cluster-1",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "test-token"},
-					Pchannels:       []string{"channel-1"},
-				},
-				{
-					ClusterId:       "cluster-2",
-					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19531", Token: "test-token"},
-					Pchannels:       []string{"channel-1"},
-				},
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "cluster-1", TargetClusterId: "cluster-2"},
-			},
-		}
-		currentPChannels := []string{"channel-1"}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", currentPChannels)
-		err := validator.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "drop replicate configuration requires current config to be single-cluster with no topology")
+		assert.Contains(t, err.Error(), "clusters list cannot be empty")
 	})
 }
 
@@ -1079,7 +1027,7 @@ func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
 	})
 }
 
-func TestReplicateConfigValidator_PChannelIncreasingConstraints(t *testing.T) {
+func TestReplicateConfigValidator_PChannelIncreasing(t *testing.T) {
 	makeCluster := func(id, uri string, pchannels []string) *commonpb.MilvusCluster {
 		return &commonpb.MilvusCluster{
 			ClusterId:       id,
@@ -1113,32 +1061,7 @@ func TestReplicateConfigValidator_PChannelIncreasingConstraints(t *testing.T) {
 		assert.True(t, validator.IsPChannelIncreasing())
 	})
 
-	t.Run("error - topology changed during pchannel increase", func(t *testing.T) {
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
-				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "c1", TargetClusterId: "c2"},
-			},
-		}
-		incomingConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
-				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "c2", TargetClusterId: "c1"}, // flipped
-			},
-		}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
-		err := validator.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "topology must remain identical")
-	})
-
-	t.Run("error - new cluster added during pchannel increase", func(t *testing.T) {
+	t.Run("success - new cluster added during pchannel increase", func(t *testing.T) {
 		currentConfig := &commonpb.ReplicateConfiguration{
 			Clusters: []*commonpb.MilvusCluster{
 				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
@@ -1161,47 +1084,16 @@ func TestReplicateConfigValidator_PChannelIncreasingConstraints(t *testing.T) {
 		}
 		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
 		err := validator.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cluster set must remain identical")
+		assert.NoError(t, err)
+		assert.True(t, validator.IsPChannelIncreasing())
 	})
 
-	t.Run("error - cluster replaced during pchannel increase (same count, different ID)", func(t *testing.T) {
+	t.Run("success - topology changed during pchannel increase", func(t *testing.T) {
 		currentConfig := &commonpb.ReplicateConfiguration{
 			Clusters: []*commonpb.MilvusCluster{
 				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
 				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "c1", TargetClusterId: "c2"},
-			},
-		}
-		incomingConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
-				makeCluster("c3", "localhost:19531", []string{"ch-1", "ch-2"}), // c2 replaced by c3
-			},
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "c1", TargetClusterId: "c3"},
-			},
-		}
-		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
-		err := validator.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cluster set must remain identical")
-		assert.Contains(t, err.Error(), "missing from incoming config")
-	})
-
-	t.Run("error - topology edge replaced during pchannel increase (same count, different edge)", func(t *testing.T) {
-		// Use validatePChannelIncreasingConstraints directly to bypass the star topology check
-		// which runs earlier and would reject the config before we get to our check.
-		currentClusterMap := map[string]*commonpb.MilvusCluster{
-			"c1": makeCluster("c1", "localhost:19530", []string{"ch-1"}),
-			"c2": makeCluster("c2", "localhost:19531", []string{"ch-1"}),
-			"c3": makeCluster("c3", "localhost:19532", []string{"ch-1"}),
-		}
-		currentConfig := &commonpb.ReplicateConfiguration{
-			Clusters: []*commonpb.MilvusCluster{
-				currentClusterMap["c1"], currentClusterMap["c2"], currentClusterMap["c3"],
+				makeCluster("c3", "localhost:19532", []string{"ch-1"}),
 			},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{
 				{SourceClusterId: "c1", TargetClusterId: "c2"},
@@ -1212,27 +1104,15 @@ func TestReplicateConfigValidator_PChannelIncreasingConstraints(t *testing.T) {
 			Clusters: []*commonpb.MilvusCluster{
 				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
 				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
-				makeCluster("c3", "localhost:19532", []string{"ch-1", "ch-2"}),
 			},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{
 				{SourceClusterId: "c1", TargetClusterId: "c2"},
-				{SourceClusterId: "c1", TargetClusterId: "c4"}, // c4 doesn't exist but same count
 			},
 		}
-		validator := &ReplicateConfigValidator{
-			incomingConfig:       incomingConfig,
-			currentConfig:        currentConfig,
-			isPChannelIncreasing: true,
-			clusterMap: map[string]*commonpb.MilvusCluster{
-				"c1": incomingConfig.Clusters[0],
-				"c2": incomingConfig.Clusters[1],
-				"c3": incomingConfig.Clusters[2],
-			},
-		}
-		err := validator.validatePChannelIncreasingConstraints(currentClusterMap)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "topology must remain identical")
-		assert.Contains(t, err.Error(), "not in current config")
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+		assert.True(t, validator.IsPChannelIncreasing())
 	})
 
 	t.Run("no pchannel increase - IsPChannelIncreasing is false", func(t *testing.T) {

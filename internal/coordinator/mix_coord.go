@@ -1314,6 +1314,10 @@ func (s *mixCoordImpl) BatchUpdateManifest(ctx context.Context, req *datapb.Batc
 	return s.datacoordServer.BatchUpdateManifest(ctx, req)
 }
 
+func (s *mixCoordImpl) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	return s.datacoordServer.CommitBackfillResult(ctx, req)
+}
+
 // Client Telemetry methods - forwarded to rootcoord
 
 func (s *mixCoordImpl) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {

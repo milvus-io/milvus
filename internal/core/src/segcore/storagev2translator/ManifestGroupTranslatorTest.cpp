@@ -112,8 +112,11 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     auto num_cells = translator->num_cells();
     auto chunk_reader = test_data_->CreateChunkReader(0);
     auto expected_num_chunks = chunk_reader->total_number_of_chunks();
+    auto row_group_sizes = chunk_reader->get_chunk_size().ValueOrDie();
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, GetCellTargetSizeBytes());
     auto expected_num_cells =
-        (expected_num_chunks + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
+        (expected_num_chunks + rgs_per_cell - 1) / rgs_per_cell;
     EXPECT_EQ(num_cells, expected_num_cells);
 
     // cell_id_of — identity mapping
@@ -346,13 +349,18 @@ TEST_P(ManifestGroupTranslatorTest, TestRowGroupRangesCoverage) {
 
     EXPECT_EQ(meta->cell_row_group_ranges_.size(), num_cells);
 
+    auto chunk_reader = test_data_->CreateChunkReader(0);
+    auto row_group_sizes = chunk_reader->get_chunk_size().ValueOrDie();
+    auto rgs_per_cell =
+        ComputeRowGroupsPerCell(row_group_sizes, GetCellTargetSizeBytes());
+
     // Ranges should be contiguous and cover [0, total_row_groups_)
     size_t expected_start = 0;
     for (size_t cid = 0; cid < num_cells; ++cid) {
         auto [start, end] = meta->get_row_group_range(cid);
         EXPECT_EQ(start, expected_start) << "gap at cid " << cid;
         EXPECT_GT(end, start) << "empty range at cid " << cid;
-        EXPECT_LE(end - start, kRowGroupsPerCell)
+        EXPECT_LE(end - start, rgs_per_cell)
             << "range too large at cid " << cid;
         expected_start = end;
     }

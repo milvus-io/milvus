@@ -89,11 +89,11 @@ class PlanNode {
 };
 
 using PlanNodePtr = std::shared_ptr<PlanNode>;
-class FilterNode : public PlanNode {
+class IterativeFilterNode : public PlanNode {
  public:
-    FilterNode(const PlanNodeId& id,
-               expr::TypedExprPtr filter,
-               std::vector<PlanNodePtr> sources)
+    IterativeFilterNode(const PlanNodeId& id,
+                        expr::TypedExprPtr filter,
+                        std::vector<PlanNodePtr> sources)
         : PlanNode(id),
           sources_{std::move(sources)},
           filter_(std::move(filter)) {
@@ -120,7 +120,7 @@ class FilterNode : public PlanNode {
 
     std::string_view
     name() const override {
-        return "Filter";
+        return "IterativeFilter";
     }
 
     std::string
@@ -186,13 +186,13 @@ class FilterBitsNode : public PlanNode {
     const expr::TypedExprPtr filter_;
 };
 
-class ElementFilterNode : public PlanNode {
+class IterativeElementFilterNode : public PlanNode {
  public:
-    ElementFilterNode(const PlanNodeId& id,
-                      expr::TypedExprPtr element_filter,
-                      std::string struct_name,
-                      std::vector<PlanNodePtr> sources,
-                      bool has_doc_predicate = true)
+    IterativeElementFilterNode(const PlanNodeId& id,
+                               expr::TypedExprPtr element_filter,
+                               std::string struct_name,
+                               std::vector<PlanNodePtr> sources,
+                               bool has_doc_predicate = true)
         : PlanNode(id),
           sources_{std::move(sources)},
           element_filter_(std::move(element_filter)),
@@ -232,13 +232,13 @@ class ElementFilterNode : public PlanNode {
 
     std::string_view
     name() const override {
-        return "ElementFilter";
+        return "IterativeElementFilter";
     }
 
     std::string
     ToString() const override {
         return fmt::format(
-            "ElementFilterNode:[struct_name:{}, element_filter:{}, "
+            "IterativeElementFilterNode:[struct_name:{}, element_filter:{}, "
             "has_doc_predicate:{}]",
             struct_name_,
             element_filter_->ToString(),

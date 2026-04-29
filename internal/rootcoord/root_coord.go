@@ -35,7 +35,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -560,6 +560,14 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
+		// Recover file resource refCnt for pending CreateCollection broadcast tasks
+		// before registering DDL callbacks, so ack callbacks won't race with recovery.
+		// See #48612.
+		pending := broadcast.GetPendingCreateCollectionResources()
+		if len(pending) > 0 {
+			c.meta.RecoverFileResourceRefCnt(pending)
+			log.Info("recovered file resource refCnt from pending broadcast tasks", zap.Int("count", len(pending)))
+		}
 		RegisterDDLCallbacks(c)
 	})
 	log.Info("RootCoord init successfully")
@@ -1182,23 +1190,10 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = &schemapb.CollectionSchema{
-		Name:               collInfo.Name,
-		Description:        collInfo.Description,
-		AutoID:             collInfo.AutoID,
-		Fields:             model.MarshalFieldModels(collInfo.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(collInfo.Functions),
-		EnableDynamicField: collInfo.EnableDynamicField,
-		EnableNamespace:    collInfo.EnableNamespace,
-		Properties:         collInfo.Properties,
-		FileResourceIds:    collInfo.FileResourceIds,
-		ExternalSource:     collInfo.ExternalSource,
-		ExternalSpec:       collInfo.ExternalSpec,
-		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
-		Version:            collInfo.SchemaVersion,
-		DoPhysicalBackfill: collInfo.DoPhysicalBackfill,
-	}
+	resp.Schema = collInfo.ToCollectionSchemaPB()
+	// Use the dbName parameter (resolved from the request) for consistency
+	// with resp.DbName; the model's DBName may not always be in sync.
+	resp.Schema.DbName = dbName
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames

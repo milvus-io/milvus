@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -41,6 +42,9 @@ func (ut *upsertTask) Execute(ctx context.Context) error {
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
 	if err := resp.UnwrapFirstError(); err != nil {
 		log.Warn("append messages to wal failed", zap.Error(err))
+		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
+			return merr.ErrCollectionSchemaMismatch
+		}
 		return err
 	}
 	// Update result.Timestamp for session consistency.
@@ -83,9 +87,9 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schemaVersion)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))

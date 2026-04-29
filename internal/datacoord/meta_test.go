@@ -36,8 +36,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -868,6 +870,432 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	})
 }
 
+func (suite *MetaBasicSuite) TestGetMaxPosition() {
+	suite.Run("nil_positions", func() {
+		pos := getMaxPosition(nil)
+		suite.Nil(pos)
+	})
+
+	suite.Run("single_position", func() {
+		p := &msgpb.MsgPosition{Timestamp: 100}
+		pos := getMaxPosition([]*msgpb.MsgPosition{p})
+		suite.Equal(uint64(100), pos.GetTimestamp())
+	})
+
+	suite.Run("multiple_positions", func() {
+		pos := getMaxPosition([]*msgpb.MsgPosition{
+			{Timestamp: 100},
+			{Timestamp: 300},
+			{Timestamp: 200},
+		})
+		suite.Equal(uint64(300), pos.GetTimestamp())
+	})
+
+	suite.Run("with_nil_entries", func() {
+		pos := getMaxPosition([]*msgpb.MsgPosition{
+			nil,
+			{Timestamp: 50},
+			nil,
+			{Timestamp: 200},
+		})
+		suite.Equal(uint64(200), pos.GetTimestamp())
+	})
+}
+
+func (suite *MetaBasicSuite) TestRecalculateSegmentPosition() {
+	channel := "ch-1"
+	fallbackStart := &msgpb.MsgPosition{ChannelName: channel, Timestamp: 10}
+	fallbackDml := &msgpb.MsgPosition{ChannelName: channel, Timestamp: 90}
+
+	suite.Run("recalculates_from_binlog_timestamps", func() {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{
+					{LogID: 1, TimestampFrom: 100, TimestampTo: 200},
+					{LogID: 2, TimestampFrom: 150, TimestampTo: 300},
+				},
+			},
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{LogID: 3, TimestampFrom: 80, TimestampTo: 250},
+				},
+			},
+		}
+		startPos, dmlPos := recalculateSegmentPosition(binlogs, channel, fallbackStart, fallbackDml)
+		suite.Equal(uint64(80), startPos.GetTimestamp())
+		suite.Equal(uint64(300), dmlPos.GetTimestamp())
+		suite.Equal(channel, startPos.GetChannelName())
+		suite.Equal(channel, dmlPos.GetChannelName())
+	})
+
+	suite.Run("fallback_when_timestamps_zero", func() {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{
+					{LogID: 1, TimestampFrom: 0, TimestampTo: 0},
+				},
+			},
+		}
+		startPos, dmlPos := recalculateSegmentPosition(binlogs, channel, fallbackStart, fallbackDml)
+		suite.Equal(fallbackStart, startPos)
+		suite.Equal(fallbackDml, dmlPos)
+	})
+
+	suite.Run("fallback_when_no_binlogs", func() {
+		startPos, dmlPos := recalculateSegmentPosition(nil, channel, fallbackStart, fallbackDml)
+		suite.Equal(fallbackStart, startPos)
+		suite.Equal(fallbackDml, dmlPos)
+	})
+
+	suite.Run("fallback_when_empty_binlogs", func() {
+		startPos, dmlPos := recalculateSegmentPosition([]*datapb.FieldBinlog{}, channel, fallbackStart, fallbackDml)
+		suite.Equal(fallbackStart, startPos)
+		suite.Equal(fallbackDml, dmlPos)
+	})
+}
+
+func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions() {
+	mockChMgr := mocks.NewChunkManager(suite.T())
+
+	// Helper to build FieldBinlog with timestamps
+	fieldBinlogWithTimestamps := func(fieldID int64, logID int64, tsFrom, tsTo uint64) *datapb.FieldBinlog {
+		return &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{
+				{LogID: logID, TimestampFrom: tsFrom, TimestampTo: tsTo},
+			},
+		}
+	}
+
+	suite.Run("mix_compaction_recalculates_positions_from_binlogs", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 999},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1},
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 888},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2},
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{fieldBinlogWithTimestamps(0, 50000, 100, 500)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		// Should use binlog timestamps, NOT inherited positions
+		suite.Equal(uint64(100), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(500), infos[0].GetDmlPosition().GetTimestamp())
+		suite.Equal("ch-1", infos[0].GetStartPosition().GetChannelName())
+	})
+
+	suite.Run("mix_compaction_fallback_when_no_timestamps", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 50},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 200},
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 100},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 300},
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		// Result binlogs have no timestamps (legacy)
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		// Fallback: StartPosition = min, DmlPosition = max of source segments
+		suite.Equal(uint64(50), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(300), infos[0].GetDmlPosition().GetTimestamp())
+	})
+
+	suite.Run("cluster_compaction_recalculates_positions", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 999},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1},
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 888},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 2},
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{fieldBinlogWithTimestamps(0, 50000, 150, 600)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		suite.Equal(uint64(150), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(600), infos[0].GetDmlPosition().GetTimestamp())
+		suite.Equal(datapb.SegmentLevel_L2, infos[0].GetLevel())
+	})
+
+	suite.Run("cluster_compaction_fallback_when_no_timestamps", func() {
+		latestSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 50},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 400},
+			}},
+			2: {SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  100,
+				PartitionID:   10,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 11000)},
+				Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 21000)},
+				NumOfRows:     2,
+				StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 80},
+				DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+			}},
+		} {
+			latestSegments.SetSegment(segID, segment)
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           3,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           4,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		suite.Equal(uint64(50), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(500), infos[0].GetDmlPosition().GetTimestamp())
+	})
+
+	suite.Run("sort_compaction_recalculates_positions", func() {
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L2,
+			Binlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			Statslogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+			NumOfRows:      2,
+			StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 999},
+			DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 1},
+			InsertChannel:  "ch-1",
+			StorageVersion: storage.StorageV1,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           2,
+				InsertLogs:          []*datapb.FieldBinlog{fieldBinlogWithTimestamps(0, 50000, 200, 800)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           2,
+				StorageVersion:      storage.StorageV2,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1},
+			Type:          datapb.CompactionType_SortCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		suite.Equal(uint64(200), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(800), infos[0].GetDmlPosition().GetTimestamp())
+	})
+
+	suite.Run("sort_compaction_fallback_when_no_timestamps", func() {
+		latestSegments := NewSegmentsInfo()
+		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L2,
+			Binlogs:        []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			Statslogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+			NumOfRows:      2,
+			StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 77},
+			DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 333},
+			InsertChannel:  "ch-1",
+			StorageVersion: storage.StorageV1,
+		}})
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:           2,
+				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				NumOfRows:           2,
+				StorageVersion:      storage.StorageV2,
+			}},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1},
+			Type:          datapb.CompactionType_SortCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Require().Equal(1, len(infos))
+
+		suite.Equal(uint64(77), infos[0].GetStartPosition().GetTimestamp())
+		suite.Equal(uint64(333), infos[0].GetDmlPosition().GetTimestamp())
+	})
+}
+
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
@@ -952,6 +1380,336 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 		err := meta.UpdateSegment(segmentID, noOp)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
+}
+
+func (suite *MetaBasicSuite) TestCompleteBackfillCompactionMutation() {
+	// Helper to build a SegmentsInfo containing a single healthy Flushed segment with the given ID.
+	makeSegments := func(segID int64, state commonpb.SegmentState) *SegmentsInfo {
+		segs := NewSegmentsInfo()
+		segs.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            segID,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         state,
+			Level:         datapb.SegmentLevel_L1,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000)},
+			NumOfRows:     5,
+			SchemaVersion: 1,
+		}})
+		return segs
+	}
+
+	suite.Run("too many input segments", func() {
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: makeSegments(1, commonpb.SegmentState_Flushed),
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1, 2}, // two inputs — should error
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 1},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.Error(err)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	suite.Run("too many result segments", func() {
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: makeSegments(1, commonpb.SegmentState_Flushed),
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 1},
+				{SegmentID: 2}, // two results — should error
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.Error(err)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	suite.Run("segment not found", func() {
+		// Segment 99 is not in meta.
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: NewSegmentsInfo(),
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{99},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 99},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrSegmentNotFound)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	suite.Run("segment dropped", func() {
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: makeSegments(1, commonpb.SegmentState_Dropped),
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 1},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.Error(err)
+		suite.ErrorIs(err, merr.ErrSegmentNotFound)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	suite.Run("segment ID mismatch", func() {
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: makeSegments(1, commonpb.SegmentState_Flushed),
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 999}, // ID mismatch
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.Error(err)
+		suite.Nil(infos)
+		suite.Nil(mutation)
+	})
+
+	suite.Run("v2 success - schema version updated", func() {
+		// Task schema version (3) > old segment schema version (1) → cloned.SchemaVersion should become 3.
+		segs := NewSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			NumOfRows:     5,
+			SchemaVersion: 1,
+		}})
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+			Schema: &schemapb.CollectionSchema{
+				Version: 3,
+			},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:  1,
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					// No manifest → V2 path
+				},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+		suite.EqualValues(3, infos[0].GetSchemaVersion())
+		// In-memory segment should also be updated.
+		updated := m.segments.GetSegment(1)
+		suite.EqualValues(3, updated.GetSchemaVersion())
+	})
+
+	suite.Run("v2 success - bm25 stats merged", func() {
+		// Old segment already has BM25 stats for field 101.
+		// Result adds BM25 stats for field 102.
+		// Both should be present after mutation.
+		segs := NewSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			Bm25Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 50001)},
+			NumOfRows:     5,
+			SchemaVersion: 1,
+		}})
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:  1,
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Bm25Logs:   []*datapb.FieldBinlog{getFieldBinlogIDs(102, 50002)},
+					// No manifest → V2 path, BM25 stats should be merged
+				},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+
+		// Collect all field IDs present in Bm25Statslogs of the result.
+		fieldIDs := make(map[int64]bool)
+		for _, fl := range infos[0].GetBm25Statslogs() {
+			fieldIDs[fl.GetFieldID()] = true
+		}
+		suite.True(fieldIDs[101], "field 101 bm25 stats should be preserved")
+		suite.True(fieldIDs[102], "field 102 bm25 stats should be added from result")
+	})
+
+	suite.Run("v2 crash-replay idempotent - no duplicate bm25 stats", func() {
+		// Simulate crash-replay: datacoord applies the same backfill result twice
+		// (crash between etcd write and task state transition). Without the dedup
+		// filter, the second application would append duplicate logID entries to
+		// Bm25Statslogs. Verify that applying the same result twice is a no-op.
+		segs := NewSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			NumOfRows:     5,
+			SchemaVersion: 1,
+		}})
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:  1,
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Bm25Logs:   []*datapb.FieldBinlog{getFieldBinlogIDs(102, 50002)},
+				},
+			},
+		}
+
+		// First application
+		infos, _, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Require().Len(infos[0].GetBm25Statslogs(), 1)
+		firstFieldBinlog := infos[0].GetBm25Statslogs()[0]
+		suite.Equal(int64(102), firstFieldBinlog.GetFieldID())
+		suite.Require().Len(firstFieldBinlog.GetBinlogs(), 1)
+		firstLogID := firstFieldBinlog.GetBinlogs()[0].GetLogID()
+
+		// Second application (crash-replay) — same result, must be idempotent
+		infos2, _, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos2, 1)
+		suite.Require().Len(infos2[0].GetBm25Statslogs(), 1,
+			"replay must not add a second FieldBinlog entry")
+		secondFieldBinlog := infos2[0].GetBm25Statslogs()[0]
+		suite.Equal(int64(102), secondFieldBinlog.GetFieldID())
+		suite.Require().Len(secondFieldBinlog.GetBinlogs(), 1,
+			"replay must not append a duplicate logID entry")
+		suite.Equal(firstLogID, secondFieldBinlog.GetBinlogs()[0].GetLogID())
+
+		// Third application — still idempotent
+		infos3, _, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos3[0].GetBm25Statslogs(), 1)
+		suite.Require().Len(infos3[0].GetBm25Statslogs()[0].GetBinlogs(), 1)
+	})
+
+	suite.Run("v3 success - manifest and storage version updated", func() {
+		// Result segment has a non-empty manifest → V3 path.
+		// ManifestPath and StorageVersion should be set; Bm25Statslogs should NOT change.
+		segs := NewSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000)},
+			Bm25Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(101, 50001)},
+			NumOfRows:     5,
+			SchemaVersion: 1,
+		}})
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BackfillCompaction,
+		}
+		const manifestPath = "collection/100/partition/10/segment/1/v3_manifest.json"
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					InsertLogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10001)},
+					Bm25Logs:       []*datapb.FieldBinlog{getFieldBinlogIDs(102, 50002)},
+					Manifest:       manifestPath,
+					StorageVersion: 3,
+				},
+			},
+		}
+		infos, mutation, err := m.completeBackfillCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.NotNil(mutation)
+		suite.Require().Len(infos, 1)
+
+		// ManifestPath and StorageVersion should reflect the V3 result.
+		suite.Equal(manifestPath, infos[0].GetManifestPath())
+		suite.EqualValues(3, infos[0].GetStorageVersion())
+
+		// BM25 stats should NOT be updated for V3 path — still only field 101.
+		fieldIDs := make(map[int64]bool)
+		for _, fl := range infos[0].GetBm25Statslogs() {
+			fieldIDs[fl.GetFieldID()] = true
+		}
+		suite.True(fieldIDs[101], "field 101 bm25 stats should be preserved")
+		suite.False(fieldIDs[102], "field 102 bm25 stats should NOT be added for V3 path")
 	})
 }
 
@@ -1492,6 +2250,39 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, commonpb.SegmentState_Dropped)
 	})
 
+	t.Run("v3 storage segment with empty binlogs uses checkpoint NumOfRows", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Create a V3 segment with no binlogs (V3 storage uses ManifestPath instead)
+		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1,
+			State:        commonpb.SegmentState_Growing,
+			Binlogs:      []*datapb.FieldBinlog{},
+			Statslogs:    []*datapb.FieldBinlog{},
+			ManifestPath: "files/binlogs/1/2/1000/manifest_0",
+		})
+		err = meta.AddSegment(context.TODO(), segment1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, segment1.NumOfRows)
+
+		// UpdateCheckPointOperator with cpNumRows=100, segment has no binlogs
+		// CalcRowCountFromBinLog will return 0, so should fall back to cpNumRows
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{
+				SegmentID: 1,
+				NumOfRows: 100,
+				Position:  &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100},
+			}}, true),
+		)
+		assert.NoError(t, err)
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		// NumOfRows should be set from checkpoint, not left at 0
+		assert.EqualValues(t, 100, updated.NumOfRows)
+	})
+
 	t.Run("update compacted segment", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
@@ -1789,6 +2580,248 @@ func TestUpdateManifestVersion(t *testing.T) {
 		assert.Equal(t, "/data/segments/1", basePath)
 		assert.Equal(t, int64(5), version)
 	})
+
+	t.Run("rollback rejected - currentVer > incomingVer is a no-op", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Current version = 10. A stale broadcast carrying version = 5 must
+		// not regress the pointer. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but concurrent compaction may have
+		// advanced ManifestPath between pre-check and this apply -- the
+		// operator-level guard is the last line of defense.
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 5)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+
+		// Confirm the stored manifest path was not mutated in the pack.
+		got := pack.Get(1)
+		_, currentVer, err := packed.UnmarshalManifestPath(got.ManifestPath)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), currentVer)
+	})
+}
+
+func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
+	// Helper: build a segment with two pre-existing column groups, where the
+	// first group owns top-level fieldID=100 and child_fields=[200,201], and
+	// the second group owns top-level fieldID=300.
+	newSegmentWithExistingGroups := func() *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   1000,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				DataVersion:    int32(5),
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     100,
+						ChildFields: []int64{200, 201},
+						Binlogs:     []*datapb.Binlog{{LogID: 1}},
+					},
+					{
+						FieldID: 300,
+						Binlogs: []*datapb.Binlog{{LogID: 2}},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("segment not found returns false", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		op := UpdateSegmentColumnGroupsOperator(999, map[int64]*datapb.FieldBinlog{
+			400: {FieldID: 400},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.False(t, op(pack))
+	})
+
+	t.Run("append new group bumps DataVersion", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 100}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		assert.NotNil(t, got)
+		assert.Equal(t, int32(6), got.DataVersion)
+		// Two pre-existing + one new.
+		assert.Len(t, got.Binlogs, 3)
+		var fids []int64
+		for _, fb := range got.Binlogs {
+			fids = append(fids, fb.GetFieldID())
+		}
+		assert.ElementsMatch(t, []int64{100, 300, 400}, fids)
+		// child_fields on 100 untouched because no child collision.
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.ElementsMatch(t, []int64{200, 201}, fb.GetChildFields())
+			}
+		}
+		_, ok := pack.increments[1]
+		assert.True(t, ok)
+	})
+
+	t.Run("strips child fields from existing group", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		// new group 500 owns child 200 which was held by group 100.
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			500: {FieldID: 500, ChildFields: []int64{200}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.ElementsMatch(t, []int64{201}, fb.GetChildFields(),
+					"child 200 should have been stripped from old group")
+			}
+		}
+	})
+
+	t.Run("replace same fieldID in place", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			100: {FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 999, EntriesNum: 7}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		// 100 replaced, 300 preserved => still 2 groups.
+		assert.Len(t, got.Binlogs, 2)
+		for _, fb := range got.Binlogs {
+			if fb.GetFieldID() == 100 {
+				assert.Len(t, fb.GetBinlogs(), 1)
+				assert.Equal(t, int64(999), fb.GetBinlogs()[0].GetLogID())
+			}
+		}
+	})
+
+	t.Run("drops empty-children existing group and records DroppedBinlogFieldIDs", func(t *testing.T) {
+		// Pre-existing single-child group (fieldID=100 owns child 200) whose
+		// only child is claimed by a new backfill group (fieldID=200). After
+		// stripping, group 100's ChildFields is empty -- the operator must
+		// drop it from segment.Binlogs AND record 100 in DroppedBinlogFieldIDs
+		// so the catalog removes the orphan etcd KV (without it, listBinlogs'
+		// prefix scan would resurrect the zombie on restart).
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		m.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   1000,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     100,
+						ChildFields: []int64{200}, // single child
+						Binlogs:     []*datapb.Binlog{{LogID: 1}},
+					},
+					{
+						FieldID:     300,
+						ChildFields: []int64{301, 302},
+						Binlogs:     []*datapb.Binlog{{LogID: 2}},
+					},
+				},
+			},
+		})
+
+		op := UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+			200: {FieldID: 200, ChildFields: []int64{200}, Binlogs: []*datapb.Binlog{{LogID: 99}}},
+		})
+		pack := &updateSegmentPack{
+			meta:       m,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
+		}
+		assert.True(t, op(pack))
+
+		got := pack.Get(1)
+		// Group 100 must be gone from in-memory binlogs; 300 (unaffected) plus
+		// new 200 remain.
+		assert.Len(t, got.Binlogs, 2)
+		fids := lo.Map(got.Binlogs, func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() })
+		assert.ElementsMatch(t, []int64{200, 300}, fids)
+
+		// Increment carries the orphan FieldID so AlterSegments can remove
+		// the persisted KV.
+		inc, ok := pack.increments[1]
+		assert.True(t, ok)
+		assert.ElementsMatch(t, []int64{100}, inc.DroppedBinlogFieldIDs)
+	})
+
+	t.Run("DataVersion monotonic across reruns", func(t *testing.T) {
+		m, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		seg := newSegmentWithExistingGroups()
+		m.AddSegment(context.Background(), seg)
+
+		err = m.UpdateSegmentsInfo(context.Background(),
+			UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+				400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 10}}},
+			}),
+		)
+		assert.NoError(t, err)
+		err = m.UpdateSegmentsInfo(context.Background(),
+			UpdateSegmentColumnGroupsOperator(1, map[int64]*datapb.FieldBinlog{
+				400: {FieldID: 400, Binlogs: []*datapb.Binlog{{LogID: 11}}},
+			}),
+		)
+		assert.NoError(t, err)
+
+		got := m.GetHealthySegment(context.Background(), 1)
+		assert.NotNil(t, got)
+		// Started at 5, two bumps => 7.
+		assert.Equal(t, int32(7), got.DataVersion)
+	})
 }
 
 func Test_meta_SetSegmentsCompacting(t *testing.T) {
@@ -1809,18 +2842,17 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 			"test set segment compacting",
 			fields{
 				NewMetaMemoryKV(),
-				&SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    1,
-								State: commonpb.SegmentState_Flushed,
-							},
-							isCompacting: false,
+				func() *SegmentsInfo {
+					s := NewSegmentsInfo()
+					s.SetSegment(1, &SegmentInfo{
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:    1,
+							State: commonpb.SegmentState_Flushed,
 						},
-					},
-					compactionTo: make(map[int64][]UniqueID),
-				},
+						isCompacting: false,
+					})
+					return s
+				}(),
 			},
 			args{
 				segmentID:  1,
@@ -2392,4 +3424,277 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
 	segment = meta.GetSegment(context.Background(), 3)
 	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
+}
+
+func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testgrowing-v0"
+
+	t.Run("empty returns nil", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		assert.Nil(t, pos)
+	})
+
+	t.Run("growing L1 segments return min DmlPosition", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Register a TEXT collection so the checkpoint logic applies
+		meta.collections.Insert(1, &collectionInfo{
+			ID: 1,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+					{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
+				},
+			},
+		})
+
+		// Growing L1 segment with T300
+		seg1 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: mockVChannel,
+				State:         commonpb.SegmentState_Growing,
+				Level:         datapb.SegmentLevel_L1,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: mockVChannel,
+					MsgID:       []byte{1},
+					Timestamp:   300,
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg1)
+		assert.NoError(t, err)
+
+		// Growing L1 segment with T500
+		seg2 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: mockVChannel,
+				State:         commonpb.SegmentState_Growing,
+				Level:         datapb.SegmentLevel_L1,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: mockVChannel,
+					MsgID:       []byte{2},
+					Timestamp:   500,
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg2)
+		assert.NoError(t, err)
+
+		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		assert.NotNil(t, pos)
+		assert.Equal(t, uint64(300), pos.GetTimestamp())
+	})
+
+	t.Run("L0 segments excluded", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Growing L0 segment with T100
+		seg := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: mockVChannel,
+				State:         commonpb.SegmentState_Growing,
+				Level:         datapb.SegmentLevel_L0,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: mockVChannel,
+					MsgID:       []byte{1},
+					Timestamp:   100,
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg)
+		assert.NoError(t, err)
+
+		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		assert.Nil(t, pos)
+	})
+
+	t.Run("non-Growing segments excluded", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		// Flushed L1 segment with T100
+		seg := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: mockVChannel,
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: mockVChannel,
+					MsgID:       []byte{1},
+					Timestamp:   100,
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg)
+		assert.NoError(t, err)
+
+		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
+		assert.Nil(t, pos)
+	})
+}
+
+func TestUpdateChannelCheckpoint_ClampedByGrowing(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-v0"
+
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	// Register a TEXT collection so clamping is enabled
+	meta.collections.Insert(1, &collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
+			},
+		},
+	})
+
+	// Add a growing L1 segment at T300
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: mockVChannel,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: mockVChannel,
+				MsgID:       []byte{1},
+				Timestamp:   300,
+			},
+		},
+	}
+	err = meta.AddSegment(context.TODO(), seg)
+	assert.NoError(t, err)
+
+	// Update checkpoint with T500, should be clamped to T300 (TEXT collection)
+	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
+		ChannelName: mockVChannel,
+		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		Timestamp:   500,
+	})
+	assert.NoError(t, err)
+
+	cp := meta.GetChannelCheckpoint(mockVChannel)
+	assert.NotNil(t, cp)
+	assert.Equal(t, uint64(300), cp.GetTimestamp())
+}
+
+func TestUpdateChannelCheckpoint_NotClampedForNonTextCollection(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-notext-v0"
+
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	// Register a non-TEXT collection — clamping should NOT apply
+	meta.collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "varchar_field", DataType: schemapb.DataType_VarChar},
+			},
+		},
+	})
+
+	// Add a growing L1 segment at T300 for the non-TEXT collection
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            10,
+			CollectionID:  2,
+			PartitionID:   1,
+			InsertChannel: mockVChannel,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: mockVChannel,
+				MsgID:       []byte{1},
+				Timestamp:   300,
+			},
+		},
+	}
+	err = meta.AddSegment(context.TODO(), seg)
+	assert.NoError(t, err)
+
+	// Update checkpoint with T500 — should NOT be clamped (non-TEXT collection)
+	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
+		ChannelName: mockVChannel,
+		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		Timestamp:   500,
+	})
+	assert.NoError(t, err)
+
+	cp := meta.GetChannelCheckpoint(mockVChannel)
+	assert.NotNil(t, cp)
+	assert.Equal(t, uint64(500), cp.GetTimestamp()) // NOT clamped
+}
+
+func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclampbatch-v0"
+
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	// Register a TEXT collection so clamping is enabled
+	meta.collections.Insert(1, &collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
+			},
+		},
+	})
+
+	// Add a growing L1 segment at T300
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: mockVChannel,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L1,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: mockVChannel,
+				MsgID:       []byte{1},
+				Timestamp:   300,
+			},
+		},
+	}
+	err = meta.AddSegment(context.TODO(), seg)
+	assert.NoError(t, err)
+
+	// Batch update checkpoint with T500, should be clamped to T300 (TEXT collection)
+	err = meta.UpdateChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{
+		{
+			ChannelName: mockVChannel,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			Timestamp:   500,
+		},
+	})
+	assert.NoError(t, err)
+
+	cp := meta.GetChannelCheckpoint(mockVChannel)
+	assert.NotNil(t, cp)
+	assert.Equal(t, uint64(300), cp.GetTimestamp())
 }

@@ -788,8 +788,19 @@ message BatchUpdateManifestMessageBody {
 }
 
 // BatchUpdateManifestItem is an item in batch update manifest message.
+// Either manifest_version (V3 segments) or v2_column_groups (V2 segments) is
+// populated. Items with both fields set are rejected by the callback.
 message BatchUpdateManifestItem {
     int64 segment_id = 1;
+    // V3 path: advance the segment's manifest pointer to this version.
     int64 manifest_version = 2;
+    // V2 path: upsert one or more column groups on the segment's FieldBinlogs.
+    BatchUpdateManifestV2ColumnGroups v2_column_groups = 3;
+}
+
+// BatchUpdateManifestV2ColumnGroups carries a V2 segment column-group upsert.
+// Keyed by the top-level fieldID of the group; value.FieldID must equal the key.
+message BatchUpdateManifestV2ColumnGroups {
+    map<int64, data.FieldBinlog> column_groups = 1;
 }
 

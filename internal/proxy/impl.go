@@ -66,6 +66,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -912,7 +913,18 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 			Status: merr.Status(err),
 		}, nil
 	}
-	return interceptor.Call(ctx, request)
+	resp, err := interceptor.Call(ctx, request)
+	// Single-point redaction at the API edge. The persisted spec carries
+	// extfs credentials (access_key_id / access_key_value / ssl_ca_cert)
+	// that internal callers (refresh / load) need raw via the same
+	// mixCoord.DescribeCollection RPC; redacting at source would break
+	// FFI auth. Sanitize here so every provider path (cached / remote)
+	// converges through one spot — adding a new provider does not
+	// re-introduce the leak.
+	if resp != nil && resp.GetSchema() != nil {
+		resp.Schema.ExternalSpec = externalspec.RedactExternalSpec(resp.Schema.ExternalSpec)
+	}
+	return resp, err
 }
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
@@ -969,10 +981,24 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	// TODO(#48808): gate AddCollectionField against in-progress backfill once segment schema-version
-	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Currently the backfill
-	// policy updates segment schema versions on a tick, so a rapid second AddCollectionField
-	// can arrive before the tick fires and be incorrectly rejected by the gate.
+	// Prevent concurrent schema-change requests (AddCollectionField / AlterCollectionSchema)
+	// on the same collection from racing past the schema version consistency gate.
+	collKey := request.GetDbName() + "/" + request.GetCollectionName()
+	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"another schema-change request is already in progress for collection %s", request.GetCollectionName())), nil
+	}
+	defer node.alterSchemaInFlight.Delete(collKey)
+
+	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
+	// Retry the schema consistency gate in Proxy first to hide short backfill
+	// convergence windows from clients until SDK retry handling is fixed.
+	if err := retry.Handle(ctx, func() (bool, error) {
+		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
+		return merr.IsRetryableErr(err), err
+	}); err != nil {
+		return merr.Status(err), nil
+	}
 
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
@@ -1060,8 +1086,13 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 	}
 	defer node.alterSchemaInFlight.Delete(collKey)
 
-	// Check schema version consistency before proceeding with alter collection schema
-	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+	// TEMP: SDKs do not consistently retry retryable DDL errors yet.
+	// Retry the schema consistency gate in Proxy first to hide short backfill
+	// convergence windows from clients until SDK retry handling is fixed.
+	if err := retry.Handle(ctx, func() (bool, error) {
+		err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName)
+		return merr.IsRetryableErr(err), err
+	}); err != nil {
 		return &milvuspb.AlterCollectionSchemaResponse{
 			AlterStatus: merr.Status(err),
 		}, nil
@@ -1119,7 +1150,17 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 }
 
 // checkSchemaVersionConsistency checks if all segments have consistent schema version
-// Returns error if schema version consistency proportion is less than 100%
+// Returns error if schema version consistency proportion is less than 100%.
+//
+// NOTE: this is a Proxy-local fast-path check only. The `alterSchemaInFlight` map
+// on the Proxy is per-instance, so in a multi-Proxy deployment two concurrent
+// schema-change requests routed to different Proxy instances each see their own
+// empty local map and both pass this check before either has bumped the schema
+// version, allowing the race through. The authoritative cluster-wide consistency
+// gate lives at RootCoord and is enforced after acquiring the collection resource
+// key lock — see checkSchemaVersionConsistencyAtRootCoord in rootcoord, added by
+// companion PR #48989. This Proxy-side check remains as a cheap early reject to
+// avoid unnecessary RootCoord round-trips on the common single-Proxy path.
 func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -1192,9 +1233,7 @@ func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, co
 		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
 	}
 	if consistentSegments < totalSegments {
-		return merr.WrapErrParameterInvalidMsg(
-			"schema version consistency check failed: %d/%d segments are consistent, required 100%%",
-			consistentSegments, totalSegments)
+		return merr.WrapErrCollectionSchemaVersionNotReady(collectionName, consistentSegments, totalSegments)
 	}
 	return nil
 }
@@ -7689,6 +7728,31 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
+	// External source and spec form an atomic tuple. Either omit both
+	// (reuse the persisted pair) or pass both (atomic override). Passing
+	// only one would silently use the empty value for the other downstream.
+	srcSet := req.GetExternalSource() != ""
+	specSet := req.GetExternalSpec() != ""
+	if srcSet != specSet {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
+				req.GetExternalSource(), req.GetExternalSpec())),
+		}, nil
+	}
+
+	// Defense in depth: refresh is the only post-create mutation path for
+	// (source, spec); enforce the same scheme allowlist and spec validation
+	// that CreateCollection runs, otherwise alter-bypass via refresh would
+	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
+	if srcSet {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	}
+
 	// Get collection info from cache (includes schema for validation)
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
@@ -7704,6 +7768,25 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 		}, nil
+	}
+
+	// Reuse path: caller did not provide override. The persisted
+	// (source, spec) on the collection must both be non-empty, otherwise
+	// downstream would look for files at "" and the job would fail with
+	// "no files found" after enqueue. Reject early so the user gets
+	// InvalidArgument instead of a stuck-then-failed job. Both halves are
+	// checked to defensively reassert the atomic-tuple invariant in case
+	// any legacy collection holds a half-initialized pair.
+	if !srcSet {
+		persistedSrc := collectionInfo.schema.GetExternalSource()
+		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		if persistedSrc == "" || persistedSpec == "" {
+			return &milvuspb.RefreshExternalCollectionResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"collection %s has no persisted external_source/external_spec; provide both in the refresh request to initialize",
+					req.GetCollectionName())),
+			}, nil
+		}
 	}
 
 	collectionID := collectionInfo.collID

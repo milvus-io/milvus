@@ -5,6 +5,7 @@
     },
     "consts": {
         "FieldMaskDB": "db",
+        "FieldMaskCollectionExternalSpec": "external_spec",
         "FieldMaskCollectionName": "collection_name",
         "FieldMaskCollectionDescription": "description",
         "FieldMaskCollectionSchema": "schema",

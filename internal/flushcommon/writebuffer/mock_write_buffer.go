@@ -24,17 +24,17 @@ func (_m *MockWriteBuffer) EXPECT() *MockWriteBuffer_Expecter {
 	return &MockWriteBuffer_Expecter{mock: &_m.Mock}
 }
 
-// BufferData provides a mock function with given fields: insertMsgs, deleteMsgs, startPos, endPos
-func (_m *MockWriteBuffer) BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) error {
-	ret := _m.Called(insertMsgs, deleteMsgs, startPos, endPos)
+// BufferData provides a mock function with given fields: insertMsgs, deleteMsgs, startPos, endPos, schemaVersion
+func (_m *MockWriteBuffer) BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition, schemaVersion int32) error {
+	ret := _m.Called(insertMsgs, deleteMsgs, startPos, endPos, schemaVersion)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BufferData")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error); ok {
-		r0 = rf(insertMsgs, deleteMsgs, startPos, endPos)
+	if rf, ok := ret.Get(0).(func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition, int32) error); ok {
+		r0 = rf(insertMsgs, deleteMsgs, startPos, endPos, schemaVersion)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -52,13 +52,14 @@ type MockWriteBuffer_BufferData_Call struct {
 //   - deleteMsgs []*msgstream.DeleteMsg
 //   - startPos *msgpb.MsgPosition
 //   - endPos *msgpb.MsgPosition
-func (_e *MockWriteBuffer_Expecter) BufferData(insertMsgs interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}) *MockWriteBuffer_BufferData_Call {
-	return &MockWriteBuffer_BufferData_Call{Call: _e.mock.On("BufferData", insertMsgs, deleteMsgs, startPos, endPos)}
+//   - schemaVersion int32
+func (_e *MockWriteBuffer_Expecter) BufferData(insertMsgs interface{}, deleteMsgs interface{}, startPos interface{}, endPos interface{}, schemaVersion interface{}) *MockWriteBuffer_BufferData_Call {
+	return &MockWriteBuffer_BufferData_Call{Call: _e.mock.On("BufferData", insertMsgs, deleteMsgs, startPos, endPos, schemaVersion)}
 }
 
-func (_c *MockWriteBuffer_BufferData_Call) Run(run func(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition)) *MockWriteBuffer_BufferData_Call {
+func (_c *MockWriteBuffer_BufferData_Call) Run(run func(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition, schemaVersion int32)) *MockWriteBuffer_BufferData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*InsertData), args[1].([]*msgstream.DeleteMsg), args[2].(*msgpb.MsgPosition), args[3].(*msgpb.MsgPosition))
+		run(args[0].([]*InsertData), args[1].([]*msgstream.DeleteMsg), args[2].(*msgpb.MsgPosition), args[3].(*msgpb.MsgPosition), args[4].(int32))
 	})
 	return _c
 }
@@ -68,7 +69,7 @@ func (_c *MockWriteBuffer_BufferData_Call) Return(_a0 error) *MockWriteBuffer_Bu
 	return _c
 }
 
-func (_c *MockWriteBuffer_BufferData_Call) RunAndReturn(run func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition) error) *MockWriteBuffer_BufferData_Call {
+func (_c *MockWriteBuffer_BufferData_Call) RunAndReturn(run func([]*InsertData, []*msgstream.DeleteMsg, *msgpb.MsgPosition, *msgpb.MsgPosition, int32) error) *MockWriteBuffer_BufferData_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -107,9 +108,9 @@ func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(context.Context, boo
 	return _c
 }
 
-// CreateNewGrowingSegment provides a mock function with given fields: partitionID, segmentID, startPos
-func (_m *MockWriteBuffer) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
-	_m.Called(partitionID, segmentID, startPos)
+// CreateNewGrowingSegment provides a mock function with given fields: partitionID, segmentID, startPos, schemaVersion
+func (_m *MockWriteBuffer) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) {
+	_m.Called(partitionID, segmentID, startPos, schemaVersion)
 }
 
 // MockWriteBuffer_CreateNewGrowingSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateNewGrowingSegment'
@@ -121,13 +122,14 @@ type MockWriteBuffer_CreateNewGrowingSegment_Call struct {
 //   - partitionID int64
 //   - segmentID int64
 //   - startPos *msgpb.MsgPosition
-func (_e *MockWriteBuffer_Expecter) CreateNewGrowingSegment(partitionID interface{}, segmentID interface{}, startPos interface{}) *MockWriteBuffer_CreateNewGrowingSegment_Call {
-	return &MockWriteBuffer_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", partitionID, segmentID, startPos)}
+//   - schemaVersion int32
+func (_e *MockWriteBuffer_Expecter) CreateNewGrowingSegment(partitionID interface{}, segmentID interface{}, startPos interface{}, schemaVersion interface{}) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+	return &MockWriteBuffer_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", partitionID, segmentID, startPos, schemaVersion)}
 }
 
-func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Run(run func(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Run(run func(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64), args[2].(*msgpb.MsgPosition))
+		run(args[0].(int64), args[1].(int64), args[2].(*msgpb.MsgPosition), args[3].(int32))
 	})
 	return _c
 }
@@ -137,7 +139,7 @@ func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Return() *MockWriteBuffe
 	return _c
 }
 
-func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition, int32)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
 	_c.Run(run)
 	return _c
 }
@@ -218,6 +220,51 @@ func (_c *MockWriteBuffer_EvictBuffer_Call) Return() *MockWriteBuffer_EvictBuffe
 
 func (_c *MockWriteBuffer_EvictBuffer_Call) RunAndReturn(run func(...SyncPolicy)) *MockWriteBuffer_EvictBuffer_Call {
 	_c.Run(run)
+	return _c
+}
+
+// HasTextFields provides a mock function with no fields
+func (_m *MockWriteBuffer) HasTextFields() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasTextFields")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockWriteBuffer_HasTextFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasTextFields'
+type MockWriteBuffer_HasTextFields_Call struct {
+	*mock.Call
+}
+
+// HasTextFields is a helper method to define mock.On call
+func (_e *MockWriteBuffer_Expecter) HasTextFields() *MockWriteBuffer_HasTextFields_Call {
+	return &MockWriteBuffer_HasTextFields_Call{Call: _e.mock.On("HasTextFields")}
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) Run(run func()) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) Return(_a0 bool) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWriteBuffer_HasTextFields_Call) RunAndReturn(run func() bool) *MockWriteBuffer_HasTextFields_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

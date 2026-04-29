@@ -80,6 +80,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		preserveFieldID: preserveFieldID == "true",
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
+		createCollectionTask.releaseFileResources()
 		return err
 	}
 
@@ -95,6 +96,9 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		// Do NOT release file resources here: the broadcast task is already in the
+		// scheduler and will retry until success. refCnt will be decremented when
+		// the collection is eventually dropped.
 		return err
 	}
 	return nil

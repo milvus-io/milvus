@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
@@ -44,6 +45,12 @@ type externalCollectionRefreshInspector struct {
 	scheduler   task.GlobalScheduler
 	allocator   allocator.Allocator
 	closeChan   chan struct{}
+	// wrapTask builds a scheduler-facing task wrapper with all callbacks
+	// wired (processFinishedJob → checker.processJobByID). The manager owns
+	// the wiring logic and injects this factory so the inspector doesn't
+	// need a direct reference to the checker (avoids construction-order
+	// circular dependency).
+	wrapTask func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask
 }
 
 func newRefreshInspector(
@@ -94,8 +101,7 @@ func (i *externalCollectionRefreshInspector) inspect() {
 		switch t.GetState() {
 		case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
 			// Re-enqueue pending tasks (scheduler will deduplicate)
-			taskWrapper := newRefreshExternalCollectionTask(t, i.refreshMeta, i.mt, i.allocator)
-			i.scheduler.Enqueue(taskWrapper)
+			i.scheduler.Enqueue(i.wrapTask(t))
 		}
 	}
 }
@@ -110,7 +116,6 @@ func (i *externalCollectionRefreshInspector) reloadFromMeta() {
 			continue
 		}
 		// Enqueue active tasks for processing
-		taskWrapper := newRefreshExternalCollectionTask(t, i.refreshMeta, i.mt, i.allocator)
-		i.scheduler.Enqueue(taskWrapper)
+		i.scheduler.Enqueue(i.wrapTask(t))
 	}
 }

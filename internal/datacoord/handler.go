@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
@@ -170,8 +169,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && s.GetManifestPath() == "" {
-			// External collection segments may not have start/DML positions but have ManifestPath
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 		if s.GetIsImporting() {
@@ -825,14 +823,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 }
 
 func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
-	prefix := metautil.BuildJSONKeyStatsPrefix(h.s.meta.chunkManager.RootPath(), jsonStats.GetJsonKeyStatsDataFormat(),
-		jsonStats.GetBuildID(), jsonStats.GetVersion(), segInfo.GetCollectionID(), segInfo.GetPartitionID(), segInfo.GetID(), jsonStats.GetFieldID())
-	uncompressedFiles := make([]string, 0, len(jsonStats.GetFiles()))
-	for _, file := range jsonStats.GetFiles() {
-		uncompressedFiles = append(uncompressedFiles, path.Join(prefix, file))
-	}
 	uncompressedJSONStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
-	uncompressedJSONStats.Files = uncompressedFiles
+	statsMap := map[int64]*datapb.JsonKeyStats{jsonStats.GetFieldID(): uncompressedJSONStats}
+	metautil.BuildJSONKeyStatsPaths(h.s.meta.chunkManager.RootPath(), segInfo, statsMap)
 	return uncompressedJSONStats
 }
 

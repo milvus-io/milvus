@@ -56,7 +56,7 @@ using namespace milvus::tracer;
 template <typename T>
 void
 validate_group_by_search_result(
-    const std::vector<GroupByValueType>& group_by_values,
+    const std::vector<CompositeGroupKey>& group_by_values,
     const std::vector<float>& distances,
     int group_size,
     int topK,
@@ -67,8 +67,8 @@ validate_group_by_search_result(
         std::unordered_map<T, int> value_map;
         float lastDistance = 0.0;
         for (size_t j = nq_start; j < nq_end; j++) {
-            if (std::holds_alternative<T>(group_by_values[j].value())) {
-                T value = std::get<T>(group_by_values[j].value());
+            if (std::holds_alternative<T>(group_by_values[j][0].value())) {
+                T value = std::get<T>(group_by_values[j][0].value());
                 value_map[value] += 1;
                 ASSERT_TRUE(value_map[value] <= group_size);
                 auto distance = distances.at(j);
@@ -149,7 +149,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result =
             run_group_by_search("/int8", milvus::proto::schema::DataType::Int8);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int8_t>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -159,7 +160,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result = run_group_by_search(
             "/int16", milvus::proto::schema::DataType::Int16);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int16_t>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -169,7 +171,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result = run_group_by_search(
             "/int32", milvus::proto::schema::DataType::Int32);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int32_t>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -179,7 +182,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result = run_group_by_search(
             "/int64", milvus::proto::schema::DataType::Int64);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int64_t>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -189,7 +193,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result =
             run_group_by_search("/bool", milvus::proto::schema::DataType::Bool);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(2 * group_size, group_by_values.size());
         validate_group_by_search_result<bool>(
             group_by_values, search_result->distances_, group_size, 2, 1);
@@ -199,7 +204,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result = run_group_by_search(
             "/string", milvus::proto::schema::DataType::VarChar);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<std::string>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -209,7 +215,8 @@ TEST(GroupBYJSON, SealedData) {
     {
         auto search_result = run_group_by_search(
             "/string", milvus::proto::schema::DataType::None);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<std::string>(
             group_by_values, search_result->distances_, group_size, topK, 1);
@@ -285,7 +292,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result =
             run_group_by_search("/int8", milvus::proto::schema::DataType::Int8);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int8_t>(group_by_values,
                                                 search_result->distances_,
@@ -298,7 +306,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result = run_group_by_search(
             "/int16", milvus::proto::schema::DataType::Int16);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int16_t>(group_by_values,
                                                  search_result->distances_,
@@ -311,7 +320,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result = run_group_by_search(
             "/int32", milvus::proto::schema::DataType::Int32);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int32_t>(group_by_values,
                                                  search_result->distances_,
@@ -324,7 +334,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result = run_group_by_search(
             "/int64", milvus::proto::schema::DataType::Int64);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int64_t>(group_by_values,
                                                  search_result->distances_,
@@ -337,7 +348,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result =
             run_group_by_search("/bool", milvus::proto::schema::DataType::Bool);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * 2 * group_size);
         validate_group_by_search_result<bool>(group_by_values,
                                               search_result->distances_,
@@ -350,7 +362,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result = run_group_by_search(
             "/string", milvus::proto::schema::DataType::VarChar);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<std::string>(group_by_values,
                                                      search_result->distances_,
@@ -363,7 +376,8 @@ TEST(GroupBYJSON, GrowingRawData) {
     {
         auto search_result = run_group_by_search(
             "/string", milvus::proto::schema::DataType::None);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<std::string>(group_by_values,
                                                      search_result->distances_,
@@ -393,7 +407,8 @@ TEST(GroupBYJSON, GrowingRawData) {
         auto search_result = segment_growing_impl->Search(
             plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-        auto& group_by_values = search_result->group_by_values_.value();
+        auto& group_by_values =
+            search_result->composite_group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK);
         validate_group_by_search_result<std::string>(
             group_by_values, search_result->distances_, 1, topK, num_queries);
@@ -523,13 +538,14 @@ TEST(GroupBYJSON, Reduce) {
         status = ReduceSearchResultsAndFillData({},
                                                 &cSearchResultData,
                                                 c_plan,
+                                                c_ph_group,
                                                 results.data(),
                                                 results.size(),
                                                 slice_nqs.data(),
                                                 slice_topKs.data(),
                                                 slice_nqs.size());
         ASSERT_EQ(status.error_code, Success);
-        CheckSearchResultDuplicate(results, group_size);
+        CheckGroupByReducedSearchResult(cSearchResultData, group_size);
         DeleteSearchResult(c_search_res_1);
         DeleteSearchResult(c_search_res_2);
         DeleteSearchResultDataBlobs(cSearchResultData);

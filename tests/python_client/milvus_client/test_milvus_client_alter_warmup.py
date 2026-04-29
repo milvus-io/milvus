@@ -3012,8 +3012,12 @@ class TestMilvusClientWarmupAsync(TestMilvusClientV2Base):
                                   DataType.VARCHAR, max_length=1024,
                                   nullable=True, warmup="async",
                                   enable_analyzer=True, enable_match=True)
-        self.add_collection_field(client, collection_name, "json_1",
-                                  DataType.JSON, nullable=True, warmup="async")
+        # Wait for the previous AddCollectionField's backfill segment-version propagation
+        # tick to fire before issuing the next one — otherwise the consistency gate at
+        # the Proxy / RootCoord rejects this call with "schema version consistency check failed".
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, "json_1",
+            DataType.JSON, nullable=True, warmup="async")
 
         res = self.describe_collection(client, collection_name)[0]
         assert cf.get_field_warmup(res, "varchar_1") == "async"

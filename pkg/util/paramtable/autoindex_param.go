@@ -67,6 +67,11 @@ type AutoIndexConfig struct {
 	TwoStageSearchEnabled        ParamItem `refreshable:"true"`
 	TwoStageSearchMinTopk        ParamItem `refreshable:"true"`
 	TwoStageSearchMinNumSegments ParamItem `refreshable:"true"`
+	// global refine
+	GlobalRefineEnable          ParamItem `refreshable:"true"`
+	GlobalRefineMinDimThreshold ParamItem `refreshable:"true"`
+	GlobalRefineSearchTopkRatio ParamItem `refreshable:"true"`
+	GlobalRefineRefineTopkRatio ParamItem `refreshable:"true"`
 }
 
 const (
@@ -297,6 +302,42 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BitmapCardinalityLimit.Init(base.mgr)
+
+	p.GlobalRefineEnable = ParamItem{
+		Key:          "autoIndex.globalRefine.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable global refine for autoIndex",
+		Export:       true,
+	}
+	p.GlobalRefineEnable.Init(base.mgr)
+
+	p.GlobalRefineMinDimThreshold = ParamItem{
+		Key:          "autoIndex.globalRefine.minDimThreshold",
+		Version:      "3.0.0",
+		DefaultValue: "256",
+		Doc:          "minimum dimension threshold for global refine, if dim < minDimThreshold, disable global refine",
+		Export:       true,
+	}
+	p.GlobalRefineMinDimThreshold.Init(base.mgr)
+
+	p.GlobalRefineSearchTopkRatio = ParamItem{
+		Key:          "autoIndex.globalRefine.searchTopkRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "search topk ratio for global refine, search search_topk_ratio * topk results per segment, should be >= 1.0, 0 means disabled",
+		Export:       true,
+	}
+	p.GlobalRefineSearchTopkRatio.Init(base.mgr)
+
+	p.GlobalRefineRefineTopkRatio = ParamItem{
+		Key:          "autoIndex.globalRefine.refineTopkRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "refine topk ratio for global refine, truncate to refine_topk_ratio * topk per segment and recompute exact distances, should be >= 1.0, 0 means disabled",
+		Export:       true,
+	}
+	p.GlobalRefineRefineTopkRatio.Init(base.mgr)
 
 	p.ScalarVarcharIndexType = ParamItem{
 		Version: "2.4.0",

@@ -43,6 +43,10 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
+func deletePlaceholderGroup(group unsafe.Pointer) {
+	C.DeletePlaceholderGroup(C.CPlaceholderGroup(group))
+}
+
 func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
 	if len(expr) == 0 {
 		return nil, errors.New("empty expression plan")
@@ -102,15 +106,6 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		return nil, errors.New("empty search request")
 	}
 
-	blobPtr := unsafe.Pointer(&placeholderGrp[0])
-	blobSize := C.int64_t(len(placeholderGrp))
-	var cPlaceholderGroup C.CPlaceholderGroup
-	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		plan.delete()
-		return nil, errors.Wrap(err, "parser searchRequest failed")
-	}
-
 	metricTypeInPlan := plan.GetMetricType()
 	if len(metricType) != 0 && metricType != metricTypeInPlan {
 		plan.delete()
@@ -118,10 +113,19 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	}
 
 	var fieldID C.int64_t
-	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
+	status := C.GetFieldID(plan.cSearchPlan, &fieldID)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		plan.delete()
 		return nil, errors.Wrap(err, "get fieldID from plan failed")
+	}
+
+	blobPtr := unsafe.Pointer(&placeholderGrp[0])
+	blobSize := C.int64_t(len(placeholderGrp))
+	var cPlaceholderGroup C.CPlaceholderGroup
+	status = C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		plan.delete()
+		return nil, errors.Wrap(err, "parser searchRequest failed")
 	}
 
 	cl := req.GetReq().GetConsistencyLevel()
@@ -152,6 +156,10 @@ func (req *SearchRequest) Plan() *SearchPlan {
 	return req.plan
 }
 
+func (req *SearchRequest) PlaceholderGroup() unsafe.Pointer {
+	return unsafe.Pointer(req.cPlaceholderGroup)
+}
+
 func (req *SearchRequest) SearchFieldID() int64 {
 	return req.searchFieldID
 }
@@ -164,7 +172,7 @@ func (req *SearchRequest) Delete() {
 	if req.plan != nil {
 		req.plan.delete()
 	}
-	C.DeletePlaceholderGroup(req.cPlaceholderGroup)
+	deletePlaceholderGroup(unsafe.Pointer(req.cPlaceholderGroup))
 }
 
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan

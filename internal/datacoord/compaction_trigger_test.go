@@ -524,7 +524,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -2001,6 +2001,41 @@ func Test_compactionTrigger_new(t *testing.T) {
 			assert.Equal(t, tt.args.allocator, got.allocator)
 		})
 	}
+}
+
+func TestFilterSegmentsWithMatchingSchemaVersion(t *testing.T) {
+	coll := &collectionInfo{
+		ID:     1,
+		Schema: &schemapb.CollectionSchema{Version: 5},
+	}
+
+	// empty input → empty output
+	result := filterSegmentsWithMatchingSchemaVersion(nil, coll)
+	assert.Empty(t, result)
+
+	// all segments match → all returned
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+	}, coll)
+	assert.Equal(t, 2, len(result))
+
+	// mixed versions → only matching segments returned
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{ID: 1, SchemaVersion: 5}},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 2, SchemaVersion: 4}},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3, SchemaVersion: 5}},
+	}, coll)
+	assert.Equal(t, 2, len(result))
+	assert.Equal(t, int64(1), result[0].GetID())
+	assert.Equal(t, int64(3), result[1].GetID())
+
+	// all segments outdated → empty output
+	result = filterSegmentsWithMatchingSchemaVersion([]*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 0}},
+		{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 4}},
+	}, coll)
+	assert.Empty(t, result)
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {

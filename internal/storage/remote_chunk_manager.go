@@ -112,6 +112,11 @@ func (mcm *RemoteChunkManager) RootPath() string {
 	return mcm.rootPath
 }
 
+// BucketName returns the bucket name this chunk manager is configured with.
+func (mcm *RemoteChunkManager) BucketName() string {
+	return mcm.bucketName
+}
+
 // UnderlyingObjectStorage returns the underlying object storage.
 func (mcm *RemoteChunkManager) UnderlyingObjectStorage() ObjectStorage {
 	return mcm.client

@@ -5132,11 +5132,12 @@ func TestIsExternalCollection(t *testing.T) {
 	assert.True(t, IsExternalCollection(schema))
 }
 
-func TestValidateExternalCollectionSchema(t *testing.T) {
+func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 	buildSchema := func() *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
 			Name:           "external",
 			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text",
@@ -5172,13 +5173,13 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, ValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("functions disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "does not support functions")
 	})
@@ -5186,7 +5187,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 	t.Run("dynamic field disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.EnableDynamicField = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("struct fields disabled", func(t *testing.T) {
@@ -5194,31 +5195,31 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
 			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
 		}
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("primary key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPrimaryKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPartitionKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("clustering key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsClusteringKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("auto id disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].AutoID = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("text match disabled", func(t *testing.T) {
@@ -5227,20 +5228,82 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 			Key:   "enable_match",
 			Value: "true",
 		})
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("external_field mapping required", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].ExternalField = ""
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must have external_field mapping")
 	})
 
 	t.Run("valid schema passes", func(t *testing.T) {
-		err := ValidateExternalCollectionSchema(buildSchema())
+		err := NormalizeAndValidateExternalCollectionSchema(buildSchema())
 		assert.NoError(t, err)
+	})
+
+	t.Run("source set without spec rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("spec set without source rejected", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "both set or both empty")
+	})
+
+	t.Run("both empty allowed deferred refresh", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = ""
+		schema.ExternalSpec = ""
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("both set allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSource = "s3://bucket/path"
+		schema.ExternalSpec = `{"format":"parquet"}`
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("duplicate external_field rejected different types", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "dup_int",
+			DataType:      schemapb.DataType_Int64,
+			ExternalField: "text_col",
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_col")
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
+	})
+
+	t.Run("duplicate external_field rejected same type", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:          "text_alias",
+			DataType:      schemapb.DataType_VarChar,
+			ExternalField: "text_col",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "32"},
+			},
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mapped by multiple fields")
 	})
 
 	t.Run("unsupported field types rejected", func(t *testing.T) {
@@ -5254,7 +5317,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 				DataType:      dt,
 				ExternalField: "bad_col",
 			})
-			err := ValidateExternalCollectionSchema(schema)
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
 			assert.Error(t, err, "expected error for type %s", dt.String())
 			assert.Contains(t, err.Error(), "does not support field type")
 		}
@@ -5289,6 +5352,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 			schema := &schemapb.CollectionSchema{
 				Name:           "external",
 				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
 				Fields: []*schemapb.FieldSchema{
 					{
 						Name:          "vec",
@@ -5304,7 +5368,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 					},
 				},
 			}
-			err := ValidateExternalCollectionSchema(schema)
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
 			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
 		}
 	})
@@ -5314,7 +5378,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		for _, f := range schema.GetFields() {
 			assert.False(t, f.GetNullable())
 		}
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		for _, f := range schema.GetFields() {
 			assert.True(t, f.GetNullable(), "field %s should be nullable", f.GetName())
@@ -5330,7 +5394,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 			AutoID:       true,
 			Nullable:     false,
 		})
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		for _, f := range schema.GetFields() {
 			if f.GetName() == common.VirtualPKFieldName {
@@ -5346,7 +5410,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		for _, f := range schema.GetFields() {
 			f.Nullable = true
 		}
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.NoError(t, err)
 		for _, f := range schema.GetFields() {
 			assert.True(t, f.GetNullable())
@@ -5368,7 +5432,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		for _, f := range schema.GetFields() {
 			f.Nullable = false
 		}
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		for _, f := range schema.GetFields() {
 			assert.False(t, f.GetNullable(),

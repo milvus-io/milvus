@@ -90,6 +90,9 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrCollectionOnRecovering("test_collection", "channel lost %s", "dev"), ErrCollectionOnRecovering)
 	s.ErrorIs(WrapErrCollectionVectorClusteringKeyNotAllowed("test_collection", "field"), ErrCollectionVectorClusteringKeyNotAllowed)
 	s.ErrorIs(WrapErrCollectionSchemaMisMatch("schema mismatch", "field"), ErrCollectionSchemaMismatch)
+	s.ErrorIs(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3), ErrCollectionSchemaVersionNotReady)
+	s.True(Status(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3)).GetRetriable())
+	s.Equal(commonpb.ErrorCode_NotReadyServe, Status(WrapErrCollectionSchemaVersionNotReady("test_collection", 1, 3)).GetErrorCode())
 	// Partition related
 	s.ErrorIs(WrapErrPartitionNotFound("test_partition", "failed to get partition"), ErrPartitionNotFound)
 	s.ErrorIs(WrapErrPartitionNotLoaded("test_partition", "failed to query"), ErrPartitionNotLoaded)

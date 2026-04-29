@@ -3,7 +3,6 @@ package streaming
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -47,8 +46,8 @@ func TestBalancer(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		time.Sleep(100 * time.Millisecond)
-		return nil
+		<-ctx.Done()
+		return ctx.Err()
 	})
 	sbalancer.EXPECT().RegisterStreamingEnabledNotifier(mock.Anything).RunAndReturn(func(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
 		notifier.Cancel()

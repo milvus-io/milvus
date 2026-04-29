@@ -765,6 +765,42 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// validateReservedFieldNames rejects user-supplied schema fields whose name
+// collides with a system-reserved identifier (RowID, Timestamp,
+// __virtual_pk__). Must be called BEFORE server-side injection of the
+// virtual PK so the check only applies to user input. Applies to regular
+// and struct-array fields alike. Fix for issue #49314.
+func validateReservedFieldNames(schema *schemapb.CollectionSchema) error {
+	reserved := map[string]struct{}{
+		common.RowIDFieldName:     {},
+		common.TimeStampFieldName: {},
+		common.VirtualPKFieldName: {},
+	}
+	check := func(name string) error {
+		if _, ok := reserved[name]; ok {
+			return merr.WrapErrFieldNameInvalid(name,
+				fmt.Sprintf("field name %q is reserved for internal use and cannot be used in user schemas", name))
+		}
+		return nil
+	}
+	for _, f := range schema.GetFields() {
+		if err := check(f.GetName()); err != nil {
+			return err
+		}
+	}
+	for _, saf := range schema.GetStructArrayFields() {
+		if err := check(saf.GetName()); err != nil {
+			return err
+		}
+		for _, f := range saf.GetFields() {
+			if err := check(f.GetName()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // injectVirtualPKForExternalCollection adds a virtual PK field for external collections
 // if no primary key field exists. External collections use virtual PKs in the format:
 // (segmentID << 32) | offset
@@ -781,7 +817,7 @@ func injectVirtualPKForExternalCollection(schema *schemapb.CollectionSchema) err
 	// will assign the actual field ID during collection creation.
 	virtualPKField := &schemapb.FieldSchema{
 		Name:         common.VirtualPKFieldName,
-		Description:  "Virtual primary key for external collection: (segmentID << 32) | offset",
+		Description:  "auto-generated primary key for external collection",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
 		AutoID:       true, // Virtual PKs are auto-generated

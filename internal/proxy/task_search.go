@@ -10,6 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -427,6 +429,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
+	// TEXT type output fields need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
 
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
@@ -449,7 +455,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = true
 	case "outputvector":
 		// hybrid group by not support non-requery due to pk-group by field binding not guaranteed
-		t.needRequery = len(vectorOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
+		// TEXT fields also need requery since data is stored as LOB references
+		t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0 || t.rankParams.GetGroupByFieldId() >= 0
 	case "outputfields":
 		fallthrough
 	default:
@@ -462,9 +469,30 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, _, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
+		}
+
+		// Hybrid search does not yet support vector array (embedding list) fields:
+		// placeholder type is per sub-request and element-level vs embedding-list-level
+		// differentiation is not wired up on this path. Reject range search / iterator /
+		// group by on such fields here; plain top-K stays allowed for now (unchanged
+		// behavior).
+		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if t.rankParams.GetGroupByFieldId() > 0 {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
+			if subIsIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields in hybrid search, fieldName:"+annsField.GetName())
+			}
 		}
 
 		ignoreGrowing := t.IgnoreGrowing
@@ -722,6 +750,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
+	// TEXT type output fields need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
 	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
 	case "always":
 		t.needRequery = true
@@ -730,7 +762,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	case "outputvector":
 		fallthrough
 	default:
-		t.needRequery = len(vectorOutputFields) > 0
+		t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
 	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
@@ -775,13 +807,28 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 
-	// For ArrayOfVector fields with group by:
-	// 1. Embedding list search does not support group by
-	// 2. Element-level search only supports group by PK (doc-level dedup)
-	if queryInfo.GetGroupByFieldId() > 0 {
-		annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
-		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if isEmbeddingListPlaceholderType(placeholderType) {
+	// For ArrayOfVector fields, the placeholder type decides the search semantics:
+	// - Element-level (plain vector placeholder): behaves like a normal single-vector
+	//   search; supports range search, iterator, and group by primary key.
+	// - Embedding-list-level (multi-search-multi): does not support range search,
+	//   iterator, or group by (other than the PK case above).
+	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
+	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
+
+		if isEmbList {
+			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
+				return merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for multi-search-multi on embedding list fields")
+			}
+			if t.isIterator {
+				return merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for multi-search-multi on embedding list fields")
+			}
+		}
+
+		if queryInfo.GetGroupByFieldId() > 0 {
+			if isEmbList {
 				return merr.WrapErrParameterInvalid("", "",
 					"group by is not supported for multi-search-multi on embedding list fields")
 			}
@@ -861,7 +908,11 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 
 	hasFilter := dsl != "" || len(exprTemplateValues) > 0
-	searchType := searchInfo.DetermineSearchType(hasFilter)
+	searchType := internalpb.SearchType_DEFAULT
+	// if function score is not nil, set searchType to DEFAULT, optimizations will be disabled in queryhook
+	if t.request.GetFunctionScore() == nil {
+		searchType = searchInfo.DetermineSearchType(hasFilter)
+	}
 
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
@@ -1099,6 +1150,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	searchReq := shallowcopy.ShallowCopySearchRequest(t.SearchRequest, nodeID)
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
@@ -1151,12 +1203,16 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 			}
 		}
 	}
-	// Currently, we get vectors by requery. Once we support getting vectors from search,
+	// TEXT type output fields also need requery since TEXT data is stored as LOB references
+	textOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
+	// Currently, we get vectors and TEXT by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
-	if len(vectorOutputFields) > 0 {
+	if len(vectorOutputFields) > 0 || len(textOutputFields) > 0 {
 		return math.MaxInt64, nil
 	}
-	// If no vector field as output, no need to requery.
+	// If no vector or TEXT field as output, no need to requery.
 	return 0, nil
 
 	//outputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {

@@ -1789,6 +1789,10 @@ func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.
 	return merr.Success(), nil
 }
 
+func (coord *MixCoordMock) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest, opts ...grpc.CallOption) (*datapb.CommitBackfillResultResponse, error) {
+	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)

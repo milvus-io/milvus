@@ -86,6 +86,10 @@ message QueryInfo {
   string json_path = 14;
   schema.DataType json_type = 15;
   bool strict_cast = 16;
+  float search_topk_ratio = 17;
+  float refine_topk_ratio = 18;
+  // Multi-field group by: list of field IDs for composite grouping
+  repeated int64 group_by_field_ids = 19;
 }
 
 message ColumnInfo {
@@ -349,7 +353,14 @@ message QueryPlanNode {
   repeated int64 group_by_field_ids = 4;
   repeated Aggregate aggregates = 5;
   repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
+  optional QueryIteratorCursor query_iterator_cursor = 7;
 };
+
+message QueryIteratorCursor {
+  optional int64 last_int_pk = 1;
+  optional string last_str_pk = 2;
+  int64 last_element_offset = 3;
+}
 
 enum FunctionType{
   FunctionTypeWeight = 0;

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -23,6 +24,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "Utils.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
@@ -31,6 +33,7 @@
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 
 namespace milvus::index {
@@ -80,8 +83,38 @@ class VectorIndex : public IndexBase {
     virtual const bool
     HasRawData() const override = 0;
 
+    virtual bool
+    IsIndexRefineEnabled() const = 0;
+
+    virtual knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                  const BitsetView& bitset,
+                  const int64_t* labels,
+                  size_t labels_len,
+                  bool is_cosine,
+                  milvus::OpContext* op_context = nullptr) const {
+        return knowhere::expected<knowhere::DataSetPtr>::Err(
+            knowhere::Status::not_implemented,
+            "CalcDistByIDs not supported for current index type");
+    }
+
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
+
+    /**
+     * @brief Retrieve embedding lists by their IDs from the index.
+     *
+     * @param dataset Contains the embedding list IDs (rows = count, ids = el_ids)
+     * @param metric_type The metric type (e.g., MAX_SIM, MAX_SIM_IP)
+     * @return A pair of (raw_vector_data, offsets) where offsets has size count+1
+     *         and raw_vector_data contains all vectors concatenated.
+     */
+    virtual std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr dataset,
+                    const std::string& metric_type) const {
+        ThrowInfo(NotImplemented,
+                  "GetEmbListByIds not supported for current index type");
+    }
 
     virtual std::unique_ptr<
         const knowhere::sparse::SparseRow<SparseValueType>[]>
@@ -152,11 +185,10 @@ class VectorIndex : public IndexBase {
 
     void
     UpdateValidData(const bool* valid_data, int64_t count) {
-        offset_mapping_.BuildIncremental(
-            valid_data,
-            count,
-            offset_mapping_.GetTotalCount(),
-            offset_mapping_.GetNextPhysicalOffset());
+        offset_mapping_.Append(valid_data,
+                               count,
+                               offset_mapping_.GetTotalCount(),
+                               offset_mapping_.GetValidCount());
     }
 
     void
@@ -198,6 +230,40 @@ class VectorIndex : public IndexBase {
     }
 
  protected:
+    template <typename T>
+    static std::vector<uint8_t>
+    DecodeVectorByIdsResult(const knowhere::DataSetPtr& result) {
+        auto tensor = result->GetTensor();
+        auto row_num = result->GetRows();
+        auto dim = result->GetDim();
+        size_t data_size =
+            static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * row_num;
+        std::vector<uint8_t> raw_data(data_size);
+        std::memcpy(raw_data.data(), tensor, data_size);
+        return raw_data;
+    }
+
+    template <typename T>
+    static std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    DecodeEmbListByIdsResult(const knowhere::DataSetPtr& result) {
+        auto tensor = result->GetTensor();
+        auto dim = result->GetDim();
+        auto num_el_ids = result->GetRows();
+        const size_t* offsets_ptr =
+            result->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        AssertInfo(offsets_ptr != nullptr,
+                   "EMB_LIST_OFFSET not found in result");
+
+        size_t total_vecs = offsets_ptr[num_el_ids];
+        size_t data_size =
+            static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * total_vecs;
+        std::vector<uint8_t> raw_data(data_size);
+        std::memcpy(raw_data.data(), tensor, data_size);
+
+        std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
+        return {std::move(raw_data), std::move(offsets)};
+    }
+
     milvus::OffsetMapping offset_mapping_;
 
  private:

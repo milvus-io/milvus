@@ -53,6 +53,15 @@ type columnBasedDataOption struct {
 	partitionName string
 	columns       []column.Column
 	partialUpdate bool
+
+	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
+	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
+	deferredErr error
+
+	// partialOps carries per-field FieldPartialUpdateOp directives. Keyed by
+	// field name. Entries with REPLACE (or nil) are treated as no-ops and are
+	// not serialized onto the wire.
+	partialOps map[string]*schemapb.FieldPartialUpdateOp
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -262,6 +271,109 @@ func (opt *columnBasedDataOption) WithInt8VectorColumn(colName string, dim int, 
 	return opt.WithColumns(column)
 }
 
+// WithStructArrayColumn appends a struct-array column built from a row-based representation,
+// inferring the per-sub-field array type from the corresponding field in `structSchema`.
+//
+// `rows` is a per-collection-row list; each entry is a map keyed by sub-field name. The value
+// for a scalar sub-field must be `[]<T>` (e.g. []int32, []string); the value for a vector
+// sub-field must be `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
+//
+// Example:
+//
+//	structSchema := entity.NewStructSchema().
+//	    WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256)).
+//	    WithField(entity.NewField().WithName("clip_emb").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+//	rows := []map[string]any{
+//	    {"clip_str": []string{"a", "b"}, "clip_emb": [][]float32{v1, v2}},
+//	    {"clip_str": []string{"c"},      "clip_emb": [][]float32{v3}},
+//	}
+//	opt.WithStructArrayColumn("clips", structSchema, rows)
+func (opt *columnBasedDataOption) WithStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) *columnBasedDataOption {
+	col, err := buildStructArrayColumn(colName, structSchema, rows)
+	if err != nil {
+		// Defer error reporting to InsertRequest/UpsertRequest so the builder chain stays valid.
+		if opt.deferredErr == nil {
+			opt.deferredErr = errors.Wrapf(err, "WithStructArrayColumn(%q)", colName)
+		}
+		return opt
+	}
+	return opt.WithColumns(col)
+}
+
+func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) (column.Column, error) {
+	if structSchema == nil {
+		return nil, errors.New("structSchema is required for WithStructArrayColumn")
+	}
+	subColumns := make([]column.Column, 0, len(structSchema.Fields))
+	for _, sub := range structSchema.Fields {
+		subColumn, err := newStructSubColumn(sub)
+		if err != nil {
+			return nil, err
+		}
+		subColumns = append(subColumns, subColumn)
+	}
+	structCol := column.NewColumnStructArray(colName, subColumns)
+	for i, row := range rows {
+		if err := structCol.AppendValue(row); err != nil {
+			return nil, errors.Wrapf(err, "row %d", i)
+		}
+	}
+	return structCol, nil
+}
+
+func newStructSubColumn(field *entity.Field) (column.Column, error) {
+	switch field.DataType {
+	case entity.FieldTypeBool:
+		return column.NewColumnBoolArray(field.Name, nil), nil
+	case entity.FieldTypeInt8:
+		return column.NewColumnInt8Array(field.Name, nil), nil
+	case entity.FieldTypeInt16:
+		return column.NewColumnInt16Array(field.Name, nil), nil
+	case entity.FieldTypeInt32:
+		return column.NewColumnInt32Array(field.Name, nil), nil
+	case entity.FieldTypeInt64:
+		return column.NewColumnInt64Array(field.Name, nil), nil
+	case entity.FieldTypeFloat:
+		return column.NewColumnFloatArray(field.Name, nil), nil
+	case entity.FieldTypeDouble:
+		return column.NewColumnDoubleArray(field.Name, nil), nil
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		return column.NewColumnVarCharArray(field.Name, nil), nil
+	case entity.FieldTypeFloatVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBFloat16Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeBinaryVector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
+	case entity.FieldTypeInt8Vector:
+		dim, err := field.GetDim()
+		if err != nil {
+			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
+		}
+		return column.NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
+	default:
+		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
+	}
+}
+
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
 	opt.partitionName = partitionName
 	return opt
@@ -272,11 +384,67 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 	return opt
 }
 
+// WithArrayAppend declares that the Array field `fieldName` should be merged
+// with ARRAY_APPEND semantics during an Upsert. The server implicitly enables
+// partial_update when any non-REPLACE op is present, so callers do not need
+// to also invoke WithPartialUpdate(true).
+func (opt *columnBasedDataOption) WithArrayAppend(fieldName string) *columnBasedDataOption {
+	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_APPEND)
+}
+
+// WithArrayRemove declares that the Array field `fieldName` should be merged
+// with ARRAY_REMOVE semantics during an Upsert. See WithArrayAppend for the
+// implicit partial_update promotion.
+func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBasedDataOption {
+	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
+}
+
+// WithFieldPartialOp attaches an explicit FieldPartialUpdateOp to the field
+// with name `fieldName`. Intended for advanced callers; typical users should
+// prefer the op-specific helpers (WithArrayAppend, WithArrayRemove).
+func (opt *columnBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *columnBasedDataOption {
+	if op == schemapb.FieldPartialUpdateOp_REPLACE {
+		// REPLACE is the default; clear any prior directive rather than
+		// transmitting a no-op message.
+		if opt.partialOps != nil {
+			delete(opt.partialOps, fieldName)
+		}
+		return opt
+	}
+	if opt.partialOps == nil {
+		opt.partialOps = make(map[string]*schemapb.FieldPartialUpdateOp)
+	}
+	opt.partialOps[fieldName] = &schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op}
+	return opt
+}
+
+// buildFieldOps materializes the recorded FieldPartialUpdateOp directives
+// into a proto-ready slice. Only non-REPLACE ops are emitted — REPLACE is
+// the on-wire default and emitting it would waste bytes on every upsert.
+//
+// The returned slice is independent of the input fieldsData; a field
+// referenced by an op that was not in fieldsData is still emitted so the
+// server can surface a validation error rather than silently drop the
+// op. Client-side filtering would hide user typos.
+func (opt *columnBasedDataOption) buildFieldOps() []*schemapb.FieldPartialUpdateOp {
+	if len(opt.partialOps) == 0 {
+		return nil
+	}
+	out := make([]*schemapb.FieldPartialUpdateOp, 0, len(opt.partialOps))
+	for _, op := range opt.partialOps {
+		out = append(out, op)
+	}
+	return out
+}
+
 func (opt *columnBasedDataOption) CollectionName() string {
 	return opt.collName
 }
 
 func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err
@@ -291,9 +459,20 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 }
 
 func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err
+	}
+	// Materialize any WithArrayAppend/WithArrayRemove/WithFieldPartialOp
+	// directives into UpsertRequest.field_ops. Auto-promote partial_update
+	// when any non-REPLACE op is present.
+	fieldOps := opt.buildFieldOps()
+	partialUpdate := opt.partialUpdate
+	if len(fieldOps) > 0 {
+		partialUpdate = true
 	}
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
@@ -301,7 +480,8 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
-		PartialUpdate:   opt.partialUpdate,
+		PartialUpdate:   partialUpdate,
+		FieldOps:        fieldOps,
 	}, nil
 }
 
@@ -357,12 +537,18 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	if err != nil {
 		return nil, err
 	}
+	fieldOps := opt.buildFieldOps()
+	partialUpdate := opt.partialUpdate
+	if len(fieldOps) > 0 {
+		partialUpdate = true
+	}
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
-		PartialUpdate:  opt.partialUpdate,
+		PartialUpdate:  partialUpdate,
+		FieldOps:       fieldOps,
 	}, nil
 }
 

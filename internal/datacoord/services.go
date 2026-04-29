@@ -302,7 +302,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -313,6 +312,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 			ChannelName:          req.GetVchannel(),
 			StorageVersion:       req.GetStorageVersion(),
 			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+			SchemaVersion:        req.GetSchemaVersion(),
 		},
 	)
 	if err != nil {
@@ -414,6 +414,66 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+
+	// Calculate schema version consistency proportion
+	// Only report when schema version > 0 (i.e., AlterCollectionSchema has been called)
+	collection := s.meta.GetCollection(req.CollectionID)
+	if collection != nil && collection.Schema != nil && collection.Schema.GetVersion() > 0 {
+		collectionSchemaVersion := collection.Schema.GetVersion()
+		// Growing segments are excluded from the consistency gate as a workaround until
+		// companion PR #48865 lands. Streaming-created growing segments currently carry
+		// SchemaVersion=0 because the propagation chain in segment_alloc_worker.go and
+		// msg_handler_impl.go does not yet pass SchemaVersion through. Including them
+		// would cause the gate to never reach 100% under any write traffic, permanently
+		// blocking subsequent schema-change DDLs.
+		//
+		// This is safe: growing segments will eventually be sealed/flushed, at which
+		// point the backfill policy picks them up and updates their SchemaVersion. The
+		// consistency gate only needs to prove that all data eligible for backfill has
+		// been backfilled — growing segments are not yet eligible.
+		//
+		// L0 segments are also excluded: they only contain delete logs, so there is no
+		// user data to backfill and no schema version consistency to track.
+		//
+		// TODO: remove the Growing exclusion once #48865 lands and streaming-created
+		// segments carry the correct SchemaVersion from creation.
+		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+			return isSegmentHealthy(si) &&
+				!si.GetIsImporting() &&
+				!si.GetIsInvisible() &&
+				si.GetLevel() != datapb.SegmentLevel_L0 &&
+				si.GetState() != commonpb.SegmentState_Growing
+		}))
+
+		// When there are no segments the collection is trivially consistent; emit nothing so the
+		// proxy treats the absent keys as "no backfill in progress" and allows the DDL through.
+		if len(segments) > 0 {
+			consistentCount := 0
+			for _, segment := range segments {
+				if segment.GetSchemaVersion() == collectionSchemaVersion {
+					consistentCount++
+				}
+			}
+			log.Info("calculated schema version consistency",
+				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				zap.Int("totalSegments", len(segments)),
+				zap.Int("consistentSegments", consistentCount))
+			// Emit raw integer counts instead of a floating-point proportion to avoid the rounding
+			// hazard where e.g. 99999/100000 = 99.999% formats as "100.00" with "%.2f" and would
+			// falsely satisfy a 100% gate check.  Proxy compares these as exact integers.
+			resp.Stats = append(resp.Stats,
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionConsistentSegmentsKey,
+					Value: strconv.Itoa(consistentCount),
+				},
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionTotalSegmentsKey,
+					Value: strconv.Itoa(len(segments)),
+				},
+			)
+		}
+	}
+
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }
@@ -852,7 +912,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		segment2InsertChannel[segment.ID] = segment.InsertChannel
 		binlogs := segment.GetBinlogs()
 
-		if len(binlogs) == 0 {
+		if len(binlogs) == 0 && segment.GetManifestPath() == "" {
 			flushedIDs.Remove(id)
 			continue
 		}
@@ -1005,6 +1065,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			IsSorted:            segment.GetIsSorted(),
 			IsSortedByNamespace: segment.GetIsSortedByNamespace(),
 			ManifestPath:        segment.GetManifestPath(),
+			DataVersion:         segment.GetDataVersion(),
 		})
 	}
 
@@ -2618,16 +2679,6 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}, nil
 	}
 
-	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
-	allocatedJobID, err := s.allocator.AllocID(ctx)
-	if err != nil {
-		log.Warn("failed to allocate job ID", zap.Error(err))
-		return &datapb.RefreshExternalCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
-
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
 	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
@@ -2637,6 +2688,37 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 		}, nil
 	}
 	defer b.Close()
+
+	// Synchronous duplicate detection at the RPC edge. The WAL ack callback
+	// already rejects duplicates, but it does so AFTER the RPC has already
+	// returned a fresh jobID to the client; that jobID then dies silently and
+	// the client polls it forever. Surfacing the in-progress jobID here
+	// (along with merr.ErrTaskDuplicate) lets the caller switch to polling
+	// the real job. The remaining TOCTOU window between this read and the
+	// ack-side AddJob falls back to the existing ack-side rejection, i.e.
+	// today's behavior — never worse.
+	if active := s.externalCollectionRefreshManager.GetActiveJobByCollectionID(req.GetCollectionId()); active != nil {
+		log.Info("refresh job already in progress, rejecting at RPC edge",
+			zap.Int64("existingJobID", active.GetJobId()),
+			zap.String("existingState", active.GetState().String()))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrTaskDuplicate(
+				"refresh_external_collection",
+				fmt.Sprintf("refresh job %d is already in progress for collection %s; poll that jobID or wait for it to complete",
+					active.GetJobId(), req.GetCollectionName()))),
+			JobId: active.GetJobId(),
+		}, nil
+	}
+
+	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
+	allocatedJobID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("failed to allocate job ID", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
 
 	// Build and broadcast the message
 	msg := message.NewRefreshExternalCollectionMessageBuilderV2().

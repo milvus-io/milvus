@@ -34,6 +34,8 @@
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include <arrow/array.h>
+#include <arrow/record_batch.h>
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -175,6 +177,7 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
                    result.status().ToString());
 
         auto array_stream = result.ValueOrDie();
+
         arrow::Status status =
             arrow::ExportRecordBatchReader(array_stream, out_stream);
         AssertInfo(status.ok(),

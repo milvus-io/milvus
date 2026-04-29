@@ -285,7 +285,7 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
             auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
@@ -624,7 +624,7 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (uint32_t i = 0; i < n; i++) {
-            if (nullable && !data->is_valid(i)) {
+            if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 BuildKeyStatsForNullRow();
             } else {
                 auto json_str =
@@ -636,10 +636,9 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 // should be handled as null row
                 if (strlen(json_str) == 0) {
                     BuildKeyStatsForNullRow();
-                    continue;
+                } else {
+                    BuildKeyStatsForRow(json_str, row_id);
                 }
-
-                BuildKeyStatsForRow(json_str, row_id);
             }
             row_id++;
         }

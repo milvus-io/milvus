@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -106,6 +105,22 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				udpates.ConsistencyLevel = lv
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
+		case common.CollectionExternalSource:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSource = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
+		case common.CollectionExternalSpec:
+			if udpates.Schema == nil {
+				udpates.Schema = &schemapb.CollectionSchema{}
+			}
+			udpates.Schema.ExternalSpec = prop.GetValue()
+			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
 		}
@@ -147,16 +162,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}
 
 		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
-		schema := &schemapb.CollectionSchema{
-			Name:               coll.Name,
-			Description:        coll.Description,
-			AutoID:             coll.AutoID,
-			Fields:             model.MarshalFieldModels(coll.Fields),
-			StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-			Functions:          model.MarshalFunctionModels(coll.Functions),
-			EnableDynamicField: coll.EnableDynamicField,
-			Properties:         newPropsKeyValuePairs,
-			Version:            coll.SchemaVersion,
+		schema := coll.ToCollectionSchemaPB()
+		schema.Properties = newPropsKeyValuePairs
+		// Preserve ExternalSource/ExternalSpec from current collection state
+		// unless this alter is itself updating them (refresh-completion sync).
+		if udpates.Schema != nil && udpates.Schema.ExternalSource != "" {
+			schema.ExternalSource = udpates.Schema.ExternalSource
+		}
+		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
+			schema.ExternalSpec = udpates.Schema.ExternalSpec
 		}
 		udpates.Schema = schema
 	}
@@ -228,17 +242,9 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 
 	fieldSchema.FieldID = nextFieldID(coll)
-	schema := &schemapb.CollectionSchema{
-		Name:               coll.Name,
-		Description:        coll.Description,
-		AutoID:             coll.AutoID,
-		Fields:             model.MarshalFieldModels(coll.Fields),
-		StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
-		Functions:          model.MarshalFunctionModels(coll.Functions),
-		EnableDynamicField: targetValue,
-		Properties:         coll.Properties,
-		Version:            coll.SchemaVersion + 1,
-	}
+	schema := coll.ToCollectionSchemaPB()
+	schema.Version = coll.SchemaVersion + 1
+	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)

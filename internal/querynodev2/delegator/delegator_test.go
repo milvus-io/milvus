@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -174,7 +175,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 }
 
@@ -209,7 +210,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
 	})
 
@@ -248,7 +249,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
 	})
 }
@@ -1472,7 +1473,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.Require().NoError(err)
 }
 
@@ -2192,7 +2193,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2216,7 +2217,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2240,7 +2241,7 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 			vchannelName:               "test-channel",
 			latestTsafe:                atomic.NewUint64(0),
 			catchingUpStreamingData:    atomic.NewBool(true),
-			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
@@ -2303,7 +2304,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.Error(err)
 	})
 
@@ -2312,7 +2313,7 @@ func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
 		manager := segments.NewManager()
 		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 		s.NoError(err)
 	})
 }

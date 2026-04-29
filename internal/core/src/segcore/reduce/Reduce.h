@@ -20,9 +20,12 @@
 #include <variant>
 #include <vector>
 
+#include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/Tracer.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "knowhere/dataset.h"
 #include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
 #include "segcore/ReduceStructure.h"
@@ -37,17 +40,22 @@ struct SearchResultDataBlobs {
 
 class ReduceHelper {
  public:
-    explicit ReduceHelper(std::vector<SearchResult*>& search_results,
-                          milvus::query::Plan* plan,
-                          int64_t* slice_nqs,
-                          int64_t* slice_topKs,
-                          int64_t slice_num,
-                          tracer::TraceContext* trace_ctx)
+    explicit ReduceHelper(
+        std::vector<SearchResult*>& search_results,
+        milvus::query::Plan* plan,
+        const milvus::query::PlaceholderGroup* placeholder_group,
+        int64_t* slice_nqs,
+        int64_t* slice_topKs,
+        int64_t slice_num,
+        tracer::TraceContext* trace_ctx,
+        milvus::OpContext* op_ctx = nullptr)
         : search_results_(search_results),
           plan_(plan),
+          placeholder_group_(placeholder_group),
           slice_nqs_(slice_nqs, slice_nqs + slice_num),
           slice_topKs_(slice_topKs, slice_topKs + slice_num),
-          trace_ctx_(trace_ctx) {
+          trace_ctx_(trace_ctx),
+          op_ctx_(op_ctx) {
         Initialize();
     }
 
@@ -75,7 +83,43 @@ class ReduceHelper {
                               std::vector<int64_t>& real_topks);
 
     void
+    FilterInvalidSearchResults();
+
+    void
     FillPrimaryKey();
+
+    void
+    TruncateToRefineTopk();
+
+    void
+    TruncateSearchResultForOneNQ(int64_t qi, int64_t topk);
+
+    void
+    ResetMergeState();
+
+    void
+    RefineDistances();
+
+    bool
+    CanUseGlobalRefine() const;
+
+    virtual bool
+    IsSearchResultRefineEnabled(SearchResult* search_result) const;
+
+    void
+    RefineOneSegment(SearchResult* search_result,
+                     FieldId field_id,
+                     bool is_cosine,
+                     bool is_negated,
+                     int64_t dim,
+                     int64_t element_size,
+                     const char* dense_blob);
+
+    void
+    ApplyRefinedOrderForOneNQ(SearchResult* search_result,
+                              size_t nq_begin,
+                              std::vector<size_t>& indices,
+                              const std::vector<float>& new_distances);
 
     void
     ReduceResultData();
@@ -117,6 +161,7 @@ class ReduceHelper {
  protected:
     std::vector<SearchResult*>& search_results_;
     milvus::query::Plan* plan_;
+    const milvus::query::PlaceholderGroup* placeholder_group_;
     int64_t num_slices_;
     std::vector<int64_t> slice_nqs_prefix_sum_;
     int64_t num_segments_;
@@ -133,6 +178,7 @@ class ReduceHelper {
     std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
     tracer::TraceContext* trace_ctx_;
     StorageCost total_search_storage_cost_;
+    milvus::OpContext* op_ctx_{nullptr};
 };
 
 }  // namespace milvus::segcore

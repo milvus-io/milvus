@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -80,6 +81,8 @@ const (
 	SearchIterBatchSizeKey = "search_iter_batch_size"
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
+	QueryIterLastPKKey     = "query_iter_last_pk"
+	QueryIterLastOffsetKey = "query_iter_last_element_offset"
 	QueryGroupByFieldsKey  = "group_by_fields"
 	OrderByFieldsKey       = "order_by_fields"
 	PipelineTraceKey       = "pipeline_trace"
@@ -426,7 +429,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.DbName = t.GetDbName()
 
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
-	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
 
@@ -464,6 +467,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate collection name
 	if err := validateCollectionName(t.schema.Name); err != nil {
+		return err
+	}
+
+	// Reject reserved system field names supplied by the user before any
+	// server-side injection runs. __virtual_pk__ is the internal PK name
+	// auto-injected for external collections; RowID and Timestamp are
+	// segcore-internal columns. Allowing a user field under these names
+	// would create a namespace trap for any tooling that assumes they are
+	// system-owned (issue #49314). Must run before
+	// injectVirtualPKForExternalCollection so the check only sees
+	// user-supplied fields.
+	if err := validateReservedFieldNames(t.schema); err != nil {
 		return err
 	}
 
@@ -699,7 +714,7 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}
-	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, newFieldSchema.GetName()) {
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))
 	}
 	if newFieldSchema.GetIsPrimaryKey() {
@@ -861,6 +876,15 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 				outName,
 			)
 		}
+	}
+
+	// Physical backfill is currently only implemented for BM25 in the datanode backfill
+	// compactor. Reject unsupported types early so the request never reaches RootCoord
+	// and no segment is left in an unrecoverable stale-schema state.
+	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg(
+			"physical backfill is currently only supported for BM25 functions, got %s",
+			funcSchemas[0].GetType().String())
 	}
 
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
@@ -1032,7 +1056,26 @@ func (t *truncateCollectionTask) OnEnqueue() error {
 }
 
 func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
-	return validateCollectionName(t.CollectionName)
+	if err := validateCollectionName(t.CollectionName); err != nil {
+		return err
+	}
+	// Truncate is a destructive op on internal segments. External collections
+	// have no internal data to truncate — their authoritative data lives in
+	// the user's object store and is materialized by RefreshExternalCollection.
+	// Allowing truncate would either no-op silently (misleading) or wipe the
+	// generated segment metadata while leaving the external source intact,
+	// putting the collection in an inconsistent state from which the next
+	// load/search would fail. Reject up front; users who want to reset the
+	// view should use RefreshExternalCollection or DropCollection.
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	if typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"truncate is not supported on external collections; use RefreshExternalCollection to refresh the data view, or DropCollection to remove it")
+	}
+	return nil
 }
 
 func (t *truncateCollectionTask) Execute(ctx context.Context) error {
@@ -1225,6 +1268,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
 	t.result.Schema.ExternalSource = result.Schema.ExternalSource
+	// Pass spec through unredacted; the public proxy.DescribeCollection
+	// entry point applies RedactExternalSpec uniformly across cached and
+	// remote provider paths so internal-only callers of this task path
+	// (if any) still observe raw creds for FFI auth.
 	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
 	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
 	t.result.CollectionID = result.CollectionID
@@ -1664,6 +1711,24 @@ func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartit
 func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+
+	// External source/spec form an atomic tuple bound to the physical data
+	// layout. The only supported way to change them is RefreshExternalCollection,
+	// which applies them atomically and re-runs the data load pipeline.
+	for _, prop := range t.GetProperties() {
+		if prop.GetKey() == common.CollectionExternalSource || prop.GetKey() == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot alter %s via alter_collection_properties; use RefreshExternalCollection instead",
+				prop.GetKey())
+		}
+	}
+	for _, key := range t.GetDeleteKeys() {
+		if key == common.CollectionExternalSource || key == common.CollectionExternalSpec {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot delete %s; external source/spec are immutable post-create except via RefreshExternalCollection",
+				key)
+		}
 	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
@@ -3738,6 +3803,7 @@ func (t *HighlightTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	t.Channel = channel
 	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
 	if err != nil {

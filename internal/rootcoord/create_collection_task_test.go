@@ -914,6 +914,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-west-2","anonymous":"true","cloud_provider":"aws"}}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -948,6 +949,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "pk",
@@ -980,6 +982,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/object",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:          "text_field",
@@ -1468,6 +1471,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1498,7 +1504,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1522,6 +1528,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1552,7 +1561,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1997,6 +2006,7 @@ func TestNamespaceProperty(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name:            collectionName,
 			ExternalSource:  "s3://bucket/path",
+			ExternalSpec:    `{"format":"parquet"}`,
 			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{

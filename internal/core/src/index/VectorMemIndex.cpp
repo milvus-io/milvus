@@ -646,6 +646,12 @@ VectorMemIndex<T>::HasRawData() const {
 }
 
 template <typename T>
+bool
+VectorMemIndex<T>::IsIndexRefineEnabled() const {
+    return index_.IsIndexRefineEnabled();
+}
+
+template <typename T>
 std::vector<uint8_t>
 VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto index_type = GetIndexType();
@@ -665,14 +671,24 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
                   "failed to get vector, {}",
                   KnowhereStatusString(res.error()));
     }
-    auto tensor = res.value()->GetTensor();
-    auto row_num = res.value()->GetRows();
-    auto dim = res.value()->GetDim();
-    int64_t data_size = milvus::GetVecRowSize<T>(dim) * row_num;
-    std::vector<uint8_t> raw_data;
-    raw_data.resize(data_size);
-    memcpy(raw_data.data(), tensor, data_size);
-    return raw_data;
+    return this->template DecodeVectorByIdsResult<T>(res.value());
+}
+
+template <typename T>
+std::pair<std::vector<uint8_t>, std::vector<size_t>>
+VectorMemIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
+                                   const std::string& metric_type) const {
+    if (dataset->GetRows() == 0) {
+        return {{}, {0}};
+    }
+
+    auto res = index_.GetEmbListByIds(dataset, metric_type);
+    if (!res.has_value()) {
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "failed to get emb list, " + KnowhereStatusString(res.error()));
+    }
+    return this->template DecodeEmbListByIdsResult<T>(res.value());
 }
 
 template <typename T>
@@ -915,6 +931,18 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             deserialize_duration)
             .count());
+}
+
+template <typename T>
+knowhere::expected<knowhere::DataSetPtr>
+VectorMemIndex<T>::CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                                 const BitsetView& bitset,
+                                 const int64_t* labels,
+                                 size_t labels_len,
+                                 bool is_cosine,
+                                 milvus::OpContext* op_context) const {
+    return index_.CalcDistByIDs(
+        query_dataset, bitset, labels, labels_len, is_cosine, op_context);
 }
 
 template class VectorMemIndex<float>;

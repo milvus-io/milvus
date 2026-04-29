@@ -36,9 +36,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// manifestRecordWriter is the common interface for both packedRecordManifestWriter
+// and packedTextManifestWriter used for V3 storage writes.
+type manifestRecordWriter interface {
+	storage.RecordWriter
+	GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64
+	GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64
+	GetWrittenPaths(columnGroup typeutil.UniqueID) string
+	GetWrittenManifest() string
+	GetWrittenRowNum() int64
+}
 
 type BulkPackWriterV3 struct {
 	*BulkPackWriterV2
@@ -226,7 +238,7 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 	columnGroups := bw.columnGroups
 
 	var err error
-	doWrite := func(w storage.RecordWriter) error {
+	doWrite := func(w manifestRecordWriter) error {
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
 				log.Error("failed to close writer after write failed", zap.Error(closeErr))
@@ -252,7 +264,20 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 	if err != nil {
 		return nil, "", err
 	}
-	w, err := storage.NewPackedRecordManifestWriter(basePath, version, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+
+	// LOB base path is at partition level: {basePath}/.. = {root}/insert_log/{coll}/{part}
+	partitionBasePath := path.Dir(basePath)
+	textColumnConfigs := buildTextColumnConfigs(bw.schema, partitionBasePath)
+	var w manifestRecordWriter
+	if len(textColumnConfigs) > 0 {
+		log.Info("using TEXT-aware writer for import",
+			zap.Int("textFieldCount", len(textColumnConfigs)),
+			zap.String("basePath", basePath))
+		w, err = storage.NewPackedTextManifestWriter("", basePath, version, bw.schema,
+			bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, textColumnConfigs)
+	} else {
+		w, err = storage.NewPackedRecordManifestWriter(basePath, version, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -575,4 +600,24 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack)
 
 	// Return empty map - stats are in manifest
 	return make(map[int64]*datapb.FieldBinlog), nil
+}
+
+// buildTextColumnConfigs builds TextColumnConfig for all TEXT fields in the schema.
+// partitionBasePath is the partition-level path: {root}/insert_log/{coll}/{part}
+// Per-column LOB path: {partitionBasePath}/lobs/{field_id}
+func buildTextColumnConfigs(schema *schemapb.CollectionSchema, partitionBasePath string) []packed.TextColumnConfig {
+	var configs []packed.TextColumnConfig
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			fieldID := field.GetFieldID()
+			configs = append(configs, packed.TextColumnConfig{
+				FieldID:             fieldID,
+				LobBasePath:         path.Join(partitionBasePath, "lobs", strconv.FormatInt(fieldID, 10)),
+				InlineThreshold:     paramtable.Get().DataNodeCfg.TextInlineThreshold.GetAsInt64(),
+				MaxLobFileBytes:     paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.GetAsInt64(),
+				FlushThresholdBytes: paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.GetAsInt64(),
+			})
+		}
+	}
+	return configs
 }

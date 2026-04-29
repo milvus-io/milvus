@@ -44,9 +44,9 @@ type WriteBuffer interface {
 	// HasSegment checks whether certain segment exists in this buffer.
 	HasSegment(segmentID int64) bool
 	// CreateNewGrowingSegment creates a new growing segment in the buffer.
-	CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)
+	CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32)
 	// BufferData is the method to buffer dml data msgs.
-	BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
+	BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
 	// FlushTimestamp set flush timestamp for write buffer
 	SetFlushTimestamp(flushTs uint64)
 	// GetFlushTimestamp get current flush timestamp
@@ -65,6 +65,8 @@ type WriteBuffer interface {
 	MemorySize() int64
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
+	// HasTextFields returns true if the collection on this channel has TEXT fields.
+	HasTextFields() bool
 	// Close is the method to close and sink current buffer data.
 	Close(ctx context.Context, drop bool)
 }
@@ -140,6 +142,9 @@ type writeBufferBase struct {
 	errHandler           func(err error)
 	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
+	// TEXT collection flag - when true, Insert data is flushed by QueryNode Growing Segment
+	hasTextFields bool
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -156,6 +161,15 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		return nil, err
 	}
 
+	// Check if collection has TEXT fields
+	hasTextFields := false
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			hasTextFields = true
+			break
+		}
+	}
+
 	wb := &writeBufferBase{
 		channelName:          channel,
 		collectionID:         metacache.Collection(),
@@ -170,6 +184,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		flushTimestamp:       flushTs,
 		errHandler:           option.errorHandler,
 		taskObserverCallback: option.taskObserverCallback,
+		hasTextFields:        hasTextFields,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -218,6 +233,10 @@ func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
 }
 
+func (wb *writeBufferBase) HasTextFields() bool {
+	return wb.hasTextFields
+}
+
 func (wb *writeBufferBase) MemorySize() int64 {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
@@ -231,21 +250,29 @@ func (wb *writeBufferBase) MemorySize() int64 {
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	log := wb.logger
+
 	wb.mut.Lock()
-	defer wb.mut.Unlock()
 
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
+		wb.mut.Unlock()
 		log.Warn("evict buffer before buffering data")
 		return
 	}
 
 	ts := wb.checkpoint.GetTimestamp()
-
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
+
+	var futures []*conc.Future[struct{}]
 	if len(segmentIDs) > 0 {
 		log.Info("evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
-		conc.AwaitAll(wb.syncSegments(context.Background(), segmentIDs)...)
+		futures = wb.syncSegments(context.Background(), segmentIDs)
+	}
+
+	wb.mut.Unlock()
+
+	if len(futures) > 0 {
+		conc.AwaitAll(futures...)
 	}
 }
 
@@ -290,17 +317,23 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 }
 
 func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
+	existingIDs := make([]int64, 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		_, ok := wb.metaCache.GetSegmentByID(segmentID)
 		if !ok {
-			log.Warn("cannot find segment when sealSegments", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
-			return merr.WrapErrSegmentNotFound(segmentID)
+			log.Info("segment not found in WriteBuffer metaCache, skipping seal",
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", wb.channelName))
+			continue
 		}
+		existingIDs = append(existingIDs, segmentID)
 	}
 	// mark segment flushing if segment was growing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
-		metacache.WithSegmentIDs(segmentIDs...),
-		metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	if len(existingIDs) > 0 {
+		wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+			metacache.WithSegmentIDs(existingIDs...),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	}
 	return nil
 }
 
@@ -522,7 +555,7 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 	return hits
 }
 
-func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
+func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) {
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
@@ -545,6 +578,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storageVersion,
 			ManifestPath:   manifestPath,
+			SchemaVersion:  schemaVersion,
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())

@@ -198,7 +198,7 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 		assert.Error(t, v.checkTextFieldData(f, nil))
 	})
 
-	t.Run("max length not found", func(t *testing.T) {
+	t.Run("no max length - text does not require it", func(t *testing.T) {
 		f := &schemapb.FieldData{
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -218,10 +218,10 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 		v := newValidateUtil(withMaxLenCheck())
 
 		err := v.checkTextFieldData(f, fs)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
-	t.Run("length exceeds", func(t *testing.T) {
+	t.Run("length exceeds max - text skips length check", func(t *testing.T) {
 		f := &schemapb.FieldData{
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -247,7 +247,7 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 		v := newValidateUtil(withMaxLenCheck())
 
 		err := v.checkTextFieldData(f, fs)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {

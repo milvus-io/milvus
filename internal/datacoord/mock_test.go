@@ -169,6 +169,10 @@ func (m *mockMixCoord) BatchUpdateManifest(context.Context, *datapb.BatchUpdateM
 	return merr.Success(), nil
 }
 
+func (m *mockMixCoord) CommitBackfillResult(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	return &datapb.CommitBackfillResultResponse{Status: merr.Success()}, nil
+}
+
 func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{
 		Status:           merr.Success(),

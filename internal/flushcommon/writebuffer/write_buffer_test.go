@@ -2,7 +2,9 @@ package writebuffer
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -283,15 +285,130 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		}, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+			return task != nil && task.SegmentID() == 2
+		}), mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
 			return struct{}{}, nil
-		}), nil)
+		}), nil).Once()
 		defer func() {
 			s.wb.mut.Lock()
 			defer s.wb.mut.Unlock()
 			s.wb.buffers = make(map[int64]*segmentBuffer)
 		}()
 		wb.EvictBuffer(GetOldestBufferPolicy(1))
+	})
+
+	s.Run("await_outside_lock", func() {
+		mockAllocator := allocator.NewMockAllocator(s.T())
+		var nextSegmentID atomic.Int64
+		nextSegmentID.Store(1000)
+		secondBufferProgress := make(chan struct{})
+		var allocCallCount atomic.Int64
+		var progressNotified atomic.Bool
+		mockAllocator.EXPECT().AllocOne().RunAndReturn(func() (int64, error) {
+			if allocCallCount.Add(1) == 2 && progressNotified.CompareAndSwap(false, true) {
+				close(secondBufferProgress)
+			}
+			return nextSegmentID.Add(1), nil
+		}).Times(2)
+
+		l0wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+			idAllocator:  mockAllocator,
+			syncPolicies: []SyncPolicy{},
+		})
+		s.Require().NoError(err)
+
+		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+		l0Segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:          1001,
+			PartitionID: 10,
+			Level:       datapb.SegmentLevel_L0,
+		}, nil, nil)
+		s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(l0Segment, true).Maybe()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+		syncStarted := make(chan struct{})
+		releaseSync := make(chan struct{})
+		var releaseSyncClosed atomic.Bool
+		closeReleaseSync := func() {
+			if releaseSyncClosed.CompareAndSwap(false, true) {
+				close(releaseSync)
+			}
+		}
+		defer closeReleaseSync()
+		var syncStartedOnce atomic.Bool
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+			return task != nil && task.SegmentID() == 1001
+		}), mock.Anything).RunAndReturn(
+			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+				if syncStartedOnce.CompareAndSwap(false, true) {
+					close(syncStarted)
+				}
+				return conc.Go[struct{}](func() (struct{}, error) {
+					<-releaseSync
+					return struct{}{}, nil
+				}), nil
+			},
+		).Once()
+
+		firstDeleteMsgs := []*msgstream.DeleteMsg{
+			{
+				DeleteRequest: &msgpb.DeleteRequest{
+					PartitionID: 10,
+					PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+					Timestamps:  []uint64{100},
+				},
+			},
+		}
+		err = l0wb.BufferData(nil, firstDeleteMsgs, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 0)
+		s.Require().NoError(err)
+
+		evictDone := make(chan struct{})
+		go func() {
+			defer close(evictDone)
+			l0wb.EvictBuffer(GetOldestBufferPolicy(1))
+		}()
+
+		select {
+		case <-syncStarted:
+		case <-time.After(3 * time.Second):
+			s.FailNow("SyncData should start before buffering second batch")
+		}
+
+		secondDeleteMsgs := []*msgstream.DeleteMsg{
+			{
+				DeleteRequest: &msgpb.DeleteRequest{
+					PartitionID: 12,
+					PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{12}}}},
+					Timestamps:  []uint64{300},
+				},
+			},
+		}
+
+		bufferDataDone := make(chan error, 1)
+		go func() {
+			bufferDataDone <- l0wb.BufferData(nil, secondDeleteMsgs, &msgpb.MsgPosition{Timestamp: 300}, &msgpb.MsgPosition{Timestamp: 350}, 0)
+		}()
+
+		select {
+		case <-secondBufferProgress:
+			// BufferData made progress under lock before sync release.
+		case <-time.After(3 * time.Second):
+			s.FailNow("BufferData should make progress before sync future is released")
+		}
+
+		closeReleaseSync()
+		select {
+		case err := <-bufferDataDone:
+			s.NoError(err)
+		case <-time.After(3 * time.Second):
+			s.FailNow("BufferData should finish after sync is released")
+		}
+		select {
+		case <-evictDone:
+		case <-time.After(3 * time.Second):
+			s.FailNow("EvictBuffer should finish after sync is released")
+		}
 	})
 }
 

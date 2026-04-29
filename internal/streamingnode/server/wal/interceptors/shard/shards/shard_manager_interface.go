@@ -48,5 +48,12 @@ type ShardManager interface {
 
 	AsyncFlushSegment(signal utils.SealSegmentSignal)
 
+	// AlterCollection updates collection state and, for schema changes, flushes and
+	// fences segment allocation atomically within one critical region.
+	// Returns the IDs of flushed segments (non-empty only for schema changes).
+	AlterCollection(msg message.MutableAlterCollectionMessageV2) ([]int64, error)
+
+	CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error)
+
 	Close()
 }

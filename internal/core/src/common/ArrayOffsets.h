@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -90,13 +91,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     friend class ArrayOffsetsTest;
 
  public:
-    ArrayOffsetsSealed() : element_row_ids_(), row_to_element_start_({0}) {
+    ArrayOffsetsSealed() : row_to_element_start_({0}) {
     }
 
-    ArrayOffsetsSealed(std::vector<int32_t> element_row_ids,
-                       std::vector<int32_t> row_to_element_start)
-        : element_row_ids_(std::move(element_row_ids)),
-          row_to_element_start_(std::move(row_to_element_start)) {
+    explicit ArrayOffsetsSealed(std::vector<int32_t> row_to_element_start)
+        : row_to_element_start_(std::move(row_to_element_start)) {
         AssertInfo(!row_to_element_start_.empty(),
                    "row_to_element_start must have at least one element");
     }
@@ -113,7 +112,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
     int64_t
     GetTotalElementCount() const override {
-        return element_row_ids_.size();
+        return row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
     }
 
     std::pair<int32_t, int32_t>
@@ -144,7 +143,6 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
  private:
-    const std::vector<int32_t> element_row_ids_;
     const std::vector<int32_t> row_to_element_start_;
     int64_t resource_size_{0};
 };
@@ -165,7 +163,7 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     int64_t
     GetTotalElementCount() const override {
         std::shared_lock lock(mutex_);
-        return element_row_ids_.size();
+        return row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
     }
 
     std::pair<int32_t, int32_t>
@@ -202,8 +200,6 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     DrainPendingRows();
 
  private:
-    std::vector<int32_t> element_row_ids_;
-
     std::vector<int32_t> row_to_element_start_;
 
     // Number of rows committed (contiguous from 0)

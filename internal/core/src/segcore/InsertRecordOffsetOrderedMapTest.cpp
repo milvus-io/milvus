@@ -156,19 +156,14 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
     }
 
     // Build ArrayOffsets: each doc has array_len elements
-    // element_row_ids: [0,0,0, 1,1,1, 2,2,2, 3,3,3, 4,4,4]
     // row_to_element_start: [0, 3, 6, 9, 12, 15]
-    std::vector<int32_t> element_row_ids;
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
-        for (int e = 0; e < array_len; e++) {
-            element_row_ids.push_back(doc);
-        }
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 15
 
@@ -179,7 +174,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get());
+                total_elements, view, array_offsets.get(), std::nullopt);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
             ASSERT_EQ(elem_indices[i].size(), array_len)
@@ -195,7 +190,8 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
         BitsetTypeView view(all.data(), total_elements);
         // limit=4: first doc contributes 3 elements, second doc contributes 1
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(4, view, array_offsets.get());
+            this->map_.find_first_n_element(
+                4, view, array_offsets.get(), std::nullopt);
         int total = 0;
         for (auto& indices : elem_indices) {
             total += indices.size();
@@ -217,7 +213,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
         BitsetTypeView view(partial.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get());
+                total_elements, view, array_offsets.get(), std::nullopt);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
             ASSERT_EQ(elem_indices[i].size(), 1);
@@ -232,7 +228,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
         BitsetTypeView view(none.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get());
+                total_elements, view, array_offsets.get(), std::nullopt);
         ASSERT_EQ(doc_offsets.size(), 0);
         ASSERT_EQ(elem_indices.size(), 0);
     }
@@ -245,7 +241,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
         BitsetTypeView view(small.data(), smaller_size);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get());
+                total_elements, view, array_offsets.get(), std::nullopt);
         // Last doc's elements are beyond bitset, should be skipped
         int total = 0;
         for (auto& indices : elem_indices) {
@@ -276,17 +272,13 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element_has_more) {
     }
 
     // Build ArrayOffsets: each doc has array_len elements
-    std::vector<int32_t> element_row_ids;
     std::vector<int32_t> row_to_element_start = {0};
     for (int doc = 0; doc < num; doc++) {
-        for (int e = 0; e < array_len; e++) {
-            element_row_ids.push_back(doc);
-        }
         row_to_element_start.push_back(
             static_cast<int32_t>((doc + 1) * array_len));
     }
-    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-        std::move(element_row_ids), std::move(row_to_element_start));
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
 
     int total_elements = num * array_len;  // 6
 
@@ -297,7 +289,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element_has_more) {
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
             this->map_.find_first_n_element(
-                total_elements, view, array_offsets.get());
+                total_elements, view, array_offsets.get(), std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -317,7 +309,8 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element_has_more) {
         }
         BitsetTypeView view(partial.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(num, view, array_offsets.get());
+            this->map_.find_first_n_element(
+                num, view, array_offsets.get(), std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -333,7 +326,8 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element_has_more) {
         all.reset();
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_n_element(3, view, array_offsets.get());
+            this->map_.find_first_n_element(
+                3, view, array_offsets.get(), std::nullopt);
         int collected = 0;
         for (auto& indices : elem_indices) {
             collected += indices.size();
@@ -344,8 +338,103 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element_has_more) {
     }
 }
 
-REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest,
-                            find_first_n,
-                            find_first_n_element,
-                            find_first_n_element_has_more);
+TYPED_TEST_P(TypedOffsetOrderedMapTest,
+             find_first_n_element_with_iterator_cursor) {
+    auto make_pk = [](int i) {
+        if constexpr (std::is_same_v<std::string, TypeParam>) {
+            return std::to_string(i);
+        } else {
+            return static_cast<TypeParam>(i);
+        }
+    };
+
+    int num = 3;
+    int array_len = 4;
+    for (int i = 0; i < num; i++) {
+        this->insert(make_pk(i));
+    }
+
+    std::vector<int32_t> row_to_element_start = {0};
+    for (int doc = 0; doc < num; doc++) {
+        row_to_element_start.push_back(
+            static_cast<int32_t>((doc + 1) * array_len));
+    }
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+
+    BitsetType bitset(num * array_len);
+    bitset.reset();
+    for (int e = 0; e < array_len; e++) {
+        bitset.set(e);  // Simulate query expr pk >= 1.
+    }
+    BitsetTypeView view(bitset.data(), bitset.size());
+
+    QueryIteratorCursor cursor;
+    cursor.last_pk = make_pk(1);
+    cursor.last_element_offset = 1;
+
+    auto [doc_offsets, elem_indices, has_more] =
+        this->map_.find_first_n_element(10, view, array_offsets.get(), cursor);
+    ASSERT_EQ(doc_offsets, std::vector<int64_t>({1, 2}));
+    ASSERT_EQ(elem_indices[0], std::vector<int32_t>({2, 3}));
+    ASSERT_EQ(elem_indices[1], std::vector<int32_t>({0, 1, 2, 3}));
+    ASSERT_FALSE(has_more);
+
+    auto [limited_docs, limited_indices, limited_has_more] =
+        this->map_.find_first_n_element(3, view, array_offsets.get(), cursor);
+    ASSERT_EQ(limited_docs, std::vector<int64_t>({1, 2}));
+    ASSERT_EQ(limited_indices[0], std::vector<int32_t>({2, 3}));
+    ASSERT_EQ(limited_indices[1], std::vector<int32_t>({0}));
+    ASSERT_TRUE(limited_has_more);
+}
+
+TYPED_TEST_P(TypedOffsetOrderedMapTest,
+             find_first_n_element_cursor_does_not_return_stale_pk) {
+    auto make_pk = [](int i) {
+        if constexpr (std::is_same_v<std::string, TypeParam>) {
+            return std::to_string(i);
+        } else {
+            return static_cast<TypeParam>(i);
+        }
+    };
+
+    int array_len = 3;
+    this->insert(make_pk(0));
+    this->insert(make_pk(1));  // older version of pk=1
+    this->insert(make_pk(1));  // newest version of pk=1
+    this->insert(make_pk(2));
+
+    std::vector<int32_t> row_to_element_start = {0};
+    for (int doc = 0; doc < 4; doc++) {
+        row_to_element_start.push_back(
+            static_cast<int32_t>((doc + 1) * array_len));
+    }
+    auto array_offsets =
+        std::make_shared<ArrayOffsetsSealed>(std::move(row_to_element_start));
+
+    BitsetType bitset(4 * array_len);
+    bitset.reset();
+    for (int e = 0; e < array_len; e++) {
+        bitset.set(e);  // Simulate query expr pk >= 1.
+    }
+    BitsetTypeView view(bitset.data(), bitset.size());
+
+    QueryIteratorCursor cursor;
+    cursor.last_pk = make_pk(1);
+    cursor.last_element_offset = 2;
+
+    auto [doc_offsets, elem_indices, has_more] =
+        this->map_.find_first_n_element(10, view, array_offsets.get(), cursor);
+    ASSERT_EQ(doc_offsets, std::vector<int64_t>({3}));
+    ASSERT_EQ(elem_indices[0], std::vector<int32_t>({0, 1, 2}));
+    ASSERT_FALSE(has_more);
+}
+
+REGISTER_TYPED_TEST_SUITE_P(
+    TypedOffsetOrderedMapTest,
+    find_first_n,
+    find_first_n_element,
+    find_first_n_element_has_more,
+    find_first_n_element_with_iterator_cursor,
+    find_first_n_element_cursor_does_not_return_stale_pk);
 INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedMapTest, TypeOfPks);

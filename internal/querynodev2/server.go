@@ -32,6 +32,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -143,6 +146,9 @@ type QueryNode struct {
 	lastModifyTs   int64
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// binlogSaver for TEXT collection growing segment flush
+	binlogSaver segments.BinlogSaver
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -270,6 +276,34 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
+	arrowIOThreadHandler := func(key string) func(evt *config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newThreads := initcore.ResolveArrowIOThreadPoolCapacity()
+			initcore.UpdateArrowIOThreadPoolCapacity(newThreads)
+			log.Info("arrow io thread pool capacity updated",
+				zap.String("trigger", key),
+				zap.Int("threads", newThreads))
+		}
+	}
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+			arrowIOThreadHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
+		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newBytes := paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64()
+			initcore.UpdateStorageV2CellTargetSizeBytes(newBytes)
+			log.Info("queryNode.segcore.storageV2.cellTargetSizeBytes updated",
+				zap.Int64("bytes", newBytes))
+		}))
 }
 
 func getIndexEngineVersion() (minimal, current, maximum int32) {
@@ -399,6 +433,8 @@ func (node *QueryNode) Init() error {
 			return
 		}
 		node.RegisterSegcoreConfigWatcher()
+
+		cleanupOrphanedSpilloverFiles(node.GetNodeID())
 
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
@@ -549,6 +585,11 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
+// SetBinlogSaver sets the BinlogSaver for TEXT collection growing segment flush.
+func (node *QueryNode) SetBinlogSaver(saver segments.BinlogSaver) {
+	node.binlogSaver = saver
+}
+
 func (node *QueryNode) GetAddress() string {
 	return node.address
 }
@@ -609,4 +650,28 @@ func (node *QueryNode) handleQueryHookEvent() {
 	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
 
 	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+}
+
+// cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files
+// from previous QueryNode runs
+func cleanupOrphanedSpilloverFiles(nodeID int64) {
+	mmapDir := pathutil.GetPath(pathutil.GrowingMMapPath, nodeID)
+	spilloverDir := filepath.Join(mmapDir, "growing_lob")
+
+	if _, err := os.Stat(spilloverDir); os.IsNotExist(err) {
+		return
+	}
+
+	log.Info("cleaning up orphaned TEXT LOB spillover files",
+		zap.String("path", spilloverDir))
+
+	if err := os.RemoveAll(spilloverDir); err != nil {
+		log.Warn("failed to clean up orphaned TEXT LOB spillover files",
+			zap.String("path", spilloverDir),
+			zap.Error(err))
+		return
+	}
+
+	log.Info("orphaned TEXT LOB spillover files cleaned up",
+		zap.String("path", spilloverDir))
 }

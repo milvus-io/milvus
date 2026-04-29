@@ -32,8 +32,6 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -44,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -62,6 +61,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -84,6 +85,7 @@ type ShardDelegator interface {
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
+	ProcessManualFlush(ctx context.Context, flushTs uint64) error
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
@@ -140,7 +142,7 @@ type shardDelegator struct {
 
 	sf          conc.Singleflight[struct{}]
 	loader      segments.Loader
-	tsCond      *sync.Cond
+	tsCond      *syncutil.ContextCond
 	latestTsafe *atomic.Uint64
 	// queryHook
 	queryHook      optimizers.QueryHook
@@ -175,6 +177,12 @@ type shardDelegator struct {
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
+
+	// growing segment flush support for TEXT collections
+	// checkpointTracker tracks offset -> MsgPosition mapping for Growing Segments
+	checkpointTracker *segments.CheckpointTracker
+	// growingFlushManager manages periodic flush of Growing Segments (for TEXT collections)
+	growingFlushManager *segments.GrowingFlushManager
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -212,6 +220,9 @@ func (sd *shardDelegator) Stopped() bool {
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
 	sd.lifetime.SetState(lifetime.Working)
+	if sd.growingFlushManager != nil {
+		sd.growingFlushManager.Start(context.Background())
+	}
 }
 
 // Collection returns delegator collection id.
@@ -293,9 +304,9 @@ func (sd *shardDelegator) executeSearchSubTasks(
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
+			ctx = retry.WithMaxAttemptsContext(ctx, 3)
 			resp, err := worker.SearchSegments(ctx, req)
-			st, ok := status.FromError(err)
-			if ok && st.Code() == codes.Unavailable {
+			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
 			}
 			return resp, err
@@ -389,13 +400,26 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	const isSecondStageSearch = false
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch)
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-
 	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+}
+
+// getVectorFieldDim returns the dimension of the vector field with the given field ID.
+// Returns 0 if the field is not found or dim cannot be determined.
+func (sd *shardDelegator) getVectorFieldDim(fieldID int64) int64 {
+	field := typeutil.GetFieldByID(sd.collection.Schema(), fieldID)
+	if field == nil {
+		return 0
+	}
+	dim, err := typeutil.GetDim(field)
+	if err != nil {
+		return 0
+	}
+	return dim
 }
 
 // Search preforms search operation on shard.
@@ -609,9 +633,9 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+		ctx = retry.WithMaxAttemptsContext(ctx, 3)
 		err := worker.QueryStreamSegments(ctx, req, srv)
-		status, ok := status.FromError(err)
-		if ok && status.Code() == codes.Unavailable {
+		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return nil, err
@@ -709,9 +733,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+		ctx = retry.WithMaxAttemptsContext(ctx, 3)
 		resp, err := worker.QuerySegments(ctx, req)
-		status, ok := status.FromError(err)
-		if ok && status.Code() == codes.Unavailable {
+		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return resp, err
@@ -797,6 +821,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.GetStatisticsRequest, worker cluster.Worker) (*internalpb.GetStatisticsResponse, error) {
+		ctx = retry.WithMaxAttemptsContext(ctx, 1)
 		return worker.GetStatistics(ctx, req)
 	}, "GetStatistics", log)
 	if err != nil {
@@ -1016,12 +1041,16 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	defer sp.End()
 	log := sd.getLogger(ctx)
 
-	// already safe to search
+	// Fast path: tSafe already meets the guarantee timestamp.
 	latestTSafe := sd.latestTsafe.Load()
 	if latestTSafe >= ts {
 		return latestTSafe, nil
 	}
-	// check whethertsafe downgraded
+
+	// Slow path: tSafe has not yet reached the guarantee timestamp,
+	// need to wait for tSafe to advance via condition variable.
+
+	// check whether tsafe downgraded
 	if paramtable.Get().QueryNodeCfg.DowngradeTsafe.GetAsBool() {
 		log.WithRateGroup("downgradeTsafe", 1, 60).RatedWarn(10, "downgrade tsafe", zap.Uint64("latestTSafe", latestTSafe), zap.Uint64("ts", ts))
 		return latestTSafe, nil
@@ -1041,33 +1070,41 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 		return 0, WrapErrTsLagTooLarge(lag, maxLag)
 	}
 
-	ch := make(chan struct{})
-	go func() {
-		sd.tsCond.L.Lock()
-		defer sd.tsCond.L.Unlock()
+	// Stall detection: if tSafe does not advance within stallTimeout, return
+	// a retryable error so the proxy can failover to another replica.
+	// This handles cases where the WAL consumption pipeline is blocked
+	// (e.g. forward delete retrying against a dead QueryNode).
+	stallTimeout := paramtable.Get().QueryNodeCfg.WaitTsafeStallTimeout.GetAsDurationByParse()
 
-		for sd.latestTsafe.Load() < ts &&
-			ctx.Err() == nil &&
-			sd.Serviceable() {
-			sd.tsCond.Wait()
-		}
-		close(ch)
-	}()
-
-	for {
-		select {
-		// timeout
-		case <-ctx.Done():
-			// notify wait goroutine to quit
-			sd.tsCond.Broadcast()
-			return 0, ctx.Err()
-		case <-ch:
-			if !sd.Serviceable() {
-				return 0, merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
+	// Standard condition variable pattern: Lock → for !condition { Wait } → Unlock
+	sd.tsCond.L.Lock()
+	for sd.latestTsafe.Load() < ts && sd.Serviceable() {
+		stallCtx, stallCancel := context.WithTimeout(ctx, stallTimeout)
+		err := sd.tsCond.Wait(stallCtx)
+		stallCancel()
+		if err != nil {
+			// Wait returned without holding the lock.
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
 			}
-			return sd.latestTsafe.Load(), nil
+			// No broadcast within stallTimeout — tSafe is stalled.
+			log.Warn("tsafe stall detected, fast-fail to allow proxy failover",
+				zap.Uint64("currentTsafe", sd.latestTsafe.Load()),
+				zap.Uint64("targetTs", ts),
+				zap.Duration("stallTimeout", stallTimeout),
+			)
+			return 0, WrapErrTsLagTooLarge(gt.Sub(st), stallTimeout)
 		}
+		// Woken by broadcast with lock re-acquired, loop back to re-check condition.
 	}
+	current := sd.latestTsafe.Load()
+	serviceable := sd.Serviceable()
+	sd.tsCond.L.Unlock()
+
+	if !serviceable {
+		return 0, merr.WrapErrChannelNotAvailable(sd.vchannelName, "delegator closed during wait tsafe")
+	}
+	return current, nil
 }
 
 // GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
@@ -1098,35 +1135,39 @@ func (sd *shardDelegator) updateLatestRequiredMVCCTimestamp(ts uint64) {
 // updateTSafe read current tsafe value from tsafeManager.
 func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 	log := sd.getLogger(context.Background()).WithRateGroup(fmt.Sprintf("UpdateTSafe-%s", sd.vchannelName), 1, 60)
-	sd.tsCond.L.Lock()
 	log.RatedInfo(10, "update tsafe",
 		zap.Int64("collectionID", sd.collectionID),
 		zap.String("vchannel", sd.vchannelName),
 		zap.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
 		zap.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
-	if tsafe > sd.latestTsafe.Load() {
-		sd.latestTsafe.Store(tsafe)
-		sd.tsCond.Broadcast()
+	if tsafe <= sd.latestTsafe.Load() {
+		return
+	}
 
-		// Check if caught up with streaming data
-		if sd.catchingUpStreamingData.Load() {
-			lagThreshold := paramtable.Get().QueryNodeCfg.CatchUpStreamingDataTsLag.GetAsDurationByParse()
-			if lagThreshold > 0 {
-				tsafeTime := tsoutil.PhysicalTime(tsafe)
-				lag := time.Since(tsafeTime)
-				caughtUp := lag <= lagThreshold
-				log.RatedInfo(10, "delegator catching up streaming data progress",
-					zap.String("channel", sd.vchannelName),
-					zap.Duration("lag", lag),
-					zap.Duration("threshold", lagThreshold),
-					zap.Bool("caughtUp", caughtUp))
-				if caughtUp {
-					sd.catchingUpStreamingData.Store(false)
-				}
+	// Store and broadcast under lock to prevent lost wakeups:
+	// without the lock, a waiter could observe the old tSafe, then enter
+	// Wait() after the broadcast has already fired, missing the notification.
+	sd.tsCond.LockAndBroadcast()
+	sd.latestTsafe.Store(tsafe)
+	sd.tsCond.L.Unlock()
+
+	// Check if caught up with streaming data (all fields are atomic, no lock needed)
+	if sd.catchingUpStreamingData.Load() {
+		lagThreshold := paramtable.Get().QueryNodeCfg.CatchUpStreamingDataTsLag.GetAsDurationByParse()
+		if lagThreshold > 0 {
+			tsafeTime := tsoutil.PhysicalTime(tsafe)
+			lag := time.Since(tsafeTime)
+			caughtUp := lag <= lagThreshold
+			log.RatedInfo(10, "delegator catching up streaming data progress",
+				zap.String("channel", sd.vchannelName),
+				zap.Duration("lag", lag),
+				zap.Duration("threshold", lagThreshold),
+				zap.Bool("caughtUp", caughtUp))
+			if caughtUp {
+				sd.catchingUpStreamingData.Store(false)
 			}
 		}
 	}
-	sd.tsCond.L.Unlock()
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
@@ -1184,6 +1225,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 
 	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		ctx = retry.WithMaxAttemptsContext(ctx, 1)
 		status, err := worker.UpdateSchema(ctx, req)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
@@ -1201,8 +1243,9 @@ func (w *StatusWrapper) GetStatus() *commonpb.Status {
 func (sd *shardDelegator) Close() {
 	sd.lifetime.SetState(lifetime.Stopped)
 	sd.lifetime.Close()
-	// broadcast to all waitTsafe goroutine to quit
-	sd.tsCond.Broadcast()
+	// broadcast to all waitTsafe to quit
+	sd.tsCond.LockAndBroadcast()
+	sd.tsCond.L.Unlock()
 	sd.lifetime.Wait()
 
 	// Stop background snapshot loop before refunding candidates
@@ -1210,6 +1253,11 @@ func (sd *shardDelegator) Close() {
 
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
+
+	// stop growing flush manager
+	if sd.growingFlushManager != nil {
+		sd.growingFlushManager.Stop()
+	}
 
 	// clean idf oracle
 	if sd.idfOracle != nil {
@@ -1282,6 +1330,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
+	binlogSaver segments.BinlogSaver,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -1370,10 +1419,43 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.idfOracle.Start()
 	}
 
-	m := sync.Mutex{}
-	sd.tsCond = sync.NewCond(&m)
+	// initialize GrowingFlushManager for TEXT collections
+	// this enables incremental flush of Growing Segments to preserve TEXT data
+	if sd.hasTextFields() {
+		sd.checkpointTracker = segments.NewCheckpointTracker()
+		if binlogSaver != nil {
+			sd.growingFlushManager = segments.NewGrowingFlushManager(
+				collectionID,
+				channel,
+				collection.Schema(),
+				manager.Collection,
+				manager.Segment,
+				binlogSaver,
+				chunkManager,
+				sd.checkpointTracker,
+			)
+			log.Info("initialized GrowingFlushManager for TEXT collection")
+		} else {
+			log.Warn("binlogSaver is nil, GrowingFlushManager not initialized for TEXT collection")
+		}
+	}
+
+	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+// hasTextFields returns true if the collection has any TEXT type fields.
+func (sd *shardDelegator) hasTextFields() bool {
+	if sd.collection == nil {
+		return false
+	}
+	for _, field := range sd.collection.Schema().GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {

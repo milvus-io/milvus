@@ -328,3 +328,55 @@ TEST(TimestampData, OwnedSingleElement) {
     ASSERT_EQ(td.size(), 1);
     EXPECT_EQ(td[0], 999);
 }
+
+// =====================================================================
+// Constant mode tests
+// =====================================================================
+
+TEST(TimestampData, ConstantZero) {
+    TimestampData td;
+    td.InitConstant(1000000, 0);
+
+    ASSERT_EQ(td.size(), 1000000);
+    ASSERT_FALSE(td.empty());
+    ASSERT_TRUE(td.is_constant_mode());
+
+    // All positions return 0
+    EXPECT_EQ(td[0], 0);
+    EXPECT_EQ(td[42], 0);
+    EXPECT_EQ(td[999999], 0);
+}
+
+TEST(TimestampData, ConstantNonZero) {
+    TimestampData td;
+    td.InitConstant(100, 12345);
+
+    ASSERT_EQ(td.size(), 100);
+    ASSERT_TRUE(td.is_constant_mode());
+
+    EXPECT_EQ(td[0], 12345);
+    EXPECT_EQ(td[50], 12345);
+    EXPECT_EQ(td[99], 12345);
+}
+
+TEST(TimestampData, ConstantClear) {
+    TimestampData td;
+    td.InitConstant(500, 0);
+
+    ASSERT_EQ(td.size(), 500);
+    ASSERT_TRUE(td.is_constant_mode());
+
+    td.clear();
+
+    ASSERT_EQ(td.size(), 0);
+    ASSERT_TRUE(td.empty());
+    ASSERT_FALSE(td.is_constant_mode());
+}
+
+TEST(TimestampData, ConstantSingleRow) {
+    TimestampData td;
+    td.InitConstant(1, 0);
+
+    ASSERT_EQ(td.size(), 1);
+    EXPECT_EQ(td[0], 0);
+}

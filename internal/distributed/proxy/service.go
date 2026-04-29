@@ -145,9 +145,9 @@ func authenticate(c *gin.Context) {
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
 	}
 
-	hookutil.GetExtension().ReportRefused(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
-	}, nil, c.FullPath())
+	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
@@ -683,6 +683,10 @@ func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 
 func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterCollectionField(ctx, request)
+}
+
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.proxy.AlterCollectionSchema(ctx, request)
 }
 
 func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {

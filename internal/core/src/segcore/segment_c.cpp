@@ -64,12 +64,30 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/TextLobSpillover.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/property_singleton.h"
+
+// milvus-storage headers for FlushGrowingSegmentData
+#include "milvus-storage/segment/segment_writer.h"
+#include "milvus-storage/transaction/transaction.h"
+#include "milvus-storage/common/layout.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/properties.h"
+
+// Arrow headers for FlushGrowingSegmentData
+#include <arrow/array.h>
+#include <arrow/buffer.h>
+#include <arrow/builder.h>
+#include <arrow/record_batch.h>
+#include <arrow/type.h>
 
 //////////////////////////////    common interfaces    //////////////////////////////
 
@@ -448,7 +466,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
             auto retrieve_result =
-                segment->Retrieve(&trace_ctx, plan, offsets, len);
+                segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
 
             return CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
@@ -829,5 +847,646 @@ ExprResCacheEraseSegment(int64_t segment_id) {
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+//////////////////////////////    interfaces for growing segment flush    //////////////////////////////
+
+namespace {
+
+// struct to hold field info for building Arrow arrays
+struct FieldInfo {
+    milvus::FieldId field_id;
+    std::string field_name;
+    milvus::DataType data_type;
+    bool nullable;
+    int64_t dim;  // for vector types
+    const milvus::segcore::VectorBase* vec_base;
+    milvus::segcore::ThreadSafeValidDataPtr valid_data;
+    // For TEXT fields with spillover: reader for temp LOB file
+    milvus::segcore::TextLobSpillover* text_lob_spillover = nullptr;
+};
+
+// get element byte width for a data type
+int64_t
+GetElementByteWidth(milvus::DataType data_type, int64_t dim) {
+    switch (data_type) {
+        case milvus::DataType::BOOL:
+        case milvus::DataType::INT8:
+            return 1;
+        case milvus::DataType::INT16:
+            return 2;
+        case milvus::DataType::INT32:
+        case milvus::DataType::FLOAT:
+            return 4;
+        case milvus::DataType::INT64:
+        case milvus::DataType::DOUBLE:
+            return 8;
+        case milvus::DataType::VECTOR_FLOAT:
+            return dim * sizeof(float);
+        case milvus::DataType::VECTOR_BINARY:
+            return dim / 8;
+        case milvus::DataType::VECTOR_FLOAT16:
+            return dim * sizeof(milvus::float16);
+        case milvus::DataType::VECTOR_BFLOAT16:
+            return dim * sizeof(milvus::bfloat16);
+        default:
+            return 0;  // variable length
+    }
+}
+
+// build Arrow Array for a single chunk of fixed-size data (zero-copy when possible)
+// this wraps the chunk data directly without copying
+template <typename ArrayType>
+arrow::Result<std::shared_ptr<arrow::Array>>
+WrapChunkAsArrowArray(const void* chunk_data,
+                      int64_t num_rows,
+                      int64_t element_size,
+                      const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
+                      int64_t validity_offset) {
+    // wrap data buffer (zero-copy)
+    auto data_buffer = arrow::Buffer::Wrap(
+        static_cast<const uint8_t*>(chunk_data), num_rows * element_size);
+
+    // build validity bitmap if needed
+    std::shared_ptr<arrow::Buffer> null_bitmap = nullptr;
+    int64_t null_count = 0;
+
+    if (valid_data) {
+        int64_t bitmap_bytes = (num_rows + 7) / 8;
+        ARROW_ASSIGN_OR_RAISE(auto bitmap_buffer,
+                              arrow::AllocateBuffer(bitmap_bytes));
+        uint8_t* dst = bitmap_buffer->mutable_data();
+        std::memset(dst, 0, bitmap_bytes);
+
+        for (int64_t i = 0; i < num_rows; i++) {
+            bool is_valid = valid_data->is_valid(validity_offset + i);
+            if (is_valid) {
+                dst[i / 8] |= (1 << (i % 8));
+            } else {
+                null_count++;
+            }
+        }
+        null_bitmap = std::move(bitmap_buffer);
+    }
+
+    return std::make_shared<ArrayType>(
+        num_rows, data_buffer, null_bitmap, null_count);
+}
+
+// build Arrow Array for a single chunk of FixedSizeBinary data (zero-copy)
+arrow::Result<std::shared_ptr<arrow::Array>>
+WrapChunkAsFixedSizeBinaryArray(
+    const void* chunk_data,
+    int64_t num_rows,
+    int64_t byte_width,
+    const std::shared_ptr<arrow::DataType>& data_type,
+    const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
+    int64_t validity_offset) {
+    // wrap data buffer (zero-copy)
+    auto data_buffer = arrow::Buffer::Wrap(
+        static_cast<const uint8_t*>(chunk_data), num_rows * byte_width);
+
+    // build validity bitmap if needed
+    std::shared_ptr<arrow::Buffer> null_bitmap = nullptr;
+    int64_t null_count = 0;
+
+    if (valid_data) {
+        int64_t bitmap_bytes = (num_rows + 7) / 8;
+        ARROW_ASSIGN_OR_RAISE(auto bitmap_buffer,
+                              arrow::AllocateBuffer(bitmap_bytes));
+        uint8_t* dst = bitmap_buffer->mutable_data();
+        std::memset(dst, 0, bitmap_bytes);
+
+        for (int64_t i = 0; i < num_rows; i++) {
+            bool is_valid = valid_data->is_valid(validity_offset + i);
+            if (is_valid) {
+                dst[i / 8] |= (1 << (i % 8));
+            } else {
+                null_count++;
+            }
+        }
+        null_bitmap = std::move(bitmap_buffer);
+    }
+
+    return std::make_shared<arrow::FixedSizeBinaryArray>(
+        data_type, num_rows, data_buffer, null_bitmap, null_count);
+}
+
+// build string array for a chunk - strings need to be copied since they're not contiguous
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildStringArrayForChunk(
+    const milvus::segcore::ConcurrentVector<std::string>* string_vec,
+    int64_t start_offset,
+    int64_t num_rows,
+    const milvus::segcore::ThreadSafeValidDataPtr& valid_data) {
+    arrow::StringBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        int64_t offset = start_offset + i;
+        if (valid_data && !valid_data->is_valid(offset)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+        } else {
+            auto str_view = string_vec->view_element(offset);
+            ARROW_RETURN_NOT_OK(
+                builder.Append(str_view.data(), str_view.length()));
+        }
+    }
+
+    return builder.Finish();
+}
+
+// build TEXT array for a chunk when spillover is enabled
+// reads LOB references from ConcurrentVector, decodes and reads actual text from spillover
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildTextArrayForChunkWithSpillover(
+    const milvus::segcore::ConcurrentVector<std::string>* ref_vec,
+    milvus::segcore::TextLobSpillover* spillover,
+    int64_t start_offset,
+    int64_t num_rows,
+    const milvus::segcore::ThreadSafeValidDataPtr& valid_data) {
+    arrow::StringBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    // Collect non-null refs for batch read
+    std::vector<int64_t> pending_indices;
+    std::vector<std::string_view> pending_refs;
+    for (int64_t i = 0; i < num_rows; i++) {
+        int64_t offset = start_offset + i;
+        if (valid_data && !valid_data->is_valid(offset)) {
+            continue;
+        }
+        pending_refs.push_back(ref_vec->view_element(offset));
+        pending_indices.push_back(i);
+    }
+
+    // Batch pread all refs
+    auto texts = spillover->DecodeAndReadBatch(pending_refs);
+
+    // Build arrow array
+    size_t batch_idx = 0;
+    for (int64_t i = 0; i < num_rows; i++) {
+        if (batch_idx < pending_indices.size() &&
+            pending_indices[batch_idx] == i) {
+            ARROW_RETURN_NOT_OK(builder.Append(texts[batch_idx].data(),
+                                               texts[batch_idx].length()));
+            batch_idx++;
+        } else {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+        }
+    }
+
+    return builder.Finish();
+}
+
+// build boolean array for a chunk - booleans need special handling
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildBoolArrayForChunk(
+    const void* chunk_data,
+    int64_t num_rows,
+    const milvus::segcore::ThreadSafeValidDataPtr& valid_data,
+    int64_t validity_offset) {
+    const uint8_t* bool_data = static_cast<const uint8_t*>(chunk_data);
+    arrow::BooleanBuilder builder;
+    ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+
+    for (int64_t i = 0; i < num_rows; i++) {
+        if (valid_data && !valid_data->is_valid(validity_offset + i)) {
+            ARROW_RETURN_NOT_OK(builder.AppendNull());
+        } else {
+            ARROW_RETURN_NOT_OK(builder.Append(bool_data[i] != 0));
+        }
+    }
+
+    return builder.Finish();
+}
+
+// build Arrow Array for a single chunk based on data type
+arrow::Result<std::shared_ptr<arrow::Array>>
+BuildArrayForChunk(const FieldInfo& field_info,
+                   int64_t chunk_id,
+                   int64_t offset_in_chunk,
+                   int64_t num_rows,
+                   int64_t global_offset) {
+    const void* chunk_data = field_info.vec_base->get_chunk_data(chunk_id);
+    int64_t element_size =
+        GetElementByteWidth(field_info.data_type, field_info.dim);
+
+    // adjust data pointer for offset within chunk
+    const uint8_t* data_ptr = static_cast<const uint8_t*>(chunk_data) +
+                              offset_in_chunk * element_size;
+
+    switch (field_info.data_type) {
+        case milvus::DataType::BOOL:
+            return BuildBoolArrayForChunk(
+                data_ptr, num_rows, field_info.valid_data, global_offset);
+
+        case milvus::DataType::INT8:
+            return WrapChunkAsArrowArray<arrow::Int8Array>(
+                data_ptr, num_rows, 1, field_info.valid_data, global_offset);
+
+        case milvus::DataType::INT16:
+            return WrapChunkAsArrowArray<arrow::Int16Array>(
+                data_ptr, num_rows, 2, field_info.valid_data, global_offset);
+
+        case milvus::DataType::INT32:
+            return WrapChunkAsArrowArray<arrow::Int32Array>(
+                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+
+        case milvus::DataType::INT64:
+            return WrapChunkAsArrowArray<arrow::Int64Array>(
+                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+
+        case milvus::DataType::FLOAT:
+            return WrapChunkAsArrowArray<arrow::FloatArray>(
+                data_ptr, num_rows, 4, field_info.valid_data, global_offset);
+
+        case milvus::DataType::DOUBLE:
+            return WrapChunkAsArrowArray<arrow::DoubleArray>(
+                data_ptr, num_rows, 8, field_info.valid_data, global_offset);
+
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::STRING: {
+            auto string_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<std::string>*>(
+                field_info.vec_base);
+            if (!string_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<std::string>");
+            }
+            return BuildStringArrayForChunk(
+                string_vec, global_offset, num_rows, field_info.valid_data);
+        }
+
+        case milvus::DataType::TEXT: {
+            auto string_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<std::string>*>(
+                field_info.vec_base);
+            if (!string_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<std::string>");
+            }
+            // TEXT with spillover: read from LOB file
+            if (field_info.text_lob_spillover) {
+                return BuildTextArrayForChunkWithSpillover(
+                    string_vec,
+                    field_info.text_lob_spillover,
+                    global_offset,
+                    num_rows,
+                    field_info.valid_data);
+            }
+            // Fallback for TEXT without spillover
+            return BuildStringArrayForChunk(
+                string_vec, global_offset, num_rows, field_info.valid_data);
+        }
+
+        case milvus::DataType::JSON: {
+            auto json_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<milvus::Json>*>(
+                field_info.vec_base);
+            if (!json_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<Json>");
+            }
+            arrow::BinaryBuilder builder;
+            ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+            for (int64_t i = 0; i < num_rows; i++) {
+                int64_t offset = global_offset + i;
+                if (field_info.valid_data &&
+                    !field_info.valid_data->is_valid(offset)) {
+                    ARROW_RETURN_NOT_OK(builder.AppendNull());
+                } else {
+                    auto sv = json_vec->view_element(offset);
+                    ARROW_RETURN_NOT_OK(builder.Append(sv.data(), sv.length()));
+                }
+            }
+            return builder.Finish();
+        }
+
+        case milvus::DataType::ARRAY: {
+            auto array_vec = dynamic_cast<
+                const milvus::segcore::ConcurrentVector<milvus::Array>*>(
+                field_info.vec_base);
+            if (!array_vec) {
+                return arrow::Status::Invalid(
+                    "Expected ConcurrentVector<Array>");
+            }
+            arrow::BinaryBuilder builder;
+            ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+            for (int64_t i = 0; i < num_rows; i++) {
+                int64_t offset = global_offset + i;
+                if (field_info.valid_data &&
+                    !field_info.valid_data->is_valid(offset)) {
+                    ARROW_RETURN_NOT_OK(builder.AppendNull());
+                } else {
+                    auto array_view = array_vec->view_element(offset);
+                    auto serialized =
+                        array_view.output_data().SerializeAsString();
+                    ARROW_RETURN_NOT_OK(
+                        builder.Append(serialized.data(), serialized.size()));
+                }
+            }
+            return builder.Finish();
+        }
+
+        case milvus::DataType::VECTOR_FLOAT:
+        case milvus::DataType::VECTOR_BINARY:
+        case milvus::DataType::VECTOR_FLOAT16:
+        case milvus::DataType::VECTOR_BFLOAT16: {
+            auto arrow_type =
+                milvus::GetArrowDataType(field_info.data_type, field_info.dim);
+            return WrapChunkAsFixedSizeBinaryArray(data_ptr,
+                                                   num_rows,
+                                                   element_size,
+                                                   arrow_type,
+                                                   field_info.valid_data,
+                                                   global_offset);
+        }
+
+        default:
+            return arrow::Status::NotImplemented("Unsupported data type");
+    }
+}
+
+}  // anonymous namespace
+
+CStatus
+FlushGrowingSegmentData(CSegmentInterface c_segment,
+                        int64_t start_offset,
+                        int64_t end_offset,
+                        const CFlushConfig* config,
+                        CFlushResult* result) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        // validate inputs
+        if (!c_segment || !config || !result) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "invalid arguments: segment, config, "
+                                          "and result must not be null");
+        }
+
+        if (start_offset < 0 || end_offset < start_offset) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid offsets: start_offset must be >= 0 and <= end_offset");
+        }
+
+        // no data to flush
+        if (start_offset == end_offset) {
+            result->manifest_path = nullptr;
+            result->committed_version = 0;
+            result->num_rows = 0;
+            return milvus::SuccessCStatus();
+        }
+
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto growing_segment =
+            dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(
+                segment_interface);
+        if (!growing_segment) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "segment is not a growing segment");
+        }
+
+        // get schema from segment
+        auto& schema = growing_segment->get_schema();
+        auto& insert_record = growing_segment->get_insert_record();
+
+        int64_t total_rows = end_offset - start_offset;
+
+        // Use get_field_ids() (ordered vector) instead of get_fields() (unordered_map)
+        // to ensure deterministic column order matching the reader's expected order.
+        std::vector<FieldInfo> field_infos;
+        std::vector<std::shared_ptr<arrow::Field>> arrow_fields;
+
+        for (const auto& field_id : schema.get_field_ids()) {
+            if (field_id == RowFieldID) {
+                continue;  // skip RowID system field
+            }
+
+            const auto& field_meta = schema[field_id];
+
+            // Timestamp is stored in insert_record.timestamps_, not in data_ map
+            const milvus::segcore::VectorBase* vec_base;
+            if (field_id == TimestampFieldID) {
+                vec_base = &insert_record.timestamps_;
+            } else {
+                vec_base = insert_record.get_data_base(field_id);
+                if (!vec_base) {
+                    LOG_ERROR("no data base for field {} of segment {}",
+                              field_meta.get_name().get(),
+                              growing_segment->get_segment_id());
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        fmt::format("no data base for field {} of segment {}",
+                                    field_meta.get_name().get(),
+                                    growing_segment->get_segment_id()));
+                }
+            }
+
+            auto arrow_type = milvus::GetArrowDataType(
+                field_meta.get_data_type(),
+                field_meta.is_vector() ? field_meta.get_dim() : 0);
+
+            FieldInfo info;
+            info.field_id = field_id;
+            info.field_name = field_meta.get_name().get();
+            info.data_type = field_meta.get_data_type();
+            info.nullable = field_meta.is_nullable();
+            info.dim = field_meta.is_vector() ? field_meta.get_dim() : 0;
+            info.vec_base = vec_base;
+            info.valid_data = nullptr;
+            if (field_meta.is_nullable() &&
+                insert_record.is_valid_data_exist(field_id)) {
+                info.valid_data = insert_record.get_valid_data(field_id);
+            }
+
+            info.text_lob_spillover = nullptr;
+            if (field_meta.get_data_type() == milvus::DataType::TEXT &&
+                growing_segment->HasTextLobSpillover(field_id)) {
+                info.text_lob_spillover =
+                    growing_segment->GetTextLobSpillover(field_id);
+            }
+
+            field_infos.push_back(std::move(info));
+
+            // create Arrow field with metadata
+            auto metadata = arrow::KeyValueMetadata::Make(
+                {milvus_storage::ARROW_FIELD_ID_KEY},
+                {std::to_string(field_id.get())});
+            arrow_fields.push_back(arrow::field(std::to_string(field_id.get()),
+                                                arrow_type,
+                                                field_meta.is_nullable(),
+                                                metadata));
+        }
+
+        if (field_infos.empty()) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "no fields to flush");
+        }
+
+        auto arrow_schema = arrow::schema(arrow_fields);
+
+        // build SegmentWriterConfig
+        milvus_storage::segment::SegmentWriterConfig writer_config;
+        writer_config.segment_path =
+            config->segment_path ? config->segment_path : "";
+        int64_t read_version = config->read_version;
+        int retry_limit = config->retry_limit > 0 ? config->retry_limit : 1;
+
+        // copy filesystem properties from global storage config
+        auto global_properties =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetProperties();
+        if (global_properties) {
+            writer_config.properties = *global_properties;
+        }
+
+        // set required properties for ColumnGroupPolicy
+        // use single column group policy (all columns in one group)
+        writer_config.properties[PROPERTY_WRITER_POLICY] =
+            std::string(LOON_COLUMN_GROUP_POLICY_SINGLE);
+        writer_config.properties[PROPERTY_FORMAT] =
+            std::string(LOON_FORMAT_PARQUET);
+
+        // add TEXT column configs
+        for (size_t i = 0; i < config->num_text_columns; i++) {
+            milvus_storage::lob_column::LobColumnConfig text_config;
+            text_config.field_id = config->text_field_ids[i];
+            if (config->text_lob_paths && config->text_lob_paths[i]) {
+                text_config.lob_base_path = config->text_lob_paths[i];
+            }
+            writer_config.lob_columns[text_config.field_id] = text_config;
+        }
+
+        // get filesystem from singleton
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        if (!fs) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "filesystem not initialized");
+        }
+
+        // create segment writer
+        auto writer_result = milvus_storage::segment::SegmentWriter::Create(
+            fs, arrow_schema, writer_config);
+        if (!writer_result.ok()) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          writer_result.status().ToString());
+        }
+        auto writer = std::move(writer_result).ValueOrDie();
+
+        // iterate over chunks and write each one (zero-copy approach)
+        // this avoids copying all data into a single contiguous buffer
+        int64_t size_per_chunk = field_infos[0].vec_base->get_size_per_chunk();
+        int64_t current_offset = start_offset;
+        int64_t rows_written = 0;
+
+        while (current_offset < end_offset) {
+            int64_t chunk_id = current_offset / size_per_chunk;
+            int64_t offset_in_chunk = current_offset % size_per_chunk;
+            int64_t chunk_size =
+                field_infos[0].vec_base->get_chunk_size(chunk_id);
+
+            // how many rows we can process from this chunk
+            int64_t available_in_chunk = chunk_size - offset_in_chunk;
+            int64_t remaining = end_offset - current_offset;
+            int64_t batch_rows = std::min(available_in_chunk, remaining);
+
+            if (batch_rows <= 0) {
+                break;
+            }
+
+            // build arrays for each field
+            std::vector<std::shared_ptr<arrow::Array>> arrays;
+            arrays.reserve(field_infos.size());
+
+            for (const auto& field_info : field_infos) {
+                auto arr_result = BuildArrayForChunk(field_info,
+                                                     chunk_id,
+                                                     offset_in_chunk,
+                                                     batch_rows,
+                                                     current_offset);
+                if (!arr_result.ok()) {
+                    return milvus::FailureCStatus(
+                        milvus::UnexpectedError,
+                        arr_result.status().ToString());
+                }
+                arrays.push_back(arr_result.ValueOrDie());
+            }
+
+            // create RecordBatch and write
+            auto batch =
+                arrow::RecordBatch::Make(arrow_schema, batch_rows, arrays);
+            auto write_status = writer->Write(batch);
+            if (!write_status.ok()) {
+                return milvus::FailureCStatus(milvus::UnexpectedError,
+                                              write_status.ToString());
+            }
+
+            current_offset += batch_rows;
+            rows_written += batch_rows;
+        }
+
+        // close writer — returns ColumnGroups + LobFiles, does NOT commit
+        auto close_result = writer->Close();
+        if (!close_result.ok()) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          close_result.status().ToString());
+        }
+        auto output = std::move(close_result).ValueOrDie();
+
+        // commit via Transaction externally
+        auto transaction_result =
+            milvus_storage::api::transaction::Transaction::Open(
+                fs,
+                writer_config.segment_path,
+                read_version,
+                milvus_storage::api::transaction::FailResolver,
+                retry_limit);
+        if (!transaction_result.ok()) {
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                transaction_result.status().ToString());
+        }
+        auto transaction = std::move(transaction_result).ValueOrDie();
+
+        // append column groups
+        transaction->AppendFiles(*output.column_groups);
+
+        // add LOB files
+        for (const auto& lob_file : output.lob_files) {
+            transaction->AddLobFile(lob_file);
+        }
+
+        // commit
+        auto commit_result = transaction->Commit();
+        if (!commit_result.ok()) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          commit_result.status().ToString());
+        }
+        auto committed_version = commit_result.ValueOrDie();
+
+        // fill output
+        auto manifest_path = milvus_storage::get_manifest_filepath(
+            writer_config.segment_path, committed_version);
+        result->manifest_path = strdup(manifest_path.c_str());
+        result->committed_version = committed_version;
+        result->num_rows = output.rows_written;
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+void
+FreeFlushResult(CFlushResult* result) {
+    if (result && result->manifest_path) {
+        free(result->manifest_path);
+        result->manifest_path = nullptr;
     }
 }

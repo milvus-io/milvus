@@ -115,6 +115,16 @@ type Segment interface {
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
+
+	// FlushData flushes data from segment memory directly to storage via C++ milvus-storage.
+	// This is a unified interface that combines data extraction and writing:
+	//   - C++ side extracts data directly from ConcurrentVector (no query engine overhead)
+	//   - C++ side writes data to storage (TEXT fields via TextColumnWriter, others via PackedWriter)
+	//   - Returns binlog paths and metadata (all processing in C++ side)
+	// Go layer only provides thin wrapper for FFI call - no business logic.
+	// TODO: Implement C++ FlushData interface (Phase 1.3, 1.4, 2.3)
+	FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error)
+	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 
 	// lazy load related
@@ -122,4 +132,37 @@ type Segment interface {
 	RemoveUnusedFieldFiles() error
 
 	GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo
+}
+
+// FlushConfig contains configuration for flushing segment data.
+// All paths and settings are passed to C++ side via FFI.
+type FlushConfig struct {
+	// Segment base path for binlog storage
+	SegmentBasePath string
+	// Partition base path for LOB storage (TEXT fields)
+	PartitionBasePath string
+	// Collection ID
+	CollectionID int64
+	// Partition ID
+	PartitionID int64
+	// TEXT column field IDs
+	TextFieldIDs []int64
+	// LOB base paths for each TEXT field (same order as TextFieldIDs)
+	// Format: {partition_path}/lobs/{field_id}
+	TextLobPaths []string
+	// ReadVersion is the manifest version to read from.
+	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
+	ReadVersion int64
+}
+
+// FlushResult contains the result of flushing segment data.
+// All data is returned from C++ side via FFI.
+// In Storage V3 FFI mode, only manifest path is needed (all file info is in manifest).
+type FlushResult struct {
+	// Manifest path (Storage V3 - contains all file information).
+	// The committed version is encoded in the path and can be extracted
+	// via packed.UnmarshalManifestPath when needed.
+	ManifestPath string
+	// Number of rows flushed
+	NumRows int64
 }

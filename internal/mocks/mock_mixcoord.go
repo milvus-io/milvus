@@ -1403,6 +1403,65 @@ func (_c *MixCoord_ClientHeartbeat_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// CommitBackfillResult provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CommitBackfillResult(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitBackfillResult")
+	}
+
+	var r0 *datapb.CommitBackfillResultResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) *datapb.CommitBackfillResultResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CommitBackfillResultResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitBackfillResultRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CommitBackfillResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitBackfillResult'
+type MixCoord_CommitBackfillResult_Call struct {
+	*mock.Call
+}
+
+// CommitBackfillResult is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitBackfillResultRequest
+func (_e *MixCoord_Expecter) CommitBackfillResult(_a0 interface{}, _a1 interface{}) *MixCoord_CommitBackfillResult_Call {
+	return &MixCoord_CommitBackfillResult_Call{Call: _e.mock.On("CommitBackfillResult", _a0, _a1)}
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest)) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitBackfillResultRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) Return(_a0 *datapb.CommitBackfillResultResponse, _a1 error) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CommitBackfillResult_Call) RunAndReturn(run func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)) *MixCoord_CommitBackfillResult_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	ret := _m.Called(_a0, _a1)

@@ -80,6 +80,13 @@ func (i *RestfulInfo) TimeStart() string {
 	return i.start.Format(timeFormat)
 }
 
+// Start returns the request-entry timestamp captured by the access middleware.
+// Exposed so downstream consumers (e.g. audit plugins) can measure end-to-end
+// request latency instead of their own instantiation time.
+func (i *RestfulInfo) Start() time.Time {
+	return i.start
+}
+
 func (i *RestfulInfo) TimeEnd() string {
 	return i.params.TimeStamp.Format(timeFormat)
 }
@@ -286,4 +293,11 @@ func (i *RestfulInfo) TemplateValueLength() string {
 	})
 
 	return fmt.Sprint(m)
+}
+
+func (i *RestfulInfo) PartialUpdate() string {
+	if req, ok := i.req.(*milvuspb.UpsertRequest); ok {
+		return fmt.Sprint(req.GetPartialUpdate())
+	}
+	return NotAny
 }

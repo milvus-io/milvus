@@ -80,12 +80,14 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}()
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
+	currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
+	schemaVersion := currentSchema.GetVersion()
 
 	if fgMsg.InsertData == nil {
 		insertData := make([]*writebuffer.InsertData, 0)
 		if len(fgMsg.InsertMessages) > 0 {
 			var err error
-			if insertData, err = writebuffer.PrepareInsert(wNode.metacache.GetSchema(fgMsg.TimeTick()), wNode.pkField, fgMsg.InsertMessages); err != nil {
+			if insertData, err = writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages); err != nil {
 				log.Error("failed to prepare data", zap.Error(err))
 				panic(err)
 			}
@@ -93,7 +95,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		fgMsg.InsertData = insertData
 	}
 
-	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end)
+	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
 	if err != nil {
 		log.Error("failed to buffer data", zap.Error(err))
 		panic(err)

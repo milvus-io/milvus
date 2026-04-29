@@ -1780,6 +1780,7 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		return &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/prefix",
+			ExternalSpec:   `{"format":"parquet"}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:       1,
@@ -2298,6 +2299,68 @@ func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
 
 	assert.Equal(t, 2, len(task.result.Schema.Fields))
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
+}
+
+// Security regression: DescribeCollection must redact credentials embedded in
+// ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
+// returning to the client. Any caller with Describe privilege would otherwise
+// be able to read another tenant's object-storage credentials out of the
+// persisted collection metadata.
+func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	InitMetaCache(ctx, mix)
+
+	collectionName := "TestDescribeCollectionTask_RedactsExternalSpecCredentials"
+
+	rawSpec := `{"format":"parquet","extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-east-1"}}`
+
+	schema := &schemapb.CollectionSchema{
+		Name:           collectionName,
+		ExternalSource: "s3://my-bucket/data/",
+		ExternalSpec:   rawSpec,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			Schema:       schema,
+			CollectionID: 1,
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionName: collectionName,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+
+	// describeCollectionTask now passes ExternalSpec through unredacted —
+	// redaction lives at the public proxy.DescribeCollection edge so both
+	// cached and remote provider paths converge through one sanitizer.
+	// The task-level result must still carry raw creds so that the
+	// post-task wrapper can choose to redact (user-facing) or not
+	// (internal callers, if added later, that need raw spec for FFI).
+	out := task.result.Schema.ExternalSpec
+	assert.Contains(t, out, "AKIAEXAMPLE",
+		"task-level result must carry raw spec; redaction is applied at proxy edge")
+	assert.Contains(t, out, "SUPERSECRET",
+		"task-level result must carry raw spec; redaction is applied at proxy edge")
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
@@ -3521,18 +3584,69 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_truncateCollectionTask_PreExecute(t *testing.T) {
-	tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
-		Base:           &commonpb.MsgBase{},
-		CollectionName: "valid",
-	}}
+	mix := NewMixCoordMock()
 	ctx := context.Background()
-	err := tct.PreExecute(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, InitMetaCache(ctx, mix))
 
-	// Test invalid collection name
-	tct.CollectionName = "#0xc0de"
-	err = tct.PreExecute(ctx)
-	assert.Error(t, err)
+	dbName := ""
+	regularName := "regular_truncate_" + funcutil.GenRandomStr()
+	externalName := "ext_truncate_" + funcutil.GenRandomStr()
+
+	regularSchema := constructCollectionSchema("pk", "fvec", 4, regularName)
+	regBytes, err := proto.Marshal(regularSchema)
+	require.NoError(t, err)
+	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName: dbName, CollectionName: regularName, Schema: regBytes, ShardsNum: 1,
+	})
+	require.NoError(t, err)
+
+	extSchema := &schemapb.CollectionSchema{
+		Name:           externalName,
+		ExternalSource: "s3://bucket/path/",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+			{
+				FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+			},
+		},
+	}
+	extBytes, err := proto.Marshal(extSchema)
+	require.NoError(t, err)
+	_, err = mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName: dbName, CollectionName: externalName, Schema: extBytes, ShardsNum: 1,
+	})
+	require.NoError(t, err)
+
+	t.Run("regular collection passes", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: regularName,
+		}}
+		assert.NoError(t, tct.PreExecute(ctx))
+	})
+
+	t.Run("invalid collection name rejected", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, CollectionName: "#0xc0de",
+		}}
+		assert.Error(t, tct.PreExecute(ctx))
+	})
+
+	// Truncate is destructive on internal segments and meaningless for
+	// external collections (data lives in user object store). Reject up
+	// front to prevent silent no-op or inconsistent meta state.
+	t.Run("external collection rejected", func(t *testing.T) {
+		tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+			Base: &commonpb.MsgBase{}, DbName: dbName, CollectionName: externalName,
+		}}
+		err := tct.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "external collection")
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
 }
 
 func Test_truncateCollectionTask_Execute(t *testing.T) {
@@ -7119,6 +7233,35 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("PreExecute rejects non-BM25 function with DoPhysicalBackfill", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						DoPhysicalBackfill: true,
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{
+							{
+								Name:             "text_embedding_func",
+								Type:             schemapb.FunctionType_TextEmbedding,
+								InputFieldNames:  []string{"text"},
+								OutputFieldNames: []string{"sparse_bm25"},
+							},
+						},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	t.Run("PreExecute happy path", func(t *testing.T) {
 		task := buildTask(buildValidRequest(), oldSchema)
 		err := task.PreExecute(ctx)
@@ -7160,5 +7303,56 @@ func TestAlterCollectionSchemaTask(t *testing.T) {
 			err = task.Execute(ctx)
 			assert.Error(t, err)
 		})
+	})
+}
+
+// TestAlterCollection_RejectExternalTupleMutation verifies the proxy-layer
+// guard rejects user alter_collection_properties calls that target the
+// external_source / external_spec tuple. Mutation of this tuple is reserved
+// to RefreshExternalCollection; see issue #49335.
+func TestAlterCollection_RejectExternalTupleMutation(t *testing.T) {
+	ctx := context.Background()
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+			DbName:         dbName,
+			CollectionName: "ext_guard_test",
+		},
+	}
+
+	t.Run("reject properties with external_source", func(t *testing.T) {
+		task.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/a/"},
+		}
+		task.DeleteKeys = nil
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
+
+	t.Run("reject properties with external_spec", func(t *testing.T) {
+		task.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+		}
+		task.DeleteKeys = nil
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "RefreshExternalCollection")
+	})
+
+	t.Run("reject delete of external_source", func(t *testing.T) {
+		task.Properties = nil
+		task.DeleteKeys = []string{common.CollectionExternalSource}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "immutable")
+	})
+
+	t.Run("reject delete of external_spec", func(t *testing.T) {
+		task.Properties = nil
+		task.DeleteKeys = []string{common.CollectionExternalSpec}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "immutable")
 	})
 }

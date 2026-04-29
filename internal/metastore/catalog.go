@@ -130,6 +130,12 @@ func (t AlterType) String() string {
 type BinlogsIncrement struct {
 	Segment    *datapb.SegmentInfo
 	UpdateMask BinlogsUpdateMask
+	// DroppedBinlogFieldIDs lists FieldBinlog.FieldID values whose insert-binlog
+	// KV entries must be removed from etcd. AlterSegments only upserts; without
+	// explicit removal, a prefix scan in listBinlogs will resurrect the zombie
+	// entry on restart. Used by operators (e.g. V2 column-group backfill commit)
+	// that structurally drop a FieldBinlog from segment.Binlogs.
+	DroppedBinlogFieldIDs []int64
 }
 
 type BinlogsUpdateMask struct {
@@ -329,10 +335,6 @@ type StreamingCoordCataLog interface {
 
 	// GetReplicateConfiguration gets the replicate configuration from metastore.
 	GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error)
-
-	// DropReplicateConfiguration removes the replicate configuration and all replicate pchannel metadata.
-	// Only return error if the ctx is canceled, otherwise it will retry until success.
-	DropReplicateConfiguration(ctx context.Context) error
 }
 
 // StreamingNodeCataLog is the interface for streamingnode catalog

@@ -504,7 +504,8 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
                 field_meta.get_element_type()));
             obj->mutable_data()->Reserve(count);
             for (int i = 0; i < count; i++) {
-                *(obj->mutable_data()->Add()) = proto::schema::VectorField();
+                auto* row = obj->mutable_data()->Add();
+                row->set_dim(dim);
             }
             break;
         }

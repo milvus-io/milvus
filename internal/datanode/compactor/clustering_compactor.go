@@ -106,6 +106,9 @@ type clusteringCompactionTask struct {
 	bm25FieldIds []int64
 
 	compactionParams compaction.Params
+
+	// lobContext holds LOB compaction strategy decisions for TEXT columns
+	lobContext *compaction.LOBCompactionContext
 }
 
 type ClusterBuffer struct {
@@ -267,6 +270,12 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		return nil, err
 	}
 
+	// 0.5, init LOB compaction context for TEXT columns (if any)
+	if err := t.initLOBCompactionContext(ctx); err != nil {
+		log.Error("failed to init LOB compaction context", zap.Error(err))
+		return nil, err
+	}
+
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
@@ -346,9 +355,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -371,9 +378,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -433,9 +438,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+			t.getWriterOpts()...,
 		)
 		if err != nil {
 			return err
@@ -1105,4 +1108,89 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 
 func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 	return t.compactionParams.StorageConfig
+}
+
+// getWriterOpts returns common writer options for all cluster buffer writers.
+// Includes TEXT column configs when lobContext requires REWRITE_ALL.
+func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
+	opts := []storage.RwOption{
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
+		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
+			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			opts = append(opts, storage.WithTextColumnConfigs(textColumnConfigs))
+			log.Info("clustering compaction: TEXT column REWRITE_ALL mode enabled",
+				zap.Int("rewriteFieldCount", len(textColumnConfigs)),
+			)
+		}
+	}
+
+	return opts
+}
+
+// initLOBCompactionContext initializes the LOB compaction context for TEXT columns.
+// For clustering compaction, data is repartitioned by clustering key, so TEXT columns
+// always require REWRITE_ALL strategy (LOB references become invalid after repartition).
+func (t *clusteringCompactionTask) initLOBCompactionContext(ctx context.Context) error {
+	// check if there are TEXT fields in schema
+	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
+	if len(textFieldIDs) == 0 {
+		return nil // no TEXT fields, nothing to do
+	}
+
+	// only apply for manifest-based storage (storage v2/v3)
+	hasManifest := false
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if seg.GetManifest() != "" {
+			hasManifest = true
+			break
+		}
+	}
+	if !hasManifest {
+		return nil // no manifest-based segments, nothing to do
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64s("textFieldIDs", textFieldIDs),
+	)
+	log.Info("initializing LOB compaction context for TEXT columns (clustering compaction)")
+
+	// create LOB compaction context
+	// for clustering compaction, we always use REWRITE_ALL (forced strategy)
+	// no need to collect LOB files or calculate hole ratio
+	t.lobContext = compaction.NewLOBCompactionContext()
+
+	// set compaction type - clustering compaction forces REWRITE_ALL
+	sourceSegmentCount := len(t.plan.GetSegmentBinlogs())
+	// target segment count is unknown for clustering compaction (determined by clustering)
+	t.lobContext.SetCompactionType(datapb.CompactionType_ClusteringCompaction, sourceSegmentCount, 0)
+
+	// compute strategies (will use forced REWRITE_ALL for all TEXT fields)
+	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+
+	// log strategy decisions
+	for fieldID, decision := range t.lobContext.Decisions {
+		log.Info("LOB compaction strategy decided",
+			zap.Int64("fieldID", fieldID),
+			zap.String("strategy", "REWRITE_ALL"),
+			zap.Bool("isForced", t.lobContext.IsForced),
+			zap.Int("sourceSegmentCount", sourceSegmentCount),
+			zap.Float64("holeRatio", decision.OverallHoleRatio),
+		)
+	}
+
+	return nil
 }

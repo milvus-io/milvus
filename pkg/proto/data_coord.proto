@@ -117,6 +117,9 @@ service DataCoord {
   rpc UnpinSnapshotData(UnpinSnapshotDataRequest) returns(common.Status){}
   // batch update manifest
   rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
+  // commit backfill result (reads result JSON from object storage and dispatches
+  // V2/V3 segment updates through the broadcaster)
+  rpc CommitBackfillResult(CommitBackfillResultRequest) returns(CommitBackfillResultResponse){}
 
   // External Table Refresh APIs
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
@@ -1385,7 +1388,7 @@ message DropCompactionPlanRequest {
   int64 planID = 1;
 }
 
-message UpdateExternalCollectionRequest {
+message RefreshExternalCollectionTaskRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   int64 taskID = 3;
@@ -1396,9 +1399,12 @@ message UpdateExternalCollectionRequest {
   schema.CollectionSchema schema = 8;
   IDRange pre_allocated_segment_ids = 9;  // pre-allocated segment ID range for data mapping
   int64 num_segments_expected = 10;       // expected number of segments for validation
+  string explore_manifest_path = 11;      // S3 manifest path for file discovery
+  int64 file_index_begin = 12;            // File range start for this task
+  int64 file_index_end = 13;              // File range end for this task
 }
 
-message UpdateExternalCollectionResponse {
+message RefreshExternalCollectionTaskResponse {
   common.Status status = 1;
   repeated int64 keptSegments = 2;
   repeated SegmentInfo updatedSegments = 3;
@@ -1444,6 +1450,12 @@ message ExternalCollectionRefreshJob {
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
 // A Task is an execution unit managed by the scheduler, belonging to a parent Job
+// ExternalFileInfo describes a single external file discovered during explore.
+message ExternalFileInfo {
+  string file_path = 1;
+  int64 num_rows = 2;
+}
+
 message ExternalCollectionRefreshTask {
   int64 task_id = 1;             // Unique task identifier
   int64 job_id = 2;              // Parent job ID
@@ -1455,6 +1467,10 @@ message ExternalCollectionRefreshTask {
   string external_source = 8;    // Copied from job for worker execution
   string external_spec = 9;      // Copied from job for worker execution
   int64 progress = 10;           // Task-level progress (0-100)
+  reserved 11;                   // removed: assigned_files (never wired in Part8)
+  string explore_manifest_path = 12;  // S3 manifest path for this job
+  int64 file_index_begin = 13;        // File range start for this task
+  int64 file_index_end = 14;          // File range end for this task
 }
 
 message GetRefreshExternalCollectionProgressResponse {
@@ -1645,6 +1661,34 @@ message BatchUpdateManifestRequest {
 message BatchUpdateManifestItem {
   int64 segment_id = 1;
   int64 manifest_version = 2;
+}
+
+// CommitBackfillResultRequest is sent by the proxy management HTTP endpoint to
+// hand off the path of a BackfillResult JSON file on object storage. DataCoord
+// downloads the JSON, classifies each segment entry (V2/V3), and dispatches
+// the resulting operators through the BatchUpdateManifest broadcast pipeline.
+message CommitBackfillResultRequest {
+  common.MsgBase base = 1;
+  // Accepted forms:
+  //   s3a://<bucket>/<key>   (canonical form produced by Spark)
+  //   s3://<bucket>/<key>
+  //   /<key>                 (bucket implied)
+  string result_path = 2;
+}
+
+message CommitBackfillResultSegmentStatus {
+  int64  segment_id = 1;
+  bool   ok         = 2;
+  string reason     = 3;
+  string kind       = 4;  // "v2" | "v3"
+}
+
+message CommitBackfillResultResponse {
+  common.Status status = 1;
+  int32 total_segments     = 2;
+  int32 committed_segments = 3;
+  int32 failed_segments    = 4;
+  repeated CommitBackfillResultSegmentStatus segment_statuses = 5;
 }
 
 message PinSnapshotDataRequest {

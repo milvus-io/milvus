@@ -14,6 +14,7 @@ import (
 const (
 	FieldMaskCollectionConsistencyLevel = "consistency_level"
 	FieldMaskCollectionDescription      = "description"
+	FieldMaskCollectionExternalSpec     = "external_spec"
 	FieldMaskCollectionName             = "collection_name"
 	FieldMaskCollectionProperties       = "properties"
 	FieldMaskCollectionSchema           = "schema"

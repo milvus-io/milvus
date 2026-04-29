@@ -76,14 +76,6 @@ func (impl *replicatesManagerImpl) SwitchReplicateMode(_ context.Context, msg me
 	if err != nil {
 		return newReplicateViolationErrorForConfig(newCfg, err)
 	}
-
-	// Nil config (drop) — switch to standalone primary with no replication.
-	if newGraph == nil {
-		impl.secondaryState = nil
-		impl.replicateConfigHelper = nil
-		return nil
-	}
-
 	incomingCurrentClusterConfig := newGraph.GetCurrentCluster()
 	switch incomingCurrentClusterConfig.Role() {
 	case replicateutil.RolePrimary:

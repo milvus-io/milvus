@@ -23,6 +23,7 @@ import (
 	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -51,8 +52,16 @@ func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, h
 	}
 }
 
+func (policy *storageVersionUpgradePolicy) Name() string {
+	return "storageVersionUpgrade"
+}
+
 func (policy *storageVersionUpgradePolicy) Enable() bool {
 	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
+}
+
+func (policy *storageVersionUpgradePolicy) TriggerInline(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return nil, nil
 }
 
 func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
@@ -133,6 +142,20 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 	}
 
 	targetVersion := policy.targetVersion()
+	// TEXT fields require V3 manifest storage for LOB support and cannot be
+	// downgraded. If the configured target version is lower than V3 for a
+	// collection that has a TEXT field, skip this collection entirely instead
+	// of silently bumping the target
+	if targetVersion < storage.StorageV3 {
+		for _, field := range collection.Schema.GetFields() {
+			if field.GetDataType() == schemapb.DataType_Text {
+				log.Warn("storage version upgrade policy skipped: collection has TEXT field but configured target storage version is lower than V3, refusing to downgrade",
+					zap.Int64("targetVersion", targetVersion),
+					zap.Int64("requiredVersion", storage.StorageV3))
+				return nil, nil
+			}
+		}
+	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&

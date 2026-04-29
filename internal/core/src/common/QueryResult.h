@@ -30,7 +30,6 @@
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
 #include "common/OffsetMapping.h"
-#include "query/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -157,11 +156,12 @@ class VectorIterator {
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
  public:
+    // Pass nullptr for VECTOR_ARRAY element-level search: the iterator
+    // returns element IDs, which will be processed by IArrayOffsets.
     ChunkMergeIterator(int chunk_count,
-                       const milvus::OffsetMapping& offset_mapping,
-                       const std::vector<int64_t>& total_rows_until_chunk = {},
+                       const milvus::OffsetMapping* offset_mapping,
                        bool larger_is_closer = false)
-        : offset_mapping_(&offset_mapping),
+        : offset_mapping_(offset_mapping),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
@@ -215,22 +215,6 @@ class ChunkMergeIterator : public VectorIterator {
     }
 
  private:
-    int64_t
-    convert_to_segment_offset(int64_t chunk_offset, int chunk_idx) {
-        if (total_rows_until_chunk_.size() == 0) {
-            AssertInfo(
-                iterators_.size() == 1,
-                "Wrong state for vectorIterators, which having incorrect "
-                "kw_iterator count:{} "
-                "without setting value for chunk_rows, "
-                "cannot convert chunk_offset to segment_offset correctly",
-                iterators_.size());
-            return chunk_offset;
-        }
-        return total_rows_until_chunk_[chunk_idx] + chunk_offset;
-    }
-
- private:
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     std::priority_queue<std::shared_ptr<OffsetDisPair>,
                         std::vector<std::shared_ptr<OffsetDisPair>>,
@@ -238,7 +222,6 @@ class ChunkMergeIterator : public VectorIterator {
         heap_;
     bool sealed = false;
     const milvus::OffsetMapping* offset_mapping_ = nullptr;
-    std::vector<int64_t> total_rows_until_chunk_;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -262,9 +245,8 @@ struct SearchResult {
     AssembleChunkVectorIterators(
         int64_t nq,
         int chunk_count,
-        const std::vector<int64_t>& total_rows_until_chunk,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
-        const milvus::OffsetMapping& offset_mapping,
+        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -276,11 +258,8 @@ struct SearchResult {
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
-                auto chunk_merge_iter =
-                    std::make_shared<ChunkMergeIterator>(chunk_count,
-                                                         offset_mapping,
-                                                         total_rows_until_chunk,
-                                                         larger_is_closer);
+                auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
+                    chunk_count, offset_mapping, larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];
@@ -307,8 +286,14 @@ struct SearchResult {
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;
     std::vector<int64_t> seg_offsets_;
-    std::optional<std::vector<GroupByValueType>> group_by_values_;
+    std::optional<std::vector<CompositeGroupKey>> composite_group_by_values_;
     std::optional<int64_t> group_size_;
+
+    bool
+    HasGroupBy() const {
+        return composite_group_by_values_.has_value() &&
+               !composite_group_by_values_->empty();
+    }
 
     // first fill data during fillPrimaryKey, and then update data after reducing search results
     std::vector<PkType> primary_keys_;

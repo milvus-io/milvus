@@ -336,6 +336,7 @@ proxy:
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  maxIndexParamsSize: 102400 # maximum total size of index params in bytes for create index requests
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
@@ -359,6 +360,9 @@ proxy:
       search:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params]"
         methods: "HybridSearch, Search"
+      upsert:
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [partial_update: $partial_update]"
+        methods: Upsert
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
@@ -518,6 +522,8 @@ queryNode:
       cacheTtl: 0
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    storageV2:
+      cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
@@ -586,6 +592,7 @@ queryNode:
   idfOracle:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
+    bm25StatsBytesPerEntry: 20 # Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -727,6 +734,10 @@ dataCoord:
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
+    lob:
+      enabled: true # Enable garbage collection for LOB (TEXT column) files
+      safetyWindow: 3600 # Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.
+      checkInterval: 1800 # Interval for LOB GC check in seconds. Default 30 minutes.
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
@@ -817,6 +828,11 @@ dataNode:
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
     useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
+    lobHoleRatioThreshold: 0.3 # The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.
+  text:
+    inlineThreshold: 65536 # TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.
+    maxLobFileBytes: 67108864 # Maximum size of a single LOB file for TEXT column storage (in bytes).
+    flushThresholdBytes: 16777216 # Flush threshold for TEXT column writer buffer (in bytes).
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode
@@ -1000,30 +1016,6 @@ common:
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
-    rbac:
-      overrideBuiltInPrivilegeGroups:
-        enabled: false # Whether to override build-in privilege groups
-      cluster:
-        readonly:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups # Cluster level readonly privileges
-        readwrite:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
-        admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup,UpdateReplicateConfiguration # Cluster level admin privileges
-      database:
-        readonly:
-          privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
-        readwrite:
-          privileges: ShowCollections,DescribeDatabase,AlterDatabase # Database level readwrite privileges
-        admin:
-          privileges: ShowCollections,DescribeDatabase,AlterDatabase,CreateCollection,DropCollection # Database level admin privileges
-      collection:
-        readonly:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport # Collection level readonly privileges
-        readwrite:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField # Collection level readwrite privileges
-        admin:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField,CreateAlias,DropAlias # Collection level admin privileges
     internaltlsEnabled: false
     tlsMode: 0
   session:

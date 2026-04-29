@@ -23,6 +23,7 @@ package segments
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
 #include "common/init_c.h"
 */
 import "C"
@@ -30,6 +31,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -46,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -525,6 +528,31 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
+// advanceLastDeltaTimestamp moves lastDeltaTimestamp forward to max(current, max(tss)).
+// Consumers (file-level skip in segment_loader.LoadDeltaLogs, dist_handler reporting to
+// QueryCoord) treat this field as a high-water-mark. Using tss[last] on unsorted batches
+// underestimates the watermark, so we scan for the true max.
+func (s *LocalSegment) advanceLastDeltaTimestamp(tss []typeutil.Timestamp) {
+	if len(tss) == 0 {
+		return
+	}
+	maxTs := tss[0]
+	for _, t := range tss[1:] {
+		if t > maxTs {
+			maxTs = t
+		}
+	}
+	for {
+		cur := s.lastDeltaTimestamp.Load()
+		if maxTs <= cur {
+			return
+		}
+		if s.lastDeltaTimestamp.CompareAndSwap(cur, maxTs) {
+			return
+		}
+	}
+}
+
 // UpdatePkCandidate updates the PK candidate with provided pks and charges resource.
 // Overrides baseSegment.UpdatePkCandidate to handle resource charging for growing segments.
 func (s *LocalSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
@@ -619,6 +647,15 @@ func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 		return true
 	})
 	return result
+}
+
+func (s *LocalSegment) IsLazyLoad() bool {
+	for _, indexInfo := range s.Indexes() {
+		if !indexInfo.IsLoaded {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
@@ -816,12 +853,11 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	s.deltaMut.Lock()
 	defer s.deltaMut.Unlock()
 
-	if s.lastDeltaTimestamp.Load() >= timestamps[len(timestamps)-1] {
-		log.Info("skip delete due to delete record before lastDeltaTimestamp",
-			zap.Int64("segmentID", s.ID()),
-			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
-		return nil
-	}
+	// segcore DeletedRecord::InternalPush is idempotent on (PK, ts):
+	// duplicate deletes against already-deleted rows are discarded internally.
+	// Do NOT add a ts-watermark skip here. In L0-forward + partial-L0-compaction
+	// scenarios, batches contain ts values below the watermark that have NOT yet
+	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
 	GetDynamicPool().Submit(func() (any, error) {
@@ -845,7 +881,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	}
 
 	s.rowNum.Store(-1)
-	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
+	// Track max ts as a high-water-mark (consumed by file-level skip in
+	// LoadDeltaLogs and by dist_handler for QueryCoord reporting). Using
+	// tss[last] on unsorted batches underestimates the watermark.
+	s.advanceLastDeltaTimestamp(timestamps)
 	return nil
 }
 
@@ -931,11 +970,9 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	s.deltaMut.Lock()
 	defer s.deltaMut.Unlock()
 
-	if s.lastDeltaTimestamp.Load() >= tss[len(tss)-1] {
-		log.Info("skip load delta data due to delete record before lastDeltaTimestamp",
-			zap.Uint64("lastDeltaTimestamp", s.lastDeltaTimestamp.Load()))
-		return nil
-	}
+	// See comment in Delete(): segcore dedups at (PK, ts) level, and tss is
+	// NOT sorted across L0 segments (BufferForwarder appends in iteration
+	// order), so comparing against tss[last] is both unnecessary and incorrect.
 
 	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
 	if err != nil {
@@ -979,7 +1016,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	}
 
 	s.rowNum.Store(-1)
-	s.lastDeltaTimestamp.Store(tss[len(tss)-1])
+	s.advanceLastDeltaTimestamp(tss)
 
 	log.Info("load deleted record done",
 		zap.Int64("rowNum", rowNum),
@@ -1447,4 +1484,102 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 
 func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return s.fieldJSONStats
+}
+
+// FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.
+// This is a unified interface that combines data extraction from segcore and writing to storage.
+// The C++ side handles: extracting raw field data from ConcurrentVector, converting to Arrow,
+// and writing to storage via milvus-storage with TEXT column LOB handling.
+func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+	// currently only growing segments support FlushData
+	if s.Type() != SegmentTypeGrowing {
+		return nil, errors.Errorf("FlushData is only supported for growing segments, got %s", s.Type().String())
+	}
+
+	// validate offsets
+	if startOffset < 0 || endOffset < startOffset {
+		return nil, errors.Errorf("invalid offsets: start=%d, end=%d", startOffset, endOffset)
+	}
+
+	// no data to flush
+	if startOffset == endOffset {
+		return nil, nil
+	}
+
+	// build C flush config
+	var cConfig C.CFlushConfig
+	cSegmentPath := C.CString(config.SegmentBasePath)
+	defer C.free(unsafe.Pointer(cSegmentPath))
+	cConfig.segment_path = cSegmentPath
+
+	cConfig.read_version = C.int64_t(config.ReadVersion)
+	cConfig.retry_limit = C.uint32_t(3)
+
+	// populate TEXT column configs
+	// All arrays must be C-allocated to avoid "Go pointer to unpinned Go pointer" panic
+	numTextCols := len(config.TextFieldIDs)
+	if numTextCols > 0 {
+		// allocate C arrays via C.malloc (not Go slices) to satisfy CGO pointer rules
+		cFieldIDs := (*C.int64_t)(C.malloc(C.size_t(numTextCols) * C.size_t(unsafe.Sizeof(C.int64_t(0)))))
+		defer C.free(unsafe.Pointer(cFieldIDs))
+
+		cLobPathPtrs := (**C.char)(C.malloc(C.size_t(numTextCols) * C.size_t(unsafe.Sizeof((*C.char)(nil)))))
+		defer C.free(unsafe.Pointer(cLobPathPtrs))
+
+		fieldIDSlice := unsafe.Slice(cFieldIDs, numTextCols)
+		lobPathSlice := unsafe.Slice(cLobPathPtrs, numTextCols)
+		for i := 0; i < numTextCols; i++ {
+			fieldIDSlice[i] = C.int64_t(config.TextFieldIDs[i])
+			lobPathSlice[i] = C.CString(config.TextLobPaths[i])
+			defer C.free(unsafe.Pointer(lobPathSlice[i]))
+		}
+
+		cConfig.text_field_ids = cFieldIDs
+		cConfig.text_lob_paths = cLobPathPtrs
+		cConfig.num_text_columns = C.size_t(numTextCols)
+	} else {
+		cConfig.text_field_ids = nil
+		cConfig.text_lob_paths = nil
+		cConfig.num_text_columns = 0
+	}
+
+	// call C FFI
+	var cResult C.CFlushResult
+	status := C.FlushGrowingSegmentData(
+		s.ptr,
+		C.int64_t(startOffset),
+		C.int64_t(endOffset),
+		&cConfig,
+		&cResult,
+	)
+	defer C.FreeFlushResult(&cResult)
+
+	if err := HandleCStatus(ctx, &status, "FlushGrowingSegmentData"); err != nil {
+		return nil, err
+	}
+
+	// no data flushed
+	if cResult.manifest_path == nil {
+		return nil, nil
+	}
+
+	// C++ SegmentWriter returns a raw file path like:
+	//   "files/insert_log/{coll}/{part}/{seg}/_metadata/manifest-{ver}.avro"
+	// But GetLoonManifest() expects a JSON-encoded manifest path like:
+	//   {"ver":{ver},"base_path":"files/insert_log/{coll}/{part}/{seg}"}
+	// Convert using the committed_version and base path extraction.
+	rawPath := C.GoString(cResult.manifest_path)
+	committedVersion := int64(cResult.committed_version)
+
+	// Extract base path: strip "/_metadata/manifest-{ver}.avro" suffix
+	basePath := rawPath
+	if idx := strings.Index(rawPath, "/_metadata/"); idx >= 0 {
+		basePath = rawPath[:idx]
+	}
+	manifestPath := packed.MarshalManifestPath(basePath, committedVersion)
+
+	return &FlushResult{
+		ManifestPath: manifestPath,
+		NumRows:      int64(cResult.num_rows),
+	}, nil
 }

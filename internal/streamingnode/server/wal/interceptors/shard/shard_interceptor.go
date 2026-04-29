@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
@@ -146,6 +145,29 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+	schemaVersion := header.GetSchemaVersion()
+	if correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header.GetCollectionId(), schemaVersion); err != nil {
+		if errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError("collection %d not found", header.GetCollectionId())
+		}
+		if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
+			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", header.GetCollectionId())
+		}
+		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+			impl.shardManager.Logger().Warn("insertMessage schema version mismatch",
+				zap.Int64("collectionID", header.GetCollectionId()),
+				zap.Int32("schemaVersion", schemaVersion),
+				zap.Int32("collectionSchemaVersion", correctSchemaVersion),
+				zap.Error(err))
+			return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
+				schemaVersion, correctSchemaVersion)
+		}
+		impl.shardManager.Logger().Error("unexpected error from CheckIfCollectionSchemaVersionMatch",
+			zap.Int64("collectionID", header.GetCollectionId()),
+			zap.Int32("schemaVersion", schemaVersion),
+			zap.Error(err))
+		return nil, errors.Wrap(err, "CheckIfCollectionSchemaVersionMatch")
+	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
@@ -241,7 +263,6 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 	// Modify the header of schema change message, carry with the all flushed segment ids.
 	header.FlushedSegmentIds = segmentIDs
 	schemaChangeMsg.OverwriteHeader(header)
-
 	return appendOp(ctx, msg)
 }
 
@@ -249,17 +270,20 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	putCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
 	header := putCollectionMsg.Header()
-	var segmentIDs []int64
-	var err error
-	if messageutil.IsSchemaChange(header) {
-		segmentIDs, err = impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
-		if err != nil {
-			return nil, status.NewUnrecoverableError(err.Error())
-		}
+
+	// AlterCollection atomically flushes+fences segments (if schema change) and updates
+	// in-memory schema — all within one critical region of the shard manager.
+	segmentIDs, err := impl.shardManager.AlterCollection(putCollectionMsg)
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
-	header.FlushedSegmentIds = segmentIDs
-	putCollectionMsg.OverwriteHeader(header)
+	// Embed flushed segment IDs into the WAL message header before appending.
+	if len(segmentIDs) > 0 {
+		header.FlushedSegmentIds = segmentIDs
+		putCollectionMsg.OverwriteHeader(header)
+	}
+
 	return appendOp(ctx, msg)
 }
 
