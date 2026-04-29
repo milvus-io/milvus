@@ -233,6 +233,14 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 			return fmt.Errorf("index metric type of BM25 function output field must be BM25, got %s", metricType)
 		}
 
+	case schemapb.FunctionType_MinHash:
+		// MinHash function output: metric_type can only be MHJACCARD
+		indexParamsMap["mh_element_bit_width"] = "32"
+		if metricType, ok := indexParamsMap[common.MetricTypeKey]; !ok || metricType == "" {
+			indexParamsMap[common.MetricTypeKey] = metric.MHJACCARD
+		} else if metricType != metric.MHJACCARD {
+			return fmt.Errorf("index metric type of MinHash function output field must be %s, got %s", metric.MHJACCARD, metricType)
+		}
 	default:
 		return nil
 	}
