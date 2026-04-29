@@ -95,18 +95,23 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 	resultOffsets := make([][]int64, len(searchResultData))
 	totalOffsetElements := 0
-	for i := range searchResultData {
-		totalOffsetElements += len(searchResultData[i].Topks)
+	for i, data := range searchResultData {
+		if int64(len(data.Topks)) < nq {
+			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+		}
+		totalOffsetElements += len(data.Topks)
 	}
 	offsetBacking := make([]int64, totalOffsetElements)
 	for i := 0; i < len(searchResultData); i++ {
-		n := len(searchResultData[i].Topks)
+		data := searchResultData[i]
+		topks := data.Topks
+		n := len(topks)
 		resultOffsets[i] = offsetBacking[:n:n]
 		offsetBacking = offsetBacking[n:]
-		for j := int64(1); j < nq; j++ {
-			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
+		for j := 1; j < n; j++ {
+			resultOffsets[i][j] = resultOffsets[i][j-1] + topks[j-1]
 		}
-		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
+		ret.AllSearchCount += data.GetAllSearchCount()
 	}
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
@@ -228,20 +233,25 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 
 	resultOffsets := make([][]int64, len(searchResultData))
 	totalOffsetElements := 0
-	for i := range searchResultData {
-		totalOffsetElements += len(searchResultData[i].Topks)
+	for i, data := range searchResultData {
+		if int64(len(data.Topks)) < nq {
+			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+		}
+		totalOffsetElements += len(data.Topks)
 	}
 	offsetBacking := make([]int64, totalOffsetElements)
 	groupByValIterator := make([]func(int) any, len(searchResultData))
 	for i := range searchResultData {
-		n := len(searchResultData[i].Topks)
+		data := searchResultData[i]
+		topks := data.Topks
+		n := len(topks)
 		resultOffsets[i] = offsetBacking[:n:n]
 		offsetBacking = offsetBacking[n:]
-		for j := int64(1); j < nq; j++ {
-			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
+		for j := 1; j < n; j++ {
+			resultOffsets[i][j] = resultOffsets[i][j-1] + topks[j-1]
 		}
-		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
-		groupByValIterator[i] = typeutil.GetDataIterator(searchResultData[i].GetGroupByFieldValue())
+		ret.AllSearchCount += data.GetAllSearchCount()
+		groupByValIterator[i] = typeutil.GetDataIterator(data.GetGroupByFieldValue())
 	}
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(searchResultData[0].GetGroupByFieldValue().GetType(), true, int(info.GetTopK()))
 	if err != nil {
