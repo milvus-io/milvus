@@ -450,9 +450,9 @@ func (_c *MockShardManager_CheckIfCollectionExists_Call) RunAndReturn(run func(i
 	return _c
 }
 
-// CheckIfCollectionSchemaVersionMatch provides a mock function with given fields: collectionID, schemaVersion
-func (_m *MockShardManager) CheckIfCollectionSchemaVersionMatch(collectionID int64, schemaVersion int32) (int32, error) {
-	ret := _m.Called(collectionID, schemaVersion)
+// CheckIfCollectionSchemaVersionMatch provides a mock function with given fields: header
+func (_m *MockShardManager) CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error) {
+	ret := _m.Called(header)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfCollectionSchemaVersionMatch")
@@ -460,17 +460,17 @@ func (_m *MockShardManager) CheckIfCollectionSchemaVersionMatch(collectionID int
 
 	var r0 int32
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, int32) (int32, error)); ok {
-		return rf(collectionID, schemaVersion)
+	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) (int32, error)); ok {
+		return rf(header)
 	}
-	if rf, ok := ret.Get(0).(func(int64, int32) int32); ok {
-		r0 = rf(collectionID, schemaVersion)
+	if rf, ok := ret.Get(0).(func(*message.InsertMessageHeader) int32); ok {
+		r0 = rf(header)
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	if rf, ok := ret.Get(1).(func(int64, int32) error); ok {
-		r1 = rf(collectionID, schemaVersion)
+	if rf, ok := ret.Get(1).(func(*message.InsertMessageHeader) error); ok {
+		r1 = rf(header)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -484,15 +484,14 @@ type MockShardManager_CheckIfCollectionSchemaVersionMatch_Call struct {
 }
 
 // CheckIfCollectionSchemaVersionMatch is a helper method to define mock.On call
-//   - collectionID int64
-//   - schemaVersion int32
-func (_e *MockShardManager_Expecter) CheckIfCollectionSchemaVersionMatch(collectionID interface{}, schemaVersion interface{}) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
-	return &MockShardManager_CheckIfCollectionSchemaVersionMatch_Call{Call: _e.mock.On("CheckIfCollectionSchemaVersionMatch", collectionID, schemaVersion)}
+//   - header *message.InsertMessageHeader
+func (_e *MockShardManager_Expecter) CheckIfCollectionSchemaVersionMatch(header interface{}) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+	return &MockShardManager_CheckIfCollectionSchemaVersionMatch_Call{Call: _e.mock.On("CheckIfCollectionSchemaVersionMatch", header)}
 }
 
-func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Run(run func(collectionID int64, schemaVersion int32)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Run(run func(header *message.InsertMessageHeader)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int32))
+		run(args[0].(*message.InsertMessageHeader))
 	})
 	return _c
 }
@@ -502,7 +501,7 @@ func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) Return(_a0 
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) RunAndReturn(run func(int64, int32) (int32, error)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
+func (_c *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call) RunAndReturn(run func(*message.InsertMessageHeader) (int32, error)) *MockShardManager_CheckIfCollectionSchemaVersionMatch_Call {
 	_c.Call.Return(run)
 	return _c
 }
