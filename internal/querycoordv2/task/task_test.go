@@ -627,7 +627,7 @@ func (suite *TaskSuite) TestLoadSegmentReopenTask() {
 			ID:           targetNode,
 			CollectionID: suite.collection,
 			Segments: map[int64]*querypb.SegmentDist{
-				segmentID: &querypb.SegmentDist{NodeID: targetNode, Version: 0},
+				segmentID: {NodeID: targetNode, Version: 0},
 			},
 			Channel: channel.ChannelName,
 		},
