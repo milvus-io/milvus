@@ -46,30 +46,37 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	left := v.visitExpr(expr.GetLeft()).(*planpb.Expr)
 	right := v.visitExpr(expr.GetRight()).(*planpb.Expr)
+	if !v.optimizeEnabled {
+		return &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Left:  left,
+					Right: right,
+					Op:    expr.GetOp(),
+				},
+			},
+		}
+	}
 	switch expr.GetOp() {
 	case planpb.BinaryExpr_LogicalOr:
 		parts := flattenOr(left, right)
-		if v.optimizeEnabled {
-			parts = v.combineOrEqualsToIn(parts)
-			parts = v.combineOrTextMatchToMerged(parts)
-			parts = v.combineOrRangePredicates(parts)
-			parts = v.combineOrBinaryRanges(parts)
-			parts = v.combineOrInWithNotEqual(parts)
-			parts = v.combineOrInWithIn(parts)
-			parts = v.combineOrInWithEqual(parts)
-		}
+		parts = v.combineOrEqualsToIn(parts)
+		parts = v.combineOrTextMatchToMerged(parts)
+		parts = v.combineOrRangePredicates(parts)
+		parts = v.combineOrBinaryRanges(parts)
+		parts = v.combineOrInWithNotEqual(parts)
+		parts = v.combineOrInWithIn(parts)
+		parts = v.combineOrInWithEqual(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
 		parts := flattenAnd(left, right)
-		if v.optimizeEnabled {
-			parts = v.combineAndRangePredicates(parts)
-			parts = v.combineAndBinaryRanges(parts)
-			parts = v.combineAndInWithIn(parts)
-			parts = v.combineAndInWithNotEqual(parts)
-			parts = v.combineAndInWithRange(parts)
-			parts = v.combineAndInWithEqual(parts)
-			parts = v.combineAndNotEqualsToNotIn(parts)
-		}
+		parts = v.combineAndRangePredicates(parts)
+		parts = v.combineAndBinaryRanges(parts)
+		parts = v.combineAndInWithIn(parts)
+		parts = v.combineAndInWithNotEqual(parts)
+		parts = v.combineAndInWithRange(parts)
+		parts = v.combineAndInWithEqual(parts)
+		parts = v.combineAndNotEqualsToNotIn(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
 	default:
 		return &planpb.Expr{
@@ -85,6 +92,18 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 }
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
+	if !v.optimizeEnabled {
+		child := v.visitExpr(expr.GetChild()).(*planpb.Expr)
+		return &planpb.Expr{
+			Expr: &planpb.Expr_UnaryExpr{
+				UnaryExpr: &planpb.UnaryExpr{
+					Op:    expr.GetOp(),
+					Child: child,
+				},
+			},
+		}
+	}
+
 	// Handle NOT(TermExpr) before visiting child.
 	// Skip bool types here — they are handled via visitTermExpr bool optimization + NOT simplification.
 	if expr.GetOp() == planpb.UnaryExpr_Not {
@@ -141,6 +160,9 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 
 func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	sortTermValues(expr)
+	if !v.optimizeEnabled {
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
+	}
 
 	// Optimize bool IN expressions:
 	// - in [true, false] → AlwaysTrueExpr (non-nullable) or IS NOT NULL (nullable)
@@ -194,6 +216,9 @@ func allBoolVals(values []*planpb.GenericValue) bool {
 // This handles cases like "1==1" which the parser constant-folds into ValueExpr(bool=true),
 // normalizing them to the canonical AlwaysTrueExpr/AlwaysFalseExpr representation.
 func (v *visitor) visitValueExpr(expr *planpb.ValueExpr, original *planpb.Expr) interface{} {
+	if !v.optimizeEnabled {
+		return original
+	}
 	val := expr.GetValue()
 	if boolVal, ok := val.GetVal().(*planpb.GenericValue_BoolVal); ok {
 		if boolVal.BoolVal {
