@@ -3,8 +3,9 @@ package metautil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 func TestIndexPathBuilder_V0_SingleFile(t *testing.T) {
