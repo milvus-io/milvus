@@ -507,6 +507,12 @@ func (s *Server) initServiceDiscovery() error {
 			log.Warn("DataCoord failed to add datanode", zap.Error(err))
 			return err
 		}
+		s.indexEngineVersionManager.AddByRole(typeutil.DataNodeRole, &sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
+				Address:  Params.DataCoordCfg.IndexNodeAddress.GetValue(),
+			},
+		})
 		s.dnSessionWatcher = sessionutil.EmptySessionWatcher()
 	} else {
 		err := s.rewatchDataNodes(sessions)
