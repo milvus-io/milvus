@@ -244,6 +244,9 @@ func TestStructArrayElementMatchSearch(t *testing.T) {
 	opt.IncludeFloatVal = true
 
 	t.Run("match_all_basic", func(t *testing.T) {
+		// MATCH_ALL is not supported by the 2.6 base server used by this backport.
+		t.Skip("MATCH_ALL is not supported by the 2.6 base server")
+
 		ds := hp.GenerateStructAElementData(500, 0, opt)
 		collName := common.GenRandomString(elemSearchPrefix+"_ma_basic", 6)
 		o2 := opt
@@ -263,6 +266,9 @@ func TestStructArrayElementMatchSearch(t *testing.T) {
 	})
 
 	t.Run("match_all_compound_same_element", func(t *testing.T) {
+		// MATCH_ALL is not supported by the 2.6 base server used by this backport.
+		t.Skip("MATCH_ALL is not supported by the 2.6 base server")
+
 		collName, _ := matchSearchSetup(t, ctx, mc, elemSearchPrefix+"_ma_compound", semanticRows(opt))
 		ids := queryAllIDs(t, ctx, mc, collName, `MATCH_ALL(structA, $[color] == "Red" && $[size] == "L")`, 100)
 		require.Contains(t, ids, int64(1), "row 1: all elements are Red+L")
@@ -537,6 +543,9 @@ func TestStructArrayElementGroupByElementFilterBasic(t *testing.T) {
 }
 
 func TestStructArrayElementGroupByMatchAll(t *testing.T) {
+	// MATCH_ALL is not supported by the 2.6 base server used by this backport.
+	t.Skip("MATCH_ALL is not supported by the 2.6 base server")
+
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName, rows := groupByCollection(t, ctx, mc)

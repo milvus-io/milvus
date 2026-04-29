@@ -519,6 +519,9 @@ func TestStructArrayElementQueryCorrectness(t *testing.T) {
 	})
 
 	t.Run("match_all_query_exact_verification", func(t *testing.T) {
+		// MATCH_ALL is not supported by the 2.6 base server used by this backport.
+		t.Skip("MATCH_ALL is not supported by the 2.6 base server")
+
 		opt := hp.DefaultStructAElementSchemaOption("")
 		controlled := []hp.StructARow{
 			hp.MakeRow(0, opt, []hp.StructAElement{{IntVal: 11}, {IntVal: 20}, {IntVal: 30}}),
@@ -676,6 +679,9 @@ func TestStructArrayElementMatchQuery(t *testing.T) {
 	common.CheckErr(t, loadTask.Await(ctx), true)
 
 	t.Run("match_query_all", func(t *testing.T) {
+		// MATCH_ALL is not supported by the 2.6 base server used by this backport.
+		t.Skip("MATCH_ALL is not supported by the 2.6 base server")
+
 		ids := queryAllIDs(t, ctx, mc, collName, `MATCH_ALL(structA, $[int_val] > 0)`, 100)
 		gt := hp.GtMatch(ds.Rows, "MATCH_ALL", func(e hp.StructAElement) bool { return e.IntVal > 0 }, 0, nil)
 		require.True(t, subset(ids, hp.IDSetToSorted(gt)),
