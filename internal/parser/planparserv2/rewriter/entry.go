@@ -52,23 +52,28 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		if v.optimizeEnabled {
 			parts = v.combineOrEqualsToIn(parts)
 			parts = v.combineOrTextMatchToMerged(parts)
+			parts = v.combineOrComplementaryRanges(parts)
 			parts = v.combineOrRangePredicates(parts)
 			parts = v.combineOrBinaryRanges(parts)
 			parts = v.combineOrInWithNotEqual(parts)
 			parts = v.combineOrInWithIn(parts)
 			parts = v.combineOrInWithEqual(parts)
+			parts = v.combineOrAbsorption(parts)
 		}
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
 		parts := flattenAnd(left, right)
 		if v.optimizeEnabled {
+			parts = v.combineAndEqualWithEqual(parts)
 			parts = v.combineAndRangePredicates(parts)
 			parts = v.combineAndBinaryRanges(parts)
+			parts = v.combineAndRangeWithEqual(parts)
 			parts = v.combineAndInWithIn(parts)
 			parts = v.combineAndInWithNotEqual(parts)
 			parts = v.combineAndInWithRange(parts)
 			parts = v.combineAndInWithEqual(parts)
 			parts = v.combineAndNotEqualsToNotIn(parts)
+			parts = v.combineAndAbsorption(parts)
 		}
 		return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
 	default:
