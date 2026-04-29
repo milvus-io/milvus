@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -1609,6 +1610,289 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h.RegisterRoutesToV2(appV2)
 
 	return ginHandler
+}
+
+type externalCollectionRESTProxy struct {
+	mockProxyComponent
+	createReq    *milvuspb.CreateCollectionRequest
+	describeResp *milvuspb.DescribeCollectionResponse
+	refreshReq   *milvuspb.RefreshExternalCollectionRequest
+	listReq      *milvuspb.ListRefreshExternalCollectionJobsRequest
+	progressReq  *milvuspb.GetRefreshExternalCollectionProgressRequest
+}
+
+func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	m.createReq = request
+	return commonSuccessStatus, nil
+}
+
+func (m *externalCollectionRESTProxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if m.describeResp != nil {
+		return m.describeResp, nil
+	}
+	return m.mockProxyComponent.DescribeCollection(ctx, request)
+}
+
+func (m *externalCollectionRESTProxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+	return &DefaultLoadStateResp, nil
+}
+
+func (m *externalCollectionRESTProxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	return &DefaultDescIndexesReqp, nil
+}
+
+func (m *externalCollectionRESTProxy) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	return &milvuspb.ListAliasesResponse{
+		Status:  &StatusSuccess,
+		Aliases: []string{DefaultAliasName},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) RefreshExternalCollection(ctx context.Context, request *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
+	m.refreshReq = request
+	return &milvuspb.RefreshExternalCollectionResponse{
+		Status: commonSuccessStatus,
+		JobId:  1001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetRefreshExternalCollectionProgress(ctx context.Context, request *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
+	m.progressReq = request
+	return &milvuspb.GetRefreshExternalCollectionProgressResponse{
+		Status: commonSuccessStatus,
+		JobInfo: &milvuspb.RefreshExternalCollectionJobInfo{
+			JobId:          request.GetJobId(),
+			CollectionName: "external_books",
+			State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+			Progress:       42,
+			ExternalSource: "s3://bucket/books",
+			StartTime:      10,
+		},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) ListRefreshExternalCollectionJobs(ctx context.Context, request *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
+	m.listReq = request
+	return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+		Status: commonSuccessStatus,
+		Jobs: []*milvuspb.RefreshExternalCollectionJobInfo{
+			{
+				JobId:          1001,
+				CollectionName: request.GetCollectionName(),
+				State:          milvuspb.RefreshExternalCollectionState_RefreshCompleted,
+				Progress:       100,
+				ExternalSource: "s3://bucket/books",
+				StartTime:      10,
+				EndTime:        20,
+			},
+		},
+	}, nil
+}
+
+func TestFieldSchemaGetProtoWithExternalField(t *testing.T) {
+	field := &FieldSchema{
+		FieldName:     "title",
+		DataType:      "VarChar",
+		ExternalField: "book_title",
+		ElementTypeParams: map[string]interface{}{
+			common.MaxLengthKey: 256,
+		},
+	}
+
+	got, err := field.GetProto(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, "book_title", got.GetExternalField())
+	assert.Equal(t, schemapb.DataType_VarChar, got.GetDataType())
+}
+
+func TestCreateExternalCollectionRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testcases := []struct {
+		name   string
+		body   string
+		source string
+		spec   string
+	}{
+		{
+			name: "schema level external config",
+			body: `{
+				"dbName": "default",
+				"collectionName": "external_books",
+				"schema": {
+					"externalSource": "s3://bucket/books",
+					"externalSpec": "{\"format\":\"parquet\"}",
+					"fields": [
+						{"fieldName": "book_intro", "dataType": "FloatVector", "externalField": "embedding", "elementTypeParams": {"dim": 2}},
+						{"fieldName": "title", "dataType": "VarChar", "externalField": "book_title", "elementTypeParams": {"max_length": 256}}
+					]
+				}
+			}`,
+			source: "s3://bucket/books",
+			spec:   `{"format":"parquet"}`,
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			proxy := &externalCollectionRESTProxy{}
+			testEngine := initHTTPServerV2(proxy, false)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(testcase.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.NotNil(t, proxy.createReq)
+			collSchema := &schemapb.CollectionSchema{}
+			assert.NoError(t, proto.Unmarshal(proxy.createReq.GetSchema(), collSchema))
+			assert.Equal(t, testcase.source, collSchema.GetExternalSource())
+			assert.Equal(t, testcase.spec, collSchema.GetExternalSpec())
+			assert.Equal(t, "embedding", collSchema.GetFields()[0].GetExternalField())
+			assert.Equal(t, "book_title", collSchema.GetFields()[1].GetExternalField())
+		})
+	}
+}
+
+func TestCreateExternalCollectionTopLevelConfigRejectedRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(`{
+		"collectionName": "external_books",
+		"externalSource": "s3://bucket/books",
+		"externalSpec": "{\"format\":\"parquet\"}",
+		"schema": {
+			"fields": [
+				{"fieldName": "book_intro", "dataType": "FloatVector", "externalField": "embedding", "elementTypeParams": {"dim": 2}},
+				{"fieldName": "title", "dataType": "VarChar", "externalField": "book_title", "elementTypeParams": {"max_length": 256}}
+			]
+		}
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Nil(t, proxy.createReq)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.NotZero(t, returnBody.Code)
+	assert.Contains(t, returnBody.Message, "schema.externalSource/schema.externalSpec")
+}
+
+func TestCreateExternalCollectionQuickCreateRejectedRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction), bytes.NewReader([]byte(`{
+		"collectionName": "external_books",
+		"dimension": 2,
+		"schema": {
+			"externalSource": "s3://bucket/books",
+			"externalSpec": "{\"format\":\"parquet\"}"
+		}
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Nil(t, proxy.createReq)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.NotZero(t, returnBody.Code)
+	assert.Contains(t, returnBody.Message, "external collection is not supported by quick create")
+}
+
+func TestDescribeExternalCollectionRESTV2(t *testing.T) {
+	paramtable.Init()
+	schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+	schema.ExternalSource = "s3://bucket/books"
+	schema.ExternalSpec = `{"format":"parquet"}`
+	schema.Fields[1].ExternalField = "word_count_col"
+	schema.Fields[2].ExternalField = "embedding"
+
+	proxy := &externalCollectionRESTProxy{
+		describeResp: &milvuspb.DescribeCollectionResponse{
+			CollectionName: DefaultCollectionName,
+			Schema:         schema,
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		},
+	}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, DescribeAction), bytes.NewReader([]byte(`{"collectionName": "`+DefaultCollectionName+`"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	data := resp[HTTPReturnData].(map[string]interface{})
+	assert.Equal(t, "s3://bucket/books", data["externalSource"])
+	assert.Equal(t, `{"format":"parquet"}`, data["externalSpec"])
+	fields := data["fields"].([]interface{})
+	wordCount := fields[1].(map[string]interface{})
+	vector := fields[2].(map[string]interface{})
+	assert.Equal(t, "word_count_col", wordCount["externalField"])
+	assert.Equal(t, "embedding", vector["externalField"])
+}
+
+func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, RefreshAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "external_books",
+		"externalSource": "s3://bucket/books_v2",
+		"externalSpec": "{\"format\":\"parquet\"}"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "external_books", proxy.refreshReq.GetCollectionName())
+	assert.Equal(t, "s3://bucket/books_v2", proxy.refreshReq.GetExternalSource())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, DescribeAction), bytes.NewReader([]byte(`{"jobId": 1001}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(1001), proxy.progressReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"progress":42`)
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, ListAction), bytes.NewReader([]byte(`{"collectionName": "external_books"}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "external_books", proxy.listReq.GetCollectionName())
+	assert.Contains(t, w.Body.String(), `"state":"RefreshCompleted"`)
+}
+
+func TestExternalCollectionJobDescribeRequiresJobIDRESTV2(t *testing.T) {
+	paramtable.Init()
+	testEngine := initHTTPServerV2(&externalCollectionRESTProxy{}, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ExternalCollectionJobCategory, DescribeAction), bytes.NewReader([]byte(`{}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.NotZero(t, returnBody.Code)
+	assert.Contains(t, returnBody.Message, "missing required parameters")
 }
 
 /**

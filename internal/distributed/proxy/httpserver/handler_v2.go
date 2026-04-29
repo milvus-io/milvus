@@ -155,10 +155,13 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/aliases/drop":     "DropAlias",
 	"/v2/vectordb/aliases/alter":    "AlterAlias",
 
-	"/v2/vectordb/jobs/import/list":         "ListImports",
-	"/v2/vectordb/jobs/import/create":       "Import",
-	"/v2/vectordb/jobs/import/get_progress": "GetImportProgress",
-	"/v2/vectordb/jobs/import/describe":     "GetImportProgress",
+	"/v2/vectordb/jobs/import/list":                  "ListImports",
+	"/v2/vectordb/jobs/import/create":                "Import",
+	"/v2/vectordb/jobs/import/get_progress":          "GetImportProgress",
+	"/v2/vectordb/jobs/import/describe":              "GetImportProgress",
+	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
+	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
+	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
 
 	"/v2/vectordb/resource_groups/create":           "CreateResourceGroup",
 	"/v2/vectordb/resource_groups/drop":             "DropResourceGroup",
@@ -307,6 +310,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
 	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
+	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
+	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
 
 	// resource group
 	router.POST(ResourceGroupCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ResourceGroupReq{} }, wrapperTraceLog(h.createResourceGroup))))
@@ -667,6 +673,8 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		"partitionsNum":       coll.NumPartitions,
 		"consistencyLevel":    commonpb.ConsistencyLevel_name[int32(coll.ConsistencyLevel)],
 		"enableDynamicField":  coll.Schema.EnableDynamicField,
+		"externalSource":      coll.Schema.GetExternalSource(),
+		"externalSpec":        coll.Schema.GetExternalSpec(),
 		"properties":          coll.Properties,
 	}, HTTPReturnMessage: errMessage})
 	return resp, nil
@@ -1789,11 +1797,32 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	c.Set(ContextRequest, req)
 
+	if httpReq.HasTopLevelExternalConfig() {
+		err := merr.WrapErrParameterInvalid("schema.externalSource/schema.externalSpec", "top-level externalSource/externalSpec",
+			"externalSource and externalSpec must be set under schema when creating an external collection")
+		log.Ctx(ctx).Warn("high level restful api, create external collection with top-level external config fail", zap.Error(err), zap.Any("request", anyReq))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+
 	var schema []byte
 	var err error
 	fieldNames := map[string]bool{}
 	partitionsNum := int64(-1)
 	if len(httpReq.Schema.Fields) == 0 {
+		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
+			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
+				"external collection is not supported by quick create; provide schema.fields with externalField")
+			log.Ctx(ctx).Warn("high level restful api, quickly create external collection fail", zap.Error(err), zap.Any("request", anyReq))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
 		if len(httpReq.Schema.Functions) > 0 {
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
@@ -1882,6 +1911,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			},
 			EnableDynamicField: enableDynamic,
 			Description:        httpReq.Description,
+			ExternalSource:     httpReq.GetExternalSource(),
+			ExternalSpec:       httpReq.GetExternalSpec(),
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1891,6 +1922,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 			Description:        httpReq.Description,
+			ExternalSource:     httpReq.GetExternalSource(),
+			ExternalSpec:       httpReq.GetExternalSpec(),
 		}
 
 		allOutputFields := []string{}
@@ -1928,6 +1961,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				DataType:        dataType,
 				TypeParams:      []*commonpb.KeyValuePair{},
 				Nullable:        field.Nullable,
+				ExternalField:   field.ExternalField,
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
@@ -3110,6 +3144,85 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
+}
+
+func (h *HandlersV2) refreshExternalCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RefreshExternalCollectionReq)
+	req := &milvuspb.RefreshExternalCollectionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		ExternalSource: httpReq.ExternalSource,
+		ExternalSpec:   httpReq.ExternalSpec,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RefreshExternalCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.RefreshExternalCollection(reqCtx, req.(*milvuspb.RefreshExternalCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.RefreshExternalCollectionResponse).GetJobId()},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) getRefreshExternalCollectionProgress(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RefreshExternalCollectionProgressReq)
+	req := &milvuspb.GetRefreshExternalCollectionProgressRequest{
+		JobId: httpReq.JobID,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetRefreshExternalCollectionProgress", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetRefreshExternalCollectionProgress(reqCtx, req.(*milvuspb.GetRefreshExternalCollectionProgressRequest))
+	})
+	if err == nil {
+		jobInfo := resp.(*milvuspb.GetRefreshExternalCollectionProgressResponse).GetJobInfo()
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: refreshExternalCollectionJobInfoToMap(jobInfo)})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listRefreshExternalCollectionJobs(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*OptionalCollectionNameReq)
+	req := &milvuspb.ListRefreshExternalCollectionJobsRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListRefreshExternalCollectionJobs", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListRefreshExternalCollectionJobs(reqCtx, req.(*milvuspb.ListRefreshExternalCollectionJobsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.ListRefreshExternalCollectionJobsResponse)
+		records := make([]map[string]interface{}, 0, len(response.GetJobs()))
+		for _, jobInfo := range response.GetJobs() {
+			records = append(records, refreshExternalCollectionJobInfoToMap(jobInfo))
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"records": records}})
+	}
+	return resp, err
+}
+
+func refreshExternalCollectionJobInfoToMap(jobInfo *milvuspb.RefreshExternalCollectionJobInfo) map[string]interface{} {
+	detail := make(map[string]interface{})
+	if jobInfo == nil {
+		return detail
+	}
+	detail["jobId"] = jobInfo.GetJobId()
+	detail["collectionName"] = jobInfo.GetCollectionName()
+	detail["state"] = jobInfo.GetState().String()
+	detail["progress"] = jobInfo.GetProgress()
+	detail["externalSource"] = jobInfo.GetExternalSource()
+	detail["startTime"] = jobInfo.GetStartTime()
+	detail["endTime"] = jobInfo.GetEndTime()
+	if jobInfo.GetReason() != "" {
+		detail["reason"] = jobInfo.GetReason()
+	}
+	return detail
 }
 
 func (h *HandlersV2) GetCollectionSchema(ctx context.Context, c *gin.Context, dbName, collectionName string) (*schemapb.CollectionSchema, error) {
