@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -164,7 +165,8 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx)
+	node.session = sessionutil.NewSession(node.ctx,
+		sessionutil.WithMaxIndexStorePathVersion(int32(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)))
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}

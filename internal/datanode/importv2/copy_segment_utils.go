@@ -707,6 +707,7 @@ func buildIndexInfoFromSource(
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
 			IndexName:                 srcIndex.GetIndexName(),
+			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}
 	}
 
