@@ -754,6 +754,51 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	})
 }
 
+func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				FieldID:               100,
+				IndexID:               10,
+				BuildID:               1001,
+				IndexName:             "idx_v0",
+				IndexVersion:          1,
+				SerializedSize:        1024,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
+			},
+			{
+				FieldID:               101,
+				IndexID:               11,
+				BuildID:               1002,
+				IndexName:             "idx_v1",
+				IndexVersion:          1,
+				SerializedSize:        2048,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFilePaths:        []string{"files/index_files/111/222/333/1002/1/v1_file"},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{1001: 2001, 1002: 2002},
+	}
+	mappings := map[string]string{
+		"files/index_files/1001/1/222/333/v0_file":     "files/index_files/2001/1/555/666/v0_file",
+		"files/index_files/111/222/333/1002/1/v1_file": "files/index_files/444/555/666/2002/1/v1_file",
+	}
+
+	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+}
+
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
 		mCopy := mockey.Mock(copyFile).Return(nil).Build()
