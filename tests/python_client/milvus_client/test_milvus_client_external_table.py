@@ -1,49 +1,5 @@
-"""
-External Table (external collection) comprehensive tests using pymilvus MilvusClient.
+"""MilvusClient external table tests."""
 
-Coverage:
-  1. Schema / lifecycle (create / describe / list / drop)
-  2. Schema validation (forbidden features, blocked field types,
-     external_source URL scheme allowlist, force-nullable normalization,
-     alter source/spec via collection properties)
-  3. All scalar data types (bool, int8-64, float, double, varchar, json, array)
-  4. All vector data types (float, binary, float16, bfloat16, int8 where supported)
-  5. All index types
-       - vector: AUTOINDEX, HNSW, IVF_FLAT, FLAT, DISKANN
-       - binary vector: BIN_FLAT, BIN_IVF_FLAT
-       - scalar: INVERTED, BITMAP, STL_SORT, TRIE
-       - mmap.enabled toggle on index and collection level
-  6. DML blocked (insert / upsert / delete / flush)
-  7. DDL blocked (create/drop partition, compact, add_field, truncate)
-  8. Refresh semantics (basic / incremental / atomic source override /
-     concurrent / job list / many files / flat-prefix-only / non-existent
-     and normal-collection rejection / empty source / schema mismatch /
-     schemaless reader column projection)
-  9. Cross-bucket external sources (s3:///bucket/path empty-host form)
- 10. Parquet compression codec matrix (snappy, lz4, gzip, zstd, none)
- 11. External file formats (parquet, lance-table, vortex, iceberg-table)
- 12. DQL surface (query filter / search metric / hybrid_search / search_iterator /
-                  query_iterator / get by virtual PK / offset-limit pagination)
- 13. Read-only / admin operations that normal collections support
-     (list_partitions, has_partition, get_collection_stats, get_partition_stats,
-      get_load_state, list_persistent_segments, rename_collection, refresh_load,
-      alter/drop collection and index properties, custom database)
- 14. Alias lifecycle, release+load, drop+recreate, concurrent query during
-     refresh/release/load, file-deleted-then-reload behavior
-
-Run (against the `external-table-test` k8s instance):
-    MINIO_ADDRESS=10.100.36.172:9000 \
-    MINIO_BUCKET=ext-table-data \
-    MINIO_ACCESS_KEY=minioadmin \
-    MINIO_SECRET_KEY=minioadmin \
-    pytest milvus_client/test_milvus_client_external_table.py \
-      --host 10.100.36.174 --port 19530 -v -s
-
-The tests build full `s3://<address>/<bucket>/<prefix>/` URLs as external_source
-so Milvus's extfs layer can resolve the endpoint from the URL alone.
-"""
-
-import io
 import json
 import os
 import random
@@ -53,988 +9,74 @@ import time
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
-from common.common_type import CaseLabel
-from minio import Minio
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckTasks
+from common.external_table_common import (
+    _PLACEHOLDER_NEW_SOURCE,
+    _PLACEHOLDER_NEW_SPEC,
+    _PLACEHOLDER_SPEC,
+    _PLACEHOLDER_SRC,
+    ALLOWED_EXTERNAL_SOURCE_SCHEMES,
+    BASIC_FORMAT_IDS,
+    BASIC_FORMATS,
+    FORMAT_NUM_FILES,
+    FORMAT_ROWS_PER_FILE,
+    FORMAT_TOTAL_ROWS,
+    FULL_MATRIX_NB,
+    REFRESH_TIMEOUT,
+    _build_iceberg_full_matrix_table,
+    _float_vectors,
+    _full_matrix_arrow_columns,
+    _full_matrix_assert_basic,
+    _iceberg_full_matrix_assert,
+    _schema_missing_external_field,
+    _schema_with_auto_id,
+    _schema_with_duplicate_external_field,
+    _schema_with_dynamic,
+    _schema_with_partition_key,
+    _schema_with_sparse_float_vector,
+    _schema_with_user_pk,
+    assert_basic_format_rows,
+    assert_external_spec_persisted,
+    build_all_scalar_schema,
+    build_basic_format_schema,
+    build_basic_schema,
+    build_external_source,
+    build_external_spec,
+    build_external_spec_for_scheme,
+    build_full_matrix_schema,
+    build_iceberg_full_matrix_schema,
+    build_multi_vector_schema,
+    build_typed_schema,
+    build_validation_source_for_scheme,
+    build_vector_variant_schema,
+    cleanup_minio_prefix,
+    create_full_matrix_indexes,
+    create_iceberg_full_matrix_indexes,
+    gen_all_null_columns_parquet_bytes,
+    gen_all_scalar_parquet_bytes,
+    gen_array_parquet_bytes,
+    gen_basic_parquet_bytes,
+    gen_dtype_mismatch_parquet_bytes,
+    gen_full_matrix_parquet_bytes,
+    gen_geometry_wkt_parquet_bytes,
+    gen_large_parquet_with_row_groups,
+    gen_multi_vector_parquet_bytes,
+    gen_parquet_bytes,
+    gen_parquet_bytes_with_codec,
+    gen_timestamptz_parquet_bytes,
+    gen_vector_variant_parquet_bytes,
+    get_minio_config,
+    new_minio_client,
+    upload_basic_data,
+    upload_parquet,
+    write_basic_format_dataset,
+)
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
 from utils.util_log import test_log as log
-
-# ============================================================
-# Constants & Configuration
-# ============================================================
-
-TEST_DIM = 8
-BINARY_DIM = 64  # must be a multiple of 8
-DEFAULT_NB = 200
-REFRESH_TIMEOUT = 180
-
-# Multi-file format coverage: each format E2E writes FORMAT_NUM_FILES sibling
-# data files (or fragments / appended snapshots), each carrying
-# FORMAT_ROWS_PER_FILE rows, exercising the multi-file refresh path.
-FORMAT_NUM_FILES = 3
-FORMAT_ROWS_PER_FILE = 3000
-FORMAT_TOTAL_ROWS = FORMAT_NUM_FILES * FORMAT_ROWS_PER_FILE
-
-SCHEME_PROVIDER_CASES = {
-    "s3": "aws",
-    "s3a": "aws",
-    "aws": "aws",
-    "minio": "minio",
-    "oss": "aliyun",
-    "gs": "gcp",
-    "gcs": "gcp",
-    "cos": "tencent",
-    "obs": "huawei",
-    "azure": "azure",
-}
-ALLOWED_EXTERNAL_SOURCE_SCHEMES = tuple(SCHEME_PROVIDER_CASES)
-
-FORMAT_CASES = {
-    "parquet": {"id": "parquet", "has_value": True},
-    "lance-table": {"id": "lance", "has_value": True},
-    "vortex": {"id": "vortex", "has_value": True},
-    "iceberg-table": {"id": "iceberg", "has_value": False},
-}
-BASIC_FORMATS = tuple(FORMAT_CASES)
-BASIC_FORMAT_IDS = [FORMAT_CASES[fmt]["id"] for fmt in BASIC_FORMATS]
-
-
-def _env(key, default):
-    return os.environ.get(key, default)
-
-
-def get_minio_config():
-    return {
-        "address": _env("MINIO_ADDRESS", "localhost:9000"),
-        "access_key": _env("MINIO_ACCESS_KEY", "minioadmin"),
-        "secret_key": _env("MINIO_SECRET_KEY", "minioadmin"),
-        "bucket": _env("MINIO_BUCKET", "ext-table-data"),
-        "secure": _env("MINIO_SECURE", "false").lower() == "true",
-    }
-
-
-def build_external_source(cfg, key_prefix):
-    """Build a full s3:// URL that Milvus's extfs resolver can use directly."""
-    # Trailing slash matters — refresh lists objects under the prefix.
-    return f"s3://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
-
-
-def build_validation_source_for_scheme(scheme, cfg, key_prefix="prefix"):
-    """Build a create-time validation source for every allowlisted scheme."""
-    if scheme == "minio":
-        return f"minio://{cfg['address']}/{cfg['bucket']}/{key_prefix}/"
-    if scheme == "azure":
-        return f"azure://account.blob.core.windows.net/{cfg['bucket']}/{key_prefix}/"
-    return f"{scheme}://bucket/{key_prefix}/"
-
-
-def minio_endpoint_url(cfg):
-    scheme = "https" if cfg["secure"] else "http"
-    return f"{scheme}://{cfg['address']}"
-
-
-def build_external_spec(cfg=None, fmt="parquet", cloud_provider="minio", **extra):
-    """Build an external_spec accepted by current master validation.
-
-    Current server-side validation requires external sources to carry a
-    self-contained extfs block. The tests use Milvus-form S3 URLs
-    (s3://<endpoint>/<bucket>/<prefix>/), so cloud_provider=minio keeps the
-    endpoint from the URI instead of deriving a cloud endpoint.
-    """
-    cfg = cfg or get_minio_config()
-    spec = {
-        "format": fmt,
-        "extfs": {
-            "cloud_provider": cloud_provider,
-            "region": "us-east-1",
-            "access_key_id": cfg["access_key"],
-            "access_key_value": cfg["secret_key"],
-            "use_ssl": "true" if cfg["secure"] else "false",
-        },
-    }
-    spec.update(extra)
-    return json.dumps(spec, separators=(",", ":"))
-
-
-def assert_external_spec_persisted(actual_spec, expected_spec, context):
-    actual = json.loads(actual_spec or "{}")
-    expected = json.loads(expected_spec or "{}")
-    assert actual.get("format") == expected.get("format"), f"{context}: format mismatch: {actual}"
-
-    actual_extfs = actual.get("extfs") or {}
-    expected_extfs = expected.get("extfs") or {}
-    for key in ("cloud_provider", "region", "use_ssl"):
-        assert actual_extfs.get(key) == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
-
-    for key in ("access_key_id", "access_key_value"):
-        value = actual_extfs.get(key)
-        assert value, f"{context}: extfs.{key} missing: {actual_extfs}"
-        assert value == "***" or value == expected_extfs.get(key), f"{context}: extfs.{key} mismatch: {actual_extfs}"
-
-
-def build_external_spec_for_scheme(scheme, cfg=None, fmt="parquet"):
-    """Build a validation-only spec whose cloud_provider matches the URI scheme."""
-    provider = SCHEME_PROVIDER_CASES[scheme]
-    return build_external_spec(cfg=cfg, fmt=fmt, cloud_provider=provider)
-
-
-def new_minio_client(cfg):
-    return Minio(
-        cfg["address"],
-        access_key=cfg["access_key"],
-        secret_key=cfg["secret_key"],
-        secure=cfg["secure"],
-    )
-
-
-# ============================================================
-# Parquet Helpers
-# ============================================================
-
-# StorageV2 memory_planner currently lacks snappy; use uncompressed parquet.
-_PARQUET_COMPRESSION = "NONE"
-
-
-def _float_vectors(ids, dim):
-    return np.array(
-        [[float(i) * 0.1 + d for d in range(dim)] for i in ids],
-        dtype=np.float32,
-    )
-
-
-def _float16_vectors(ids, dim):
-    return np.array(
-        [[float(i) * 0.1 + d for d in range(dim)] for i in ids],
-        dtype=np.float16,
-    )
-
-
-def _bfloat16_vectors(ids, dim):
-    """Build bfloat16 via numpy uint16 view; pyarrow lacks native bfloat16 bitcast."""
-    # bfloat16 shares the top 16 bits of float32's IEEE 754 representation.
-    f = np.array(
-        [[float(i) * 0.1 + d for d in range(dim)] for i in ids],
-        dtype=np.float32,
-    )
-    return (f.view(np.uint32) >> 16).astype(np.uint16)
-
-
-def _int8_vectors(ids, dim):
-    return np.array(
-        [[(i + d) % 127 - 63 for d in range(dim)] for i in ids],
-        dtype=np.int8,
-    )
-
-
-def _binary_vectors_bytes(ids, dim):
-    """Return (num_rows, dim/8) uint8 array; bit set patterns depend on id."""
-    nbytes = dim // 8
-    rng = np.random.default_rng(seed=42)
-    arr = rng.integers(low=0, high=256, size=(len(ids), nbytes), dtype=np.uint8)
-    # make it deterministic per id: XOR with id-derived bytes
-    for row_idx, i in enumerate(ids):
-        arr[row_idx][0] = i & 0xFF
-    return arr
-
-
-def gen_parquet_bytes(num_rows, start_id, scalar_name, arrow_type, value_fn, dim=TEST_DIM):
-    """Generate a Parquet file with columns: id, <scalar_name>, embedding (float_vec)."""
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            scalar_name: pa.array([value_fn(i) for i in ids], type=arrow_type),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_basic_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
-    """Generate a Parquet file with columns: id, value (float), embedding."""
-    return gen_parquet_bytes(
-        num_rows,
-        start_id,
-        "value",
-        pa.float32(),
-        lambda i: float(i) * 1.5,
-        dim=dim,
-    )
-
-
-def gen_zero_row_basic_parquet_bytes(dim=TEST_DIM):
-    """Well-formed 0-row parquet with the basic external schema."""
-    table = pa.table(
-        {
-            "id": pa.array([], type=pa.int64()),
-            "value": pa.array([], type=pa.float32()),
-            "embedding": pa.FixedSizeListArray.from_arrays(
-                pa.array([], type=pa.float32()),
-                list_size=dim,
-            ),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_parquet_bytes_with_codec(num_rows, start_id, codec, dim=TEST_DIM):
-    """Like gen_basic_parquet_bytes but with an explicit Parquet compression codec."""
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=codec)
-    return buf.getvalue()
-
-
-def gen_array_parquet_bytes(num_rows, start_id, arr_name, arr_element_arrow_type, arr_value_fn, dim=TEST_DIM):
-    """Parquet with an Array-typed column: id, <arr_name> (list<element>), embedding."""
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            arr_name: pa.array([arr_value_fn(i) for i in ids], type=pa.list_(arr_element_arrow_type)),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_dtype_mismatch_parquet_bytes(
-    num_rows, start_id, mismatch_name, mismatch_array, dim=TEST_DIM, include_embedding=True
-):
-    """Parquet with a deliberately incompatible user column.
-
-    The id column and optional embedding are valid so failures can be
-    attributed to the requested Milvus type vs external Arrow type mapping.
-    """
-    ids = list(range(start_id, start_id + num_rows))
-    columns = {
-        "id": pa.array(ids, type=pa.int64()),
-        mismatch_name: mismatch_array,
-    }
-    if include_embedding:
-        vectors = _float_vectors(ids, dim)
-        columns["embedding"] = pa.FixedSizeListArray.from_arrays(
-            vectors.flatten(),
-            list_size=dim,
-        )
-    table = pa.table(columns)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_vector_variant_parquet_bytes(num_rows, start_id, vec_field, vec_dtype, dim):
-    """Generate parquet with id + <vec_field> of the given vector family + no scalar."""
-    ids = list(range(start_id, start_id + num_rows))
-    if vec_dtype == DataType.FLOAT_VECTOR:
-        arr = _float_vectors(ids, dim)
-        parquet_col = pa.FixedSizeListArray.from_arrays(arr.flatten(), list_size=dim)
-    elif vec_dtype == DataType.FLOAT16_VECTOR:
-        # pyarrow cannot write float16 to Parquet, so store raw 16-bit bits as uint16.
-        # Milvus reads this back as float16 by reinterpreting the uint16 buffer.
-        arr = _float16_vectors(ids, dim).view(np.uint16)
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()),
-            list_size=dim,
-        )
-    elif vec_dtype == DataType.BFLOAT16_VECTOR:
-        arr = _bfloat16_vectors(ids, dim)
-        # Store as uint16; Milvus reader must interpret as bfloat16 raw bits.
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint16()),
-            list_size=dim,
-        )
-    elif vec_dtype == DataType.INT8_VECTOR:
-        arr = _int8_vectors(ids, dim)
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.int8()),
-            list_size=dim,
-        )
-    elif vec_dtype == DataType.BINARY_VECTOR:
-        arr = _binary_vectors_bytes(ids, dim)
-        parquet_col = pa.FixedSizeListArray.from_arrays(
-            pa.array(arr.flatten(), type=pa.uint8()),
-            list_size=dim // 8,
-        )
-    else:
-        raise ValueError(f"unsupported vec_dtype {vec_dtype}")
-
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            vec_field: parquet_col,
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_all_scalar_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
-    """Single parquet with every stable scalar type + FloatVector.
-
-    Columns: id, val_bool, val_int8, val_int16, val_int32, val_int64,
-             val_float, val_double, val_varchar, val_json, embedding.
-    """
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "val_bool": pa.array([i % 2 == 0 for i in ids], type=pa.bool_()),
-            "val_int8": pa.array([i % 100 for i in ids], type=pa.int8()),
-            "val_int16": pa.array([i * 3 for i in ids], type=pa.int16()),
-            "val_int32": pa.array([i * 7 for i in ids], type=pa.int32()),
-            "val_int64": pa.array([i * 1000 for i in ids], type=pa.int64()),
-            "val_float": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-            "val_double": pa.array([float(i) * 2.5 for i in ids], type=pa.float64()),
-            "val_varchar": pa.array([f"s_{i:05d}" for i in ids], type=pa.string()),
-            "val_json": pa.array([json.dumps({"k": i, "g": i % 3}) for i in ids], type=pa.string()),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_multi_vector_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
-    """Parquet with two vector fields (float + binary) + id + scalar."""
-    ids = list(range(start_id, start_id + num_rows))
-    float_arr = _float_vectors(ids, dim)
-    bin_arr = _binary_vectors_bytes(ids, BINARY_DIM)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "value": pa.array([float(i) for i in ids], type=pa.float32()),
-            "dense_vec": pa.FixedSizeListArray.from_arrays(float_arr.flatten(), list_size=dim),
-            "bin_vec": pa.FixedSizeListArray.from_arrays(
-                pa.array(bin_arr.flatten(), type=pa.uint8()),
-                list_size=BINARY_DIM // 8,
-            ),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_timestamptz_parquet_bytes(num_rows, start_id, dim=TEST_DIM, ts_unit="us"):
-    """Parquet with id + ts (arrow timestamp) + embedding.
-
-    Milvus reads Timestamptz as int64 microseconds; the arrow timestamp column
-    is normalized to int64 by NormalizeExternalArrow on the load path.
-    """
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    base = 1_700_000_000
-    if ts_unit == "us":
-        ts_vals = [(base + i) * 1_000_000 for i in ids]
-    elif ts_unit == "ms":
-        ts_vals = [(base + i) * 1_000 for i in ids]
-    else:
-        ts_vals = [base + i for i in ids]
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "ts": pa.array(ts_vals, type=pa.timestamp(ts_unit)),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_geometry_wkt_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
-    """Parquet with Geometry stored as WKT strings, matching user datasets."""
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "geo": pa.array([f"POINT({i}.0 {i}.0)" for i in ids], type=pa.string()),
-            "embedding": pa.FixedSizeListArray.from_arrays(
-                vectors.flatten(),
-                list_size=dim,
-            ),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_all_null_columns_parquet_bytes(num_rows, start_id, dim=TEST_DIM):
-    """Parquet where every user scalar column is entirely null.
-
-    External collections force user fields to nullable=true (schema.go:2350).
-    A column with no non-null values exercises that path: arrow reads back
-    ListArray with null_count == num_rows, and Milvus must surface those
-    nulls without crashing the segment writer.
-    """
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "n_int": pa.array([None] * num_rows, type=pa.int32()),
-            "n_float": pa.array([None] * num_rows, type=pa.float32()),
-            "n_varchar": pa.array([None] * num_rows, type=pa.string()),
-            "n_json": pa.array([None] * num_rows, type=pa.string()),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-def gen_large_parquet_with_row_groups(num_rows, start_id, row_group_size, dim=TEST_DIM):
-    """Generate a single large parquet file with explicit row_group_size.
-
-    Forces parquet to split internally into multiple row groups so the
-    Milvus reader exercises the multi-row-group path. The same file may
-    also be split into multiple Milvus segments by the loon FFI layer
-    when num_rows exceeds the segment-size threshold.
-    """
-    ids = list(range(start_id, start_id + num_rows))
-    vectors = _float_vectors(ids, dim)
-    table = pa.table(
-        {
-            "id": pa.array(ids, type=pa.int64()),
-            "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-            "embedding": pa.FixedSizeListArray.from_arrays(vectors.flatten(), list_size=dim),
-        }
-    )
-    buf = io.BytesIO()
-    pq.write_table(
-        table,
-        buf,
-        compression=_PARQUET_COMPRESSION,
-        row_group_size=row_group_size,
-    )
-    return buf.getvalue()
-
-
-# ============================================================
-# Full-matrix schema (DataType × Index)
-# ============================================================
-# A single collection schema covering every supported scalar + vector
-# DataType, with same-dtype duplicates wired to different index types.
-# Each entry is (milvus_field_name, milvus_DataType, index_type, index_metric,
-#                index_params, ext_field_name, arrow_writer_type, value_fn,
-#                add_field_extra). Vector entries treat dim/element_type via
-#                add_field_extra rather than a value_fn.
-#
-# The same field list is consumed by both the parquet/lance arrow-table
-# generator and the iceberg multi-column writer (vector columns degrade to
-# raw binary blobs in iceberg because Iceberg has no fixed-size-list).
-
-FULL_MATRIX_SCALAR_FIELDS = [
-    # (field_name, DataType,           pa type,            milvus add_field extras, value_fn)
-    ("b_inv", DataType.BOOL, pa.bool_(), {}, lambda i: i % 2 == 0),
-    ("i8_bmp", DataType.INT8, pa.int8(), {}, lambda i: i % 100),
-    ("i16_inv", DataType.INT16, pa.int16(), {}, lambda i: (i * 3) % 32000),
-    ("i32_stl", DataType.INT32, pa.int32(), {}, lambda i: i * 7),
-    ("i64_inv", DataType.INT64, pa.int64(), {}, lambda i: i * 1000),
-    ("f_inv", DataType.FLOAT, pa.float32(), {}, lambda i: float(i) * 1.5),
-    ("d_inv", DataType.DOUBLE, pa.float64(), {}, lambda i: float(i) * 2.5),
-    ("vc_trie", DataType.VARCHAR, pa.string(), {"max_length": 64}, lambda i: f"s_{i:05d}"),
-    ("j", DataType.JSON, pa.string(), {}, lambda i: json.dumps({"k": i, "g": i % 3})),
-    ("ts", DataType.TIMESTAMPTZ, pa.timestamp("us"), {}, lambda i: (1_700_000_000 + i) * 1_000_000),
-]
-
-# Scalar indexes wired per field. None means no scalar index built.
-FULL_MATRIX_SCALAR_INDEXES = {
-    "b_inv": "INVERTED",
-    "i8_bmp": "BITMAP",
-    "i16_inv": "INVERTED",
-    "i32_stl": "STL_SORT",
-    "i64_inv": "INVERTED",
-    "f_inv": "INVERTED",
-    "d_inv": "INVERTED",
-    "vc_trie": "TRIE",
-    # j (JSON) and ts (Timestamptz) are stored without scalar index.
-}
-
-FULL_MATRIX_ARRAY_FIELD = ("arr_int", DataType.INT64, lambda i: [i, i + 1, i + 2])
-
-# A fixed POINT(0 0) WKB blob — sufficient to verify Geometry round-trip.
-# WKB: byte order (1=little-endian) | uint32 type(1=POINT) | float64 x | float64 y
-_GEOMETRY_WKB = (
-    b"\x01\x01\x00\x00\x00"
-    + b"\x00" * 8  # x = 0.0
-    + b"\x00" * 8  # y = 0.0
-)
-
-# Full-matrix vectors use a production-realistic dim (128) rather than
-# TEST_DIM=8. Reason: the auto-tuned IVF_FLAT_CC config Milvus picks for
-# AUTOINDEX (nlist=128, sub_dim=4) on dim=8 is degenerate and triggers a
-# native SIGSEGV in the querynode load path on master-20260424-5409a81 —
-# this is a milvus bug worth its own issue, but full matrix tests should
-# run on realistic shapes anyway.
-FULL_MATRIX_DIM = 128
-FULL_MATRIX_BINARY_DIM = 128  # multiple of 8
-
-# Vector fields. Each entry: (name, DataType, dim, index_type, metric, params).
-FULL_MATRIX_VECTOR_FIELDS = [
-    ("fv_auto", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
-    ("fv_flat", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "FLAT", "L2", {}),
-    ("fv_hnsw", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "HNSW", "L2", {"M": 8, "efConstruction": 64}),
-    ("fv_ivf", DataType.FLOAT_VECTOR, FULL_MATRIX_DIM, "IVF_FLAT", "L2", {"nlist": 8}),
-    ("f16v", DataType.FLOAT16_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
-    ("bf16v", DataType.BFLOAT16_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
-    ("binv_flat", DataType.BINARY_VECTOR, FULL_MATRIX_BINARY_DIM, "BIN_FLAT", "HAMMING", {}),
-    ("binv_ivf", DataType.BINARY_VECTOR, FULL_MATRIX_BINARY_DIM, "BIN_IVF_FLAT", "HAMMING", {"nlist": 8}),
-    ("i8v", DataType.INT8_VECTOR, FULL_MATRIX_DIM, "AUTOINDEX", "L2", {}),
-]
-
-
-def _full_matrix_arrow_columns(
-    num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
-):
-    """Build a dict {column_name → pyarrow.Array} that fits both parquet and
-    Lance. Column layout matches FULL_MATRIX_SCALAR_FIELDS / VECTOR_FIELDS;
-    each milvus field reads from a uniquely-named column.
-
-    Pass excluded_fields to omit specific scalar columns (e.g. for vortex,
-    where the server reader can't sample Arrow String buffers)."""
-    ids = list(range(start_id, start_id + num_rows))
-    excluded = set(excluded_fields)
-
-    columns = {"id": pa.array(ids, type=pa.int64())}
-
-    # Scalars
-    for name, _dtype, arrow_type, _extra, value_fn in FULL_MATRIX_SCALAR_FIELDS:
-        if name in excluded:
-            continue
-        columns[name] = pa.array([value_fn(i) for i in ids], type=arrow_type)
-
-    # Array<Int64>
-    arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
-    if arr_name not in excluded:
-        columns[arr_name] = pa.array([arr_value_fn(i) for i in ids], type=pa.list_(pa.int64()))
-
-    # Geometry as binary (WKB).
-    if "geo" not in excluded:
-        columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
-
-    # Vectors. Layout per type:
-    #   FloatVector / Int8Vector  → FixedSizeList<element, dim>
-    #   Float16Vector             → FixedSizeList<uint16, dim> (raw bits)
-    #   BFloat16Vector            → FixedSizeList<uint16, dim> (raw bits)
-    #   BinaryVector              → FixedSizeList<uint8,  dim/8>
-    fv_arr = _float_vectors(ids, dim).flatten()
-    f16_arr = _float16_vectors(ids, dim).view(np.uint16).flatten()
-    bf16_arr = _bfloat16_vectors(ids, dim).flatten()
-    i8_arr = _int8_vectors(ids, dim).flatten()
-    bin_arr = _binary_vectors_bytes(ids, bin_dim).flatten()
-
-    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        if name in excluded:
-            continue
-        if vtype == DataType.FLOAT_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(fv_arr, type=pa.float32()),
-                list_size=vdim,
-            )
-        elif vtype == DataType.FLOAT16_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(f16_arr, type=pa.uint16()),
-                list_size=vdim,
-            )
-        elif vtype == DataType.BFLOAT16_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bf16_arr, type=pa.uint16()),
-                list_size=vdim,
-            )
-        elif vtype == DataType.INT8_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(i8_arr, type=pa.int8()),
-                list_size=vdim,
-            )
-        elif vtype == DataType.BINARY_VECTOR:
-            columns[name] = pa.FixedSizeListArray.from_arrays(
-                pa.array(bin_arr, type=pa.uint8()),
-                list_size=vdim // 8,
-            )
-        else:
-            raise ValueError(f"unsupported vector dtype {vtype}")
-    return columns
-
-
-def gen_full_matrix_parquet_bytes(num_rows, start_id, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
-    """Single parquet file with every full-matrix field."""
-    columns = _full_matrix_arrow_columns(num_rows, start_id, dim=dim, bin_dim=bin_dim)
-    table = pa.table(columns)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression=_PARQUET_COMPRESSION)
-    return buf.getvalue()
-
-
-# ============================================================
-# MinIO Helpers
-# ============================================================
-
-
-def upload_parquet(minio_client, bucket, key, data):
-    minio_client.put_object(
-        bucket,
-        key,
-        io.BytesIO(data),
-        length=len(data),
-        content_type="application/octet-stream",
-    )
-
-
-def cleanup_minio_prefix(minio_client, bucket, prefix):
-    for obj in minio_client.list_objects(bucket, prefix=prefix, recursive=True):
-        minio_client.remove_object(bucket, obj.object_name)
-
-
-# ============================================================
-# Schema / Refresh / Load Helpers
-# ============================================================
-
-
-def build_basic_schema(client, ext_path, dim=TEST_DIM, ext_spec=None):
-    """Minimal external schema: id(Int64) + value(Float) + embedding(FloatVector)."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_typed_schema(client, ext_path, scalar_name, scalar_dtype, dim=TEST_DIM, ext_spec=None, **extra):
-    """External schema with id + one scalar field of the given type + FloatVector."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field(scalar_name, scalar_dtype, external_field=scalar_name, **extra)
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_vector_variant_schema(client, ext_path, vec_field, vec_dtype, dim, ext_spec=None):
-    """External schema with id + one vector field of the given dtype."""
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field(vec_field, vec_dtype, dim=dim, external_field=vec_field)
-    return schema
-
-
-def build_all_scalar_schema(client, ext_path, dim=TEST_DIM, ext_spec=None):
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("val_bool", DataType.BOOL, external_field="val_bool")
-    schema.add_field("val_int8", DataType.INT8, external_field="val_int8")
-    schema.add_field("val_int16", DataType.INT16, external_field="val_int16")
-    schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
-    schema.add_field("val_int64", DataType.INT64, external_field="val_int64")
-    schema.add_field("val_float", DataType.FLOAT, external_field="val_float")
-    schema.add_field("val_double", DataType.DOUBLE, external_field="val_double")
-    schema.add_field("val_varchar", DataType.VARCHAR, max_length=64, external_field="val_varchar")
-    schema.add_field("val_json", DataType.JSON, external_field="val_json")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def build_multi_vector_schema(client, ext_path, float_dim=TEST_DIM, bin_dim=BINARY_DIM, ext_spec=None):
-    schema = client.create_schema(
-        external_source=ext_path,
-        external_spec=ext_spec or build_external_spec(),
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("dense_vec", DataType.FLOAT_VECTOR, dim=float_dim, external_field="dense_vec")
-    schema.add_field("bin_vec", DataType.BINARY_VECTOR, dim=bin_dim, external_field="bin_vec")
-    return schema
-
-
-def build_full_matrix_schema(
-    client, ext_path, ext_spec=None, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM, excluded_fields=()
-):
-    """Schema covering every supported DataType, with same-dtype duplicates
-    wired to different index types. See FULL_MATRIX_SCALAR_FIELDS /
-    FULL_MATRIX_VECTOR_FIELDS for the full layout.
-    """
-    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
-    schema.add_field("id", DataType.INT64, external_field="id")
-    excluded = set(excluded_fields)
-
-    for name, dtype, _arrow, extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS:
-        if name in excluded:
-            continue
-        schema.add_field(name, dtype, external_field=name, **extra)
-
-    arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
-    if arr_name not in excluded:
-        schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
-
-    if "geo" not in excluded:
-        schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
-
-    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        if name in excluded:
-            continue
-        schema.add_field(name, vtype, dim=vdim, external_field=name)
-    return schema
-
-
-def create_full_matrix_indexes(client, collection_name, excluded_fields=()):
-    """Build every scalar + vector index per FULL_MATRIX configuration in
-    a single create_index call.
-    """
-    index_params = client.prepare_index_params()
-    excluded = set(excluded_fields)
-
-    # Scalar indexes
-    for field, idx_type in FULL_MATRIX_SCALAR_INDEXES.items():
-        if field in excluded:
-            continue
-        index_params.add_index(
-            field_name=field,
-            index_type=idx_type,
-        )
-
-    # Vector indexes
-    for name, _vtype, _vdim, idx_type, metric, params in FULL_MATRIX_VECTOR_FIELDS:
-        if name in excluded:
-            continue
-        kwargs = {
-            "field_name": name,
-            "index_type": idx_type,
-            "metric_type": metric,
-        }
-        if params:
-            kwargs["params"] = params
-        index_params.add_index(**kwargs)
-
-    client.create_index(collection_name, index_params)
-
-
-def refresh_and_wait(client, collection_name, timeout=REFRESH_TIMEOUT, external_source=None, external_spec=None):
-    """Trigger refresh, poll until terminal state, return job_id."""
-    kwargs = {"collection_name": collection_name}
-    if external_source is not None:
-        kwargs["external_source"] = external_source
-    if external_spec is not None:
-        kwargs["external_spec"] = external_spec
-
-    job_id = client.refresh_external_collection(**kwargs)
-    assert job_id and job_id > 0, f"Expected positive job_id, got {job_id}"
-    log.info(f"[refresh] submitted job_id={job_id} for {collection_name}")
-
-    deadline = time.time() + timeout
-    last_state = None
-    while time.time() < deadline:
-        progress = client.get_refresh_external_collection_progress(job_id=job_id)
-        if progress.state != last_state:
-            log.info(f"[refresh] job={job_id} state={progress.state} progress={progress.progress}%")
-            last_state = progress.state
-        if progress.state == "RefreshCompleted":
-            return job_id
-        if progress.state == "RefreshFailed":
-            raise AssertionError(f"Refresh job {job_id} failed: {progress.reason}")
-        time.sleep(2)
-
-    raise AssertionError(f"Refresh job {job_id} did not finish within {timeout}s")
-
-
-def refresh_and_poll_terminal(client, collection_name, timeout=60, external_source=None, external_spec=None):
-    """Trigger refresh and return (job_id, progress) for completed or failed jobs."""
-    kwargs = {"collection_name": collection_name}
-    if external_source is not None:
-        kwargs["external_source"] = external_source
-    if external_spec is not None:
-        kwargs["external_spec"] = external_spec
-
-    job_id = client.refresh_external_collection(**kwargs)
-    assert job_id and job_id > 0, f"Expected positive job_id, got {job_id}"
-    deadline = time.time() + timeout
-    progress = None
-    while time.time() < deadline:
-        progress = client.get_refresh_external_collection_progress(job_id=job_id)
-        if progress.state in ("RefreshCompleted", "RefreshFailed"):
-            return job_id, progress
-        time.sleep(2)
-    state = progress.state if progress is not None else "<none>"
-    raise AssertionError(f"Refresh job {job_id} did not finish within {timeout}s; state={state}")
-
-
-def refresh_and_expect_failed(
-    client,
-    collection_name,
-    timeout=60,
-    external_source=None,
-    external_spec=None,
-    reason_terms=(),
-):
-    """Trigger refresh and require a terminal RefreshFailed with a useful reason."""
-    job_id, progress = refresh_and_poll_terminal(
-        client,
-        collection_name,
-        timeout=timeout,
-        external_source=external_source,
-        external_spec=external_spec,
-    )
-    assert progress.state == "RefreshFailed", f"Refresh job {job_id} should fail terminally, got {progress.state}"
-    assert progress.reason, f"Refresh job {job_id} failed without a reason"
-    if reason_terms:
-        reason = progress.reason.lower()
-        assert any(term.lower() in reason for term in reason_terms), progress.reason
-    return job_id, progress
-
-
-def add_vector_index(client, collection_name, vec_field="embedding", index_type="AUTOINDEX", metric_type="L2", **extra):
-    index_params = client.prepare_index_params()
-    index_params.add_index(
-        field_name=vec_field,
-        index_type=index_type,
-        metric_type=metric_type,
-        **extra,
-    )
-    client.create_index(collection_name, index_params)
-
-
-def index_and_load(client, collection_name, vec_field="embedding", metric_type="L2"):
-    add_vector_index(client, collection_name, vec_field, "AUTOINDEX", metric_type)
-    client.load_collection(collection_name)
-
-
-def query_count(client, collection_name):
-    res = client.query(collection_name, filter="", output_fields=["count(*)"])
-    return res[0]["count(*)"]
-
-
-def upload_basic_data(
-    minio_client, cfg, ext_key, num_rows=DEFAULT_NB, start_id=0, filename="data.parquet", dim=TEST_DIM
-):
-    """Upload a basic parquet file and return full minio key."""
-    key = f"{ext_key}/{filename}"
-    upload_parquet(
-        minio_client,
-        cfg["bucket"],
-        key,
-        gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
-    )
-    return key
-
-
-def require_format_dependencies(fmt):
-    if fmt == "lance-table":
-        try:
-            import lance  # noqa: F401
-        except ImportError:
-            pytest.skip("lance package not installed in this environment")
-    elif fmt == "iceberg-table":
-        try:
-            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
-        except ImportError:
-            pytest.skip("pyiceberg not installed. Install with:\n  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'")
-
-
-def write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches, dim=TEST_DIM):
-    """Write the basic id/value/embedding dataset for one external format.
-
-    Returns (external_source, external_spec). Iceberg rewrites external_source
-    to the metadata.json URI and has no value column.
-    """
-    require_format_dependencies(fmt)
-    if fmt == "parquet":
-        for idx, (start_id, num_rows) in enumerate(batches):
-            upload_parquet(
-                minio_client,
-                cfg["bucket"],
-                f"{ext_key}/file_{idx:03d}.parquet",
-                gen_basic_parquet_bytes(num_rows, start_id, dim=dim),
-            )
-        return ext_url, build_external_spec(cfg, fmt=fmt)
-
-    if fmt == "lance-table":
-        _write_lance_to_minio_batches(minio_client, cfg["bucket"], ext_key, batches, dim=dim)
-        return ext_url, build_external_spec(cfg, fmt=fmt)
-
-    if fmt == "vortex":
-        for idx, (start_id, num_rows) in enumerate(batches):
-            _write_vortex_to_minio(
-                cfg["bucket"],
-                cfg,
-                ext_key,
-                num_rows=num_rows,
-                start_id=start_id,
-                dim=dim,
-                filename=f"data_{idx:03d}.vortex",
-            )
-        return ext_url, build_external_spec(cfg, fmt=fmt)
-
-    if fmt == "iceberg-table":
-        snapshot_id, iceberg_url = _build_iceberg_table_in_minio(ext_key, cfg, batches=batches, dim=dim)
-        return iceberg_url, build_external_spec(cfg, fmt=fmt, snapshot_id=int(snapshot_id))
-
-    raise AssertionError(f"unsupported format: {fmt}")
-
-
-def build_basic_format_schema(client, fmt, ext_url, ext_spec, dim=TEST_DIM):
-    schema = client.create_schema(external_source=ext_url, external_spec=ext_spec)
-    schema.add_field("id", DataType.INT64, external_field="id")
-    if FORMAT_CASES[fmt]["has_value"]:
-        schema.add_field("value", DataType.FLOAT, external_field="value")
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
-    return schema
-
-
-def assert_basic_format_rows(client, coll, fmt, batches, dim=TEST_DIM):
-    total = sum(num_rows for _start_id, num_rows in batches)
-    assert query_count(client, coll) == total
-    for start_id, num_rows in batches:
-        if num_rows == 0:
-            continue
-        rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "embedding"])
-        assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
-        vec = rows[0]["embedding"]
-        assert len(vec) == dim
-        if fmt == "iceberg-table":
-            for j, v in enumerate(vec):
-                expected = float(start_id) + j * 0.1
-                assert abs(v - expected) < 1e-2, f"[{fmt}] vec[{j}] for id={start_id} = {v}"
-        if FORMAT_CASES[fmt]["has_value"]:
-            rows = client.query(coll, filter=f"id == {start_id}", output_fields=["id", "value"])
-            assert len(rows) == 1, f"[{fmt}] row id={start_id} missing"
-            assert abs(rows[0]["value"] - start_id * 1.5) < 1e-3
-
 
 # ============================================================
 # Fixtures
@@ -1042,15 +84,14 @@ def assert_basic_format_rows(client, coll, fmt, batches, dim=TEST_DIM):
 
 
 @pytest.fixture(scope="module")
-def minio_env():
-    """Shared MinIO client + config for the module. Skips if unreachable."""
-    cfg = get_minio_config()
-    try:
-        mc = new_minio_client(cfg)
-        if not mc.bucket_exists(cfg["bucket"]):
-            pytest.skip(f"MinIO bucket {cfg['bucket']} not accessible at {cfg['address']}")
-    except Exception as exc:
-        pytest.skip(f"MinIO unavailable at {cfg['address']}: {exc}")
+def minio_env(request):
+    """Shared MinIO client + config for the module."""
+    cfg = get_minio_config(
+        minio_host=request.config.getoption("--minio_host"),
+        minio_bucket=request.config.getoption("--minio_bucket"),
+    )
+    mc = new_minio_client(cfg)
+    assert mc.bucket_exists(cfg["bucket"]), f"MinIO bucket {cfg['bucket']} not accessible at {cfg['address']}"
     return mc, cfg
 
 
@@ -1069,51 +110,191 @@ def external_prefix(minio_env, request):
         log.warning(f"cleanup_minio_prefix({key}) failed: {exc}")
 
 
-# ============================================================
-# Schema builders for validation tests (module-level, reused across classes)
-# ============================================================
+class ExternalTableTestBase(TestMilvusClientV2Base):
+    """Shared base for external table MilvusClient wrapper tests."""
 
-_PLACEHOLDER_SRC = "s3://test-bucket/placeholder/"
-_PLACEHOLDER_SPEC = build_external_spec(cloud_provider="aws")
+    @staticmethod
+    def error_items(err_msg, err_code=1100):
+        return {ct.err_code: err_code, ct.err_msg: err_msg}
 
+    def refresh_and_wait(
+        self,
+        client,
+        collection_name,
+        timeout=REFRESH_TIMEOUT,
+        external_source=None,
+        external_spec=None,
+    ):
+        kwargs = {"collection_name": collection_name}
+        if external_source is not None:
+            kwargs["external_source"] = external_source
+        if external_spec is not None:
+            kwargs["external_spec"] = external_spec
 
-def _schema_with_user_pk(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("pk", DataType.INT64, is_primary=True, external_field="pk")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-    return schema
+        job_id = self.refresh_external_collection(client, **kwargs)[0]
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if progress.state == "RefreshCompleted":
+                return job_id
+            if progress.state == "RefreshFailed":
+                raise AssertionError(f"refresh failed: job_id={job_id}, reason={progress.reason}")
+            time.sleep(2)
+        raise TimeoutError(f"refresh did not complete in {timeout}s, job_id={job_id}")
 
+    def refresh_and_poll_terminal(
+        self,
+        client,
+        collection_name,
+        timeout=60,
+        external_source=None,
+        external_spec=None,
+    ):
+        kwargs = {"collection_name": collection_name}
+        if external_source is not None:
+            kwargs["external_source"] = external_source
+        if external_spec is not None:
+            kwargs["external_spec"] = external_spec
 
-def _schema_with_auto_id(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("id", DataType.INT64, auto_id=True, external_field="id")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-    return schema
+        job_id = self.refresh_external_collection(client, **kwargs)[0]
+        deadline = time.time() + timeout
+        progress = None
+        while time.time() < deadline:
+            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                return job_id, progress
+            time.sleep(2)
+        raise TimeoutError(f"refresh did not reach terminal state in {timeout}s, job_id={job_id}, last={progress}")
 
+    def refresh_and_expect_failed(
+        self,
+        client,
+        collection_name,
+        timeout=60,
+        external_source=None,
+        external_spec=None,
+        reason_terms=(),
+    ):
+        job_id, progress = self.refresh_and_poll_terminal(
+            client,
+            collection_name,
+            timeout=timeout,
+            external_source=external_source,
+            external_spec=external_spec,
+        )
+        assert progress.state == "RefreshFailed", f"expected RefreshFailed for job {job_id}, got {progress.state}"
+        reason = (progress.reason or "").lower()
+        assert reason, f"refresh job {job_id} failed without a reason"
+        if reason_terms:
+            assert any(term.lower() in reason for term in reason_terms), (
+                f"refresh job {job_id} reason {progress.reason!r} did not contain any of {reason_terms}"
+            )
+        return job_id, progress
 
-def _schema_with_dynamic(client):
-    schema = client.create_schema(
-        external_source=_PLACEHOLDER_SRC,
-        external_spec=_PLACEHOLDER_SPEC,
-        enable_dynamic_field=True,
-    )
-    schema.add_field("id", DataType.INT64, external_field="id")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-    return schema
+    def add_vector_index(
+        self, client, collection_name, vec_field="embedding", index_type="AUTOINDEX", metric_type="L2", **extra
+    ):
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=vec_field,
+            index_type=index_type,
+            metric_type=metric_type,
+            **extra,
+        )
+        self.create_index(client, collection_name, index_params)
 
+    def index_and_load(self, client, collection_name, vec_field="embedding", metric_type="L2"):
+        self.add_vector_index(client, collection_name, vec_field=vec_field, metric_type=metric_type)
+        self.load_collection(client, collection_name)
 
-def _schema_with_partition_key(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("cat", DataType.VARCHAR, max_length=64, is_partition_key=True, external_field="cat")
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-    return schema
+    def query_count(self, client, collection_name):
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        return res[0]["count(*)"]
 
+    # Basic parquet collection lifecycle helpers. These intentionally cover
+    # only the common happy path; specialized cases keep their setup inline.
+    def create_basic_external_collection(self, client, collection_name, external_source, ext_spec=None):
+        schema = build_basic_schema(client, external_source, ext_spec=ext_spec)
+        self.create_collection(client, collection_name=collection_name, schema=schema)
+        return schema
 
-def _schema_missing_external_field(client):
-    schema = client.create_schema(external_source=_PLACEHOLDER_SRC, external_spec=_PLACEHOLDER_SPEC)
-    schema.add_field("plain_field", DataType.INT64)  # missing external_field
-    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-    return schema
+    @staticmethod
+    def _basic_external_io(minio_env, external_prefix):
+        minio_client, cfg = minio_env
+        return minio_client, cfg, external_prefix["url"], external_prefix["key"]
+
+    def _upload_basic_dataset(
+        self,
+        minio_env,
+        external_prefix,
+        num_rows=ct.default_nb,
+        start_id=0,
+        filename="data.parquet",
+    ):
+        minio_client, cfg, _external_source, external_key = self._basic_external_io(minio_env, external_prefix)
+        upload_basic_data(
+            minio_client,
+            cfg,
+            external_key,
+            num_rows=num_rows,
+            start_id=start_id,
+            filename=filename,
+        )
+
+    def prepare_refreshed_basic_collection(
+        self,
+        client,
+        minio_env,
+        external_prefix,
+        num_rows=ct.default_nb,
+        start_id=0,
+        filename="data.parquet",
+        collection_name=None,
+        ext_spec=None,
+    ):
+        external_source = external_prefix["url"]
+        coll = collection_name or cf.gen_collection_name_by_testcase_name()
+        self._upload_basic_dataset(
+            minio_env,
+            external_prefix,
+            num_rows=num_rows,
+            start_id=start_id,
+            filename=filename,
+        )
+        self.create_basic_external_collection(client, coll, external_source, ext_spec=ext_spec)
+        self.refresh_and_wait(client, coll)
+        return coll
+
+    def prepare_indexed_basic_collection(self, client, minio_env, external_prefix, **kwargs):
+        index_type = kwargs.pop("index_type", "AUTOINDEX")
+        metric_type = kwargs.pop("metric_type", "L2")
+        vector_index_params = kwargs.pop("index_params", None)
+        coll = self.prepare_refreshed_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            **kwargs,
+        )
+        self.add_vector_index(
+            client,
+            coll,
+            "embedding",
+            index_type=index_type,
+            metric_type=metric_type,
+            **({"params": vector_index_params} if vector_index_params else {}),
+        )
+        return coll
+
+    def prepare_loaded_basic_collection(self, client, minio_env, external_prefix, **kwargs):
+        metric_type = kwargs.pop("metric_type", "L2")
+        coll = self.prepare_refreshed_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            **kwargs,
+        )
+        self.index_and_load(client, coll, metric_type=metric_type)
+        return coll
 
 
 # ============================================================
@@ -1121,41 +302,48 @@ def _schema_missing_external_field(client):
 # ============================================================
 
 
-class TestExternalTableSchema(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
     """Collection creation, describe, list, drop and schema validation."""
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_create_describe_list_drop(self, external_prefix):
-        """Create an external collection, verify describe/list, then drop."""
+    def test_milvus_client_external_table_create_describe_list_drop(self, external_prefix):
+        """
+        target: test MilvusClient external table create describe list drop
+        method: Create an external collection, verify describe/list, then drop
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url = external_prefix["url"]
-        schema = build_basic_schema(client, ext_url)
 
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            assert client.has_collection(coll), "collection should exist after create"
+        self.create_basic_external_collection(client, coll, ext_url)
+        assert self.has_collection(client, coll)[0], "collection should exist after create"
 
-            info = client.describe_collection(coll)
-            assert info.get("external_source") == ext_url
-            assert json.loads(info.get("external_spec", "{}")).get("format") == "parquet"
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == ext_url
+        assert json.loads(info.get("external_spec", "{}")).get("format") == "parquet"
 
-            field_names = [f["name"] for f in info["fields"]]
-            assert "__virtual_pk__" in field_names, "virtual PK should be injected"
-            for required in ("id", "value", "embedding"):
-                assert required in field_names, f"{required} missing from {field_names}"
+        field_names = [f["name"] for f in info["fields"]]
+        assert "__virtual_pk__" in field_names, "virtual PK should be injected"
+        for required in ("id", "value", "embedding"):
+            assert required in field_names, f"{required} missing from {field_names}"
 
-            vpk = next(f for f in info["fields"] if f["name"] == "__virtual_pk__")
-            assert vpk["is_primary"] is True
-            assert vpk["auto_id"] is True
+        vpk = next(f for f in info["fields"] if f["name"] == "__virtual_pk__")
+        assert vpk["is_primary"] is True
+        assert vpk["auto_id"] is True
 
-            value_f = next(f for f in info["fields"] if f["name"] == "value")
-            assert value_f.get("external_field") == "value"
+        value_f = next(f for f in info["fields"] if f["name"] == "value")
+        assert value_f.get("external_field") == "value"
 
-            assert coll in client.list_collections()
-        finally:
-            client.drop_collection(coll)
-            assert not client.has_collection(coll), "collection should be gone after drop"
+        assert (
+            coll
+            in self.list_collections(
+                client,
+            )[0]
+        )
+
+        self.drop_collection(client, coll)
+        assert not self.has_collection(client, coll)[0], "collection should be gone after drop"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -1166,221 +354,199 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
             ("dynamic_field_enabled", lambda c: _schema_with_dynamic(c), "dynamic field"),
             ("partition_key", lambda c: _schema_with_partition_key(c), "partition key"),
             ("missing_external_field", lambda c: _schema_missing_external_field(c), "external_field"),
+            ("sparse_float_vector", lambda c: _schema_with_sparse_float_vector(c), "SparseFloatVector"),
+            ("duplicate_external_field", lambda c: _schema_with_duplicate_external_field(c), "external_field"),
+        ],
+        ids=[
+            "user_primary_key",
+            "auto_id_on_user_field",
+            "dynamic_field_enabled",
+            "partition_key",
+            "missing_external_field",
+            "sparse_float_vector",
+            "duplicate_external_field",
         ],
     )
-    def test_schema_reject_forbidden(self, case_name, schema_builder, err_hint):
-        """Forbidden schema shapes must be rejected at create_collection time."""
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-
-        with pytest.raises(Exception) as exc_info:
-            schema = schema_builder(client)
-            client.create_collection(collection_name=coll, schema=schema)
-
-        msg = str(exc_info.value).lower()
-        assert err_hint.lower() in msg, f"[{case_name}] expected {err_hint!r} in error, got: {exc_info.value}"
-        log.info(f"[{case_name}] correctly rejected: {exc_info.value}")
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_schema_reject_sparse_float_vector(self):
-        """SPARSE_FLOAT_VECTOR is explicitly blocked for external collections.
-
-        Server message must mention both 'does not support field type' and
-        the type name 'SparseFloatVector' (typeutil.IsExternalCollection in
-        pkg/util/typeutil/schema.go).
+    def test_milvus_client_external_table_schema_reject_invalid_definition(self, case_name, schema_builder, err_hint):
+        """
+        target: test MilvusClient external table schema reject invalid definition
+        method: Forbidden or invalid external schema shapes must be rejected at create_collection time
+        expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(
-            external_source=_PLACEHOLDER_SRC,
-            external_spec=_PLACEHOLDER_SPEC,
+
+        schema = schema_builder(client)
+        self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items=self.error_items(err_hint),
         )
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("sv", DataType.SPARSE_FLOAT_VECTOR, external_field="sv")
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc_info.value)
-        assert ("does not support field type" in msg and "SparseFloatVector" in msg) or "sparse" in msg.lower(), (
-            f"Expected SparseFloatVector type-block error, got: {exc_info.value}"
-        )
+        log.info(f"[{case_name}] correctly rejected with {err_hint!r}")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("scheme", ALLOWED_EXTERNAL_SOURCE_SCHEMES)
-    def test_external_source_allowed_schemes(self, scheme):
-        """All schemes in the allowlist (RootCoord ValidateSourceAndSpec)
-        should be accepted at create time."""
+    def test_milvus_client_external_table_external_source_allowed_schemes(self, scheme, minio_env):
+        """
+        target: test MilvusClient external table external source allowed schemes
+        method: The CI allowlist keeps MinIO as the only external source provider at create time
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        cfg = get_minio_config()
+        _minio_client, cfg = minio_env
         source = build_validation_source_for_scheme(scheme, cfg)
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=source,
             external_spec=build_external_spec_for_scheme(scheme, cfg=cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            assert client.has_collection(coll)
-        finally:
-            client.drop_collection(coll)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        assert self.has_collection(client, coll)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_secure_minio_smoke(self, minio_env, external_prefix):
-        """MINIO_SECURE=true should flow through source upload and extfs.use_ssl."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_secure_minio_smoke(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table secure minio smoke
+        method: HTTPS MinIO config should flow through source upload and extfs.use_ssl
+        expected: behavior matches the case assertion.
+        """
+        _minio_client, cfg = minio_env
         if not cfg["secure"]:
-            pytest.skip("set MINIO_SECURE=true to run secure MinIO smoke")
+            pytest.skip("set --minio_host=https://<host>:<port> to run secure MinIO smoke")
 
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         ext_spec = build_external_spec(cfg)
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=20)
-
-        schema = build_basic_schema(client, ext_url, ext_spec=ext_spec)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 20
-            info = client.describe_collection(coll)
-            assert_external_spec_persisted(info.get("external_spec"), ext_spec, "secure minio external_spec")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_external_source_relative_path_no_scheme_rejected(self):
-        """A relative path without an explicit scheme is rejected."""
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(
-            external_source="my-data/parquet/",
-            external_spec=build_external_spec(),
+        coll = self.prepare_loaded_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            num_rows=20,
+            ext_spec=ext_spec,
         )
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc_info.value).lower()
-        assert "explicit scheme" in msg or "external_source" in msg, (
-            f"Expected relative-path rejection, got: {exc_info.value}"
-        )
+        assert self.query_count(client, coll) == 20
+        info = self.describe_collection(client, coll)[0]
+        assert_external_spec_persisted(info.get("external_spec"), ext_spec, "secure minio external_spec")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "source",
+        "case_name,source,err_terms",
         [
-            "http://169.254.169.254/metadata",
-            "ftp://example.com/data",
-            "xyz://bucket/prefix",
-            "file:///tmp/data",
+            ("relative_path_no_scheme", "my-data/parquet/", ("explicit scheme", "external_source")),
+            ("http", "http://169.254.169.254/metadata", ("not allowed", "not support")),
+            ("ftp", "ftp://example.com/data", ("not allowed", "not support")),
+            ("unknown", "xyz://bucket/prefix", ("not allowed", "not support")),
+            ("file", "file:///tmp/data", ("not allowed", "not support")),
+            ("userinfo", "s3://ak:sk@bucket/prefix", ("credentials",)),
         ],
-        ids=["http", "ftp", "unknown", "file"],
+        ids=["relative_path_no_scheme", "http", "ftp", "unknown", "file", "userinfo"],
     )
-    def test_external_source_disallowed_schemes(self, source):
-        """Schemes outside the allowlist must be rejected with 'not allowed'."""
+    def test_milvus_client_external_table_external_source_rejected(self, case_name, source, err_terms):
+        """
+        target: test MilvusClient external table external source rejected
+        method: Invalid source forms and schemes outside the allowlist must be rejected
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(external_source=source, external_spec=_PLACEHOLDER_SPEC)
-        schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc_info.value).lower()
-        assert "not allowed" in msg or "not support" in msg, f"Expected scheme rejection, got: {exc_info.value}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_external_source_userinfo_rejected(self):
-        """Embedded credentials like s3://ak:sk@bucket/prefix must be rejected."""
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(
-            external_source="s3://ak:sk@bucket/prefix",
+        schema = self.create_schema(
+            client,
+            external_source=source,
             external_spec=_PLACEHOLDER_SPEC,
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        assert "credentials" in str(exc_info.value).lower(), f"Expected userinfo rejection, got: {exc_info.value}"
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        assert not created, f"[{case_name}] {source} should be rejected for external_source"
+        msg = str(create_res).lower()
+        assert any(term in msg for term in err_terms), f"[{case_name}] unexpected error: {create_res}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_user_fields_force_nullable(self):
-        """User fields are server-side normalized to nullable=True; the
-        virtual PK is exempt and remains the primary key."""
+    def test_milvus_client_external_table_user_fields_force_nullable(self):
+        """
+        target: test MilvusClient external table user fields force nullable
+        method: User fields are server-side normalized to nullable=True; the virtual PK is exempt and remains the primary key
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=_PLACEHOLDER_SRC,
             external_spec=_PLACEHOLDER_SPEC,
-        )
+        )[0]
         # Intentionally do NOT pass nullable on any user field.
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("v", DataType.VARCHAR, max_length=64, external_field="v")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            info = client.describe_collection(coll)
-            by_name = {f["name"]: f for f in info["fields"]}
-            for field in ("id", "v", "vec"):
-                assert by_name[field].get("nullable") is True, (
-                    f"user field '{field}' should be force-nullable, got {by_name[field]}"
-                )
-            vpk = by_name.get("__virtual_pk__")
-            assert vpk is not None and vpk.get("is_primary") is True, "__virtual_pk__ should still be the primary key"
-        finally:
-            client.drop_collection(coll)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        info = self.describe_collection(client, coll)[0]
+        by_name = {f["name"]: f for f in info["fields"]}
+        for field in ("id", "v", "vec"):
+            assert by_name[field].get("nullable") is True, (
+                f"user field '{field}' should be force-nullable, got {by_name[field]}"
+            )
+        vpk = by_name.get("__virtual_pk__")
+        assert vpk is not None and vpk.get("is_primary") is True, "__virtual_pk__ should still be the primary key"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "properties",
         [
-            {"collection.external_source": "s3://bucket/new/"},
-            {"collection.external_spec": '{"format":"lance-table"}'},
+            {"collection.external_source": _PLACEHOLDER_NEW_SOURCE},
+            {"collection.external_spec": _PLACEHOLDER_NEW_SPEC},
             {
-                "collection.external_source": "s3://bucket/new/",
-                "collection.external_spec": '{"format":"lance-table"}',
+                "collection.external_source": _PLACEHOLDER_NEW_SOURCE,
+                "collection.external_spec": _PLACEHOLDER_NEW_SPEC,
             },
         ],
         ids=["source_only", "spec_only", "source_and_spec"],
     )
-    def test_alter_collection_external_source_via_property_rejected(self, properties):
-        """Setting collection.external_source / collection.external_spec via
-        alter_collection_properties is rejected; the supported path for
-        rebinding source is refresh_external_collection(external_source=,
-        external_spec=). This test pins that contract.
+    def test_milvus_client_external_table_alter_collection_external_source_via_property_rejected(
+        self, properties, minio_env
+    ):
+        """
+        target: test MilvusClient external table alter collection external source via property rejected
+        method: verify alter collection external source via property rejected
+        expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        cfg = get_minio_config()
-        schema = client.create_schema(
+        _minio_client, cfg = minio_env
+        schema = self.create_schema(
+            client,
             external_source=build_external_source(cfg, "old"),
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="vec")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            before = client.describe_collection(coll)
-            with pytest.raises(Exception) as exc_info:
-                client.alter_collection_properties(
-                    coll,
-                    properties=properties,
-                )
-            msg = str(exc_info.value).lower()
-            assert (
-                "refreshexternalcollection" in msg.replace(" ", "")
-                or "external_source" in msg
-                or "external_spec" in msg
-                or "invalid parameter" in msg
-            ), f"unexpected error: {exc_info.value}"
-            after = client.describe_collection(coll)
-            assert after.get("external_source") == before.get("external_source")
-            assert after.get("external_spec") == before.get("external_spec")
-            log.info(f"alter via property correctly rejected: {exc_info.value}")
-        finally:
-            client.drop_collection(coll)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="vec")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        before = self.describe_collection(client, coll)[0]
+        with pytest.raises(Exception) as exc_info:
+            client.alter_collection_properties(
+                coll,
+                properties=properties,
+            )
+        msg = str(exc_info.value).lower()
+        assert (
+            "refreshexternalcollection" in msg.replace(" ", "")
+            or "external_source" in msg
+            or "external_spec" in msg
+            or "invalid parameter" in msg
+        ), f"unexpected error: {exc_info.value}"
+        after = self.describe_collection(client, coll)[0]
+        assert after.get("external_source") == before.get("external_source")
+        assert after.get("external_spec") == before.get("external_spec")
+        log.info(f"alter via property correctly rejected: {exc_info.value}")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -1405,37 +571,27 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         ],
         ids=["as_int64_pk", "as_scalar", "as_varchar_pk"],
     )
-    def test_regular_collection_rejects_virtual_pk_reserved_name(self, fields):
-        """milvus#49314: __virtual_pk__ is reserved even outside external collections."""
+    def test_milvus_client_external_table_regular_collection_rejects_virtual_pk_reserved_name(self, fields):
+        """
+        target: test MilvusClient external table regular collection rejects virtual pk reserved name (milvus#49314)
+        method: milvus#49314: __virtual_pk__ is reserved even outside external collections
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema()
+        schema = self.create_schema(
+            client,
+        )[0]
         for name, dtype, kwargs in fields:
             schema.add_field(name, dtype, **kwargs)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim)
 
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc_info.value).lower()
-        assert "__virtual_pk__" in msg and "reserved" in msg, f"expected reserved-name rejection, got: {exc_info.value}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_duplicate_external_field_mapping_rejected(self):
-        """milvus#49235: one external column cannot back multiple user fields."""
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema(
-            external_source=_PLACEHOLDER_SRC,
-            external_spec=_PLACEHOLDER_SPEC,
-        )
-        schema.add_field("id", DataType.INT64, external_field="same_col")
-        schema.add_field("value", DataType.FLOAT, external_field="same_col")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        with pytest.raises(Exception) as exc_info:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc_info.value).lower()
-        assert "external_field" in msg and ("multiple" in msg or "duplicate" in msg), (
-            f"expected duplicate external_field rejection, got: {exc_info.value}"
+        self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.err_res,
+            check_items=self.error_items("__virtual_pk__"),
         )
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1447,21 +603,22 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
         ],
         ids=["source_only", "spec_only"],
     )
-    def test_refresh_override_requires_source_spec_pair(self, kwargs, external_prefix):
-        """milvus#49230/#49335: refresh override source/spec must be atomic."""
+    def test_milvus_client_external_table_refresh_override_requires_source_spec_pair(self, kwargs, external_prefix):
+        """
+        target: test MilvusClient external table refresh override requires source spec pair (#49335, milvus#49230)
+        method: milvus#49230/#49335: refresh override source/spec must be atomic
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         schema = build_basic_schema(client, external_prefix["url"])
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            with pytest.raises(Exception) as exc_info:
-                client.refresh_external_collection(collection_name=coll, **kwargs)
-            msg = str(exc_info.value).lower()
-            assert "both" in msg or "external_source" in msg or "external_spec" in msg or "invalid" in msg, (
-                f"unexpected error: {exc_info.value}"
-            )
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        with pytest.raises(Exception) as exc_info:
+            client.refresh_external_collection(collection_name=coll, **kwargs)
+        msg = str(exc_info.value).lower()
+        assert "both" in msg or "external_source" in msg or "external_spec" in msg or "invalid" in msg, (
+            f"unexpected error: {exc_info.value}"
+        )
 
 
 # ============================================================
@@ -1469,7 +626,7 @@ class TestExternalTableSchema(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableDataTypes(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableDataTypes(ExternalTableTestBase):
     """E2E coverage for every supported scalar and vector data type."""
 
     # ---- Scalar types ------------------------------------------------
@@ -1488,44 +645,48 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             ("varchar", DataType.VARCHAR, {"max_length": 64}, pa.string(), lambda i: f"s_{i:05d}"),
             ("json", DataType.JSON, {}, pa.string(), lambda i: json.dumps({"k": i, "g": i % 3})),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["bool", "int8", "int16", "int32", "int64", "float", "double", "varchar", "json"],
     )
-    def test_scalar_type_e2e(self, type_name, dtype, extra, arrow_type, value_fn, minio_env, external_prefix):
-        """End-to-end per supported scalar type."""
+    def test_milvus_client_external_table_scalar_type_e2e(
+        self, type_name, dtype, extra, arrow_type, value_fn, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table scalar type e2e
+        method: End-to-end per supported scalar type
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         scalar_name = f"f_{type_name}"
-        data = gen_parquet_bytes(DEFAULT_NB, 0, scalar_name, arrow_type, value_fn)
+        data = gen_parquet_bytes(ct.default_nb, 0, scalar_name, arrow_type, value_fn)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
         schema = build_typed_schema(client, ext_url, scalar_name, dtype, **extra)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
 
-            count = query_count(client, coll)
-            assert count == DEFAULT_NB, f"[{type_name}] expected {DEFAULT_NB} rows, got {count}"
+        count = self.query_count(client, coll)
+        assert count == ct.default_nb, f"[{type_name}] expected {ct.default_nb} rows, got {count}"
 
-            res = client.query(coll, filter="id == 0", output_fields=["id", scalar_name])
-            assert len(res) == 1
-            assert res[0]["id"] == 0
-            log.info(f"[{type_name}] id=0 -> {res[0]}")
+        res = self.query(client, coll, filter="id == 0", output_fields=["id", scalar_name])[0]
+        assert len(res) == 1
+        assert res[0]["id"] == 0
+        log.info(f"[{type_name}] id=0 -> {res[0]}")
 
-            vectors = _float_vectors([0], TEST_DIM).tolist()
-            search_res = client.search(
-                coll,
-                data=vectors,
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id", scalar_name],
-            )
-            assert len(search_res) == 1 and len(search_res[0]) > 0
-        finally:
-            client.drop_collection(coll)
+        vectors = _float_vectors([0], ct.default_dim).tolist()
+        search_res = self.search(
+            client,
+            coll,
+            data=vectors,
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id", scalar_name],
+        )[0]
+        assert len(search_res) == 1 and len(search_res[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -1540,41 +701,47 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
                 lambda i: [f"a_{i}", f"b_{i}"],
             ),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["int64", "varchar"],
     )
-    def test_array_type_e2e(self, elem_name, elem_dtype, elem_arrow, elem_extra, value_fn, minio_env, external_prefix):
-        """Array-of-<elem> field: upload, refresh, load, and query the array values."""
+    def test_milvus_client_external_table_array_type_e2e(
+        self, elem_name, elem_dtype, elem_arrow, elem_extra, value_fn, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table array type e2e
+        method: Array-of-<elem> field: upload, refresh, load, and query the array values
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         arr_field = f"arr_{elem_name}"
 
-        data = gen_array_parquet_bytes(DEFAULT_NB, 0, arr_field, elem_arrow, value_fn)
+        data = gen_array_parquet_bytes(ct.default_nb, 0, arr_field, elem_arrow, value_fn)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
-        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field(arr_field, DataType.ARRAY, element_type=elem_dtype, external_field=arr_field, **elem_extra)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == DEFAULT_NB
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == ct.default_nb
 
-            rows = client.query(coll, filter="id == 5", output_fields=["id", arr_field])
-            assert len(rows) == 1
-            expected = value_fn(5)
-            assert rows[0][arr_field] == expected, f"got {rows[0][arr_field]}, expected {expected}"
-        finally:
-            client.drop_collection(coll)
+        rows = self.query(client, coll, filter="id == 5", output_fields=["id", arr_field])[0]
+        assert len(rows) == 1
+        expected = value_fn(5)
+        assert rows[0][arr_field] == expected, f"got {rows[0][arr_field]}, expected {expected}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_all_scalar_types_in_one_collection(self, minio_env, external_prefix):
-        """Single collection with every scalar type + one FloatVector; cross-field
-        filters and queries work correctly."""
+    def test_milvus_client_external_table_all_scalar_types_in_one_collection(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table all scalar types in one collection
+        method: Single collection with every scalar type + one FloatVector; cross-field filters and queries work correctly
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -1589,57 +756,59 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         )
 
         schema = build_all_scalar_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == nb
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
 
-            # bool filter: even ids → 50
-            b = client.query(coll, filter="val_bool == true", output_fields=["id"])
-            assert len(b) == 50
-            # int8 range: < 10 → 10
-            i8 = client.query(coll, filter="val_int8 < 10", output_fields=["id"])
-            assert len(i8) == 10
-            # varchar like: first 10 match s_0000x pattern (x = 0..9) → 10
-            s = client.query(coll, filter='val_varchar like "s_0000%"', output_fields=["id"])
-            assert len(s) == 10
+        # bool filter: even ids → 50
+        b = self.query(client, coll, filter="val_bool == true", output_fields=["id"])[0]
+        assert len(b) == 50
+        # int8 range: < 10 → 10
+        i8 = self.query(client, coll, filter="val_int8 < 10", output_fields=["id"])[0]
+        assert len(i8) == 10
+        # varchar like: first 10 match s_0000x pattern (x = 0..9) → 10
+        s = self.query(client, coll, filter='val_varchar like "s_0000%"', output_fields=["id"])[0]
+        assert len(s) == 10
 
-            # Verify specific row values for id=42
-            row42 = client.query(
-                coll,
-                filter="id == 42",
-                output_fields=[
-                    "id",
-                    "val_bool",
-                    "val_int8",
-                    "val_int16",
-                    "val_int32",
-                    "val_int64",
-                    "val_float",
-                    "val_double",
-                    "val_varchar",
-                    "val_json",
-                ],
-            )
-            assert len(row42) == 1
-            r = row42[0]
-            assert r["val_bool"] is True
-            assert r["val_int8"] == 42
-            assert r["val_int16"] == 42 * 3
-            assert r["val_int32"] == 42 * 7
-            assert r["val_int64"] == 42 * 1000
-            assert abs(r["val_float"] - 63.0) < 0.01
-            assert abs(r["val_double"] - 105.0) < 0.01
-            assert r["val_varchar"] == "s_00042"
-            parsed = r["val_json"] if isinstance(r["val_json"], dict) else json.loads(r["val_json"])
-            assert parsed["k"] == 42
-        finally:
-            client.drop_collection(coll)
+        # Verify specific row values for id=42
+        row42 = self.query(
+            client,
+            coll,
+            filter="id == 42",
+            output_fields=[
+                "id",
+                "val_bool",
+                "val_int8",
+                "val_int16",
+                "val_int32",
+                "val_int64",
+                "val_float",
+                "val_double",
+                "val_varchar",
+                "val_json",
+            ],
+        )[0]
+        assert len(row42) == 1
+        r = row42[0]
+        assert r["val_bool"] is True
+        assert r["val_int8"] == 42
+        assert r["val_int16"] == 42 * 3
+        assert r["val_int32"] == 42 * 7
+        assert r["val_int64"] == 42 * 1000
+        assert abs(r["val_float"] - 63.0) < 0.01
+        assert abs(r["val_double"] - 105.0) < 0.01
+        assert r["val_varchar"] == "s_00042"
+        parsed = r["val_json"] if isinstance(r["val_json"], dict) else json.loads(r["val_json"])
+        assert parsed["k"] == 42
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_geometry_wkt_parquet_round_trip(self, minio_env, external_prefix):
-        """milvus#48627: WKT-backed Geometry columns query back as geometry text."""
+    def test_milvus_client_external_table_geometry_wkt_parquet_round_trip(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table geometry wkt parquet round trip (milvus#48627)
+        method: milvus#48627: WKT-backed Geometry columns query back as geometry text
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -1651,28 +820,27 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             f"{ext_key}/data.parquet",
             gen_geometry_wkt_parquet_bytes(50, 0),
         )
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
 
-            rows = client.query(
-                coll,
-                filter="id == 7",
-                output_fields=["id", "geo"],
-            )
-            assert len(rows) == 1
-            assert rows[0]["id"] == 7
-            assert "POINT" in str(rows[0]["geo"]).upper(), rows[0]
-        finally:
-            client.drop_collection(coll)
+        rows = self.query(
+            client,
+            coll,
+            filter="id == 7",
+            output_fields=["id", "geo"],
+        )[0]
+        assert len(rows) == 1
+        assert rows[0]["id"] == 7
+        assert "POINT" in str(rows[0]["geo"]).upper(), rows[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -1831,9 +999,29 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
                 True,
             ),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=[
+            "int8_from_string",
+            "int16_from_string",
+            "int32_from_string",
+            "int64_from_string",
+            "float_from_string",
+            "double_from_string",
+            "varchar_from_int64",
+            "json_from_int64",
+            "geometry_from_int64",
+            "timestamptz_from_string",
+            "int8_from_int64_overflow",
+            "int16_from_int64_overflow",
+            "int32_from_int64_overflow",
+            "float_from_int64",
+            "double_from_int64",
+            "int64_from_double",
+            "array_int64_from_list_string",
+            "array_float_from_list_string",
+            "array_bool_from_list_string",
+        ],
     )
-    def test_incompatible_external_arrow_type_rejected(
+    def test_milvus_client_external_table_incompatible_external_arrow_type_rejected(
         self,
         case_name,
         milvus_dtype,
@@ -1844,12 +1032,10 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
         minio_env,
         external_prefix,
     ):
-        """Milvus field type vs external Arrow type mismatches must fail visibly.
-
-        The exact detection stage can vary by reader path and build:
-        create_collection, refresh, index/load, or query are all acceptable
-        rejection points. What must not happen is a silent successful query
-        with data decoded through an incompatible type mapping.
+        """
+        target: test MilvusClient external table incompatible external arrow type rejected
+        method: Milvus field type vs external Arrow type mismatches must fail visibly
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -1872,78 +1058,77 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             ),
         )
 
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field(bad_field, milvus_dtype, external_field=bad_field, **field_kwargs)
         if include_embedding:
-            schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+            schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        if not created:
+            log.info(f"[{case_name}] create_collection rejected mismatch: {create_res}")
+            return
+
+        job_id, progress = self.refresh_and_poll_terminal(client, coll, timeout=60)
+        if progress.state == "RefreshFailed":
+            assert progress.reason, f"[{case_name}] refresh job {job_id} failed without a reason"
+            log.info(f"[{case_name}] refresh rejected mismatch: job={job_id}, reason={progress.reason}")
+            return
+
+        assert progress.state == "RefreshCompleted", f"[{case_name}] unexpected refresh state: {progress.state}"
 
         try:
-            try:
-                client.create_collection(collection_name=coll, schema=schema)
-            except Exception as exc:
-                log.info(f"[{case_name}] create_collection rejected mismatch: {exc}")
-                return
-
-            job_id, progress = refresh_and_poll_terminal(client, coll, timeout=60)
-            if progress.state == "RefreshFailed":
-                assert progress.reason, f"[{case_name}] refresh job {job_id} failed without a reason"
-                log.info(f"[{case_name}] refresh rejected mismatch: job={job_id}, reason={progress.reason}")
-                return
-
-            assert progress.state == "RefreshCompleted", f"[{case_name}] unexpected refresh state: {progress.state}"
-
-            try:
-                if include_embedding:
-                    add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-                    client.load_collection(coll, timeout=30)
-                    accepted_result = client.query(
-                        coll,
-                        filter="id >= 0",
-                        output_fields=["id", bad_field],
-                        limit=1,
-                    )
-                else:
-                    add_vector_index(client, coll, bad_field, "AUTOINDEX", "L2")
-                    client.load_collection(coll, timeout=30)
-                    accepted_result = client.query(
-                        coll,
-                        filter="id >= 0",
-                        output_fields=["id", bad_field],
-                        limit=1,
-                    )
-                    accepted_hits = client.search(
-                        coll,
-                        data=[[0.0] * TEST_DIM],
-                        limit=1,
-                        anns_field=bad_field,
-                        output_fields=["id"],
-                    )
-                    accepted_result = {
-                        "query": accepted_result,
-                        "search": accepted_hits,
-                    }
-            except Exception as exc:
-                log.info(f"[{case_name}] load/query rejected mismatch: {exc}")
-                return
-
-            if known_acceptance:
-                pytest.xfail(
-                    f"[{case_name}] current master accepts incompatible "
-                    f"external Arrow data; observed result: {accepted_result}"
+            if include_embedding:
+                self.add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
+                client.load_collection(coll, timeout=30)
+                accepted_result = client.query(
+                    coll,
+                    filter="id >= 0",
+                    output_fields=["id", bad_field],
+                    limit=1,
                 )
-            pytest.fail(
-                f"[{case_name}] incompatible external Arrow type was accepted "
-                f"through refresh, load, and query; result={accepted_result}"
+            else:
+                self.add_vector_index(client, coll, bad_field, "AUTOINDEX", "L2")
+                client.load_collection(coll, timeout=30)
+                accepted_result = client.query(
+                    coll,
+                    filter="id >= 0",
+                    output_fields=["id", bad_field],
+                    limit=1,
+                )
+                accepted_hits = client.search(
+                    coll,
+                    data=[[0.0] * ct.default_dim],
+                    limit=1,
+                    anns_field=bad_field,
+                    output_fields=["id"],
+                )
+                accepted_result = {
+                    "query": accepted_result,
+                    "search": accepted_hits,
+                }
+        except Exception as exc:
+            log.info(f"[{case_name}] load/query rejected mismatch: {exc}")
+            return
+
+        if known_acceptance:
+            pytest.xfail(
+                f"[{case_name}] current master accepts incompatible "
+                f"external Arrow data; observed result: {accepted_result}"
             )
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        pytest.fail(
+            f"[{case_name}] incompatible external Arrow type was accepted "
+            f"through refresh, load, and query; result={accepted_result}"
+        )
 
     # ---- Vector types -----------------------------------------------
 
@@ -1951,23 +1136,27 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
     @pytest.mark.parametrize(
         "case_name,external_dim",
         [
-            ("external_dim_larger_than_schema", TEST_DIM * 2),
-            ("external_dim_smaller_than_schema", TEST_DIM // 2),
+            ("external_dim_larger_than_schema", ct.default_dim * 2),
+            ("external_dim_smaller_than_schema", ct.default_dim // 2),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["external_dim_larger_than_schema", "external_dim_smaller_than_schema"],
     )
     @pytest.mark.xfail(
         reason="milvus#49388: vector dim mismatch is not rejected during refresh yet",
         raises=AssertionError,
     )
-    def test_float_vector_external_dim_mismatch_rejected(
+    def test_milvus_client_external_table_float_vector_external_dim_mismatch_rejected(
         self,
         case_name,
         external_dim,
         minio_env,
         external_prefix,
     ):
-        """milvus#49388: external FloatVector width must match schema dim."""
+        """
+        target: test MilvusClient external table float vector external dim mismatch rejected (milvus#49388)
+        method: milvus#49388: external FloatVector width must match schema dim
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -1980,91 +1169,97 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             gen_basic_parquet_bytes(20, 0, dim=external_dim),
         )
 
-        schema = build_basic_schema(client, ext_url, dim=TEST_DIM, ext_spec=build_external_spec(cfg))
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            _job_id, progress = refresh_and_expect_failed(client, coll, timeout=60)
-            log.info(f"[{case_name}] refresh rejected vector dim mismatch: {progress.reason}")
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        schema = build_basic_schema(client, ext_url, dim=ct.default_dim, ext_spec=build_external_spec(cfg))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        _job_id, progress = self.refresh_and_expect_failed(client, coll, timeout=60)
+        log.info(f"[{case_name}] refresh rejected vector dim mismatch: {progress.reason}")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "vec_kind,vec_dtype,metric,dim",
         [
-            ("float", DataType.FLOAT_VECTOR, "L2", TEST_DIM),
-            ("float16", DataType.FLOAT16_VECTOR, "L2", TEST_DIM),
-            ("bfloat16", DataType.BFLOAT16_VECTOR, "L2", TEST_DIM),
-            ("int8", DataType.INT8_VECTOR, "L2", TEST_DIM),
+            ("float", DataType.FLOAT_VECTOR, "L2", ct.default_dim),
+            ("float16", DataType.FLOAT16_VECTOR, "L2", ct.default_dim),
+            ("bfloat16", DataType.BFLOAT16_VECTOR, "L2", ct.default_dim),
+            ("int8", DataType.INT8_VECTOR, "L2", ct.default_dim),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["float", "float16", "bfloat16", "int8"],
     )
-    def test_float_family_vector_e2e(self, vec_kind, vec_dtype, metric, dim, minio_env, external_prefix):
-        """Each float-family / int8 vector type: upload, refresh, index, load, search."""
+    def test_milvus_client_external_table_float_family_vector_e2e(
+        self, vec_kind, vec_dtype, metric, dim, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table float family vector e2e
+        method: Each float-family / int8 vector type: upload, refresh, index, load, search
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         vec_field = f"vec_{vec_kind}"
 
-        data = gen_vector_variant_parquet_bytes(DEFAULT_NB, 0, vec_field, vec_dtype, dim)
+        data = gen_vector_variant_parquet_bytes(ct.default_nb, 0, vec_field, vec_dtype, dim)
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
         schema = build_vector_variant_schema(client, ext_url, vec_field, vec_dtype, dim)
-        try:
-            client.create_collection(collection_name=coll, schema=schema)
-        except Exception as e:
-            pytest.skip(f"[{vec_kind}] create_collection rejected on this build: {e}")
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        if not created:
+            pytest.skip(f"[{vec_kind}] create_collection rejected on this build: {create_res}")
 
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, vec_field, "AUTOINDEX", metric)
-            client.load_collection(coll)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, vec_field, "AUTOINDEX", metric)
+        self.load_collection(client, coll)
 
-            assert query_count(client, coll) == DEFAULT_NB
+        assert self.query_count(client, coll) == ct.default_nb
 
-            # Construct a query vector in the right dtype/encoding expected by pymilvus.
-            if vec_dtype == DataType.BINARY_VECTOR:
-                return  # handled by dedicated test
-            if vec_dtype == DataType.INT8_VECTOR:
-                # pymilvus expects int8 vector as numpy int8 array (or bytes)
-                query_vec = [np.zeros(dim, dtype=np.int8)]
-            elif vec_dtype == DataType.FLOAT16_VECTOR:
-                query_vec = [np.zeros(dim, dtype=np.float16)]
-            elif vec_dtype == DataType.BFLOAT16_VECTOR:
-                # pymilvus rejects uint16 at client side; feed raw bytes of
-                # the bfloat16 zero pattern instead (dim * 2 bytes).
-                query_vec = [bytes(dim * 2)]
-            else:
-                query_vec = [[0.0] * dim]
-            search_res = client.search(
-                coll,
-                data=query_vec,
-                limit=5,
-                anns_field=vec_field,
-                output_fields=["id"],
-            )
-            assert len(search_res) == 1 and len(search_res[0]) > 0
-        finally:
-            client.drop_collection(coll)
+        # Construct a query vector in the right dtype/encoding expected by pymilvus.
+        if vec_dtype == DataType.BINARY_VECTOR:
+            return  # handled by dedicated test
+        if vec_dtype == DataType.INT8_VECTOR:
+            # pymilvus expects int8 vector as numpy int8 array (or bytes)
+            query_vec = [np.zeros(dim, dtype=np.int8)]
+        elif vec_dtype == DataType.FLOAT16_VECTOR:
+            query_vec = [np.zeros(dim, dtype=np.float16)]
+        elif vec_dtype == DataType.BFLOAT16_VECTOR:
+            # pymilvus rejects uint16 at client side; feed raw bytes of
+            # the bfloat16 zero pattern instead (dim * 2 bytes).
+            query_vec = [bytes(dim * 2)]
+        else:
+            query_vec = [[0.0] * dim]
+        search_res = self.search(
+            client,
+            coll,
+            data=query_vec,
+            limit=5,
+            anns_field=vec_field,
+            output_fields=["id"],
+        )[0]
+        assert len(search_res) == 1 and len(search_res[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_binary_vector_e2e(self, minio_env, external_prefix):
-        """Binary vector end-to-end with HAMMING / JACCARD metric."""
+    def test_milvus_client_external_table_binary_vector_e2e(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table binary vector e2e
+        method: Binary vector end-to-end with HAMMING / JACCARD metric
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
         data = gen_vector_variant_parquet_bytes(
-            DEFAULT_NB,
+            ct.default_nb,
             0,
             "bin_vec",
             DataType.BINARY_VECTOR,
-            BINARY_DIM,
+            ct.default_dim,
         )
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
@@ -2073,33 +1268,35 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             ext_url,
             "bin_vec",
             DataType.BINARY_VECTOR,
-            BINARY_DIM,
+            ct.default_dim,
         )
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "bin_vec", "BIN_FLAT", "HAMMING")
-            client.load_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.add_vector_index(client, coll, "bin_vec", "BIN_FLAT", "HAMMING")
+        self.load_collection(client, coll)
 
-            assert query_count(client, coll) == DEFAULT_NB
+        assert self.query_count(client, coll) == ct.default_nb
 
-            # Single query vector of correct length (BINARY_DIM bits → BINARY_DIM/8 bytes)
-            query_vec = [b"\x00" * (BINARY_DIM // 8)]
-            search_res = client.search(
-                coll,
-                data=query_vec,
-                limit=5,
-                anns_field="bin_vec",
-                output_fields=["id"],
-                search_params={"metric_type": "HAMMING"},
-            )
-            assert len(search_res) == 1 and len(search_res[0]) > 0
-        finally:
-            client.drop_collection(coll)
+        # Single query vector of correct length (ct.default_dim bits → ct.default_dim/8 bytes)
+        query_vec = [b"\x00" * (ct.default_dim // 8)]
+        search_res = self.search(
+            client,
+            coll,
+            data=query_vec,
+            limit=5,
+            anns_field="bin_vec",
+            output_fields=["id"],
+            search_params={"metric_type": "HAMMING"},
+        )[0]
+        assert len(search_res) == 1 and len(search_res[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_multi_vector_collection(self, minio_env, external_prefix):
-        """Collection with FloatVector + BinaryVector: both indexable and searchable."""
+    def test_milvus_client_external_table_multi_vector_collection(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table multi vector collection
+        method: Collection with FloatVector + BinaryVector: both indexable and searchable
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2109,39 +1306,40 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             minio_client,
             cfg["bucket"],
             f"{ext_key}/data.parquet",
-            gen_multi_vector_parquet_bytes(DEFAULT_NB, 0),
+            gen_multi_vector_parquet_bytes(ct.default_nb, 0),
         )
         schema = build_multi_vector_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
 
-            index_params = client.prepare_index_params()
-            index_params.add_index(field_name="dense_vec", index_type="AUTOINDEX", metric_type="L2")
-            index_params.add_index(field_name="bin_vec", index_type="BIN_FLAT", metric_type="HAMMING")
-            client.create_index(coll, index_params)
-            client.load_collection(coll)
+        index_params = self.prepare_index_params(
+            client,
+        )[0]
+        index_params.add_index(field_name="dense_vec", index_type="AUTOINDEX", metric_type="L2")
+        index_params.add_index(field_name="bin_vec", index_type="BIN_FLAT", metric_type="HAMMING")
+        self.create_index(client, coll, index_params)
+        self.load_collection(client, coll)
 
-            assert query_count(client, coll) == DEFAULT_NB
+        assert self.query_count(client, coll) == ct.default_nb
 
-            dense_res = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=3,
-                anns_field="dense_vec",
-                output_fields=["id"],
-            )
-            bin_res = client.search(
-                coll,
-                data=[b"\x00" * (BINARY_DIM // 8)],
-                limit=3,
-                anns_field="bin_vec",
-                output_fields=["id"],
-                search_params={"metric_type": "HAMMING"},
-            )
-            assert len(dense_res[0]) == 3 and len(bin_res[0]) == 3
-        finally:
-            client.drop_collection(coll)
+        dense_res = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=3,
+            anns_field="dense_vec",
+            output_fields=["id"],
+        )[0]
+        bin_res = self.search(
+            client,
+            coll,
+            data=[b"\x00" * (ct.default_dim // 8)],
+            limit=3,
+            anns_field="bin_vec",
+            output_fields=["id"],
+            search_params={"metric_type": "HAMMING"},
+        )[0]
+        assert len(dense_res[0]) == 3 and len(bin_res[0]) == 3
 
     # ---- Whitelist gap coverage --------------------------------------
     # The supported-type whitelist in pkg/util/typeutil/schema.go:2369-2394
@@ -2150,18 +1348,18 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("ts_unit", ["us", "ms"])
-    def test_timestamptz_type_e2e(self, ts_unit, minio_env, external_prefix):
-        """Timestamptz field: arrow timestamp in parquet → Milvus Timestamptz.
-
-        NormalizeExternalArrow (Util.cpp:2092-2097) converts arrow.timestamp
-        to int64 microseconds; query output is rendered as ISO-8601.
+    def test_milvus_client_external_table_timestamptz_type_e2e(self, ts_unit, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table timestamptz type e2e
+        method: Timestamptz field: arrow timestamp in parquet → Milvus Timestamptz
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
 
-        nb = DEFAULT_NB
+        nb = ct.default_nb
         upload_parquet(
             minio_client,
             cfg["bucket"],
@@ -2169,60 +1367,59 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
             gen_timestamptz_parquet_bytes(nb, 0, ts_unit=ts_unit),
         )
 
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("ts", DataType.TIMESTAMPTZ, external_field="ts")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == nb
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
 
-            row = client.query(coll, filter="id == 7", output_fields=["id", "ts"])
-            assert len(row) == 1
-            ts_val = row[0]["ts"]
-            # Server returns ISO-8601 string; verify the offset matches our
-            # encoding base (1700000000 + 7 = 1700000007 → "2023-11-14T22:13:27Z").
-            assert isinstance(ts_val, str) and ts_val.startswith("2023-11-14")
-            log.info(f"[timestamptz/{ts_unit}] id=7 -> {ts_val}")
-        finally:
-            client.drop_collection(coll)
+        row = self.query(client, coll, filter="id == 7", output_fields=["id", "ts"])[0]
+        assert len(row) == 1
+        ts_val = row[0]["ts"]
+        # Server returns ISO-8601 string; verify the offset matches our
+        # encoding base (1700000000 + 7 = 1700000007 → "2023-11-14T22:13:27Z").
+        assert isinstance(ts_val, str) and ts_val.startswith("2023-11-14")
+        log.info(f"[timestamptz/{ts_unit}] id=7 -> {ts_val}")
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_array_of_vector_top_level_rejected(self, external_prefix):
-        """ArrayOfVector is on the external whitelist (schema.go:2389) but the
-        general schema validator only accepts it inside a struct array field
-        ('array of vector can only be in the struct array field'). External
-        collections separately reject struct fields (schema.go:2285-2287),
-        so there is no usable path today.
-
-        This test pins the contradiction: top-level _ARRAY_OF_VECTOR fails
-        at create_collection. If a future build relaxes either side, this
-        test must be updated to a positive E2E assertion.
+    def test_milvus_client_external_table_array_of_vector_top_level_rejected(self, external_prefix):
+        """
+        target: test MilvusClient external table array of vector top level rejected
+        method: verify array of vector top level rejected
+        expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url = external_prefix["url"]
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field(
             "vecs",
             DataType._ARRAY_OF_VECTOR,
             element_type=DataType.FLOAT_VECTOR,
-            dim=TEST_DIM,
+            dim=ct.default_dim,
             max_capacity=4,
             external_field="vecs",
         )
-        with pytest.raises(Exception) as exc:
-            client.create_collection(collection_name=coll, schema=schema)
-        msg = str(exc.value)
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        assert not created, "array-of-vector top-level external field should be rejected"
+        msg = str(create_res)
         assert "struct" in msg.lower() or "array of vector" in msg.lower(), msg
         log.info(f"[array_of_vector] rejected as expected: {msg}")
 
@@ -2232,17 +1429,16 @@ class TestExternalTableDataTypes(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableNullableScenarios(ExternalTableTestBase):
     """External user fields are force-nullable (schema.go:2350). Probe edge
     cases of that contract."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_all_null_scalar_columns(self, minio_env, external_prefix):
-        """Every user scalar column is entirely null in parquet.
-
-        Verifies: (1) refresh succeeds, (2) count(*) reflects the row total,
-        (3) get-by-id returns rows with None for null fields, (4) `field is
-        null` filter matches every row.
+    def test_milvus_client_external_table_all_null_scalar_columns(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table all null scalar columns
+        method: Every user scalar column is entirely null in parquet
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -2257,50 +1453,50 @@ class TestExternalTableNullableScenarios(TestMilvusClientV2Base):
             gen_all_null_columns_parquet_bytes(nb, 0),
         )
 
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("n_int", DataType.INT32, external_field="n_int")
         schema.add_field("n_float", DataType.FLOAT, external_field="n_float")
         schema.add_field("n_varchar", DataType.VARCHAR, max_length=64, external_field="n_varchar")
         schema.add_field("n_json", DataType.JSON, external_field="n_json")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
 
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == nb
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
 
-            # Single-row peek: every user field should round-trip as None.
-            rows = client.query(
-                coll,
-                filter="id == 5",
-                output_fields=["id", "n_int", "n_float", "n_varchar", "n_json"],
-            )
-            assert len(rows) == 1, f"missing id=5 in result: {rows}"
-            r = rows[0]
-            assert r["id"] == 5
-            assert r["n_int"] is None
-            assert r["n_float"] is None
-            assert r["n_varchar"] is None
-            assert r["n_json"] is None
+        # Single-row peek: every user field should round-trip as None.
+        rows = self.query(
+            client,
+            coll,
+            filter="id == 5",
+            output_fields=["id", "n_int", "n_float", "n_varchar", "n_json"],
+        )[0]
+        assert len(rows) == 1, f"missing id=5 in result: {rows}"
+        r = rows[0]
+        assert r["id"] == 5
+        assert r["n_int"] is None
+        assert r["n_float"] is None
+        assert r["n_varchar"] is None
+        assert r["n_json"] is None
 
-            # `is null` filter should match every row.
-            null_rows = client.query(
-                coll,
-                filter="n_int is null",
-                output_fields=["id"],
-                limit=nb,
-            )
-            assert len(null_rows) == nb, f"is-null filter only matched {len(null_rows)}/{nb}"
-        finally:
-            client.drop_collection(coll)
+        # `is null` filter should match every row.
+        null_rows = self.query(
+            client,
+            coll,
+            filter="n_int is null",
+            output_fields=["id"],
+            limit=nb,
+        )[0]
+        assert len(null_rows) == nb, f"is-null filter only matched {len(null_rows)}/{nb}"
 
 
-class TestExternalTableLargeFile(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableLargeFile(ExternalTableTestBase):
     """Large single-file scenarios — multi-row-group parquet and large row
     counts that can be split into multiple Milvus segments."""
 
@@ -2313,18 +1509,17 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
         ],
         ids=["10rg", "20rg"],
     )
-    def test_large_single_file_with_row_groups(
+    def test_milvus_client_external_table_large_single_file_with_row_groups(
         self,
         num_rows,
         row_group_size,
         minio_env,
         external_prefix,
     ):
-        """A single large parquet file with explicit row_group_size, verifying
-        the multi-row-group reader path on a stable external table.
-
-        Asserts: count(*) is exact; spot-checked rows round-trip correctly;
-        a vector search returns at least `limit` results.
+        """
+        target: test MilvusClient external table large single file with row groups
+        method: verify large single file with row groups
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -2339,32 +1534,31 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
         )
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == num_rows
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == num_rows
 
-            # Spot-check rows in the first, middle, and last row group.
-            for sample in (0, num_rows // 2, num_rows - 1):
-                rows = client.query(
-                    coll,
-                    filter=f"id == {sample}",
-                    output_fields=["id", "value"],
-                )
-                assert len(rows) == 1, f"missing id={sample}"
-                assert abs(rows[0]["value"] - sample * 1.5) < 1e-3
-
-            hits = client.search(
+        # Spot-check rows in the first, middle, and last row group.
+        for sample in (0, num_rows // 2, num_rows - 1):
+            rows = self.query(
+                client,
                 coll,
-                data=[[0.0] * TEST_DIM],
-                limit=10,
-                anns_field="embedding",
-                output_fields=["id"],
-            )
-            assert len(hits[0]) == 10
-        finally:
-            client.drop_collection(coll)
+                filter=f"id == {sample}",
+                output_fields=["id", "value"],
+            )[0]
+            assert len(rows) == 1, f"missing id={sample}"
+            assert abs(rows[0]["value"] - sample * 1.5) < 1e-3
+
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=10,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0]
+        assert len(hits[0]) == 10
 
 
 # ============================================================
@@ -2372,7 +1566,7 @@ class TestExternalTableLargeFile(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableIndexes(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableIndexes(ExternalTableTestBase):
     """Index creation on external collections — vector + scalar + binary."""
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2386,52 +1580,45 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             ("HNSW", "COSINE", {"M": 8}),
             ("DISKANN", "L2", {}),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["AUTOINDEX_L2", "FLAT_L2", "HNSW_L2", "IVF_FLAT_L2", "HNSW_COSINE", "DISKANN_L2"],
     )
-    def test_vector_index(self, index_type, metric_type, params, minio_env, external_prefix):
-        """Create each supported vector index type on a FloatVector field and query.
-
-        DISKANN requires the cluster to have a disk-backed index node. If the
-        deployment lacks it, create_index raises and we skip rather than fail.
+    def test_milvus_client_external_table_vector_index(
+        self, index_type, metric_type, params, minio_env, external_prefix
+    ):
         """
-        minio_client, cfg = minio_env
+        target: test MilvusClient external table vector index
+        method: Create each supported vector index type on a FloatVector field and query
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
-
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
         try:
-            refresh_and_wait(client, coll)
-            try:
-                add_vector_index(
-                    client,
-                    coll,
-                    "embedding",
-                    index_type=index_type,
-                    metric_type=metric_type,
-                    **({"params": params} if params else {}),
-                )
-            except Exception as e:
-                if index_type == "DISKANN":
-                    pytest.skip(f"DISKANN not available on this deployment: {e}")
-                raise
-            client.load_collection(coll)
-
-            hits = client.search(
+            self.add_vector_index(
+                client,
                 coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 5
+                "embedding",
+                index_type=index_type,
+                metric_type=metric_type,
+                **({"params": params} if params else {}),
+            )
+        except Exception as e:
+            if index_type == "DISKANN":
+                pytest.skip(f"DISKANN not available on this deployment: {e}")
+            raise
+        self.load_collection(client, coll)
 
-            idx_list = client.list_indexes(collection_name=coll)
-            assert any("embedding" in str(i) for i in idx_list), f"embedding index not in list: {idx_list}"
-        finally:
-            client.drop_collection(coll)
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits) == 5
+
+        idx_list = self.list_indexes(client, collection_name=coll)[0]
+        assert any("embedding" in str(i) for i in idx_list), f"embedding index not in list: {idx_list}"
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -2440,130 +1627,128 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             ("HNSW", {"M": 16, "efConstruction": 200}),
             ("IVF_FLAT", {"nlist": 16}),
         ],
-        ids=lambda x: x if isinstance(x, str) else None,
+        ids=["HNSW", "IVF_FLAT"],
     )
-    def test_vector_index_mmap_enable(self, index_type, params, minio_env, external_prefix):
-        """Toggle mmap.enabled on the vector index via alter_index_properties;
-        verify describe reflects the change and search still returns correct hits.
-
-        DISKANN is deliberately excluded — it is already disk-based and does
-        not accept mmap.enabled (Milvus returns invalid-params).
+    def test_milvus_client_external_table_vector_index_mmap_enable(
+        self, index_type, params, minio_env, external_prefix
+    ):
         """
-        minio_client, cfg = minio_env
+        target: test MilvusClient external table vector index mmap enable
+        method: verify vector index mmap enable
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
+        coll = self.prepare_indexed_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            index_type=index_type,
+            index_params=params,
+            num_rows=ct.default_nb,
+        )
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        # Alter mmap=True before load
         try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "embedding", index_type, "L2", params=params)
-
-            # Alter mmap=True before load
-            try:
-                client.alter_index_properties(
-                    collection_name=coll,
-                    index_name="embedding",
-                    properties={"mmap.enabled": True},
-                )
-            except Exception as e:
-                pytest.skip(f"alter_index_properties not supported: {e}")
-
-            info = client.describe_index(collection_name=coll, index_name="embedding")
-            log.info(f"[{index_type}] index info after mmap=True: {info}")
-            assert str(info.get("mmap.enabled", "")).lower() == "true", f"expected mmap.enabled=True, got {info}"
-
-            client.load_collection(coll)
-            hits_on = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits_on) == 5
-
-            # Flip back to False
-            client.release_collection(coll)
             client.alter_index_properties(
                 collection_name=coll,
                 index_name="embedding",
-                properties={"mmap.enabled": False},
+                properties={"mmap.enabled": True},
             )
-            info_off = client.describe_index(collection_name=coll, index_name="embedding")
-            assert str(info_off.get("mmap.enabled", "")).lower() == "false"
+        except Exception as e:
+            pytest.skip(f"alter_index_properties not supported: {e}")
 
-            client.load_collection(coll)
-            hits_off = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits_off) == 5
-        finally:
-            client.drop_collection(coll)
+        info = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
+        log.info(f"[{index_type}] index info after mmap=True: {info}")
+        assert str(info.get("mmap.enabled", "")).lower() == "true", f"expected mmap.enabled=True, got {info}"
+
+        self.load_collection(client, coll)
+        hits_on = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits_on) == 5
+
+        # Flip back to False
+        self.release_collection(client, coll)
+        self.alter_index_properties(
+            client,
+            collection_name=coll,
+            index_name="embedding",
+            properties={"mmap.enabled": False},
+        )
+        info_off = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
+        assert str(info_off.get("mmap.enabled", "")).lower() == "false"
+
+        self.load_collection(client, coll)
+        hits_off = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits_off) == 5
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_mmap_property(self, minio_env, external_prefix):
-        """Collection-level mmap.enabled toggled via alter_collection_properties
-        and surfaced through describe_collection.
+    def test_milvus_client_external_table_collection_mmap_property(self, minio_env, external_prefix):
         """
-        minio_client, cfg = minio_env
+        target: test MilvusClient external table collection mmap property
+        method: Collection-level mmap.enabled toggled via alter_collection_properties and surfaced through describe_collection
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
         try:
-            refresh_and_wait(client, coll)
-
-            try:
-                client.alter_collection_properties(
-                    collection_name=coll,
-                    properties={"mmap.enabled": True},
-                )
-            except Exception as e:
-                pytest.skip(f"alter_collection_properties mmap not supported: {e}")
-
-            desc = client.describe_collection(coll)
-            props = desc.get("properties") or {}
-            assert str(props.get("mmap.enabled", "")).lower() == "true", (
-                f"expected collection mmap.enabled=True, got properties={props}"
-            )
-
-            index_and_load(client, coll)
-            assert query_count(client, coll) == DEFAULT_NB
-
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 5
-
-            # Flip back
-            client.release_collection(coll)
             client.alter_collection_properties(
                 collection_name=coll,
-                properties={"mmap.enabled": False},
+                properties={"mmap.enabled": True},
             )
-            desc2 = client.describe_collection(coll)
-            assert str((desc2.get("properties") or {}).get("mmap.enabled", "")).lower() == "false"
-        finally:
-            client.drop_collection(coll)
+        except Exception as e:
+            pytest.skip(f"alter_collection_properties mmap not supported: {e}")
+
+        desc = self.describe_collection(client, coll)[0]
+        props = desc.get("properties") or {}
+        assert str(props.get("mmap.enabled", "")).lower() == "true", (
+            f"expected collection mmap.enabled=True, got properties={props}"
+        )
+
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == ct.default_nb
+
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits) == 5
+
+        # Flip back
+        self.release_collection(client, coll)
+        self.alter_collection_properties(
+            client,
+            collection_name=coll,
+            properties={"mmap.enabled": False},
+        )
+        desc2 = self.describe_collection(client, coll)[0]
+        assert str((desc2.get("properties") or {}).get("mmap.enabled", "")).lower() == "false"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
-    def test_binary_vector_index(self, index_type, minio_env, external_prefix):
-        """Binary-vector index types over HAMMING."""
+    def test_milvus_client_external_table_binary_vector_index(self, index_type, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table binary vector index
+        method: Binary-vector index types over HAMMING
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2573,27 +1758,25 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             minio_client,
             cfg["bucket"],
             f"{ext_key}/data.parquet",
-            gen_vector_variant_parquet_bytes(DEFAULT_NB, 0, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM),
+            gen_vector_variant_parquet_bytes(ct.default_nb, 0, "bin_vec", DataType.BINARY_VECTOR, ct.default_dim),
         )
-        schema = build_vector_variant_schema(client, ext_url, "bin_vec", DataType.BINARY_VECTOR, BINARY_DIM)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            params = {"nlist": 16} if index_type == "BIN_IVF_FLAT" else {}
-            add_vector_index(client, coll, "bin_vec", index_type, "HAMMING", **({"params": params} if params else {}))
-            client.load_collection(coll)
+        schema = build_vector_variant_schema(client, ext_url, "bin_vec", DataType.BINARY_VECTOR, ct.default_dim)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        params = {"nlist": 16} if index_type == "BIN_IVF_FLAT" else {}
+        self.add_vector_index(client, coll, "bin_vec", index_type, "HAMMING", **({"params": params} if params else {}))
+        self.load_collection(client, coll)
 
-            hits = client.search(
-                coll,
-                data=[b"\x00" * (BINARY_DIM // 8)],
-                limit=5,
-                anns_field="bin_vec",
-                output_fields=["id"],
-                search_params={"metric_type": "HAMMING"},
-            )[0]
-            assert len(hits) == 5
-        finally:
-            client.drop_collection(coll)
+        hits = self.search(
+            client,
+            coll,
+            data=[b"\x00" * (ct.default_dim // 8)],
+            limit=5,
+            anns_field="bin_vec",
+            output_fields=["id"],
+            search_params={"metric_type": "HAMMING"},
+        )[0][0]
+        assert len(hits) == 5
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -2604,103 +1787,87 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
             ("BITMAP", "value"),
         ],
     )
-    def test_scalar_index(self, scalar_index_type, field_name, minio_env, external_prefix):
-        """Create a scalar index on an external collection field."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_scalar_index(self, scalar_index_type, field_name, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table scalar index
+        method: Create a scalar index on an external collection field
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        index_params = self.prepare_index_params(
+            client,
+        )[0]
+        index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
         try:
-            refresh_and_wait(client, coll)
+            index_params.add_index(field_name=field_name, index_type=scalar_index_type)
+            client.create_index(coll, index_params)
+        except Exception as e:
+            pytest.skip(f"{scalar_index_type} on {field_name} not supported: {e}")
 
-            index_params = client.prepare_index_params()
-            index_params.add_index(field_name="embedding", index_type="AUTOINDEX", metric_type="L2")
-            try:
-                index_params.add_index(field_name=field_name, index_type=scalar_index_type)
-                client.create_index(coll, index_params)
-            except Exception as e:
-                pytest.skip(f"{scalar_index_type} on {field_name} not supported: {e}")
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == ct.default_nb
 
-            client.load_collection(coll)
-            assert query_count(client, coll) == DEFAULT_NB
+        idx_list = self.list_indexes(client, collection_name=coll)[0]
+        log.info(f"[{scalar_index_type}] list_indexes: {idx_list}")
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_drop_and_recreate_index(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table drop and recreate index
+        method: Drop the vector index, then recreate with different params
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self.prepare_indexed_basic_collection(client, minio_env, external_prefix)
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == ct.default_nb
+
+        self.release_collection(client, coll)
+        # Drop index by name (Milvus auto-assigns or uses field name)
+        try:
+            client.drop_index(collection_name=coll, index_name="embedding")
+        except Exception:
+            # Some SDKs / builds require the actual auto-generated name
             idx_list = client.list_indexes(collection_name=coll)
-            log.info(f"[{scalar_index_type}] list_indexes: {idx_list}")
-        finally:
-            client.drop_collection(coll)
+            target = next((n for n in idx_list if "embedding" in str(n)), None)
+            if target is None:
+                pytest.skip("Unable to locate index to drop")
+            client.drop_index(collection_name=coll, index_name=str(target))
+
+        # Recreate with HNSW
+        self.add_vector_index(client, coll, "embedding", "HNSW", "IP", params={"M": 16})
+        self.load_collection(client, coll)
+
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=3,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits) == 3
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_and_recreate_index(self, minio_env, external_prefix):
-        """Drop the vector index, then recreate with different params."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_list_and_describe_index(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table list and describe index
+        method: verify list and describe index
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
+        coll = self.prepare_indexed_basic_collection(client, minio_env, external_prefix)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-            client.load_collection(coll)
-            assert query_count(client, coll) == DEFAULT_NB
+        indexes = self.list_indexes(client, collection_name=coll)[0]
+        assert len(indexes) >= 1, f"expected at least 1 index, got {indexes}"
+        log.info(f"list_indexes: {indexes}")
 
-            client.release_collection(coll)
-            # Drop index by name (Milvus auto-assigns or uses field name)
-            try:
-                client.drop_index(collection_name=coll, index_name="embedding")
-            except Exception:
-                # Some SDKs / builds require the actual auto-generated name
-                idx_list = client.list_indexes(collection_name=coll)
-                target = next((n for n in idx_list if "embedding" in str(n)), None)
-                if target is None:
-                    pytest.skip("Unable to locate index to drop")
-                client.drop_index(collection_name=coll, index_name=str(target))
-
-            # Recreate with HNSW
-            add_vector_index(client, coll, "embedding", "HNSW", "IP", params={"M": 16})
-            client.load_collection(coll)
-
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=3,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 3
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_list_and_describe_index(self, minio_env, external_prefix):
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
-
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-
-            indexes = client.list_indexes(collection_name=coll)
-            assert len(indexes) >= 1, f"expected at least 1 index, got {indexes}"
-            log.info(f"list_indexes: {indexes}")
-
-            name = str(indexes[0])
-            info = client.describe_index(collection_name=coll, index_name=name)
-            log.info(f"describe_index({name}) -> {info}")
-            assert info is not None
-        finally:
-            client.drop_collection(coll)
+        name = str(indexes[0])
+        info = self.describe_index(client, collection_name=coll, index_name=name)[0]
+        log.info(f"describe_index({name}) -> {info}")
+        assert info is not None
 
 
 # ============================================================
@@ -2708,176 +1875,121 @@ class TestExternalTableIndexes(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableWriteBlocked(ExternalTableTestBase):
     """All DML + partition/field DDL should be rejected on external collections."""
 
-    @staticmethod
-    def _prepared_collection(client, minio_client, cfg, ext_url, ext_key):
+    def _prepared_collection(self, client, minio_env, external_prefix):
         """Create a refreshed, loaded external collection and return its name."""
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(50, 0))
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        refresh_and_wait(client, coll)
-        index_and_load(client, coll)
-        return coll
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("op_name", ["insert", "upsert", "delete", "flush"])
-    def test_dml_rejected(self, op_name, minio_env, external_prefix):
-        """insert / upsert / delete / flush are all blocked."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            with pytest.raises(Exception) as exc_info:
-                if op_name == "insert":
-                    client.insert(
-                        collection_name=coll,
-                        data=[
-                            {
-                                "id": 99999,
-                                "value": 1.0,
-                                "embedding": [0.0] * TEST_DIM,
-                            }
-                        ],
-                    )
-                elif op_name == "upsert":
-                    client.upsert(
-                        collection_name=coll,
-                        data=[
-                            {
-                                "id": 0,
-                                "value": 0.0,
-                                "embedding": [0.0] * TEST_DIM,
-                            }
-                        ],
-                    )
-                elif op_name == "delete":
-                    client.delete(collection_name=coll, filter="id >= 0")
-                elif op_name == "flush":
-                    client.flush(collection_name=coll)
-            msg = str(exc_info.value).lower()
-            # Two valid rejection points:
-            # - server-side: "<op> operation is not supported for external collection"
-            # - client-side: pymilvus requires all fields (including virtual_pk)
-            #   before the RPC even leaves — upsert/insert fail with DataNotMatch.
-            assert (
-                "external" in msg
-                or "not support" in msg
-                or "virtual_pk" in msg
-                or "datanotmatch" in msg
-                or "missed an field" in msg
-            ), f"[{op_name}] unexpected error: {exc_info.value}"
-            log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_partition_rejected(self, minio_env, external_prefix):
-        """create_partition on external collection should fail."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            with pytest.raises(Exception) as exc_info:
-                client.create_partition(collection_name=coll, partition_name="p1")
-            msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg, f"unexpected error: {exc_info.value}"
-            log.info(f"create_partition correctly rejected: {exc_info.value}")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_drop_partition_rejected(self, minio_env, external_prefix):
-        """drop_partition on the _default partition of an external collection."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            with pytest.raises(Exception) as exc_info:
-                client.drop_partition(collection_name=coll, partition_name="_default")
-            msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg or "default" in msg, f"unexpected error: {exc_info.value}"
-            log.info(f"drop_partition correctly rejected: {exc_info.value}")
-        finally:
-            client.drop_collection(coll)
+        return self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "op_name",
+        "op_name,err_terms",
         [
+            ("insert", ("external", "not support", "virtual_pk", "datanotmatch", "missed an field")),
+            ("upsert", ("external", "not support", "virtual_pk", "datanotmatch", "missed an field")),
+            ("delete", ("external", "not support")),
+            ("flush", ("external", "not support")),
+            ("create_partition", ("external", "not support")),
+            ("drop_partition", ("external", "not support", "default")),
+            ("compact", ("external", "not support", "not allowed")),
+            ("add_collection_field", ("external", "not support", "not allowed")),
+            ("truncate_collection", ("external", "not support", "not allowed")),
+        ],
+        ids=[
+            "insert",
+            "upsert",
+            "delete",
+            "flush",
+            "create_partition",
+            "drop_partition",
             "compact",
             "add_collection_field",
             "truncate_collection",
         ],
     )
-    def test_ddl_rejected(self, op_name, minio_env, external_prefix):
-        """DDL / write operations that should be blocked on external collections.
-
-        Note: load_partitions / release_partitions on the _default partition
-        are accepted (they alias load_collection / release_collection) — those
-        are covered as allowed ops in TestExternalTableReadOps.
+    def test_milvus_client_external_table_write_operation_rejected(
+        self, op_name, err_terms, minio_env, external_prefix
+    ):
         """
-        minio_client, cfg = minio_env
+        target: test MilvusClient external table write operation rejected
+        method: DML, partition, and DDL operations are blocked on external collections
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            with pytest.raises(Exception) as exc_info:
-                if op_name == "compact":
-                    client.compact(collection_name=coll)
-                elif op_name == "add_collection_field":
-                    client.add_collection_field(
-                        collection_name=coll,
-                        field_name="new_field",
-                        data_type=DataType.INT64,
-                        nullable=True,
-                    )
-                elif op_name == "truncate_collection":
-                    client.truncate_collection(collection_name=coll)
-            msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg or "not allowed" in msg, (
-                f"[{op_name}] unexpected error: {exc_info.value}"
-            )
-            log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        coll = self._prepared_collection(client, minio_env, external_prefix)
+        with pytest.raises(Exception) as exc_info:
+            if op_name == "insert":
+                client.insert(
+                    collection_name=coll,
+                    data=[
+                        {
+                            "id": 99999,
+                            "value": 1.0,
+                            "embedding": [0.0] * ct.default_dim,
+                        }
+                    ],
+                )
+            elif op_name == "upsert":
+                client.upsert(
+                    collection_name=coll,
+                    data=[
+                        {
+                            "id": 0,
+                            "value": 0.0,
+                            "embedding": [0.0] * ct.default_dim,
+                        }
+                    ],
+                )
+            elif op_name == "delete":
+                client.delete(collection_name=coll, filter="id >= 0")
+            elif op_name == "flush":
+                client.flush(collection_name=coll)
+            elif op_name == "create_partition":
+                client.create_partition(collection_name=coll, partition_name="p1")
+            elif op_name == "drop_partition":
+                client.drop_partition(collection_name=coll, partition_name="_default")
+            elif op_name == "compact":
+                client.compact(collection_name=coll)
+            elif op_name == "add_collection_field":
+                client.add_collection_field(
+                    collection_name=coll,
+                    field_name="new_field",
+                    data_type=DataType.INT64,
+                    nullable=True,
+                )
+            elif op_name == "truncate_collection":
+                client.truncate_collection(collection_name=coll)
+        msg = str(exc_info.value).lower()
+        assert any(term in msg for term in err_terms), f"[{op_name}] unexpected error: {exc_info.value}"
+        log.info(f"[{op_name}] correctly rejected: {exc_info.value}")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_truncate_collection_rejected_keeps_external_source(self, minio_env, external_prefix):
-        """milvus#49343: truncate_collection is forbidden for external collections."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_truncate_collection_rejected_keeps_external_source(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table truncate collection rejected keeps external source (milvus#49343)
+        method: milvus#49343: truncate_collection is forbidden for external collections
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            before = client.describe_collection(coll)
-            with pytest.raises(Exception) as exc_info:
-                client.truncate_collection(collection_name=coll)
-            msg = str(exc_info.value).lower()
-            assert "external" in msg or "not support" in msg or "forbidden" in msg or "1100" in msg, (
-                f"truncate_collection should be rejected as an external collection write op: {exc_info.value}"
-            )
-            after = client.describe_collection(coll)
-            assert after.get("external_source") == before.get("external_source")
-            assert after.get("external_spec") == before.get("external_spec")
+        coll = self._prepared_collection(client, minio_env, external_prefix)
+        before = self.describe_collection(client, coll)[0]
+        with pytest.raises(Exception) as exc_info:
+            client.truncate_collection(collection_name=coll)
+        msg = str(exc_info.value).lower()
+        assert "external" in msg or "not support" in msg or "forbidden" in msg or "1100" in msg, (
+            f"truncate_collection should be rejected as an external collection write op: {exc_info.value}"
+        )
+        after = self.describe_collection(client, coll)[0]
+        assert after.get("external_source") == before.get("external_source")
+        assert after.get("external_spec") == before.get("external_spec")
 
-            client.release_collection(coll)
-            refresh_and_wait(client, coll)
-            client.load_collection(coll)
-            assert query_count(client, coll) == 50
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        self.release_collection(client, coll)
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == 50
 
 
 # ============================================================
@@ -2885,41 +1997,45 @@ class TestExternalTableWriteBlocked(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableRefresh(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
     """External refresh: basic, incremental, atomic source override, concurrent, jobs."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_basic_picks_up_data(self, minio_env, external_prefix):
-        """Initial refresh sees uploaded data; uploading more grows count."""
+    def test_milvus_client_external_table_refresh_basic_picks_up_data(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh basic picks up data
+        method: Initial refresh sees uploaded data; uploading more grows count
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
+        coll = self.prepare_loaded_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            filename="part0.parquet",
+            num_rows=ct.default_nb,
+        )
+        ext_key = external_prefix["key"]
+        assert self.query_count(client, coll) == ct.default_nb
 
-        upload_basic_data(minio_client, cfg, ext_key, filename="part0.parquet", num_rows=DEFAULT_NB, start_id=0)
+        # Append more data, re-refresh, require release+load.
+        self.release_collection(client, coll)
+        upload_basic_data(
+            minio_client, cfg, ext_key, filename="part1.parquet", num_rows=ct.default_nb, start_id=ct.default_nb
+        )
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == DEFAULT_NB
-
-            # Append more data, re-refresh, require release+load.
-            client.release_collection(coll)
-            upload_basic_data(
-                minio_client, cfg, ext_key, filename="part1.parquet", num_rows=DEFAULT_NB, start_id=DEFAULT_NB
-            )
-            refresh_and_wait(client, coll)
-            client.load_collection(coll)
-
-            assert query_count(client, coll) == DEFAULT_NB * 2
-        finally:
-            client.drop_collection(coll)
+        assert self.query_count(client, coll) == ct.default_nb * 2
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_incremental_add_remove(self, minio_env, external_prefix):
-        """Add a file, remove a file — row count tracks fragment changes."""
+    def test_milvus_client_external_table_refresh_incremental_add_remove(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh incremental add remove
+        method: Add a file, remove a file — row count tracks fragment changes
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2931,28 +2047,29 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             )
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 1000
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == 1000
 
-            client.release_collection(coll)
-            minio_client.remove_object(cfg["bucket"], f"{ext_key}/data_1.parquet")
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data_2.parquet", gen_basic_parquet_bytes(300, 2000))
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        self.release_collection(client, coll)
+        minio_client.remove_object(cfg["bucket"], f"{ext_key}/data_1.parquet")
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data_2.parquet", gen_basic_parquet_bytes(300, 2000))
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
 
-            assert query_count(client, coll) == 800
-            assert len(client.query(coll, filter="id >= 0 && id < 500", output_fields=["id"])) == 500
-            assert len(client.query(coll, filter="id >= 500 && id < 1000", output_fields=["id"])) == 0
-            assert len(client.query(coll, filter="id >= 2000 && id < 2300", output_fields=["id"])) == 300
-        finally:
-            client.drop_collection(coll)
+        assert self.query_count(client, coll) == 800
+        assert len(self.query(client, coll, filter="id >= 0 && id < 500", output_fields=["id"])[0]) == 500
+        assert len(self.query(client, coll, filter="id >= 500 && id < 1000", output_fields=["id"])[0]) == 0
+        assert len(self.query(client, coll, filter="id >= 2000 && id < 2300", output_fields=["id"])[0]) == 300
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_override_source(self, minio_env, external_prefix):
-        """refresh(external_source=NEW) atomically rebinds the collection."""
+    def test_milvus_client_external_table_refresh_override_source(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh override source
+        method: refresh(external_source=NEW) atomically rebinds the collection
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2966,44 +2083,49 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
         expected_spec = build_external_spec(cfg)
         schema = build_basic_schema(client, url_a, ext_spec=expected_spec)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            ids_a = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
-            assert ids_a == list(range(0, 100))
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        ids_a = sorted(r["id"] for r in self.query(client, coll, filter="id >= 0", output_fields=["id"], limit=200)[0])
+        assert ids_a == list(range(0, 100))
 
-            client.release_collection(coll)
-            refresh_and_wait(client, coll, external_source=url_b, external_spec=expected_spec)
-            client.load_collection(coll)
+        self.release_collection(client, coll)
+        self.refresh_and_wait(client, coll, external_source=url_b, external_spec=expected_spec)
+        self.load_collection(client, coll)
 
-            ids_b = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
-            assert ids_b == list(range(5000, 5100))
+        ids_b = sorted(r["id"] for r in self.query(client, coll, filter="id >= 0", output_fields=["id"], limit=200)[0])
+        assert ids_b == list(range(5000, 5100))
 
-            info = client.describe_collection(coll)
-            assert info.get("external_source") == url_b, (
-                f"override source was not persisted: {info.get('external_source')!r}"
-            )
-            assert_external_spec_persisted(info.get("external_spec"), expected_spec, "override external_spec")
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == url_b, (
+            f"override source was not persisted: {info.get('external_source')!r}"
+        )
+        assert_external_spec_persisted(info.get("external_spec"), expected_spec, "override external_spec")
 
-            fresh_client = self._client()
-            fresh_info = fresh_client.describe_collection(coll)
-            assert fresh_info.get("external_source") == url_b, (
-                f"fresh client sees stale source: {fresh_info.get('external_source')!r}"
-            )
-            assert_external_spec_persisted(fresh_info.get("external_spec"), expected_spec, "fresh external_spec")
+        fresh_client = self._client()
+        fresh_info = fresh_client.describe_collection(coll)
+        assert fresh_info.get("external_source") == url_b, (
+            f"fresh client sees stale source: {fresh_info.get('external_source')!r}"
+        )
+        assert_external_spec_persisted(fresh_info.get("external_spec"), expected_spec, "fresh external_spec")
 
-            client.release_collection(coll)
-            refresh_and_wait(client, coll)
-            client.load_collection(coll)
-            ids_reuse = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=200))
-            assert ids_reuse == list(range(5000, 5100)), "reuse refresh reverted to the pre-override source"
-        finally:
-            client.drop_collection(coll)
+        self.release_collection(client, coll)
+        self.refresh_and_wait(client, coll)
+        self.load_collection(client, coll)
+        ids_reuse = sorted(
+            r["id"] for r in self.query(client, coll, filter="id >= 0", output_fields=["id"], limit=200)[0]
+        )
+        assert ids_reuse == list(range(5000, 5100)), "reuse refresh reverted to the pre-override source"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_failed_refresh_override_keeps_previous_data_and_spec(self, minio_env, external_prefix):
-        """A failed source override must not publish new metadata or drop old data."""
+    def test_milvus_client_external_table_failed_refresh_override_keeps_previous_data_and_spec(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table failed refresh override keeps previous data and spec
+        method: A failed source override must not publish new metadata or drop old data
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3015,49 +2137,52 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         upload_basic_data(minio_client, cfg, good_key, num_rows=100, start_id=0)
 
         schema = build_basic_schema(client, good_url, ext_spec=expected_spec)
-        client.create_collection(collection_name=coll, schema=schema)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert sorted(
+            r["id"] for r in self.query(client, coll, filter="id >= 0", output_fields=["id"], limit=100)[0]
+        ) == list(range(100))
+
+        self.release_collection(client, coll)
+        missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+        bad_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
         try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert sorted(
-                r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=100)
-            ) == list(range(100))
-
-            client.release_collection(coll)
-            missing_bucket = f"nosuchbucket-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
-            bad_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
-            try:
-                refresh_and_expect_failed(
-                    client,
-                    coll,
-                    timeout=60,
-                    external_source=bad_url,
-                    external_spec=expected_spec,
-                    reason_terms=("bucket", "nosuchbucket", "no_such_bucket"),
-                )
-            except AssertionError:
-                raise
-            except Exception as exc:
-                msg = str(exc).lower()
-                assert "bucket" in msg or "nosuchbucket" in msg or "external" in msg, (
-                    f"failed override rejected with unexpected error: {exc}"
-                )
-
-            info = client.describe_collection(coll)
-            assert info.get("external_source") == good_url, (
-                f"failed refresh override polluted external_source: {info.get('external_source')!r}"
+            self.refresh_and_expect_failed(
+                client,
+                coll,
+                timeout=60,
+                external_source=bad_url,
+                external_spec=expected_spec,
+                reason_terms=("bucket", "nosuchbucket", "no_such_bucket"),
             )
-            assert_external_spec_persisted(info.get("external_spec"), expected_spec, "failed override external_spec")
+        except AssertionError:
+            raise
+        except Exception as exc:
+            msg = str(exc).lower()
+            assert "bucket" in msg or "nosuchbucket" in msg or "external" in msg, (
+                f"failed override rejected with unexpected error: {exc}"
+            )
 
-            client.load_collection(coll)
-            ids = sorted(r["id"] for r in client.query(coll, filter="id >= 0", output_fields=["id"], limit=100))
-            assert ids == list(range(100)), f"old data unavailable after failed override: {ids[:10]}"
-        finally:
-            client.drop_collection(coll)
+        info = self.describe_collection(client, coll)[0]
+        assert info.get("external_source") == good_url, (
+            f"failed refresh override polluted external_source: {info.get('external_source')!r}"
+        )
+        assert_external_spec_persisted(info.get("external_spec"), expected_spec, "failed override external_spec")
+
+        self.load_collection(client, coll)
+        ids = sorted(r["id"] for r in self.query(client, coll, filter="id >= 0", output_fields=["id"], limit=100)[0])
+        assert ids == list(range(100)), f"old data unavailable after failed override: {ids[:10]}"
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_refresh_second_concurrent_returns_existing_or_rejects(self, minio_env, external_prefix):
-        """milvus#49231: duplicate refresh must not return a dropped new job_id."""
+    def test_milvus_client_external_table_refresh_second_concurrent_returns_existing_or_rejects(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table refresh second concurrent returns existing or rejects (milvus#49231)
+        method: milvus#49231: duplicate refresh must not return a dropped new job_id
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3070,41 +2195,42 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         )
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        job_first = self.refresh_external_collection(client, collection_name=coll)[0]
         try:
-            job_first = client.refresh_external_collection(collection_name=coll)
-            try:
-                job_second = client.refresh_external_collection(collection_name=coll)
-                log.info(f"second refresh accepted job_id={job_second}")
-                assert job_second == job_first, (
-                    f"duplicate refresh returned a different positive job_id: first={job_first}, second={job_second}"
-                )
-            except Exception as exc:
-                msg = str(exc).lower()
-                assert (
-                    "already" in msg
-                    or "duplicate" in msg
-                    or "in progress" in msg
-                    or "precondition" in msg
-                    or "exist" in msg
-                ), f"second refresh was rejected with an unexpected error: {exc}"
-                log.info(f"second refresh rejected at RPC: {exc}")
+            job_second = client.refresh_external_collection(collection_name=coll)
+            log.info(f"second refresh accepted job_id={job_second}")
+            assert job_second == job_first, (
+                f"duplicate refresh returned a different positive job_id: first={job_first}, second={job_second}"
+            )
+        except Exception as exc:
+            msg = str(exc).lower()
+            assert (
+                "already" in msg
+                or "duplicate" in msg
+                or "in progress" in msg
+                or "precondition" in msg
+                or "exist" in msg
+            ), f"second refresh was rejected with an unexpected error: {exc}"
+            log.info(f"second refresh rejected at RPC: {exc}")
 
-            deadline = time.time() + REFRESH_TIMEOUT
-            first_state = None
-            while time.time() < deadline:
-                p = client.get_refresh_external_collection_progress(job_id=job_first)
-                first_state = p.state
-                if first_state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            assert first_state == "RefreshCompleted"
-        finally:
-            client.drop_collection(coll)
+        deadline = time.time() + REFRESH_TIMEOUT
+        first_state = None
+        while time.time() < deadline:
+            p = self.get_refresh_external_collection_progress(client, job_id=job_first)[0]
+            first_state = p.state
+            if first_state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        assert first_state == "RefreshCompleted"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_list_refresh_jobs(self, minio_env, external_prefix):
-        """After refreshes, list_refresh_external_collection_jobs returns them."""
+    def test_milvus_client_external_table_list_refresh_jobs(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table list refresh jobs
+        method: After refreshes, list_refresh_external_collection_jobs returns them
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3112,16 +2238,13 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(100, 0))
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            job_id = refresh_and_wait(client, coll)
-            jobs = client.list_refresh_external_collection_jobs(collection_name=coll)
-            assert len(jobs) >= 1, f"expected ≥1 job, got {jobs}"
-            job_ids = [j.job_id for j in jobs]
-            assert job_id in job_ids, f"job {job_id} missing from {job_ids}"
-            log.info(f"refresh jobs: {[(j.job_id, j.state) for j in jobs]}")
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        job_id = self.refresh_and_wait(client, coll)
+        jobs = self.list_refresh_external_collection_jobs(client, collection_name=coll)[0]
+        assert len(jobs) >= 1, f"expected ≥1 job, got {jobs}"
+        job_ids = [j.job_id for j in jobs]
+        assert job_id in job_ids, f"job {job_id} missing from {job_ids}"
+        log.info(f"refresh jobs: {[(j.job_id, j.state) for j in jobs]}")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -3131,10 +2254,16 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             (5, 100),  # small uniform files
             (10, 50),  # many tiny files
         ],
-        ids=lambda x: str(x) if isinstance(x, int) else None,
+        ids=["1x500", "5x100", "10x50"],
     )
-    def test_refresh_many_files(self, num_files, rows_per_file, minio_env, external_prefix):
-        """Refresh aggregates rows correctly across many parquet files in one prefix."""
+    def test_milvus_client_external_table_refresh_many_files(
+        self, num_files, rows_per_file, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table refresh many files
+        method: Refresh aggregates rows correctly across many parquet files in one prefix
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3150,118 +2279,117 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             )
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
 
-            total = num_files * rows_per_file
-            assert query_count(client, coll) == total
+        total = num_files * rows_per_file
+        assert self.query_count(client, coll) == total
 
-            # Spot-check a row from each file survived ingestion
-            for idx in range(num_files):
-                first_id = idx * rows_per_file
-                rows = client.query(
-                    coll,
-                    filter=f"id == {first_id}",
-                    output_fields=["id", "value"],
-                )
-                assert len(rows) == 1, f"row id={first_id} missing after refresh"
-                assert abs(rows[0]["value"] - first_id * 1.5) < 1e-4
-        finally:
-            client.drop_collection(coll)
+        # Spot-check a row from each file survived ingestion
+        for idx in range(num_files):
+            first_id = idx * rows_per_file
+            rows = self.query(
+                client,
+                coll,
+                filter=f"id == {first_id}",
+                output_fields=["id", "value"],
+            )[0]
+            assert len(rows) == 1, f"row id={first_id} missing after refresh"
+            assert abs(rows[0]["value"] - first_id * 1.5) < 1e-4
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_non_existent_collection(self):
-        """Refresh on a non-existent collection must fail at RPC."""
+    @pytest.mark.parametrize(
+        "case_name", ["non_existent_collection", "normal_collection"], ids=["non_existent", "normal"]
+    )
+    def test_milvus_client_external_table_refresh_invalid_target_rejected(self, case_name):
+        """
+        target: test MilvusClient external table refresh invalid target rejected
+        method: Refresh on a non-existent or normal collection must fail at RPC
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
+        if case_name == "non_existent_collection":
+            coll = "non_existent_xyz"
+        else:
+            coll = cf.gen_collection_name_by_testcase_name()
+            schema = self.create_schema(
+                client,
+            )[0]
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+            self.create_collection(client, collection_name=coll, schema=schema)
         with pytest.raises(Exception):
-            client.refresh_external_collection(collection_name="non_existent_xyz")
+            client.refresh_external_collection(collection_name=coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_normal_collection_rejected(self):
-        """Refresh on a normal (non-external) collection must be rejected."""
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = client.create_schema()
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            with pytest.raises(Exception):
-                client.refresh_external_collection(collection_name=coll)
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_empty_source_behavior(self, external_prefix):
-        """Refresh on an empty external source — accepted job either
-        completes with 0 rows or fails with a clear reason. Either is OK;
-        the test only requires a clean terminal state, not infinite pending.
+    def test_milvus_client_external_table_refresh_empty_source_behavior(self, external_prefix):
+        """
+        target: test MilvusClient external table refresh empty source behavior
+        method: Refresh on an empty external source — accepted job either completes with 0 rows or fails with a clear reason
+        expected: behavior matches the case assertion.
         """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url = external_prefix["url"]
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        self.create_collection(client, collection_name=coll, schema=schema)
         try:
-            try:
-                job_id = client.refresh_external_collection(collection_name=coll)
-            except Exception as e:
-                log.info(f"empty-source refresh rejected at submit: {e}")
-                return
+            job_id = client.refresh_external_collection(collection_name=coll)
+        except Exception as e:
+            log.info(f"empty-source refresh rejected at submit: {e}")
+            return
 
-            deadline = time.time() + 60
-            state = None
-            while time.time() < deadline:
-                p = client.get_refresh_external_collection_progress(job_id=job_id)
-                state = p.state
-                if state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            assert state in ("RefreshCompleted", "RefreshFailed"), (
-                f"empty-source refresh stuck in {state} (expected terminal state)"
-            )
-            log.info(f"empty-source refresh terminal state={state}")
-        finally:
-            client.drop_collection(coll)
+        deadline = time.time() + 60
+        state = None
+        while time.time() < deadline:
+            p = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            state = p.state
+            if state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        assert state in ("RefreshCompleted", "RefreshFailed"), (
+            f"empty-source refresh stuck in {state} (expected terminal state)"
+        )
+        log.info(f"empty-source refresh terminal state={state}")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_empty_external_source_rejected_or_failed(self, external_prefix):
-        """milvus#49230: external_source="" must not leave refresh Pending forever."""
+    def test_milvus_client_external_table_refresh_empty_external_source_rejected_or_failed(self, external_prefix):
+        """
+        target: test MilvusClient external table refresh empty external source rejected or failed (milvus#49230)
+        method: milvus#49230: external_source="" must not leave refresh Pending forever
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         schema = build_basic_schema(client, external_prefix["url"])
-        client.create_collection(collection_name=coll, schema=schema)
+        self.create_collection(client, collection_name=coll, schema=schema)
         try:
-            try:
-                job_id, progress = refresh_and_poll_terminal(
-                    client,
-                    coll,
-                    timeout=60,
-                    external_source="",
-                    external_spec=build_external_spec(),
-                )
-            except Exception as exc:
-                msg = str(exc).lower()
-                assert (
-                    "external_source" in msg
-                    or "external source" in msg
-                    or "empty" in msg
-                    or "invalid" in msg
-                    or "no files found" in msg
-                ), f"empty external_source rejected with unexpected error: {exc}"
-                log.info(f"empty external_source refresh rejected at RPC: {exc}")
-                return
-
-            assert progress.state == "RefreshFailed", (
-                f"empty external_source refresh job {job_id} should fail terminally, got {progress.state}"
+            job_id, progress = self.refresh_and_poll_terminal(
+                client,
+                coll,
+                timeout=60,
+                external_source="",
+                external_spec=build_external_spec(),
             )
-            assert progress.reason, "empty external_source refresh failed without a reason"
-            reason = progress.reason.lower()
-            assert "external" in reason or "source" in reason or "empty" in reason, progress.reason
-        finally:
-            client.drop_collection(coll)
+        except Exception as exc:
+            msg = str(exc).lower()
+            assert (
+                "external_source" in msg
+                or "external source" in msg
+                or "empty" in msg
+                or "invalid" in msg
+                or "no files found" in msg
+            ), f"empty external_source rejected with unexpected error: {exc}"
+            log.info(f"empty external_source refresh rejected at RPC: {exc}")
+            return
+
+        assert progress.state == "RefreshFailed", (
+            f"empty external_source refresh job {job_id} should fail terminally, got {progress.state}"
+        )
+        assert progress.reason, "empty external_source refresh failed without a reason"
+        reason = progress.reason.lower()
+        assert "external" in reason or "source" in reason or "empty" in reason, progress.reason
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -3269,8 +2397,12 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         BASIC_FORMATS,
         ids=BASIC_FORMAT_IDS,
     )
-    def test_refresh_zero_row_format_terminal(self, fmt, minio_env, external_prefix):
-        """milvus#49225: 0-row external files must not crash or hang refresh."""
+    def test_milvus_client_external_table_refresh_zero_row_format_terminal(self, fmt, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh zero row format terminal (milvus#49225)
+        method: milvus#49225: 0-row external files must not crash or hang refresh
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3286,32 +2418,33 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         )
         schema = build_basic_format_schema(client, fmt, source, ext_spec)
 
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            job_id = client.refresh_external_collection(collection_name=coll)
-            deadline = time.time() + 60
-            progress = None
-            while time.time() < deadline:
-                progress = client.get_refresh_external_collection_progress(job_id=job_id)
-                if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            assert progress is not None
-            assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
-                f"[{fmt}] zero-row refresh stuck in {progress.state}"
-            )
+        self.create_collection(client, collection_name=coll, schema=schema)
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
+        deadline = time.time() + 60
+        progress = None
+        while time.time() < deadline:
+            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        assert progress is not None
+        assert progress.state in ("RefreshCompleted", "RefreshFailed"), (
+            f"[{fmt}] zero-row refresh stuck in {progress.state}"
+        )
 
-            if progress.state == "RefreshCompleted":
-                index_and_load(client, coll)
-                assert query_count(client, coll) == 0
-            else:
-                assert progress.reason, f"[{fmt}] failed zero-row refresh should expose a reason"
-        finally:
-            client.drop_collection(coll)
+        if progress.state == "RefreshCompleted":
+            self.index_and_load(client, coll)
+            assert self.query_count(client, coll) == 0
+        else:
+            assert progress.reason, f"[{fmt}] failed zero-row refresh should expose a reason"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_nonexistent_bucket_fails_terminal(self, minio_env):
-        """milvus#49233: NoSuchBucket must fail terminally, not retry forever."""
+    def test_milvus_client_external_table_refresh_nonexistent_bucket_fails_terminal(self, minio_env):
+        """
+        target: test MilvusClient external table refresh nonexistent bucket fails terminal (milvus#49233)
+        method: milvus#49233: NoSuchBucket must fail terminally, not retry forever
+        expected: behavior matches the case assertion.
+        """
         _minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -3319,32 +2452,26 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
         ext_url = f"s3://{cfg['address']}/{missing_bucket}/external/path/"
 
         schema = build_basic_schema(client, ext_url, ext_spec=build_external_spec(cfg))
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            job_id = client.refresh_external_collection(collection_name=coll)
-            deadline = time.time() + 60
-            progress = None
-            while time.time() < deadline:
-                progress = client.get_refresh_external_collection_progress(job_id=job_id)
-                if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            assert progress is not None
-            assert progress.state == "RefreshFailed", (
-                f"NoSuchBucket refresh should fail terminally, got {progress.state}"
-            )
-            reason = (progress.reason or "").lower()
-            assert "bucket" in reason or "no_such_bucket" in reason or "nosuchbucket" in reason, progress.reason
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
+        deadline = time.time() + 60
+        progress = None
+        while time.time() < deadline:
+            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        assert progress is not None
+        assert progress.state == "RefreshFailed", f"NoSuchBucket refresh should fail terminally, got {progress.state}"
+        reason = (progress.reason or "").lower()
+        assert "bucket" in reason or "no_such_bucket" in reason or "nosuchbucket" in reason, progress.reason
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_refresh_schema_mismatch_caught_eventually(self, minio_env, external_prefix):
-        """Schema with wrong external_field mappings: refresh / load / query
-        should surface the mismatch at some point (not silently return wrong
-        data). The test only asserts a non-success outcome at one of the
-        stages — it doesn't pin which stage detects the error since that
-        varies by build.
+    def test_milvus_client_external_table_refresh_schema_mismatch_caught_eventually(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh schema mismatch caught eventually
+        method: verify refresh schema mismatch caught eventually
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3354,101 +2481,103 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
         # Mismatched mappings — parquet has columns id/value/embedding;
         # the schema points at wrong_col_a/wrong_col_b.
-        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
         schema.add_field("x", DataType.INT64, external_field="wrong_col_a")
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="wrong_col_b")
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="wrong_col_b")
 
-        try:
-            client.create_collection(collection_name=coll, schema=schema)
-        except Exception as e:
-            log.info(f"create_collection caught the mismatch: {e}")
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        if not created:
+            log.info(f"create_collection caught the mismatch: {create_res}")
             return
 
         try:
-            try:
-                job_id = client.refresh_external_collection(collection_name=coll)
-            except Exception as e:
-                log.info(f"refresh submit caught the mismatch: {e}")
-                return
+            job_id = client.refresh_external_collection(collection_name=coll)
+        except Exception as e:
+            log.info(f"refresh submit caught the mismatch: {e}")
+            return
 
-            deadline = time.time() + 60
-            state = None
-            while time.time() < deadline:
-                p = client.get_refresh_external_collection_progress(job_id=job_id)
-                state = p.state
-                if state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            if state == "RefreshFailed":
-                log.info(f"refresh caught the mismatch: state={state}")
-                return
+        deadline = time.time() + 60
+        state = None
+        while time.time() < deadline:
+            p = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            state = p.state
+            if state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        if state == "RefreshFailed":
+            log.info(f"refresh caught the mismatch: state={state}")
+            return
 
-            # Refresh accepted; the mismatch must surface at create_index/load/query.
-            try:
-                idx = client.prepare_index_params()
-                idx.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
-                client.create_index(coll, idx)
-                client.load_collection(coll, timeout=60)
-                client.query(coll, filter="x == 0", output_fields=["x"])
-                pytest.fail("schema mismatch was not detected at any stage")
-            except Exception as e:
-                log.info(f"index/load/query caught the mismatch: {e}")
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        # Refresh accepted; the mismatch must surface at create_index/load/query.
+        try:
+            idx = client.prepare_index_params()
+            idx.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+            client.create_index(coll, idx)
+            client.load_collection(coll, timeout=60)
+            client.query(coll, filter="x == 0", output_fields=["x"])
+            pytest.fail("schema mismatch was not detected at any stage")
+        except Exception as e:
+            log.info(f"index/load/query caught the mismatch: {e}")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_case_mismatched_external_fields_rejected(self, minio_env, external_prefix):
-        """milvus#49232: case-mismatched parquet column names must not load silently."""
+    def test_milvus_client_external_table_case_mismatched_external_fields_rejected(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table case mismatched external fields rejected (milvus#49232)
+        method: milvus#49232: case-mismatched parquet column names must not load silently
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         upload_basic_data(minio_client, cfg, ext_key, num_rows=50)
 
-        schema = client.create_schema(
+        schema = self.create_schema(
+            client,
             external_source=ext_url,
             external_spec=build_external_spec(cfg),
-        )
+        )[0]
         schema.add_field("id", DataType.INT64, external_field="ID")
         schema.add_field("value", DataType.FLOAT, external_field="Value")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="Embedding")
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="Embedding")
 
-        try:
-            client.create_collection(collection_name=coll, schema=schema)
-        except Exception as e:
-            log.info(f"case mismatch rejected at create_collection: {e}")
+        create_res, created = self.create_collection(
+            client,
+            collection_name=coll,
+            schema=schema,
+            check_task=CheckTasks.check_nothing,
+        )
+        if not created:
+            log.info(f"case mismatch rejected at create_collection: {create_res}")
             return
 
-        try:
-            job_id = client.refresh_external_collection(collection_name=coll)
-            deadline = time.time() + 60
-            progress = None
-            while time.time() < deadline:
-                progress = client.get_refresh_external_collection_progress(job_id=job_id)
-                if progress.state in ("RefreshCompleted", "RefreshFailed"):
-                    break
-                time.sleep(2)
-            assert progress is not None
-            if progress.state == "RefreshFailed":
-                return
-            assert progress.state == "RefreshCompleted", f"case-mismatch refresh stuck in {progress.state}"
+        job_id = self.refresh_external_collection(client, collection_name=coll)[0]
+        deadline = time.time() + 60
+        progress = None
+        while time.time() < deadline:
+            progress = self.get_refresh_external_collection_progress(client, job_id=job_id)[0]
+            if progress.state in ("RefreshCompleted", "RefreshFailed"):
+                break
+            time.sleep(2)
+        assert progress is not None
+        if progress.state == "RefreshFailed":
+            return
+        assert progress.state == "RefreshCompleted", f"case-mismatch refresh stuck in {progress.state}"
 
-            with pytest.raises(Exception):
-                index_and_load(client, coll)
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
+        with pytest.raises(Exception):
+            self.index_and_load(client, coll)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_schemaless_reader_extra_columns_ignored(self, minio_env, external_prefix):
-        """Parquet has 9 scalar columns plus embedding; the external schema
-        only projects 3 of them. The reader must silently drop the unmapped
-        columns and serve the projected ones correctly.
+    def test_milvus_client_external_table_schemaless_reader_extra_columns_ignored(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table schemaless reader extra columns ignored
+        method: Parquet has 9 scalar columns plus embedding; the external schema only projects 3 of them
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3466,28 +2595,26 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 
         # Project only id, val_int32, embedding — the other 7 scalar columns
         # exist in the file but are not declared in the schema.
-        schema = client.create_schema(external_source=ext_url, external_spec=build_external_spec(cfg))
+        schema = self.create_schema(client, external_source=ext_url, external_spec=build_external_spec(cfg))[0]
         schema.add_field("id", DataType.INT64, external_field="id")
         schema.add_field("val_int32", DataType.INT32, external_field="val_int32")
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=TEST_DIM, external_field="embedding")
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == nb
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=ct.default_dim, external_field="embedding")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == nb
 
-            res = client.query(coll, filter="id == 5", output_fields=["id", "val_int32"])
-            assert len(res) == 1
-            assert res[0]["id"] == 5
-            assert res[0]["val_int32"] == 5 * 7  # value_fn for val_int32 was i*7
-        finally:
-            client.drop_collection(coll)
+        res = self.query(client, coll, filter="id == 5", output_fields=["id", "val_int32"])[0]
+        assert len(res) == 1
+        assert res[0]["id"] == 5
+        assert res[0]["val_int32"] == 5 * 7  # value_fn for val_int32 was i*7
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_refresh_scans_flat_prefix_only(self, minio_env, external_prefix):
-        """Refresh lists files directly under the external_source prefix only;
-        files placed inside sub-directories are NOT picked up. This test
-        pins that non-recursive behaviour.
+    def test_milvus_client_external_table_refresh_scans_flat_prefix_only(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh scans flat prefix only
+        method: verify refresh scans flat prefix only
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3512,25 +2639,23 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
             upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/{rel}", gen_basic_parquet_bytes(nrows, start_id))
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
 
-            # Only the 3 flat files should count (300 rows), not the 2 nested
-            assert query_count(client, coll) == 300
+        # Only the 3 flat files should count (300 rows), not the 2 nested
+        assert self.query_count(client, coll) == 300
 
-            # Nested-file id ranges must be absent
-            for _, _, start_id in nested_files:
-                got = client.query(
-                    coll,
-                    filter=f"id >= {start_id} && id < {start_id + 100}",
-                    output_fields=["id"],
-                    limit=200,
-                )
-                assert len(got) == 0, f"ids [{start_id}..{start_id + 100}) unexpectedly present (subdir ingested)"
-        finally:
-            client.drop_collection(coll)
+        # Nested-file id ranges must be absent
+        for _, _, start_id in nested_files:
+            got = self.query(
+                client,
+                coll,
+                filter=f"id >= {start_id} && id < {start_id + 100}",
+                output_fields=["id"],
+                limit=200,
+            )[0]
+            assert len(got) == 0, f"ids [{start_id}..{start_id + 100}) unexpectedly present (subdir ingested)"
 
 
 # ============================================================
@@ -3538,276 +2663,242 @@ class TestExternalTableRefresh(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableDQL(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
     """Read-side operations on external collections."""
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "filter_expr,expected",
         [
-            ("", DEFAULT_NB),
+            ("", ct.default_nb),
             ("id < 10", 10),
             ("id >= 100 && id < 150", 50),
             ("value > 0.0 && id < 50", 49),  # value=1.5*id, id==0 excluded
             ("id in [0, 1, 2, 3, 99]", 5),
         ],
     )
-    def test_query_filter(self, filter_expr, expected, minio_env, external_prefix):
-        """Scalar filters return the expected row count."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_query_filter(self, filter_expr, expected, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table query filter
+        method: Scalar filters return the expected row count
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            if filter_expr == "":
-                assert query_count(client, coll) == expected
-            else:
-                res = client.query(coll, filter=filter_expr, output_fields=["id"], limit=DEFAULT_NB)
-                assert len(res) == expected
-        finally:
-            client.drop_collection(coll)
+        if filter_expr == "":
+            assert self.query_count(client, coll) == expected
+        else:
+            res = self.query(client, coll, filter=filter_expr, output_fields=["id"], limit=ct.default_nb)[0]
+            assert len(res) == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("metric", ["L2", "IP", "COSINE"])
-    def test_search_metric(self, metric, minio_env, external_prefix):
-        """Search under each metric returns topK with correctly ordered distances."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_search_metric(self, metric, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table search metric
+        method: Search under each metric returns topK with correctly ordered distances
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
+        coll = self.prepare_indexed_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            index_type="FLAT",
+            metric_type=metric,
+        )
+        self.load_collection(client, coll)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, index_type="FLAT", metric_type=metric)
-            client.load_collection(coll)
-
-            hits = client.search(
-                coll,
-                data=_float_vectors([0], TEST_DIM).tolist(),
-                limit=5,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 5
-            distances = [h["distance"] for h in hits]
-            if metric == "L2":
-                assert distances == sorted(distances)
-            else:
-                assert distances == sorted(distances, reverse=True)
-            expected_top_id = DEFAULT_NB - 1 if metric == "IP" else 0
-            assert hits[0]["id"] == expected_top_id, (
-                f"{metric} top hit mismatch: got id={hits[0]['id']}, expected {expected_top_id}"
-            )
-        finally:
-            client.drop_collection(coll)
+        hits = self.search(
+            client,
+            coll,
+            data=_float_vectors([0], ct.default_dim).tolist(),
+            limit=5,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits) == 5
+        distances = [h["distance"] for h in hits]
+        if metric == "L2":
+            assert distances == sorted(distances)
+        else:
+            assert distances == sorted(distances, reverse=True)
+        expected_top_id = ct.default_nb - 1 if metric == "IP" else 0
+        assert hits[0]["id"] == expected_top_id, (
+            f"{metric} top hit mismatch: got id={hits[0]['id']}, expected {expected_top_id}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_with_scalar_filter(self, minio_env, external_prefix):
-        """Vector search combined with scalar filter (hybrid via `search(filter=...)`)."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_search_with_scalar_filter(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table search with scalar filter
+        method: Vector search combined with scalar filter (hybrid via `search(filter=...)`)
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=10,
-                anns_field="embedding",
-                output_fields=["id"],
-                filter="id >= 50 && id < 100",
-            )[0]
-            assert len(hits) == 10
-            assert all(50 <= h["id"] < 100 for h in hits), f"filter violated: {[h['id'] for h in hits]}"
-        finally:
-            client.drop_collection(coll)
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=10,
+            anns_field="embedding",
+            output_fields=["id"],
+            filter="id >= 50 && id < 100",
+        )[0][0]
+        assert len(hits) == 10
+        assert all(50 <= h["id"] < 100 for h in hits), f"filter violated: {[h['id'] for h in hits]}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_hybrid_search_multi_vector(self, minio_env, external_prefix):
-        """hybrid_search over two vector fields with RRF reranker."""
+    def test_milvus_client_external_table_hybrid_search_multi_vector(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table hybrid search multi vector
+        method: hybrid_search over two vector fields with RRF reranker
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
         upload_parquet(
-            minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_multi_vector_parquet_bytes(DEFAULT_NB, 0)
+            minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_multi_vector_parquet_bytes(ct.default_nb, 0)
         )
 
         schema = build_multi_vector_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            idx = client.prepare_index_params()
-            idx.add_index(field_name="dense_vec", index_type="AUTOINDEX", metric_type="L2")
-            idx.add_index(field_name="bin_vec", index_type="BIN_FLAT", metric_type="HAMMING")
-            client.create_index(coll, idx)
-            client.load_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        idx = self.prepare_index_params(
+            client,
+        )[0]
+        idx.add_index(field_name="dense_vec", index_type="AUTOINDEX", metric_type="L2")
+        idx.add_index(field_name="bin_vec", index_type="BIN_FLAT", metric_type="HAMMING")
+        self.create_index(client, coll, idx)
+        self.load_collection(client, coll)
 
-            req1 = AnnSearchRequest(
-                data=[[0.0] * TEST_DIM],
-                anns_field="dense_vec",
-                limit=10,
-                param={"metric_type": "L2"},
-            )
-            req2 = AnnSearchRequest(
-                data=[b"\x00" * (BINARY_DIM // 8)],
-                anns_field="bin_vec",
-                limit=10,
-                param={"metric_type": "HAMMING"},
-            )
-            hits = client.hybrid_search(
-                collection_name=coll,
-                reqs=[req1, req2],
-                ranker=RRFRanker(),
-                limit=5,
-                output_fields=["id"],
-            )
-            assert len(hits) == 1 and len(hits[0]) == 5, f"hybrid_search returned {hits}"
-            ids = [h["id"] for h in hits[0]]
-            assert len(set(ids)) == len(ids), f"hybrid_search returned duplicate ids: {ids}"
-            assert all(0 <= row_id < DEFAULT_NB for row_id in ids), f"hybrid_search ids out of range: {ids}"
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_iterator(self, minio_env, external_prefix):
-        """query_iterator lazily paginates through rows in batch_size chunks."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
-
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            it = client.query_iterator(
-                collection_name=coll,
-                filter="id >= 0",
-                batch_size=50,
-                output_fields=["id"],
-            )
-            total = 0
-            while True:
-                batch = it.next()
-                if not batch:
-                    break
-                total += len(batch)
-                assert len(batch) <= 50
-            it.close()
-            assert total == DEFAULT_NB, f"iterator yielded {total}, expected {DEFAULT_NB}"
-        finally:
-            client.drop_collection(coll)
+        req1 = AnnSearchRequest(
+            data=[[0.0] * ct.default_dim],
+            anns_field="dense_vec",
+            limit=10,
+            param={"metric_type": "L2"},
+        )
+        req2 = AnnSearchRequest(
+            data=[b"\x00" * (ct.default_dim // 8)],
+            anns_field="bin_vec",
+            limit=10,
+            param={"metric_type": "HAMMING"},
+        )
+        hits = self.hybrid_search(
+            client,
+            collection_name=coll,
+            reqs=[req1, req2],
+            ranker=RRFRanker(),
+            limit=5,
+            output_fields=["id"],
+        )[0]
+        assert len(hits) == 1 and len(hits[0]) == 5, f"hybrid_search returned {hits}"
+        ids = [h["id"] for h in hits[0]]
+        assert len(set(ids)) == len(ids), f"hybrid_search returned duplicate ids: {ids}"
+        assert all(0 <= row_id < ct.default_nb for row_id in ids), f"hybrid_search ids out of range: {ids}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_iterator(self, minio_env, external_prefix):
-        """search_iterator lazily paginates vector search results."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_query_iterator(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table query iterator
+        method: query_iterator lazily paginates through rows in batch_size chunks
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            it = client.search_iterator(
-                collection_name=coll,
-                data=[[0.0] * TEST_DIM],
-                anns_field="embedding",
-                batch_size=20,
-                limit=80,
-                output_fields=["id"],
-            )
-            total = 0
-            while True:
-                batch = it.next()
-                if not batch:
-                    break
-                total += len(batch)
-            it.close()
-            assert total == 80, f"iterator yielded {total}, expected 80"
-        finally:
-            client.drop_collection(coll)
+        it = self.query_iterator(
+            client,
+            collection_name=coll,
+            filter="id >= 0",
+            batch_size=50,
+            output_fields=["id"],
+        )[0]
+        total = 0
+        while True:
+            batch = it.next()
+            if not batch:
+                break
+            total += len(batch)
+            assert len(batch) <= 50
+        it.close()
+        assert total == ct.default_nb, f"iterator yielded {total}, expected {ct.default_nb}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_get_by_virtual_pk(self, minio_env, external_prefix):
-        """get() by virtual PK returns the requested rows."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_search_iterator(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table search iterator
+        method: search_iterator lazily paginates vector search results
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=50)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
+        it = self.search_iterator(
+            client,
+            collection_name=coll,
+            data=[[0.0] * ct.default_dim],
+            anns_field="embedding",
+            batch_size=20,
+            limit=80,
+            output_fields=["id"],
+        )[0]
+        total = 0
+        while True:
+            batch = it.next()
+            if not batch:
+                break
+            total += len(batch)
+        it.close()
+        assert total == 80, f"iterator yielded {total}, expected 80"
 
-            # Resolve virtual PKs of the first 5 rows via query
-            first_five = client.query(
-                coll,
-                filter="id >= 0 && id < 5",
-                output_fields=["id", "__virtual_pk__"],
-                limit=5,
-            )
-            vpks = [r["__virtual_pk__"] for r in first_five]
-            assert len(vpks) == 5
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_get_by_virtual_pk(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table get by virtual pk
+        method: get() by virtual PK returns the requested rows
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
 
-            fetched = client.get(collection_name=coll, ids=vpks, output_fields=["id"])
-            assert len(fetched) == 5
-            assert {r["id"] for r in fetched} == {r["id"] for r in first_five}
-        finally:
-            client.drop_collection(coll)
+        # Resolve virtual PKs of the first 5 rows via query
+        first_five = self.query(
+            client,
+            coll,
+            filter="id >= 0 && id < 5",
+            output_fields=["id", "__virtual_pk__"],
+            limit=5,
+        )[0]
+        vpks = [r["__virtual_pk__"] for r in first_five]
+        assert len(vpks) == 5
+
+        fetched = self.get(client, collection_name=coll, ids=vpks, output_fields=["id"])[0]
+        assert len(fetched) == 5
+        assert {r["id"] for r in fetched} == {r["id"] for r in first_five}
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_pagination_offset_limit(self, minio_env, external_prefix):
-        """query(offset=..., limit=...) paginates correctly."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_pagination_offset_limit(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table pagination offset limit
+        method: query(offset=..., limit=...) paginates correctly
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=50)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-
-            page1 = client.query(coll, filter="id >= 0", output_fields=["id"], offset=0, limit=10)
-            page2 = client.query(coll, filter="id >= 0", output_fields=["id"], offset=10, limit=10)
-            assert len(page1) == 10 and len(page2) == 10
-            ids1 = {r["id"] for r in page1}
-            ids2 = {r["id"] for r in page2}
-            assert ids1.isdisjoint(ids2), "paginated pages should not overlap"
-            assert all(0 <= row_id < 50 for row_id in ids1 | ids2), f"paginated ids out of range: {ids1 | ids2}"
-        finally:
-            client.drop_collection(coll)
+        page1 = self.query(client, coll, filter="id >= 0", output_fields=["id"], offset=0, limit=10)[0]
+        page2 = self.query(client, coll, filter="id >= 0", output_fields=["id"], offset=10, limit=10)[0]
+        assert len(page1) == 10 and len(page2) == 10
+        ids1 = {r["id"] for r in page1}
+        ids2 = {r["id"] for r in page2}
+        assert ids1.isdisjoint(ids2), "paginated pages should not overlap"
+        assert all(0 <= row_id < 50 for row_id in ids1 | ids2), f"paginated ids out of range: {ids1 | ids2}"
 
 
 # ============================================================
@@ -3815,12 +2906,16 @@ class TestExternalTableDQL(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableLifecycle(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
     """Alias lifecycle and coarse lifecycle edges."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_create_alter_drop(self, minio_env, external_prefix):
-        """Alias can be created, rebound, and dropped for external collections."""
+    def test_milvus_client_external_table_alias_create_alter_drop(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table alias create alter drop
+        method: Alias can be created, rebound, and dropped for external collections
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll_a = cf.gen_collection_name_by_testcase_name() + "_a"
@@ -3833,124 +2928,117 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         url_b = build_external_source(cfg, f"{ext_key}/b")
         schema_a = build_basic_schema(client, url_a)
         schema_b = build_basic_schema(client, url_b)
-        client.create_collection(collection_name=coll_a, schema=schema_a)
-        client.create_collection(collection_name=coll_b, schema=schema_b)
+        self.create_collection(client, collection_name=coll_a, schema=schema_a)
+        self.create_collection(client, collection_name=coll_b, schema=schema_b)
 
         alias = f"alias_{random.randint(10000, 99999)}"
-        try:
-            refresh_and_wait(client, coll_a)
-            refresh_and_wait(client, coll_b)
-            index_and_load(client, coll_a)
-            index_and_load(client, coll_b)
+        self.refresh_and_wait(client, coll_a)
+        self.refresh_and_wait(client, coll_b)
+        self.index_and_load(client, coll_a)
+        self.index_and_load(client, coll_b)
 
-            client.create_alias(collection_name=coll_a, alias=alias)
-            via_alias_a = client.query(alias, filter="id >= 0", output_fields=["id"], limit=100)
-            assert len(via_alias_a) == 30
+        self.create_alias(client, collection_name=coll_a, alias=alias)
+        via_alias_a = self.query(client, alias, filter="id >= 0", output_fields=["id"], limit=100)[0]
+        assert len(via_alias_a) == 30
 
-            client.alter_alias(collection_name=coll_b, alias=alias)
-            via_alias_b = client.query(alias, filter="id >= 0", output_fields=["id"], limit=100)
-            assert len(via_alias_b) == 40
-            assert all(r["id"] >= 10000 for r in via_alias_b)
+        self.alter_alias(client, collection_name=coll_b, alias=alias)
+        via_alias_b = self.query(client, alias, filter="id >= 0", output_fields=["id"], limit=100)[0]
+        assert len(via_alias_b) == 40
+        assert all(r["id"] >= 10000 for r in via_alias_b)
 
-            client.drop_alias(alias=alias)
-            with pytest.raises(Exception):
-                client.query(alias, filter="id >= 0", output_fields=["id"], limit=1)
-        finally:
-            try:
-                client.drop_alias(alias=alias)
-            except Exception:
-                pass
-            client.drop_collection(coll_a)
-            client.drop_collection(coll_b)
+        self.drop_alias(client, alias=alias)
+        with pytest.raises(Exception):
+            client.query(alias, filter="id >= 0", output_fields=["id"], limit=1)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_refresh_requires_release_to_see_new_data(self, minio_env, external_prefix):
-        """Without release+load, queries still see pre-refresh data."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part0.parquet", gen_basic_parquet_bytes(100, 0))
-
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 100
-
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part1.parquet", gen_basic_parquet_bytes(100, 100))
-            refresh_and_wait(client, coll)
-
-            stale = query_count(client, coll)
-            assert stale == 100, f"without release+load expected 100, got {stale}"
-
-            client.release_collection(coll)
-            client.load_collection(coll)
-            assert query_count(client, coll) == 200
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_concurrent_query_during_refresh_release_load(self, minio_env, external_prefix):
-        """Continuous query thread keeps running while the main thread uploads
-        a new file, refreshes, releases, and reloads. After the cycle the
-        queries should observe the new (larger) row count without crashing.
+    def test_milvus_client_external_table_refresh_requires_release_to_see_new_data(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table refresh requires release to see new data
+        method: Without release+load, queries still see pre-refresh data
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data0.parquet", gen_basic_parquet_bytes(500, 0))
+        coll = self.prepare_loaded_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            filename="part0.parquet",
+            num_rows=100,
+        )
+        ext_key = external_prefix["key"]
+        assert self.query_count(client, coll) == 100
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 500
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part1.parquet", gen_basic_parquet_bytes(100, 100))
+        self.refresh_and_wait(client, coll)
 
-            stop = threading.Event()
-            ok = {"n": 0}
-            fail = {"n": 0}
-            last = {"v": 500}
+        stale = self.query_count(client, coll)
+        assert stale == 100, f"without release+load expected 100, got {stale}"
 
-            def query_loop():
-                while not stop.is_set():
-                    try:
-                        last["v"] = query_count(client, coll)
-                        ok["n"] += 1
-                    except Exception:
-                        fail["n"] += 1
-                    time.sleep(0.2)
-
-            t = threading.Thread(target=query_loop, daemon=True)
-            t.start()
-            time.sleep(1)
-            _ = fail  # silences linter on unused-but-tracked counter
-
-            # Upload a new file and run the refresh+release+load cycle while the
-            # query thread keeps polling.
-            upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(300, 500))
-            refresh_and_wait(client, coll)
-            client.release_collection(coll)
-            time.sleep(1)
-            client.load_collection(coll)
-            time.sleep(2)
-
-            stop.set()
-            t.join(timeout=10)
-            log.info(f"concurrent: ok={ok['n']} fail={fail['n']} last={last['v']}")
-            assert last["v"] == 800, f"expected 800 rows after refresh+reload, got {last['v']}"
-        finally:
-            client.drop_collection(coll)
+        self.release_collection(client, coll)
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == 200
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_file_deleted_then_reload(self, minio_env, external_prefix):
-        """Delete a source parquet file (without a refresh), then
-        release+load. The reload either keeps serving cached data or falls
-        back to fewer rows or surfaces an error — all three are documented
-        behaviors. The test only requires the system not to hang or crash.
+    def test_milvus_client_external_table_concurrent_query_during_refresh_release_load(
+        self, minio_env, external_prefix
+    ):
+        """
+        target: test MilvusClient external table concurrent query during refresh release load
+        method: Continuous query thread keeps running while the main thread uploads a new file, refreshes, releases, and reloads
+        expected: behavior matches the case assertion.
+        """
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = self.prepare_loaded_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            filename="data0.parquet",
+            num_rows=500,
+        )
+        ext_key = external_prefix["key"]
+        assert self.query_count(client, coll) == 500
+
+        stop = threading.Event()
+        ok = {"n": 0}
+        fail = {"n": 0}
+        last = {"v": 500}
+
+        def query_loop():
+            while not stop.is_set():
+                try:
+                    last["v"] = self.query_count(client, coll)
+                    ok["n"] += 1
+                except Exception:
+                    fail["n"] += 1
+                time.sleep(0.2)
+
+        t = threading.Thread(target=query_loop, daemon=True)
+        t.start()
+        time.sleep(1)
+        _ = fail  # silences linter on unused-but-tracked counter
+
+        # Upload a new file and run the refresh+release+load cycle while the
+        # query thread keeps polling.
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(300, 500))
+        self.refresh_and_wait(client, coll)
+        self.release_collection(client, coll)
+        time.sleep(1)
+        self.load_collection(client, coll)
+        time.sleep(2)
+
+        stop.set()
+        t.join(timeout=10)
+        log.info(f"concurrent: ok={ok['n']} fail={fail['n']} last={last['v']}")
+        assert last["v"] == 800, f"expected 800 rows after refresh+reload, got {last['v']}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_file_deleted_then_reload(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table file deleted then reload
+        method: Delete a source parquet file (without a refresh), then release+load
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3960,55 +3048,46 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data1.parquet", gen_basic_parquet_bytes(100, 100))
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == 200
+
+        # Delete a backing file with no refresh in between.
+        minio_client.remove_object(cfg["bucket"], f"{ext_key}/data1.parquet")
+        log.info("deleted data1.parquet without a follow-up refresh")
+
+        self.release_collection(client, coll)
         try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 200
-
-            # Delete a backing file with no refresh in between.
-            minio_client.remove_object(cfg["bucket"], f"{ext_key}/data1.parquet")
-            log.info("deleted data1.parquet without a follow-up refresh")
-
-            client.release_collection(coll)
-            try:
-                client.load_collection(coll, timeout=60)
-                count_after = query_count(client, coll)
-                log.info(f"reload-after-deletion served {count_after} rows")
-                assert count_after in (100, 200), f"unexpected row count after deletion+reload: {count_after}"
-            except Exception as e:
-                # Acceptable: load fails because the manifest references a
-                # missing file. The test passes as long as it surfaces cleanly.
-                log.info(f"reload-after-deletion failed as expected: {e}")
-        finally:
-            client.drop_collection(coll)
+            client.load_collection(coll, timeout=60)
+            count_after = self.query_count(client, coll)
+            log.info(f"reload-after-deletion served {count_after} rows")
+            assert count_after in (100, 200), f"unexpected row count after deletion+reload: {count_after}"
+        except Exception as e:
+            # Acceptable: load fails because the manifest references a
+            # missing file. The test passes as long as it surfaces cleanly.
+            log.info(f"reload-after-deletion failed as expected: {e}")
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_and_recreate_same_name(self, minio_env, external_prefix):
-        """Drop then recreate with the same name should succeed and serve data."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_drop_and_recreate_same_name(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table drop and recreate same name
+        method: Drop then recreate with the same name should succeed and serve data
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=50)
+        coll = self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=50)
+        ext_url = external_prefix["url"]
+        assert self.query_count(client, coll) == 50
 
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        refresh_and_wait(client, coll)
-        index_and_load(client, coll)
-        assert query_count(client, coll) == 50
-
-        client.drop_collection(coll)
-        assert not client.has_collection(coll)
+        self.drop_collection(client, coll)
+        assert not self.has_collection(client, coll)[0]
 
         schema2 = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema2)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 50
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema2)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert self.query_count(client, coll) == 50
 
 
 # ============================================================
@@ -4016,15 +3095,15 @@ class TestExternalTableLifecycle(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableCrossBucket(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableCrossBucket(ExternalTableTestBase):
     """External data living in a separate MinIO bucket from Milvus's own."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_cross_bucket_source(self, minio_env):
-        """End-to-end refresh/load/query against a different bucket.
-
-        Uses Milvus-form s3://<endpoint>/<bucket>/<path>/ because current
-        validation rejects empty-host external_source URIs.
+    def test_milvus_client_external_table_cross_bucket_source(self, minio_env):
+        """
+        target: test MilvusClient external table cross bucket source
+        method: End-to-end refresh/load/query against a different bucket
+        expected: behavior matches the case assertion.
         """
         minio_client, cfg = minio_env
         cross_bucket = "external-cross-bucket"
@@ -4049,16 +3128,12 @@ class TestExternalTableCrossBucket(TestMilvusClientV2Base):
                 external_source,
                 ext_spec=build_external_spec(cfg),
             )
-            client.create_collection(collection_name=coll, schema=schema)
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == nb * 2
+            self.create_collection(client, collection_name=coll, schema=schema)
+            self.refresh_and_wait(client, coll)
+            self.index_and_load(client, coll)
+            assert self.query_count(client, coll) == nb * 2
             log.info(f"cross-bucket: {nb * 2} rows loaded from {cross_bucket} while milvus uses {cfg['bucket']}")
         finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
             cleanup_minio_prefix(minio_client, cross_bucket, f"{key_prefix}/")
 
 
@@ -4067,7 +3142,7 @@ class TestExternalTableCrossBucket(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableParquetCodecs(ExternalTableTestBase):
     """Parquet compression codec compatibility for external collections.
 
     Milvus's bundled Arrow needs `arrow:with_snappy=True` and
@@ -4078,8 +3153,12 @@ class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("codec", ["snappy", "lz4", "gzip", "zstd", "none"])
-    def test_parquet_codec_readable(self, codec, minio_env, external_prefix):
-        """Upload a parquet compressed with `codec`, refresh, query the count back."""
+    def test_milvus_client_external_table_parquet_codec_readable(self, codec, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table parquet codec readable
+        method: Upload a parquet compressed with `codec`, refresh, query the count back
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name() + f"_{codec}"
@@ -4095,15 +3174,12 @@ class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", data)
 
         schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            count = query_count(client, coll)
-            assert count == nb, f"codec={codec}: expected {nb}, got {count}"
-            log.info(f"codec={codec}: {nb} rows round-tripped")
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        count = self.query_count(client, coll)
+        assert count == nb, f"codec={codec}: expected {nb}, got {count}"
+        log.info(f"codec={codec}: {nb} rows round-tripped")
 
 
 # ============================================================
@@ -4111,829 +3187,261 @@ class TestExternalTableParquetCodecs(TestMilvusClientV2Base):
 # ============================================================
 
 
-class TestExternalTableReadOps(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableReadOps(ExternalTableTestBase):
     """Operations normal collections support that should also work on
     external collections: stats, state, partitions, segments, rename,
     refresh_load, property alter/drop, database scoping."""
 
-    @staticmethod
-    def _prepared_collection(client, minio_client, cfg, ext_url, ext_key, num_rows=DEFAULT_NB):
-        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", gen_basic_parquet_bytes(num_rows, 0))
-        coll = cf.gen_collection_name_by_testcase_name()
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        refresh_and_wait(client, coll)
-        index_and_load(client, coll)
-        return coll
+    def _prepared_collection(self, client, minio_env, external_prefix, num_rows=ct.default_nb):
+        return self.prepare_loaded_basic_collection(client, minio_env, external_prefix, num_rows=num_rows)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_list_partitions_and_has_partition(self, minio_env, external_prefix):
-        """External collection exposes only the _default partition."""
-        minio_client, cfg = minio_env
+    @pytest.mark.parametrize(
+        "op_name",
+        [
+            "list_partitions",
+            "get_collection_stats",
+            "get_partition_stats",
+            "list_segments",
+            "refresh_load",
+        ],
+        ids=[
+            "list_partitions",
+            "get_collection_stats",
+            "get_partition_stats",
+            "list_segments",
+            "refresh_load",
+        ],
+    )
+    def test_milvus_client_external_table_read_operation(self, op_name, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table read operation
+        method: Read/admin operations supported by normal collections work on external collections
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            parts = client.list_partitions(collection_name=coll)
+        coll = self._prepared_collection(client, minio_env, external_prefix)
+
+        if op_name == "list_partitions":
+            parts = self.list_partitions(client, collection_name=coll)[0]
             assert list(parts) == ["_default"], f"expected only _default, got {parts}"
-            assert client.has_partition(collection_name=coll, partition_name="_default") is True
-            assert client.has_partition(collection_name=coll, partition_name="nonexistent_xyz") is False
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_get_collection_stats(self, minio_env, external_prefix):
-        """get_collection_stats reports the loaded row count."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            stats = client.get_collection_stats(collection_name=coll)
+            assert self.has_partition(client, collection_name=coll, partition_name="_default")[0] is True
+            assert self.has_partition(client, collection_name=coll, partition_name="nonexistent_xyz")[0] is False
+        elif op_name == "get_collection_stats":
+            stats = self.get_collection_stats(client, collection_name=coll)[0]
             log.info(f"collection stats: {stats}")
             row_count = int(stats.get("row_count", 0))
-            assert row_count == DEFAULT_NB, f"expected row_count={DEFAULT_NB}, got {row_count}"
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_get_partition_stats_default(self, minio_env, external_prefix):
-        """_default partition stats should match collection row count."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
+            assert row_count == ct.default_nb, f"expected row_count={ct.default_nb}, got {row_count}"
+        elif op_name == "get_partition_stats":
             try:
                 stats = client.get_partition_stats(collection_name=coll, partition_name="_default")
             except Exception as e:
                 pytest.skip(f"get_partition_stats not supported: {e}")
             log.info(f"partition stats: {stats}")
             row_count = int(stats.get("row_count", 0))
-            assert row_count == DEFAULT_NB
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_get_load_state_transitions(self, minio_env, external_prefix):
-        """get_load_state reports Loaded after load, NotLoad after release."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-
-            # Before load
-            state = client.get_load_state(collection_name=coll)
-            log.info(f"[pre-load] state={state}")
-            assert "not" in str(state).lower() or "notload" in str(state).lower().replace("_", "")
-
-            # After load
-            client.load_collection(coll)
-            state2 = client.get_load_state(collection_name=coll)
-            log.info(f"[post-load] state={state2}")
-            assert "load" in str(state2).lower() and "not" not in str(state2).lower().split("state")[-1]
-
-            # After release
-            client.release_collection(coll)
-            state3 = client.get_load_state(collection_name=coll)
-            log.info(f"[post-release] state={state3}")
-            assert "not" in str(state3).lower() or "notload" in str(state3).lower().replace("_", "")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_list_persistent_and_loaded_segments(self, minio_env, external_prefix):
-        """list_persistent_segments / list_loaded_segments return without error.
-
-        External collections don't have Milvus-side persistent segments (data
-        lives in the external parquet/lance/vortex files), so the persistent
-        list is typically empty — we only assert the calls succeed and return
-        an iterable.
-        """
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
+            assert row_count == ct.default_nb
+        elif op_name == "list_segments":
             try:
                 persistent = client.list_persistent_segments(collection_name=coll)
             except Exception as e:
                 pytest.skip(f"list_persistent_segments not supported: {e}")
             assert persistent is not None
             log.info(f"persistent segments (len={len(list(persistent))}): {persistent}")
-
             try:
                 loaded = client.list_loaded_segments(collection_name=coll)
                 log.info(f"loaded segments: {loaded}")
             except Exception as e:
                 log.info(f"list_loaded_segments not available on this build: {e}")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_partition_load_release_default(self, minio_env, external_prefix):
-        """load_partitions / release_partitions work on the _default partition
-        (effectively aliasing load_collection / release_collection).
-        """
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=DEFAULT_NB)
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            add_vector_index(client, coll, "embedding", "AUTOINDEX", "L2")
-
-            client.load_partitions(collection_name=coll, partition_names=["_default"])
-            assert query_count(client, coll) == DEFAULT_NB
-
-            client.release_partitions(collection_name=coll, partition_names=["_default"])
-            state = client.get_load_state(collection_name=coll)
-            log.info(f"state after release_partitions: {state}")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_rename_collection(self, minio_env, external_prefix):
-        """rename_collection should succeed; new name answers queries."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key, num_rows=50)
-        new_name = coll + "_renamed"
-        try:
-            try:
-                client.rename_collection(old_name=coll, new_name=new_name)
-            except Exception as e:
-                pytest.skip(f"rename_collection not supported: {e}")
-
-            assert not client.has_collection(coll)
-            assert client.has_collection(new_name)
-            assert query_count(client, new_name) == 50
-        finally:
-            try:
-                client.drop_collection(new_name)
-            except Exception:
-                pass
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_refresh_load(self, minio_env, external_prefix):
-        """refresh_load reloads currently loaded segments without a new refresh."""
-        minio_client, cfg = minio_env
-        client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
+        elif op_name == "refresh_load":
             try:
                 client.refresh_load(collection_name=coll)
             except Exception as e:
                 pytest.skip(f"refresh_load not supported: {e}")
-            assert query_count(client, coll) == DEFAULT_NB
-        finally:
-            client.drop_collection(coll)
+            assert self.query_count(client, coll) == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_alter_and_drop_collection_description(self, minio_env, external_prefix):
-        """alter_collection_properties(description=...) surfaces via describe;
-        drop_collection_properties removes it again.
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_get_load_state_transitions(self, minio_env, external_prefix):
         """
-        minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=20)
-        schema = build_basic_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            try:
-                client.alter_collection_properties(
-                    collection_name=coll,
-                    properties={"collection.description": "ext-table description"},
-                )
-            except Exception as e:
-                pytest.skip(f"alter_collection_properties(description) not supported: {e}")
-
-            desc = client.describe_collection(coll)
-            props = desc.get("properties") or {}
-            log.info(f"after alter: properties={props}, description={desc.get('description')}")
-
-            try:
-                client.drop_collection_properties(
-                    collection_name=coll,
-                    property_keys=["collection.description"],
-                )
-            except Exception as e:
-                log.info(f"drop_collection_properties not supported: {e}")
-        finally:
-            client.drop_collection(coll)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_property(self, minio_env, external_prefix):
-        """drop_index_properties removes mmap.enabled that was set earlier.
-
-        The server requires the collection to be released before altering
-        index properties.
+        target: test MilvusClient external table get load state transitions
+        method: get_load_state reports Loaded after load, NotLoad after release
+        expected: behavior matches the case assertion.
         """
-        minio_client, cfg = minio_env
         client = self._client()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        coll = self._prepared_collection(client, minio_client, cfg, ext_url, ext_key)
-        try:
-            client.release_collection(coll)
-            try:
-                client.alter_index_properties(
-                    collection_name=coll,
-                    index_name="embedding",
-                    properties={"mmap.enabled": True},
-                )
-            except Exception as e:
-                pytest.skip(f"alter_index_properties not supported: {e}")
+        coll = self.prepare_indexed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
 
-            info = client.describe_index(collection_name=coll, index_name="embedding")
-            assert str(info.get("mmap.enabled", "")).lower() == "true"
+        # Before load
+        state = self.get_load_state(client, collection_name=coll)[0]
+        log.info(f"[pre-load] state={state}")
+        assert "not" in str(state).lower() or "notload" in str(state).lower().replace("_", "")
 
-            try:
-                client.drop_index_properties(
-                    collection_name=coll,
-                    index_name="embedding",
-                    property_keys=["mmap.enabled"],
-                )
-            except Exception as e:
-                pytest.skip(f"drop_index_properties not supported: {e}")
+        # After load
+        self.load_collection(client, coll)
+        state2 = self.get_load_state(client, collection_name=coll)[0]
+        log.info(f"[post-load] state={state2}")
+        assert "load" in str(state2).lower() and "not" not in str(state2).lower().split("state")[-1]
 
-            info2 = client.describe_index(collection_name=coll, index_name="embedding")
-            log.info(f"after drop mmap property: {info2}")
-            # Property should be absent or default "false"
-            assert str(info2.get("mmap.enabled", "false")).lower() in ("false", "")
-        finally:
-            client.drop_collection(coll)
+        # After release
+        self.release_collection(client, coll)
+        state3 = self.get_load_state(client, collection_name=coll)[0]
+        log.info(f"[post-release] state={state3}")
+        assert "not" in str(state3).lower() or "notload" in str(state3).lower().replace("_", "")
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_external_collection_in_custom_database(self, minio_env, external_prefix):
-        """Create an external collection inside a non-default database."""
-        minio_client, cfg = minio_env
+    def test_milvus_client_external_table_partition_load_release_default(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table partition load release default
+        method: verify partition load release default
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self.prepare_indexed_basic_collection(client, minio_env, external_prefix, num_rows=ct.default_nb)
+
+        self.load_partitions(client, collection_name=coll, partition_names=["_default"])
+        assert self.query_count(client, coll) == ct.default_nb
+
+        self.release_partitions(client, collection_name=coll, partition_names=["_default"])
+        state = self.get_load_state(client, collection_name=coll)[0]
+        log.info(f"state after release_partitions: {state}")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_external_table_rename_collection(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table rename collection
+        method: rename_collection should succeed; new name answers queries
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self._prepared_collection(client, minio_env, external_prefix, num_rows=50)
+        new_name = coll + "_renamed"
+        try:
+            client.rename_collection(old_name=coll, new_name=new_name)
+        except Exception as e:
+            pytest.skip(f"rename_collection not supported: {e}")
+
+        assert not self.has_collection(client, coll)[0]
+        assert self.has_collection(client, new_name)[0]
+        assert self.query_count(client, new_name) == 50
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_alter_and_drop_collection_description(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table alter and drop collection description
+        method: alter_collection_properties(description=...) surfaces via describe; drop_collection_properties removes it again
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self.prepare_refreshed_basic_collection(client, minio_env, external_prefix, num_rows=20)
+        try:
+            client.alter_collection_properties(
+                collection_name=coll,
+                properties={"collection.description": "ext-table description"},
+            )
+        except Exception as e:
+            pytest.skip(f"alter_collection_properties(description) not supported: {e}")
+
+        desc = self.describe_collection(client, coll)[0]
+        props = desc.get("properties") or {}
+        log.info(f"after alter: properties={props}, description={desc.get('description')}")
+
+        try:
+            client.drop_collection_properties(
+                collection_name=coll,
+                property_keys=["collection.description"],
+            )
+        except Exception as e:
+            log.info(f"drop_collection_properties not supported: {e}")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_drop_index_property(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table drop index property
+        method: drop_index_properties removes mmap.enabled that was set earlier
+        expected: behavior matches the case assertion.
+        """
+        client = self._client()
+        coll = self._prepared_collection(client, minio_env, external_prefix)
+        self.release_collection(client, coll)
+        try:
+            client.alter_index_properties(
+                collection_name=coll,
+                index_name="embedding",
+                properties={"mmap.enabled": True},
+            )
+        except Exception as e:
+            pytest.skip(f"alter_index_properties not supported: {e}")
+
+        info = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
+        assert str(info.get("mmap.enabled", "")).lower() == "true"
+
+        try:
+            client.drop_index_properties(
+                collection_name=coll,
+                index_name="embedding",
+                property_keys=["mmap.enabled"],
+            )
+        except Exception as e:
+            pytest.skip(f"drop_index_properties not supported: {e}")
+
+        info2 = self.describe_index(client, collection_name=coll, index_name="embedding")[0]
+        log.info(f"after drop mmap property: {info2}")
+        # Property should be absent or default "false"
+        assert str(info2.get("mmap.enabled", "false")).lower() in ("false", "")
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_external_collection_in_custom_database(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table external collection in custom database
+        method: Create an external collection inside a non-default database
+        expected: behavior matches the case assertion.
+        """
         client = self._client()
         db_name = f"ext_db_{random.randint(10000, 99999)}"
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        upload_basic_data(minio_client, cfg, ext_key, num_rows=30)
 
-        try:
-            client.create_database(db_name=db_name)
-        except Exception as e:
-            pytest.skip(f"create_database not supported: {e}")
+        create_db_res, db_created = self.create_database(
+            client,
+            db_name=db_name,
+            check_task=CheckTasks.check_nothing,
+        )
+        if not db_created:
+            pytest.skip(f"create_database not supported: {create_db_res}")
 
         coll = cf.gen_collection_name_by_testcase_name()
-        try:
-            client.use_database(db_name=db_name)
-            schema = build_basic_schema(client, ext_url)
-            client.create_collection(collection_name=coll, schema=schema)
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert query_count(client, coll) == 30
-
-            dbs = client.list_databases()
-            assert db_name in list(dbs)
-        finally:
-            try:
-                client.drop_collection(coll)
-            except Exception:
-                pass
-            client.use_database(db_name="default")
-            try:
-                client.drop_database(db_name=db_name)
-            except Exception:
-                pass
-
-
-# ============================================================
-# 9. External file formats — parquet / lance-table / vortex
-# ============================================================
-
-
-def _write_lance_to_minio(minio_client, bucket, key_prefix, num_rows, start_id, dim=TEST_DIM):
-    """Build a Lance dataset locally and upload every file under its folder
-    to MinIO, preserving the relative layout Lance uses (versions/, data/, etc).
-    """
-    return _write_lance_to_minio_batches(
-        minio_client,
-        bucket,
-        key_prefix,
-        batches=[(start_id, num_rows)],
-        dim=dim,
-    )
-
-
-def _write_lance_to_minio_batches(minio_client, bucket, key_prefix, batches, dim=TEST_DIM):
-    """Multi-fragment variant: each (start_id, count) tuple in `batches` is
-    appended into the same Lance dataset, producing one fragment file per
-    batch under data/. Used to exercise multi-data-file refresh.
-    """
-    import os
-    import shutil
-    import tempfile
-
-    import lance
-
-    tmpdir = tempfile.mkdtemp(prefix="ext_lance_")
-    local_path = os.path.join(tmpdir, "dataset.lance")
-    try:
-        for idx, (start_id, num_rows) in enumerate(batches):
-            ids = list(range(start_id, start_id + num_rows))
-            vectors = _float_vectors(ids, dim)
-            table = pa.table(
-                {
-                    "id": pa.array(ids, type=pa.int64()),
-                    "value": pa.array([float(i) * 1.5 for i in ids], type=pa.float32()),
-                    "embedding": pa.FixedSizeListArray.from_arrays(
-                        vectors.flatten(),
-                        list_size=dim,
-                    ),
-                }
-            )
-            mode = "create" if idx == 0 else "append"
-            lance.write_dataset(table, local_path, mode=mode)
-        for root, _dirs, files in os.walk(local_path):
-            for fname in files:
-                absolute = os.path.join(root, fname)
-                relative = os.path.relpath(absolute, local_path)
-                minio_client.fput_object(bucket, f"{key_prefix}/{relative}", absolute)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-def _find_vortex_sidecar_python():
-    """Locate the Python 3.11+ sidecar venv (`.venv-vortex/`) used to write
-    Vortex files. vortex-data>=0.35.0 requires Python >= 3.11 but the main
-    test venv is pinned to 3.10, so we delegate Vortex generation to a subprocess.
-
-    Returns the interpreter path or None if the sidecar is missing.
-    """
-    import os
-
-    # tests/python_client/ → walk up to find .venv-vortex/
-    here = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(4):
-        candidate = os.path.join(here, ".venv-vortex", "bin", "python")
-        if os.path.exists(candidate):
-            return candidate
-        here = os.path.dirname(here)
-    return None
-
-
-def _write_vortex_to_minio(bucket, cfg, key_prefix, num_rows, start_id, dim=TEST_DIM, filename="data.vortex"):
-    """Write a Vortex dataset to MinIO via the `.venv-vortex` sidecar
-    (Python 3.11+ required for vortex-data >= 0.35).
-
-    The embedding is written as FixedSizeList<uint8, dim*4> inside the vortex
-    file — Milvus's vortex reader reinterprets those raw bytes as float32
-    vectors of width `dim`.
-
-    Pass a unique `filename` per call to write multiple sibling .vortex files
-    under the same key_prefix (used for multi-file format coverage).
-    """
-    import os
-    import subprocess
-
-    sidecar = _find_vortex_sidecar_python()
-    if sidecar is None:
-        pytest.skip(
-            "Vortex sidecar venv missing. Create it once with:\n"
-            "  uv venv .venv-vortex -p python3.12\n"
-            "  source .venv-vortex/bin/activate && uv pip install "
-            "'vortex-data==0.56.0' 'pyarrow>=16' 'numpy>=2.0' minio"
+        self.use_database(client, db_name=db_name)
+        self.prepare_loaded_basic_collection(
+            client,
+            minio_env,
+            external_prefix,
+            num_rows=30,
+            collection_name=coll,
         )
+        assert self.query_count(client, coll) == 30
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    helper = os.path.join(here, "_vortex_gen.py")
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "VT_NUM_ROWS": str(num_rows),
-            "VT_START_ID": str(start_id),
-            "VT_DIM": str(dim),
-            "MINIO_ADDRESS": cfg["address"],
-            "MINIO_BUCKET": bucket,
-            "MINIO_ACCESS_KEY": cfg["access_key"],
-            "MINIO_SECRET_KEY": cfg["secret_key"],
-            "MINIO_SECURE": "true" if cfg["secure"] else "false",
-            "VT_MINIO_KEY": f"{key_prefix}/{filename}",
-        }
-    )
-    result = subprocess.run(
-        [sidecar, helper],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"vortex helper failed (code {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
-    log.info(f"[vortex] wrote {result.stdout.strip()} to {key_prefix}/data.vortex")
-
-
-def _write_vortex_table_to_minio(bucket, cfg, key_prefix, table, *, filename="data.vortex"):
-    """Write an arbitrary pyarrow Table to MinIO as a vortex file via the
-    sidecar venv. The table is serialized to an Arrow IPC stream and piped
-    to the sidecar over stdin; the sidecar deserializes and hands the
-    table directly to vx.io.write — schema (FixedSizeList dimensions,
-    types, etc.) is preserved verbatim across the venv boundary.
-
-    Used by the full-matrix vortex test where the schema is too rich to
-    encode via env vars.
-    """
-    import os
-    import subprocess
-
-    sidecar = _find_vortex_sidecar_python()
-    if sidecar is None:
-        pytest.skip(
-            "Vortex sidecar venv missing. Create it once with:\n"
-            "  uv venv .venv-vortex -p python3.12\n"
-            "  source .venv-vortex/bin/activate && uv pip install "
-            "'vortex-data==0.56.0' 'pyarrow>=16' 'numpy>=2.0' minio"
-        )
-
-    here = os.path.dirname(os.path.abspath(__file__))
-    helper = os.path.join(here, "_vortex_gen.py")
-
-    buf = io.BytesIO()
-    with pa.ipc.new_stream(buf, table.schema) as writer:
-        writer.write_table(table)
-    ipc_bytes = buf.getvalue()
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "VT_INPUT_FROM_STDIN": "1",
-            "MINIO_ADDRESS": cfg["address"],
-            "MINIO_BUCKET": bucket,
-            "MINIO_ACCESS_KEY": cfg["access_key"],
-            "MINIO_SECRET_KEY": cfg["secret_key"],
-            "MINIO_SECURE": "true" if cfg["secure"] else "false",
-            "VT_MINIO_KEY": f"{key_prefix}/{filename}",
-        }
-    )
-    result = subprocess.run(
-        [sidecar, helper],
-        input=ipc_bytes,
-        env=env,
-        capture_output=True,
-        timeout=180,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"vortex helper failed (code {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
-    log.info(f"[vortex] wrote {result.stdout.decode().strip()} to {key_prefix}/{filename}")
-
-
-def _build_iceberg_table_in_minio(prefix, cfg, batches, dim=TEST_DIM):
-    """Create an Iceberg table whose warehouse lives directly on MinIO.
-
-    Writing the warehouse to MinIO (not locally) is required because Iceberg
-    metadata.json records absolute data-file URIs at write time; if we wrote
-    to file:// then uploaded, those URIs would be unreachable from the
-    Milvus reader.
-
-    Vector encoding: each row stores its vector as a single binary blob of
-    dim * sizeof(float) bytes. The Milvus iceberg reader path returns it as
-    arrow.binary, and external_field=embedding is mapped to a FloatVector
-    field — NormalizeExternalArrow reinterprets the raw bytes as float32.
-
-    Note: list<float32> looks more natural but pyarrow >=15 promotes long
-    lists to large_list, which the vector normalizer rejects
-    (Util.cpp:1761). The binary encoding sidesteps that.
-
-    `batches` is a list of (start_id, count) tuples. Each batch is appended
-    to the same iceberg table as a separate parquet data file under data/.
-    The final snapshot includes every batch.
-
-    Returns (snapshot_id, ext_url) where ext_url is the s3:// URL of the
-    table's metadata.json in Milvus URI form.
-    """
-    import shutil
-    import struct
-    import tempfile
-
-    from pyiceberg.catalog.sql import SqlCatalog
-    from pyiceberg.schema import Schema as IbgSchema
-    from pyiceberg.types import BinaryType, LongType, NestedField
-
-    tmp = tempfile.mkdtemp(prefix="ibg_cat_")
-    try:
-        cat = SqlCatalog(
-            "milvus_test",
-            **{
-                "uri": f"sqlite:///{tmp}/cat.db",
-                "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": minio_endpoint_url(cfg),
-                "s3.access-key-id": cfg["access_key"],
-                "s3.secret-access-key": cfg["secret_key"],
-                "s3.region": "us-east-1",
-                "s3.path-style-access": "true",
-            },
-        )
-        cat.create_namespace("ext")
-
-        ibg_schema = IbgSchema(
-            NestedField(1, "id", LongType(), required=False),
-            NestedField(2, "embedding", BinaryType(), required=False),
-        )
-        arrow_schema = pa.schema(
-            [
-                pa.field("id", pa.int64(), nullable=True),
-                pa.field("embedding", pa.binary(), nullable=True),
-            ]
-        )
-        tbl = cat.create_table("ext.t", schema=ibg_schema)
-
-        for start_id, num_rows in batches:
-            ids = list(range(start_id, start_id + num_rows))
-            vec_bytes = [struct.pack(f"<{dim}f", *[float(i + j * 0.1) for j in range(dim)]) for i in ids]
-            arrow_table = pa.table(
-                {
-                    "id": pa.array(ids, type=pa.int64()),
-                    "embedding": pa.array(vec_bytes, type=pa.binary()),
-                },
-                schema=arrow_schema,
-            )
-            tbl.append(arrow_table)
-
-        snap = tbl.current_snapshot().snapshot_id
-        # metadata_location: s3://<bucket>/<prefix>/.../metadata/000NN-uuid.metadata.json
-        # → Milvus form: s3://<address>/<bucket>/...
-        meta_loc = tbl.metadata_location
-        if not meta_loc.startswith("s3://"):
-            raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
-        bucket_and_key = meta_loc[len("s3://") :]
-        ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
-        return snap, ext_url
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-# Iceberg full-matrix is a strict subset of FULL_MATRIX_* because Iceberg V2
-# only supports int (32-bit) and long (64-bit) integers — no Int8/Int16. We
-# reuse the same field names where possible to keep query expectations
-# identical between formats; Int8 → IntegerType promoted to Milvus INT32
-# rather than INT8, otherwise NormalizeExternalArrow refuses the cast.
-ICEBERG_FULL_MATRIX_SCALAR_FIELDS = [
-    # (field_name, milvus DataType, iceberg type ctor (lambda field_id: type),
-    #  arrow type, milvus add_field extras, value_fn)
-    ("b_inv", DataType.BOOL, lambda fid: ("BooleanType",), pa.bool_(), {}, lambda i: i % 2 == 0),
-    ("i32_stl", DataType.INT32, lambda fid: ("IntegerType",), pa.int32(), {}, lambda i: i * 7),
-    ("i64_inv", DataType.INT64, lambda fid: ("LongType",), pa.int64(), {}, lambda i: i * 1000),
-    ("f_inv", DataType.FLOAT, lambda fid: ("FloatType",), pa.float32(), {}, lambda i: float(i) * 1.5),
-    ("d_inv", DataType.DOUBLE, lambda fid: ("DoubleType",), pa.float64(), {}, lambda i: float(i) * 2.5),
-    ("vc_trie", DataType.VARCHAR, lambda fid: ("StringType",), pa.string(), {"max_length": 64}, lambda i: f"s_{i:05d}"),
-    ("j", DataType.JSON, lambda fid: ("StringType",), pa.string(), {}, lambda i: json.dumps({"k": i, "g": i % 3})),
-    (
-        "ts",
-        DataType.TIMESTAMPTZ,
-        lambda fid: ("TimestamptzType",),
-        pa.timestamp("us", tz="UTC"),
-        {},
-        lambda i: (1_700_000_000 + i) * 1_000_000,
-    ),
-]
-
-ICEBERG_FULL_MATRIX_SCALAR_INDEXES = {
-    "b_inv": "INVERTED",
-    "i32_stl": "STL_SORT",
-    "i64_inv": "INVERTED",
-    "f_inv": "INVERTED",
-    "d_inv": "INVERTED",
-    "vc_trie": "TRIE",
-}
-
-
-def _build_iceberg_full_matrix_table(prefix, cfg, num_rows, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
-    """Iceberg variant of the full-matrix dataset.
-
-    Vectors are stored as raw binary blobs because Iceberg has no
-    fixed-size-list. JSON / Geometry use String / Binary respectively.
-    Returns (snapshot_id, ext_url).
-    """
-    import shutil
-    import struct
-    import tempfile
-
-    from pyiceberg.catalog.sql import SqlCatalog
-    from pyiceberg.schema import Schema as IbgSchema
-    from pyiceberg.types import (
-        BinaryType,
-        BooleanType,
-        DoubleType,
-        FloatType,
-        IntegerType,
-        ListType,
-        LongType,
-        NestedField,
-        StringType,
-        TimestamptzType,
-    )
-
-    iceberg_type_lookup = {
-        "BooleanType": BooleanType(),
-        "IntegerType": IntegerType(),
-        "LongType": LongType(),
-        "FloatType": FloatType(),
-        "DoubleType": DoubleType(),
-        "StringType": StringType(),
-        "TimestamptzType": TimestamptzType(),
-    }
-
-    ids = list(range(num_rows))
-    next_field_id = [3]  # field-id assignment, id=1, schema starts at 2 then bumps
-
-    def fid():
-        x = next_field_id[0]
-        next_field_id[0] += 1
-        return x
-
-    nested_fields = [NestedField(1, "id", LongType(), required=False)]
-    arrow_fields = [pa.field("id", pa.int64(), nullable=True)]
-    arrow_columns = {"id": pa.array(ids, type=pa.int64())}
-
-    # Scalars
-    for name, _dtype, ibg_factory, arrow_type, _extra, value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
-        ibg_type = iceberg_type_lookup[ibg_factory(0)[0]]
-        nested_fields.append(NestedField(fid(), name, ibg_type, required=False))
-        arrow_fields.append(pa.field(name, arrow_type, nullable=True))
-        arrow_columns[name] = pa.array([value_fn(i) for i in ids], type=arrow_type)
-
-    # Array<Int64>: ListType<LongType>
-    arr_name, _arr_dtype, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
-    nested_fields.append(
-        NestedField(
-            fid(),
-            arr_name,
-            ListType(element_id=fid(), element_type=LongType(), element_required=False),
-            required=False,
-        ),
-    )
-    arrow_fields.append(
-        pa.field(arr_name, pa.list_(pa.field("element", pa.int64(), nullable=True)), nullable=True),
-    )
-    arrow_columns[arr_name] = pa.array(
-        [arr_value_fn(i) for i in ids],
-        type=pa.list_(pa.field("element", pa.int64(), nullable=True)),
-    )
-
-    # Geometry → BinaryType (WKB)
-    nested_fields.append(NestedField(fid(), "geo", BinaryType(), required=False))
-    arrow_fields.append(pa.field("geo", pa.binary(), nullable=True))
-    arrow_columns["geo"] = pa.array([_GEOMETRY_WKB] * num_rows, type=pa.binary())
-
-    # Vector fields → BinaryType blobs of dim*sizeof(elem) bytes.
-    fv_arr = _float_vectors(ids, dim)
-    f16_arr = _float16_vectors(ids, dim).view(np.uint16)
-    bf16_arr = _bfloat16_vectors(ids, dim)  # already raw uint16-equivalent
-    i8_arr = _int8_vectors(ids, dim)
-    bin_arr = _binary_vectors_bytes(ids, bin_dim)
-
-    def vec_blobs(name, vtype, vdim):
-        if vtype == DataType.FLOAT_VECTOR:
-            return [struct.pack(f"<{vdim}f", *fv_arr[i].tolist()) for i in range(num_rows)]
-        if vtype == DataType.FLOAT16_VECTOR:
-            return [f16_arr[i].astype(np.uint16).tobytes() for i in range(num_rows)]
-        if vtype == DataType.BFLOAT16_VECTOR:
-            return [bf16_arr[i].tobytes() for i in range(num_rows)]
-        if vtype == DataType.INT8_VECTOR:
-            return [i8_arr[i].tobytes() for i in range(num_rows)]
-        if vtype == DataType.BINARY_VECTOR:
-            return [bin_arr[i].tobytes() for i in range(num_rows)]
-        raise ValueError(f"unsupported vec type {vtype}")
-
-    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        nested_fields.append(NestedField(fid(), name, BinaryType(), required=False))
-        arrow_fields.append(pa.field(name, pa.binary(), nullable=True))
-        arrow_columns[name] = pa.array(vec_blobs(name, vtype, vdim), type=pa.binary())
-
-    ibg_schema = IbgSchema(*nested_fields)
-    arrow_schema = pa.schema(arrow_fields)
-    arrow_table = pa.table(arrow_columns, schema=arrow_schema)
-
-    tmp = tempfile.mkdtemp(prefix="ibg_fm_")
-    try:
-        cat = SqlCatalog(
-            "milvus_test_fm",
-            **{
-                "uri": f"sqlite:///{tmp}/cat.db",
-                "warehouse": f"s3://{cfg['bucket']}/{prefix}",
-                "s3.endpoint": minio_endpoint_url(cfg),
-                "s3.access-key-id": cfg["access_key"],
-                "s3.secret-access-key": cfg["secret_key"],
-                "s3.region": "us-east-1",
-                "s3.path-style-access": "true",
-            },
-        )
-        cat.create_namespace("ext")
-        tbl = cat.create_table("ext.t", schema=ibg_schema)
-        tbl.append(arrow_table)
-
-        snap = tbl.current_snapshot().snapshot_id
-        meta_loc = tbl.metadata_location
-        if not meta_loc.startswith("s3://"):
-            raise RuntimeError(f"unexpected metadata_loc scheme: {meta_loc}")
-        bucket_and_key = meta_loc[len("s3://") :]
-        ext_url = f"s3://{cfg['address']}/{bucket_and_key}"
-        return snap, ext_url
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def build_iceberg_full_matrix_schema(client, ext_path, ext_spec, dim=FULL_MATRIX_DIM, bin_dim=FULL_MATRIX_BINARY_DIM):
-    """Milvus schema for the iceberg full-matrix dataset. Matches
-    ICEBERG_FULL_MATRIX_SCALAR_FIELDS for scalars and FULL_MATRIX_VECTOR_FIELDS
-    for vectors (vectors are stored as iceberg binary blobs but exposed as
-    Milvus vector types; NormalizeExternalArrow reinterprets the bytes)."""
-    schema = client.create_schema(external_source=ext_path, external_spec=ext_spec or build_external_spec())
-    schema.add_field("id", DataType.INT64, external_field="id")
-    for name, dtype, _ibg, _arrow, extra, _value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
-        schema.add_field(name, dtype, external_field=name, **extra)
-    arr_name, arr_elem_dtype, _ = FULL_MATRIX_ARRAY_FIELD
-    schema.add_field(arr_name, DataType.ARRAY, element_type=arr_elem_dtype, max_capacity=8, external_field=arr_name)
-    schema.add_field("geo", DataType.GEOMETRY, external_field="geo")
-    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        schema.add_field(name, vtype, dim=vdim, external_field=name)
-    return schema
-
-
-def create_iceberg_full_matrix_indexes(client, collection_name):
-    """Wire the iceberg-subset scalar indexes + the same 9 vector indexes
-    used by parquet/lance full-matrix."""
-    index_params = client.prepare_index_params()
-    for field, idx_type in ICEBERG_FULL_MATRIX_SCALAR_INDEXES.items():
-        index_params.add_index(field_name=field, index_type=idx_type)
-    for name, _vtype, _vdim, idx_type, metric, params in FULL_MATRIX_VECTOR_FIELDS:
-        kwargs = {"field_name": name, "index_type": idx_type, "metric_type": metric}
-        if params:
-            kwargs["params"] = params
-        index_params.add_index(**kwargs)
-    client.create_index(collection_name, index_params)
-
-
-def _iceberg_full_matrix_assert(client, coll, expected_count):
-    """Iceberg-specific subset of _full_matrix_assert_basic: scalar set is
-    smaller (no Int8/Int16/Bitmap)."""
-    assert query_count(client, coll) == expected_count
-
-    output_fields = ["id"] + [f for f, _, _, _, _, _ in ICEBERG_FULL_MATRIX_SCALAR_FIELDS]
-    output_fields += [FULL_MATRIX_ARRAY_FIELD[0], "geo"]
-    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
-    assert len(rows) == 1, f"id=42 missing: {rows}"
-    r = rows[0]
-    assert r["id"] == 42
-    for name, _dtype, _ibg, _arrow, _extra, value_fn in ICEBERG_FULL_MATRIX_SCALAR_FIELDS:
-        expected = value_fn(42)
-        if name == "j":
-            parsed = r["j"] if isinstance(r["j"], dict) else json.loads(r["j"])
-            assert parsed.get("k") == 42, f"json[k]: {parsed}"
-        elif name in ("f_inv", "d_inv"):
-            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]}"
-        elif name == "ts":
-            assert isinstance(r[name], str) and r[name], "ts empty"
-        else:
-            assert r[name] == expected, f"{name}: {r[name]} != {expected}"
-    arr_name, _, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
-    assert r[arr_name] == arr_value_fn(42), f"{arr_name}: {r[arr_name]}"
-
-    for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        query_vec = _full_matrix_query_vec(name, vdim)
-        hits = client.search(
-            coll,
-            data=query_vec,
-            limit=3,
-            anns_field=name,
-            output_fields=["id"],
-            search_params={"metric_type": metric},
+        dbs = self.list_databases(
+            client,
         )[0]
-        assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
+        assert db_name in list(dbs)
+
+        self.drop_collection(client, coll)
+        self.use_database(client, db_name="default")
+        self.drop_database(client, db_name=db_name)
 
 
-class TestExternalTableFormats(TestMilvusClientV2Base):
+# ============================================================
+# 9. External file formats — parquet / lance-table / iceberg-table
+# ============================================================
+
+
+class TestMilvusClientExternalTableFormats(ExternalTableTestBase):
     """Coverage for the `external_spec.format` string values."""
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fmt", BASIC_FORMATS, ids=BASIC_FORMAT_IDS)
-    def test_basic_format_matrix(self, fmt, minio_env, external_prefix):
-        """Every format uses the shared writer/spec/source registry."""
+    def test_milvus_client_external_table_basic_format_matrix(self, fmt, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table basic format matrix
+        method: Every format uses the shared writer/spec/source registry
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -4949,139 +3457,55 @@ class TestExternalTableFormats(TestMilvusClientV2Base):
             batches,
         )
         schema = build_basic_format_schema(client, fmt, source, ext_spec)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert_basic_format_rows(client, coll, fmt, batches)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert_basic_format_rows(client, coll, fmt, batches)
 
-            hits = client.search(
-                coll,
-                data=[[0.0] * TEST_DIM],
-                limit=3,
-                anns_field="embedding",
-                output_fields=["id"],
-            )[0]
-            assert len(hits) == 3
-            assert all(0 <= hit["id"] < FORMAT_TOTAL_ROWS for hit in hits), f"[{fmt}] invalid search ids: {hits}"
-        finally:
-            client.drop_collection(coll)
+        hits = self.search(
+            client,
+            coll,
+            data=[[0.0] * ct.default_dim],
+            limit=3,
+            anns_field="embedding",
+            output_fields=["id"],
+        )[0][0]
+        assert len(hits) == 3
+        assert all(0 <= hit["id"] < FORMAT_TOTAL_ROWS for hit in hits), f"[{fmt}] invalid search ids: {hits}"
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("fmt", ["vortex", "iceberg-table"], ids=["vortex", "iceberg"])
-    def test_cluster_nightly_heavy_format_smoke(self, fmt, minio_env, external_prefix):
-        """Opt-in cluster/nightly smoke for formats that have exposed QueryNode-only bugs."""
-        if _env("EXTERNAL_TABLE_CLUSTER_SMOKE", "false").lower() != "true":
+    @pytest.mark.parametrize("fmt", ["iceberg-table"], ids=["iceberg"])
+    def test_milvus_client_external_table_cluster_nightly_heavy_format_smoke(self, fmt, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table cluster nightly heavy format smoke
+        method: Opt-in cluster/nightly smoke for formats that have exposed QueryNode-only bugs
+        expected: behavior matches the case assertion.
+        """
+        if os.environ.get("EXTERNAL_TABLE_CLUSTER_SMOKE", "false").lower() != "true":
             pytest.skip("set EXTERNAL_TABLE_CLUSTER_SMOKE=true on a cluster deployment")
 
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
         ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        batches = [(0, DEFAULT_NB), (DEFAULT_NB, DEFAULT_NB)]
+        batches = [(0, ct.default_nb), (ct.default_nb, ct.default_nb)]
         source, ext_spec = write_basic_format_dataset(fmt, minio_client, cfg, ext_url, ext_key, batches)
         schema = build_basic_format_schema(client, fmt, source, ext_spec)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            index_and_load(client, coll)
-            assert_basic_format_rows(client, coll, fmt, batches)
-            client.release_collection(coll)
-            client.load_collection(coll)
-            assert query_count(client, coll) == DEFAULT_NB * 2
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        self.index_and_load(client, coll)
+        assert_basic_format_rows(client, coll, fmt, batches)
+        self.release_collection(client, coll)
+        self.load_collection(client, coll)
+        assert self.query_count(client, coll) == ct.default_nb * 2
 
 
 # ============================================================
 # 10. Full-matrix coverage: every DataType × every Index × every Format
 # ============================================================
 
-# Smaller row count keeps full-matrix tests under ~2 min each: each test
-# builds 21 fields with 10+ scalar indexes and 9 vector indexes.
-FULL_MATRIX_NB = 200
 
-# Vortex regression coverage includes the formerly problematic variable-length
-# fields. milvus#49352 covered Arrow string columns (VARCHAR / JSON) and
-# milvus#49353 covered Arrow binary-backed GEOMETRY.
-_VORTEX_EXCLUDED_FIELDS = set()
-
-
-def _full_matrix_query_vec(vec_field, dim):
-    """Build a search query vector matching the dtype of the given vector
-    field. pymilvus is dtype-strict on the wire — int8 needs np.int8,
-    bf16 needs raw bytes, etc."""
-    for name, vtype, vdim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        if name != vec_field:
-            continue
-        if vtype == DataType.BINARY_VECTOR:
-            return [b"\x00" * (vdim // 8)]
-        if vtype == DataType.INT8_VECTOR:
-            return [np.zeros(vdim, dtype=np.int8)]
-        if vtype == DataType.FLOAT16_VECTOR:
-            return [np.zeros(vdim, dtype=np.float16)]
-        if vtype == DataType.BFLOAT16_VECTOR:
-            return [bytes(vdim * 2)]
-        return [[0.0] * vdim]
-    raise KeyError(vec_field)
-
-
-def _full_matrix_assert_basic(client, coll, expected_count, excluded_fields=()):
-    """Shared assertions: count + per-type spot-checks + search hits per
-    vector field. Used by every full-matrix format test."""
-    assert query_count(client, coll) == expected_count
-    excluded = set(excluded_fields)
-
-    # Spot-check id=42: every scalar field round-trips with the expected
-    # value derived from the same value_fn used to build the parquet.
-    output_fields = ["id"] + [f for f, _, _, _, _ in FULL_MATRIX_SCALAR_FIELDS if f not in excluded]
-    arr_name = FULL_MATRIX_ARRAY_FIELD[0]
-    if arr_name not in excluded:
-        output_fields.append(arr_name)
-    if "geo" not in excluded:
-        output_fields.append("geo")
-    rows = client.query(coll, filter="id == 42", output_fields=output_fields)
-    assert len(rows) == 1, f"id=42 missing: {rows}"
-    r = rows[0]
-    assert r["id"] == 42
-    for name, _dtype, _arrow, _extra, value_fn in FULL_MATRIX_SCALAR_FIELDS:
-        if name in excluded:
-            continue
-        expected = value_fn(42)
-        if name == "j":
-            parsed = r["j"] if isinstance(r["j"], dict) else json.loads(r["j"])
-            assert parsed.get("k") == 42, f"json[k] mismatch: {parsed}"
-        elif name == "f_inv":
-            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]} != {expected}"
-        elif name == "d_inv":
-            assert abs(r[name] - expected) < 1e-3, f"{name}: {r[name]} != {expected}"
-        elif name == "ts":
-            # Server returns an ISO-8601 string; we just assert non-empty.
-            assert isinstance(r[name], str) and r[name], f"ts empty: {r[name]}"
-        else:
-            assert r[name] == expected, f"{name}: {r[name]} != {expected}"
-    arr_name, _, arr_value_fn = FULL_MATRIX_ARRAY_FIELD
-    if arr_name not in excluded:
-        assert r[arr_name] == arr_value_fn(42), f"{arr_name}: {r[arr_name]}"
-
-    # One search per vector field → confirms every (type × index × metric)
-    # combination produced a usable index.
-    for name, _vtype, vdim, _idx, metric, _params in FULL_MATRIX_VECTOR_FIELDS:
-        if name in excluded:
-            continue
-        query_vec = _full_matrix_query_vec(name, vdim)
-        hits = client.search(
-            coll,
-            data=query_vec,
-            limit=3,
-            anns_field=name,
-            output_fields=["id"],
-            search_params={"metric_type": metric},
-        )[0]
-        assert len(hits) == 3, f"[{name}] search returned {len(hits)} hits"
-
-
-class TestExternalTableFullMatrix(TestMilvusClientV2Base):
+class TestMilvusClientExternalTableFullMatrix(ExternalTableTestBase):
     """End-to-end coverage of every supported DataType × Index combination
     on every external file format. A single collection per format carries
     21 fields wired to 8 scalar indexes + 9 vector indexes (4 FloatVector
@@ -5089,8 +3513,12 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
     Int8/Binary vectors with their canonical indexes)."""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_full_matrix_parquet(self, minio_env, external_prefix):
-        """Parquet × full DataType × full Index matrix."""
+    def test_milvus_client_external_table_full_matrix_parquet(self, minio_env, external_prefix):
+        """
+        target: test MilvusClient external table full matrix parquet
+        method: Parquet × full DataType × full Index matrix
+        expected: behavior matches the case assertion.
+        """
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -5103,29 +3531,19 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
             gen_full_matrix_parquet_bytes(FULL_MATRIX_NB, 0),
         )
         schema = build_full_matrix_schema(client, ext_url)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            create_full_matrix_indexes(client, coll)
-            client.load_collection(coll)
-            _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        create_full_matrix_indexes(client, coll)
+        self.load_collection(client, coll)
+        _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_full_matrix_lance(self, minio_env, external_prefix):
-        """Lance × full DataType × full Index matrix.
-
-        Lance writes the same arrow columns (FixedSizeList vectors, native
-        scalar types) into a Lance dataset on MinIO; the iceberg-table
-        path is exercised separately because Iceberg has no FixedSizeList.
+    def test_milvus_client_external_table_full_matrix_lance(self, minio_env, external_prefix):
         """
-        try:
-            import lance  # noqa: F401
-        except ImportError:
-            pytest.skip("lance package not installed in this environment")
-
-        import os
+        target: test MilvusClient external table full matrix lance
+        method: Lance × full DataType × full Index matrix
+        expected: behavior matches the case assertion.
+        """
         import shutil
         import tempfile
 
@@ -5160,90 +3578,28 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
             ext_url,
             ext_spec=build_external_spec(cfg, fmt="lance-table"),
         )
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            create_full_matrix_indexes(client, coll)
-            client.load_collection(coll)
-            _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        create_full_matrix_indexes(client, coll)
+        self.load_collection(client, coll)
+        _full_matrix_assert_basic(client, coll, FULL_MATRIX_NB)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_full_matrix_vortex(self, minio_env, external_prefix):
-        """Vortex × full DataType × full Index matrix.
-
-        Vortex generation runs in the .venv-vortex sidecar (Python >=3.11
-        for vortex-data >= 0.35). The arrow Table is built in the main
-        venv with the shared full-matrix column generator, then streamed
-        to the sidecar via Arrow IPC over stdin so the schema (including
-        FixedSizeList vector dims) is preserved verbatim.
-
-        Splits the full row set into FORMAT_NUM_FILES sibling .vortex
-        files to also exercise multi-file ingestion through the vortex
-        reader path.
+    @pytest.mark.skip(reason="vortex-data requires Python >= 3.11")
+    def test_milvus_client_external_table_full_matrix_vortex(self):
         """
-        _minio_client, cfg = minio_env
-        client = self._client()
-        coll = cf.gen_collection_name_by_testcase_name()
-        ext_url, ext_key = external_prefix["url"], external_prefix["key"]
-        excluded = _VORTEX_EXCLUDED_FIELDS
-
-        # Distribute rows across multiple sibling vortex files.
-        rows_per_file, remainder = divmod(FULL_MATRIX_NB, FORMAT_NUM_FILES)
-        offset = 0
-        for idx in range(FORMAT_NUM_FILES):
-            n = rows_per_file + (1 if idx < remainder else 0)
-            columns = _full_matrix_arrow_columns(
-                n,
-                offset,
-                excluded_fields=excluded,
-            )
-            table = pa.table(columns)
-            _write_vortex_table_to_minio(
-                cfg["bucket"],
-                cfg,
-                ext_key,
-                table,
-                filename=f"data_{idx:03d}.vortex",
-            )
-            offset += n
-        assert offset == FULL_MATRIX_NB
-
-        schema = build_full_matrix_schema(
-            client,
-            ext_url,
-            ext_spec=build_external_spec(cfg, fmt="vortex"),
-            excluded_fields=excluded,
-        )
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            create_full_matrix_indexes(client, coll, excluded_fields=excluded)
-            client.load_collection(coll)
-            _full_matrix_assert_basic(
-                client,
-                coll,
-                FULL_MATRIX_NB,
-                excluded_fields=excluded,
-            )
-        finally:
-            client.drop_collection(coll)
+        target: test MilvusClient external table full matrix vortex
+        method: Vortex × full DataType × full Index matrix
+        expected: behavior matches the case assertion.
+        """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_full_matrix_iceberg(self, minio_env, external_prefix):
-        """Iceberg × full DataType × full Index matrix.
-
-        Iceberg has no native fixed-size-list (vectors stored as binary
-        blobs) and no Int8/Int16 (only 32/64-bit integers), so the iceberg
-        scalar set is a strict subset of FULL_MATRIX_SCALAR_FIELDS. Vector
-        fields and indexes mirror parquet/lance exactly.
+    def test_milvus_client_external_table_full_matrix_iceberg(self, minio_env, external_prefix):
         """
-        try:
-            from pyiceberg.catalog.sql import SqlCatalog  # noqa: F401
-        except ImportError:
-            pytest.skip("pyiceberg not installed. Install with:\n  uv pip install 'pyiceberg[sql-sqlite,s3fs]==0.7.1'")
-
+        target: test MilvusClient external table full matrix iceberg
+        method: Iceberg × full DataType × full Index matrix
+        expected: behavior matches the case assertion.
+        """
         _minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -5260,11 +3616,8 @@ class TestExternalTableFullMatrix(TestMilvusClientV2Base):
             snapshot_id=int(snapshot_id),
         )
         schema = build_iceberg_full_matrix_schema(client, ext_url, ext_spec)
-        client.create_collection(collection_name=coll, schema=schema)
-        try:
-            refresh_and_wait(client, coll)
-            create_iceberg_full_matrix_indexes(client, coll)
-            client.load_collection(coll)
-            _iceberg_full_matrix_assert(client, coll, FULL_MATRIX_NB)
-        finally:
-            client.drop_collection(coll)
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        create_iceberg_full_matrix_indexes(client, coll)
+        self.load_collection(client, coll)
+        _iceberg_full_matrix_assert(client, coll, FULL_MATRIX_NB)

@@ -84,5 +84,9 @@ python-dotenv<=2.0.0
 # for geometry
 shapely==2.1.1
 
+# for external table formats
+pylance==1.0.0
+pyiceberg[sql-sqlite]==0.8.1
+
 # for time zone
 tzdata>=2024.1
