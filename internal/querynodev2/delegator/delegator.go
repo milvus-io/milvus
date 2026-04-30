@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -51,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -296,8 +298,19 @@ func (sd *shardDelegator) executeSearchSubTasks(
 	growing []SegmentEntry,
 	sealedRowCount map[int64]int64,
 ) ([]*internalpb.SearchResults, error) {
+	return sd.executeSearchSubTasksWithModifyFn(ctx, req, sealed, growing, sealedRowCount, sd.modifySearchRequest)
+}
+
+func (sd *shardDelegator) executeSearchSubTasksWithModifyFn(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sealedRowCount map[int64]int64,
+	modifyFn func(*querypb.SearchRequest, querypb.DataScope, []int64, int64) *querypb.SearchRequest,
+) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, modifyFn)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
@@ -319,6 +332,50 @@ func (sd *shardDelegator) executeSearchSubTasks(
 
 	log.Debug("Delegator search done", zap.Int("results", len(results)))
 	return results, nil
+}
+
+// extractFilterExpr extracts the filter expression from a PlanNode.
+func extractFilterExpr(plan *planpb.PlanNode) *planpb.Expr {
+	if vn := plan.GetVectorAnns(); vn != nil {
+		return vn.GetPredicates()
+	}
+	return nil
+}
+
+// makeAdaptiveModifySearchRequest returns a modify function that injects per-segment
+// iterative-filter hints into the SerializedExprPlan when all segments in the batch
+// have been advised to use iterative filter.
+func (sd *shardDelegator) makeAdaptiveModifySearchRequest(
+	origReq *querypb.SearchRequest,
+	advisedHints AdvisedHints,
+) func(*querypb.SearchRequest, querypb.DataScope, []int64, int64) *querypb.SearchRequest {
+	// Pre-serialize the iterative-filter variant of the plan once.
+	var iterativePlan []byte
+	plan := &planpb.PlanNode{}
+	if proto.Unmarshal(origReq.GetReq().GetSerializedExprPlan(), plan) == nil {
+		if vn := plan.GetVectorAnns(); vn != nil && vn.GetQueryInfo() != nil {
+			vn.QueryInfo.Hints = HintIterativeFilter
+			if b, err := proto.Marshal(plan); err == nil {
+				iterativePlan = b
+			}
+		}
+	}
+
+	return func(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
+		nodeReq := sd.modifySearchRequest(req, scope, segmentIDs, targetID)
+		// Only override for sealed (historical) segments; growing segments fall back to default.
+		if scope != querypb.DataScope_Historical || iterativePlan == nil {
+			return nodeReq
+		}
+		// Use iterative filter only when ALL segments in this batch are advised to do so.
+		for _, segID := range segmentIDs {
+			if advisedHints[segID] != HintIterativeFilter {
+				return nodeReq
+			}
+		}
+		nodeReq.Req.SerializedExprPlan = iterativePlan
+		return nodeReq
+	}
 }
 
 // Search preforms search operation on shard.
@@ -388,25 +445,37 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
-	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
-		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
-		if err != nil {
-			return nil, err
-		}
-		if !fallback {
-			return results, nil
-		}
-		// fallback: continue with normal single-stage search below
-		log.Debug("Two-stage search requested fallback, continuing with normal search")
-	}
-
-	const isSecondStageSearch = false
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim)
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, false, sd.getVectorFieldDim)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
+
+	// Compute per-segment filter strategy hints when the adaptive strategy is enabled.
+	var advisedHints AdvisedHints
+	if paramtable.Get().QueryNodeCfg.EnableAdaptiveFilterStrategy.GetAsBool() &&
+		req.GetReq().GetSerializedExprPlan() != nil {
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			plan := &planpb.PlanNode{}
+			if err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan); err == nil {
+				exprPb := extractFilterExpr(plan)
+				if exprPb != nil {
+					threshold := paramtable.Get().QueryNodeCfg.AdaptiveFilterStrategyThreshold.GetAsFloat()
+					advisedHints = AdviseFilterStrategy(exprPb, sd.partitionStats, sealed, threshold)
+				}
+			}
+		}()
+	}
+	// Build the modify function: if we have per-segment hints, wrap modifySearchRequest
+	// so that requests targeting segments that need iterative filter get an updated plan.
+	modifyFn := sd.modifySearchRequest
+	if len(advisedHints) > 0 {
+		modifyFn = sd.makeAdaptiveModifySearchRequest(req, advisedHints)
+	}
+
+	return sd.executeSearchSubTasksWithModifyFn(ctx, req, sealed, growing, sealedRowCount, modifyFn)
 }
 
 // getVectorFieldDim returns the dimension of the vector field with the given field ID.
