@@ -242,6 +242,20 @@ func TestCatalog_CChannelMetaKeyCompatibility(t *testing.T) {
 		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
 	})
 
+	t.Run("ignores sibling keys ending with slash", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		siblingValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "sibling-channel"})
+		require.NoError(t, err)
+		kvStorage[canonicalCChannelMetaKeyForTest+"-foo/"] = string(siblingValue)
+
+		cchannel, err := catalog.GetCChannel(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, cchannel)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyCChannelMetaKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
 	t.Run("save writes canonical key and removes legacy key", func(t *testing.T) {
 		catalog, kvStorage, _ := newTestCatalog(t)
 		legacyValue, err := proto.Marshal(&streamingpb.CChannelMeta{Pchannel: "legacy-channel"})
@@ -356,6 +370,20 @@ func TestCatalog_VersionMetaKeyCompatibility(t *testing.T) {
 		childValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 3})
 		require.NoError(t, err)
 		kvStorage[canonicalVersionKeyForTest+"/child"] = string(childValue)
+
+		version, err := catalog.GetVersion(ctx)
+
+		require.NoError(t, err)
+		assert.Nil(t, version)
+		kv.AssertNotCalled(t, "Remove", mock.Anything, legacyVersionKeyForTest)
+		kv.AssertNotCalled(t, "MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("ignores sibling keys ending with slash", func(t *testing.T) {
+		catalog, kvStorage, kv := newTestCatalog(t)
+		siblingValue, err := proto.Marshal(&streamingpb.StreamingVersion{Version: 3})
+		require.NoError(t, err)
+		kvStorage[canonicalVersionKeyForTest+"-foo/"] = string(siblingValue)
 
 		version, err := catalog.GetVersion(ctx)
 
