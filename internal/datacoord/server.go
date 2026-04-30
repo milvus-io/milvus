@@ -507,12 +507,6 @@ func (s *Server) initServiceDiscovery() error {
 			log.Warn("DataCoord failed to add datanode", zap.Error(err))
 			return err
 		}
-		s.indexEngineVersionManager.AddByRole(typeutil.DataNodeRole, &sessionutil.Session{
-			SessionRaw: sessionutil.SessionRaw{
-				ServerID: Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
-				Address:  Params.DataCoordCfg.IndexNodeAddress.GetValue(),
-			},
-		})
 		s.dnSessionWatcher = sessionutil.EmptySessionWatcher()
 	} else {
 		err := s.rewatchDataNodes(sessions)
@@ -540,6 +534,14 @@ func (s *Server) initServiceDiscovery() error {
 // Note: may apply same node multiple times, so rewatchQueryNodes must be idempotent
 func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) error {
 	s.indexEngineVersionManager.Startup(sessions)
+	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+		s.indexEngineVersionManager.AddByRole(typeutil.QueryNodeRole, &sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
+				Address:  Params.DataCoordCfg.IndexNodeAddress.GetValue(),
+			},
+		})
+	}
 	return nil
 }
 
@@ -573,7 +575,6 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		log.Warn("DataCoord failed to add datanode", zap.Error(err))
 		return err
 	}
-	s.indexEngineVersionManager.StartupByRole(typeutil.DataNodeRole, sessions)
 	return nil
 }
 
@@ -877,7 +878,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			if s.fileResourceObserver != nil {
 				s.fileResourceObserver.Notify()
 			}
-			s.indexEngineVersionManager.AddByRole(typeutil.DataNodeRole, event.Session)
 			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
@@ -892,12 +892,10 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 				return nil
 			}
 			s.nodeManager.RemoveNode(event.Session.ServerID)
-			s.indexEngineVersionManager.RemoveByRole(typeutil.DataNodeRole, event.Session)
 		case sessionutil.SessionUpdateEvent:
 			log.Info("received datanode SessionUpdateEvent",
 				zap.String("address", info.Address),
 				zap.Int64("serverID", info.Version))
-			s.indexEngineVersionManager.UpdateByRole(typeutil.DataNodeRole, event.Session)
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))

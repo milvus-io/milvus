@@ -2041,7 +2041,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.nodeManager.GetClientIDs()
 		assert.EqualValues(t, 1, len(dataNodes))
-		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionAddEvent,
@@ -2072,7 +2072,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionDelEvent,
@@ -2087,7 +2087,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 		_ = svr.nodeManager.GetClientIDs()
 	})
 
@@ -2485,7 +2485,7 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
 func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {

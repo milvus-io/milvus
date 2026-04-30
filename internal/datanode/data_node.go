@@ -165,8 +165,7 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx,
-		sessionutil.WithMaxIndexStorePathVersion(int32(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED)))
+	node.session = sessionutil.NewSession(node.ctx)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}

@@ -240,6 +240,9 @@ message IndexTaskInfo {
   int64 index_store_version = 7 [deprecated = true];
   uint64 mem_size = 8;
   int32 current_scalar_index_version = 9;
+  // The actual index file path layout used by the worker for this build.
+  // See milvus.proto.index.IndexStorePathVersion for value semantics.
+  index.IndexStorePathVersion index_store_path_version = 10;
 }
 
 message IndexJobResults {
