@@ -603,6 +603,95 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
 }
 
+// TestSyncLoadedSegmentsWithReplicaChannelFilter verifies that the leader checker
+// enumerates delegators using WithReplica2Channel(replica) rather than iterating
+// the replica's RW-SQ node list.
+//
+// Context: the original implementation filtered delegators via
+// replica.GetRWSQNodes() when the streaming service is enabled.  After a
+// streaming-node restart, GetRWSQNodes() can return an empty or stale set,
+// causing the checker to silently skip every delegator in the replica.  This
+// leaves them stuck with isServiceable=false indefinitely and triggers an
+// infinite segment-load-task re-scheduling loop.
+//
+// The fix replaces the node-loop with a single
+// ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica)) call, which
+// uses replica.GetNodes() (all node categories: RW, RO, RW-SQ, RO-SQ) and is
+// therefore not affected by a stale RW-SQ set.
+func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicaChannelFilter() {
+	ctx := context.Background()
+	observer := suite.checker
+	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+
+	// Replica nodes are regular querynode IDs (stored in GetRWNodes / GetNodes).
+	// GetRWSQNodes() returns empty for this replica because no RwSqNodes are set.
+	// The patched code must still find the delegator on node 2.
+	observer.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
+	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
+
+	// Segment is loaded on node 1.
+	loadVersion := time.Now().UnixMilli()
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, loadVersion, "test-insert-channel"))
+
+	// Delegator lives on node 2.  WithReplica2Channel uses GetNodes() = [1, 2]
+	// so this delegator is reachable even when GetRWSQNodes() is empty.
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: 1,
+			Channel:      "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(
+				ctx, 1, meta.CurrentTarget),
+		},
+	})
+
+	// The checker must generate a task to sync the loaded segment to the
+	// leader view, proving that the delegator on node 2 was not skipped.
+	tasks := observer.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
+	suite.Equal(tasks[0].ReplicaID(), int64(1))
+	suite.Len(tasks[0].Actions(), 1)
+	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeGrow)
+	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
+	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(1))
+}
+
 func TestLeaderCheckerSuite(t *testing.T) {
 	suite.Run(t, new(LeaderCheckerTestSuite))
 }
