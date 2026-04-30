@@ -111,6 +111,7 @@ func (c *catalog) SaveVersion(ctx context.Context, version *streamingpb.Streamin
 }
 
 func (c *catalog) loadMetaWithLegacyTrailingSlash(ctx context.Context, key string) (string, bool, bool, error) {
+	// Callers must serialize Get/Save for key; read repair is not CAS.
 	keys, values, err := c.metaKV.LoadWithPrefix(ctx, key)
 	if err != nil {
 		return "", false, false, err
@@ -122,7 +123,7 @@ func (c *catalog) loadMetaWithLegacyTrailingSlash(ctx context.Context, key strin
 		case strings.HasSuffix(loadedKey, key):
 			canonicalValue = values[i]
 			foundCanonical = true
-		case strings.HasSuffix(loadedKey, "/"):
+		case strings.HasSuffix(loadedKey, key+"/"):
 			legacyValue = values[i]
 			foundLegacy = true
 		}
