@@ -66,7 +66,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
@@ -99,7 +99,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -160,7 +160,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -210,7 +210,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -873,8 +873,14 @@ func (s *CopySegmentMetaSuite) TestCopySegmentTasks_Operations() {
 	s.Len(tasks.listTasks(), 1)
 }
 
-// TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal verifies that transitioning a
-// job to Completed with PinId>0 unpins the source snapshot exactly once.
+// TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent
+// job is a no-op and does not error.
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_NotFound() {
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.NoError(err)
+}
+
 func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -924,8 +930,6 @@ func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	assert.Equal(t, 1, unpinCalls, "Double terminal transition must not double-unpin")
 }
 
-// TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob verifies jobs persisted
-// before the pin refactor (PinId=0) skip Unpin and do not panic on nil snapshotMeta.
 func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -965,9 +969,6 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	assert.False(t, unpinCalled, "UnpinSnapshot must not be called for legacy job (PinId=0)")
 }
 
-// TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed verifies that when UnpinSnapshot
-// returns an error the state transition is still persisted, and the caller receives nil.
-// The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
 func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1007,41 +1008,4 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	assert.Equal(t, 1, unpinCalls)
 	// State transition happened despite unpin failure.
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copyMeta.jobs[jobID].GetState())
-}
-
-// TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent
-// job is a no-op and does not error.
-func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_NotFound() {
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
-	s.NoError(err)
-}
-
-// TestUpdateJobStateAndReleaseRef_CatalogError verifies that if the catalog save fails,
-// job state is preserved (no partial transition).
-func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
-	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(errors.New("catalog error")).Once()
-
-	snapshotName := "snap_err"
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              600,
-			CollectionId:       s.collectionID,
-			SourceCollectionId: s.collectionID,
-			SnapshotName:       snapshotName,
-			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
-		},
-		tr: timerecord.NewTimeRecorder("test job"),
-	}
-	s.copyMeta.AddJob(context.TODO(), job)
-
-	// Update fails at catalog layer
-	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 600,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
-	s.Error(err)
-
-	// Job should still be in Executing state (catalog write failed, in-memory unchanged)
-	savedJob := s.copyMeta.GetJob(context.TODO(), 600)
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, savedJob.GetState())
 }

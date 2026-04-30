@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -267,4 +268,38 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 		suite.NotNil(fb104)
 		suite.Equal(1, len(fb104.Binlogs))
 	})
+}
+
+// allBinlogs adapts a legacy bool-returning proto mutator to a SegmentOperator
+// and declares only binlog families changed by the mutator for side-prefix rewrite.
+func allBinlogs(fn func(*datapb.SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		before := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
+		ok := fn(s.SegmentInfo)
+		if !ok {
+			return BinlogIncrement{}, false
+		}
+		inc := BinlogIncrement{}
+		if !proto.Equal(&datapb.SegmentInfo{Binlogs: before.GetBinlogs()}, &datapb.SegmentInfo{Binlogs: s.GetBinlogs()}) {
+			inc.Binlogs = s.Binlogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Statslogs: before.GetStatslogs()}, &datapb.SegmentInfo{Statslogs: s.GetStatslogs()}) {
+			inc.Statslogs = s.Statslogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Deltalogs: before.GetDeltalogs()}, &datapb.SegmentInfo{Deltalogs: s.GetDeltalogs()}) {
+			inc.Deltalogs = s.Deltalogs
+		}
+		if !proto.Equal(&datapb.SegmentInfo{Bm25Statslogs: before.GetBm25Statslogs()}, &datapb.SegmentInfo{Bm25Statslogs: s.GetBm25Statslogs()}) {
+			inc.Bm25Statslogs = s.Bm25Statslogs
+		}
+		return inc, true
+	}
+}
+
+// stateOnlyOp adapts a legacy bool-returning SegmentOperator closure to the
+// new (BinlogIncrement, bool) signature for tests that never mutate binlogs.
+func stateOnlyOp(fn func(*SegmentInfo) bool) SegmentOperator {
+	return func(s *SegmentInfo) (BinlogIncrement, bool) {
+		return BinlogIncrement{}, fn(s)
+	}
 }

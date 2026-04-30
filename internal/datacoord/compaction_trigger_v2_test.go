@@ -15,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -91,11 +91,13 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	}
 	segments := genSegmentsForMeta(s.testLabel)
 	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		ctx:            context.TODO(),
+		segments:       NewCachedSegmentsInfo(),
+		segmentPersist: newTestSegmentPersist(),
+		collections:    typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
@@ -284,7 +286,11 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 			},
 		}
 
-		s.Equal(int64(200*1024*1024), getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
+		expectedSize := int64(100 * 1024 * 1024)
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex("DISKANN") {
+			expectedSize = int64(200 * 1024 * 1024)
+		}
+		s.Equal(expectedSize, getExpectedSegmentSize(s.triggerManager.meta, collection.ID, collection.Schema))
 	})
 
 	s.Run("HNSW & DISKANN", func() {
@@ -699,21 +705,17 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		// otherwise schema versions never converge under inspector pressure.
 		s.SetupTest()
 
-		// Wire a mock catalog so meta.UpdateSegment can call catalog.AlterSegments.
-		mockCatalog := mocks.NewDataCoordCatalog(s.T())
-		mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).
-			Return(nil).Once()
-		s.triggerManager.meta.catalog = mockCatalog
-
 		segmentID := int64(424242)
-		s.triggerManager.meta.segments.SetSegment(segmentID, &SegmentInfo{
+		s.Require().NoError(s.triggerManager.meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            segmentID,
 				CollectionID:  s.testLabel.CollectionID,
+				PartitionID:   s.testLabel.PartitionID,
+				InsertChannel: s.testLabel.Channel,
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: 1,
 			},
-		})
+		}))
 
 		// Inline views come from TriggerInline(), not Trigger(). Trigger() returns nothing.
 		// The inline view is applied before isFull() is even consulted, so schema version
@@ -768,25 +770,22 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 	})
 
 	s.Run("applyInlineView UpdateSegment fails logs error and continues", func() {
-		// When meta.UpdateSegment fails (catalog error), applyInlineView logs the error
+		// When meta.UpdateSegment fails, applyInlineView logs the error
 		// and continues rather than aborting the whole inline pass.
 		s.SetupTest()
 
-		// Wire a catalog that rejects AlterSegments.
-		mockCatalog := mocks.NewDataCoordCatalog(s.T())
-		mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).
-			Return(errors.New("catalog error")).Once()
-		s.triggerManager.meta.catalog = mockCatalog
-
 		segmentID := int64(424243)
-		s.triggerManager.meta.segments.SetSegment(segmentID, &SegmentInfo{
+		s.Require().NoError(s.triggerManager.meta.AddSegment(context.Background(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            segmentID,
 				CollectionID:  s.testLabel.CollectionID,
+				PartitionID:   s.testLabel.PartitionID,
+				InsertChannel: s.testLabel.Channel,
 				State:         commonpb.SegmentState_Flushed,
 				SchemaVersion: 1,
 			},
-		})
+		}))
+		s.triggerManager.meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("persist error")})
 
 		mockPolicy := &testCompactionPolicy{
 			enabled:    true,

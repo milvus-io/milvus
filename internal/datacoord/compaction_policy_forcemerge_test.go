@@ -40,7 +40,7 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	meta, err := newMemoryMeta(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
+		meta.segments.SetSegment(id, segment, 0)
 	}
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())

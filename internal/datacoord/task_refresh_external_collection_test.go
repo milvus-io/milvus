@@ -440,21 +440,21 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Create segments info
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		segments.SetSegment(1, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
 				CollectionID: 100,
 				State:        commonpb.SegmentState_Flushed,
 			},
-		})
+		}, 0)
 		segments.SetSegment(2, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           2,
 				CollectionID: 100,
 				State:        commonpb.SegmentState_Flushed,
 			},
-		})
+		}, 0)
 
 		mt := &meta{
 			segments:    segments,
@@ -480,7 +480,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Create segments info with existing segments
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		segments.SetSegment(1, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -488,7 +488,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 				State:        commonpb.SegmentState_Flushed,
 				NumOfRows:    500,
 			},
-		})
+		}, 0)
 		segments.SetSegment(2, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           2,
@@ -496,7 +496,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 				State:        commonpb.SegmentState_Flushed,
 				NumOfRows:    600,
 			},
-		})
+		}, 0)
 		segments.SetSegment(3, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           3,
@@ -504,13 +504,11 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 				State:        commonpb.SegmentState_Dropped, // already dropped
 				NumOfRows:    100,
 			},
-		})
+		}, 0)
 
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
@@ -532,7 +530,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Create 10 segments
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		for i := int64(1); i <= 10; i++ {
 			segments.SetSegment(i, &SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
@@ -541,14 +539,12 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 					State:        commonpb.SegmentState_Flushed,
 					NumOfRows:    100,
 				},
-			})
+			}, 0)
 		}
 
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
 
@@ -565,19 +561,16 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 	})
 
 	t.Run("update_segments_failed", func(t *testing.T) {
-		catalog := &stubCatalog{
-			alterSegmentErr: errors.New("alter segments failed"),
-		}
+		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		assert.NoError(t, err)
 
 		// Create segments info
-		segments := NewSegmentsInfo()
-		mt := &meta{
-			catalog:     catalog,
-			segments:    segments,
-			collections: newTestCollections(100),
-		}
+		segments := NewCachedSegmentsInfo()
+		mt := newTestMetaFromCache(t, segments, nil)
+		mt.catalog = catalog
+		mt.collections = newTestCollections(100)
+		mt.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("alter segments failed")})
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
 			TaskId:         1001,
@@ -640,7 +633,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		mt := &meta{
 			segments:    segments,
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -686,7 +679,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		mt := &meta{
 			segments:    segments,
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -724,7 +717,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		mt := &meta{
 			segments:    segments,
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -758,7 +751,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
 		mt := &meta{
@@ -799,14 +792,14 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
 
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		segments.SetSegment(1, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
 				CollectionID: 100,
 				State:        commonpb.SegmentState_Flushed,
 			},
-		})
+		}, 0)
 
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
@@ -1065,7 +1058,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Create segments and meta
-		segments := NewSegmentsInfo()
+		segments := NewCachedSegmentsInfo()
 		segments.SetSegment(1, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -1073,7 +1066,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 				State:        commonpb.SegmentState_Flushed,
 				NumOfRows:    500,
 			},
-		})
+		}, 0)
 
 		mt := &meta{
 			catalog:     catalog,
@@ -1137,7 +1130,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 		mt := &meta{
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 			collections: collections,
 		}
 
@@ -1335,11 +1328,9 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	err = refreshMeta.AddTask(protoTask)
 	assert.NoError(t, err)
 
-	segments := NewSegmentsInfo()
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	segments := NewCachedSegmentsInfo()
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
@@ -1395,7 +1386,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedValidateSourceF
 	err = refreshMeta.AddTask(protoTask)
 	assert.NoError(t, err)
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -1508,7 +1499,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 	assert.NoError(t, err)
 
 	// Create existing segments
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(1, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           1,
@@ -1516,7 +1507,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 			State:        commonpb.SegmentState_Flushed,
 			NumOfRows:    1000,
 		},
-	})
+	}, 0)
 	segments.SetSegment(2, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           2,
@@ -1524,12 +1515,10 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 			State:        commonpb.SegmentState_Flushed,
 			NumOfRows:    2000,
 		},
-	})
+	}, 0)
 
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	protoTask := &datapb.ExternalCollectionRefreshTask{
@@ -1567,7 +1556,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 	assert.NoError(t, err)
 
 	// Create 10 existing segments
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	for i := int64(1); i <= 10; i++ {
 		segments.SetSegment(i, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -1576,13 +1565,11 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 				State:        commonpb.SegmentState_Flushed,
 				NumOfRows:    1000,
 			},
-		})
+		}, 0)
 	}
 
-	mt := &meta{
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = newTestCollections(100)
 
 	alloc := &stubAllocator{nextID: 99999}
 	protoTask := &datapb.ExternalCollectionRefreshTask{
@@ -1618,7 +1605,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_UpdateSegmentsInfoFailed(t *te
 	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 	assert.NoError(t, err)
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
 		collections: newTestCollections(100),
@@ -1669,7 +1656,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersi
 	err = refreshMeta.AddTask(protoTask)
 	assert.NoError(t, err)
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),

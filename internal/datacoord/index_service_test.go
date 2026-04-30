@@ -803,56 +803,53 @@ func TestServer_AlterIndex(t *testing.T) {
 		meta: &meta{
 			catalog:   catalog,
 			indexMeta: indexMeta,
-			segments: &SegmentsInfo{
-				compactionTo: make(map[int64][]int64),
-				segments: map[UniqueID]*SegmentInfo{
-					invalidSegID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             invalidSegID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								// timesamp > index start time, will be filtered out
-								Timestamp: createTS + 1,
-							},
-						},
-					},
-					segID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
-							CreatedByCompaction: true,
-							CompactionFrom:      []int64{segID - 1},
-						},
-					},
-					segID - 1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Dropped,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
+			segments: newTestCachedSegmentsInfo(map[UniqueID]*SegmentInfo{
+				invalidSegID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             invalidSegID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							// timesamp > index start time, will be filtered out
+							Timestamp: createTS + 1,
 						},
 					},
 				},
-			},
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS,
+						},
+						CreatedByCompaction: true,
+						CompactionFrom:      []int64{segID - 1},
+					},
+				},
+				segID - 1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Dropped,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS,
+						},
+					},
+				},
+			}),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1040,10 +1037,10 @@ func TestServer_GetIndexState(t *testing.T) {
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 	}
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 
 	t.Run("index state is unissued", func(t *testing.T) {
@@ -1096,7 +1093,7 @@ func TestServer_GetIndexState(t *testing.T) {
 			},
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 	}
 	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx.Insert(indexID, &model.SegmentIndex{
@@ -1118,7 +1115,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	})
 	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx)
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 
 	t.Run("index state is none", func(t *testing.T) {
@@ -1183,7 +1180,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 		meta: &meta{
 			catalog:   indexMeta.catalog,
 			indexMeta: indexMeta,
-			segments:  NewSegmentsInfo(),
+			segments:  NewCachedSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1247,7 +1244,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
 			lastWrittenTime: time.Time{},
-		})
+		}, 0)
 
 		resp, err := s.GetSegmentIndexState(ctx, req)
 		assert.NoError(t, err)
@@ -1312,7 +1309,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		meta: &meta{
 			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segments:  NewSegmentsInfo(),
+			segments:  NewCachedSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1347,7 +1344,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 				UserIndexParams: nil,
 			},
 		}
-		s.meta.segments = NewSegmentsInfo()
+		s.meta.segments = NewCachedSegmentsInfo()
 		s.meta.segments.SetSegment(segID, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             segID,
@@ -1366,7 +1363,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
 			lastWrittenTime: time.Time{},
-		})
+		}, 0)
 
 		resp, err := s.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
@@ -1393,7 +1390,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 			IndexSerializedSize: 0,
 			WriteHandoff:        false,
 		})
-		s.meta.segments = NewSegmentsInfo()
+		s.meta.segments = NewCachedSegmentsInfo()
 		s.meta.segments.SetSegment(segID, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             segID,
@@ -1412,7 +1409,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
 			lastWrittenTime: time.Time{},
-		})
+		}, 0)
 
 		resp, err := s.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
@@ -1647,7 +1644,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 		},
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
@@ -1813,7 +1810,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 	s.meta.indexMeta.segmentIndexes.Insert(segID-1, segIdx2)
 
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 	RegisterDDLCallbacks(s)
 
@@ -1994,7 +1991,7 @@ func TestServer_ListIndexes(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2190,7 +2187,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 		},
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
@@ -2285,7 +2282,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 	})
 	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx1)
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 	RegisterDDLCallbacks(s)
 
@@ -2451,7 +2448,7 @@ func TestServer_DropIndex(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewCachedSegmentsInfo(),
 		},
 		broker:          b,
 		allocator:       mock0Allocator,
@@ -2475,7 +2472,7 @@ func TestServer_DropIndex(t *testing.T) {
 			MaxRowNum:      65536,
 			LastExpireTime: createTS,
 		},
-	})
+	}, 0)
 
 	t.Run("server not available", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
@@ -2606,7 +2603,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments:     NewSegmentsInfo(),
+			segments:     NewCachedSegmentsInfo(),
 			chunkManager: cli,
 		},
 		allocator:       mock0Allocator,
@@ -2641,7 +2638,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 			MaxRowNum:      65536,
 			LastExpireTime: createTS,
 		},
-	})
+	}, 0)
 
 	t.Run("server not available", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
@@ -2701,7 +2698,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		},
 	}
 	m := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -2738,7 +2735,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		},
 	}
 	for id, segment := range segments {
-		m.segments.SetSegment(id, segment)
+		m.segments.SetSegment(id, segment, 0)
 	}
 	indexInspector := &indexInspector{
 		meta: m,

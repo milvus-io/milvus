@@ -624,10 +624,113 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 
-	operators := []UpdateOperator{}
+	mutations := map[int64][]SegmentOperator{}
+	var newSegments []*datapb.SegmentInfo
+	var validationSkipped bool
+	reqCopy := req
+
+	applySaveBinlogPaths := func(applyStateAndStorage bool) SegmentOperator {
+		return func(seg *SegmentInfo) (BinlogIncrement, bool) {
+			if applyStateAndStorage {
+				seg.StorageVersion = reqCopy.GetStorageVersion()
+
+				if reqCopy.GetDropped() {
+					seg.State = commonpb.SegmentState_Dropped
+					seg.DroppedAt = uint64(time.Now().UnixNano())
+				} else if reqCopy.GetFlushed() {
+					if enableSortCompaction() && reqCopy.GetSegLevel() != datapb.SegmentLevel_L0 {
+						seg.IsInvisible = true
+					}
+					seg.State = commonpb.SegmentState_Flushed
+				}
+			}
+
+			// Binlogs
+			if reqCopy.GetWithFullBinlogs() {
+				seg.Binlogs = mergeFieldBinlogs(nil, reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(nil, reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2Bm25LogPaths())
+			} else {
+				seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), reqCopy.GetField2Bm25LogPaths())
+			}
+			if len(reqCopy.GetDeltalogs()) > 0 {
+				seg.deltaRowcount.Store(-1)
+			}
+
+			// Checkpoint
+			skipCheck := reqCopy.GetWithFullBinlogs()
+			var cpNumRows int64
+			for _, cp := range reqCopy.GetCheckPoints() {
+				if cp.SegmentID != seg.GetID() {
+					continue
+				}
+				if cp.GetPosition() == nil {
+					continue
+				}
+				if !skipCheck && seg.DmlPosition != nil && seg.DmlPosition.Timestamp >= cp.Position.Timestamp {
+					continue
+				}
+				cpNumRows = cp.GetNumOfRows()
+				seg.DmlPosition = cp.GetPosition()
+			}
+
+			// Num rows from binlog, falling back to checkpoint for storage-v3/L0
+			// updates whose insert binlogs are intentionally empty.
+			count := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo)
+			if count > 0 {
+				seg.NumOfRows = count
+			} else if cpNumRows > 0 {
+				seg.NumOfRows = cpNumRows
+			}
+
+			// Manifest
+			if reqCopy.GetManifestPath() != "" {
+				seg.ManifestPath = reqCopy.GetManifestPath()
+			}
+
+			// Start position for this segment
+			for _, pos := range reqCopy.GetStartPositions() {
+				if pos.GetSegmentID() == seg.GetID() && len(pos.GetStartPosition().GetMsgID()) > 0 {
+					seg.StartPosition = pos.GetStartPosition()
+				}
+			}
+
+			// Drop empty flushing segments
+			if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
+				(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+			}
+			return BinlogIncrement{
+				Binlogs:       seg.Binlogs,
+				Statslogs:     seg.Statslogs,
+				Deltalogs:     seg.Deltalogs,
+				Bm25Statslogs: seg.Bm25Statslogs,
+			}, true
+		}
+	}
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
+		// Insert new L0 segment if it doesn't exist
+		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		if segment == nil {
+			newSegment := NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            req.GetSegmentID(),
+				CollectionID:  req.GetCollectionID(),
+				PartitionID:   req.GetPartitionID(),
+				InsertChannel: req.GetChannel(),
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L0,
+			})
+			applySaveBinlogPaths(false)(newSegment)
+			newSegments = append(newSegments, newSegment.SegmentInfo)
+		} else {
+			mutations[req.GetSegmentID()] = []SegmentOperator{applySaveBinlogPaths(false)}
+		}
 	} else {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// validate level one segment
@@ -648,61 +751,67 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
-		// Set storage version
-		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
-
-		// Set segment state
+		// Set segment state side effects
 		if req.GetDropped() {
-			// segmentManager manages growing segments
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
-			}
-			// set segment to SegmentState_Flushed
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
 		}
+
+		// Validate inside SegmentOperator: check against persist value (lock-free CAS)
+		validate := func(seg *SegmentInfo) (BinlogIncrement, bool) {
+			if !reqCopy.GetWithFullBinlogs() {
+				return BinlogIncrement{}, true
+			}
+			if seg.State == commonpb.SegmentState_Flushed && !reqCopy.GetDropped() {
+				log.Info("segment is already flushed, ignoring save binlog paths",
+					zap.Int64("segmentID", seg.GetID()))
+				validationSkipped = true
+				return BinlogIncrement{}, false
+			}
+			for _, cp := range reqCopy.GetCheckPoints() {
+				if cp.SegmentID == seg.GetID() && seg.GetDmlPosition() != nil &&
+					cp.GetPosition().GetTimestamp() < seg.GetDmlPosition().GetTimestamp() {
+					log.Info("dml time tick is stale, ignoring save binlog paths",
+						zap.Int64("segmentID", seg.GetID()),
+						zap.Uint64("incoming", cp.GetPosition().GetTimestamp()),
+						zap.Uint64("existing", seg.GetDmlPosition().GetTimestamp()))
+					validationSkipped = true
+					return BinlogIncrement{}, false
+				}
+			}
+			return BinlogIncrement{}, true
+		}
+
+		mutations[req.GetSegmentID()] = []SegmentOperator{validate, applySaveBinlogPaths(true)}
 	}
 
-	if req.GetWithFullBinlogs() {
-		// check checkpoint will be executed at updateSegmentPack validation to ignore the illegal checkpoint update.
-		operators = append(operators, UpdateBinlogsFromSaveBinlogPathsOperator(
-			req.GetSegmentID(),
-			req.GetField2BinlogPaths(),
-			req.GetField2StatslogPaths(),
-			req.GetDeltalogs(),
-			req.GetField2Bm25LogPaths(),
-		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
-	} else {
-		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
-			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
+	// Start positions for other segments
+	for _, pos := range req.GetStartPositions() {
+		if len(pos.GetStartPosition().GetMsgID()) == 0 || pos.GetSegmentID() == req.GetSegmentID() {
+			continue
+		}
+		segID := pos.GetSegmentID()
+		sp := pos.GetStartPosition()
+		mutations[segID] = append(mutations[segID], func(seg *SegmentInfo) (BinlogIncrement, bool) {
+			seg.StartPosition = sp
+			return BinlogIncrement{}, true
+		})
 	}
-
-	// save manifest, start positions and checkpoints
-	operators = append(operators,
-		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
-		UpdateStartPosition(req.GetStartPositions()),
-		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
-	)
 
 	// Update segment info in memory and meta.
-	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
-			log.Error("save binlog and checkpoints failed", zap.Error(err))
-			return merr.Status(err), nil
-		}
-		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
+	if err := s.meta.UpdateSegmentsInfo(ctx, mutations, newSegments...); err != nil {
+		log.Error("save binlog and checkpoints failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	if validationSkipped {
+		return merr.Success(), nil
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	log.Info("SaveBinlogPaths sync segment with meta",
 		zap.Any("checkpoints", req.GetCheckPoints()),
-		zap.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
-		zap.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
-		zap.Strings("statslogs", stringifyBinlogs(req.GetField2StatslogPaths())),
-		zap.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)
 
 	// Validate manifest segment after update
