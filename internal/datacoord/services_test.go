@@ -4741,6 +4741,47 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 		assert.Len(t, resp.GetJobs(), 0)
 	})
 
+	t.Run("success_list_all", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedCollectionID int64
+		expectedJobs := []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:          123,
+				CollectionId:   100,
+				CollectionName: "test_collection_1",
+				State:          indexpb.JobState_JobStateFinished,
+				Progress:       100,
+			},
+			{
+				JobId:          122,
+				CollectionId:   200,
+				CollectionName: "test_collection_2",
+				State:          indexpb.JobState_JobStateFailed,
+				Progress:       50,
+			},
+		}
+
+		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).To(
+			func(_ *externalCollectionRefreshManager, _ context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error) {
+				capturedCollectionID = collectionID
+				return expectedJobs, nil
+			}).Build()
+		defer mockListJobs.UnPatch()
+
+		server := &Server{
+			externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{})
+
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int64(0), capturedCollectionID)
+		assert.Len(t, resp.GetJobs(), 2)
+	})
+
 	t.Run("success_with_jobs", func(t *testing.T) {
 		ctx := context.Background()
 

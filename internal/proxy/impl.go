@@ -7866,7 +7866,8 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	}, nil
 }
 
-// ListRefreshExternalCollectionJobs lists refresh jobs for an external collection
+// ListRefreshExternalCollectionJobs lists refresh jobs for external collections.
+// An empty collection name lists all jobs.
 func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
@@ -7887,30 +7888,32 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 
 	log.Debug(rpcReceived(method))
 
-	// Validate collection name
-	if err := validateCollectionName(req.GetCollectionName()); err != nil {
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
+	var collectionID int64
+	if req.GetCollectionName() != "" {
+		if err := validateCollectionName(req.GetCollectionName()); err != nil {
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
 
-	// Get collection info from cache and validate it's an external collection
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
-	if err != nil {
-		log.Warn("failed to get collection info", zap.Error(err))
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
+		// Get collection info from cache and validate it's an external collection
+		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		if err != nil {
+			log.Warn("failed to get collection info", zap.Error(err))
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
 
-	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
-		log.Warn("collection is not an external collection")
-		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
-		}, nil
-	}
+		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+			log.Warn("collection is not an external collection")
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
+			}, nil
+		}
 
-	collectionID := collectionInfo.collID
+		collectionID = collectionInfo.collID
+	}
 
 	// Call DataCoord to list jobs
 	resp, err := node.mixCoord.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{

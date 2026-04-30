@@ -429,6 +429,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.DbName = t.GetDbName()
 
 	isExternalCollection := typeutil.IsExternalCollection(t.schema)
+	hasExternalConfig := t.schema.GetExternalSource() != "" || t.schema.GetExternalSpec() != ""
+	if hasExternalConfig && !isExternalCollection {
+		return merr.WrapErrParameterInvalidMsg(
+			"external_source/external_spec require external_field mappings on collection %s",
+			t.schema.GetName())
+	}
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
@@ -713,6 +719,9 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	// --- new field property constraints ---
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
+	}
+	if newFieldSchema.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("add field operation does not support external field mapping, field name = %s", newFieldSchema.GetName())
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", newFieldSchema.GetName()))

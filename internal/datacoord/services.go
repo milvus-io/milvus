@@ -2785,7 +2785,8 @@ func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *
 	}, nil
 }
 
-// ListRefreshExternalCollectionJobs lists refresh jobs for a collection
+// ListRefreshExternalCollectionJobs lists refresh jobs for a collection.
+// A zero collectionID lists jobs for all external collections.
 func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionId()))
