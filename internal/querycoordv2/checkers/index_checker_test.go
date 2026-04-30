@@ -22,11 +22,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -352,6 +354,88 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeReopen)
+}
+
+func TestRemoveRedundantIndex(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	catalog := catalogmocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	nodeMgr := session.NewNodeManager()
+	metaMgr := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	distManager := meta.NewDistributionManager(nodeMgr)
+	broker := meta.NewMockBroker(t)
+	targetMgr := meta.NewMockTargetManager(t)
+	checker := NewIndexChecker(metaMgr, distManager, broker, nodeMgr, targetMgr)
+	targetMgr.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cid, sid int64, i3 int32) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:    sid,
+			Level: datapb.SegmentLevel_L1,
+		}
+	}).Maybe()
+
+	// meta
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "test_remove_redundant_index",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
+		},
+	}
+	require.NoError(t, checker.meta.PutCollection(ctx, coll))
+	require.NoError(t, checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2})))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
+
+	// dist
+	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
+	segment.IndexInfo = map[int64]*querypb.FieldIndexInfo{
+		1000: {
+			FieldID:     101,
+			IndexID:     1000,
+			EnableIndex: true,
+		},
+		1001: {
+			FieldID:     102,
+			IndexID:     1001,
+			EnableIndex: true,
+		},
+	}
+	checker.dist.SegmentDistManager.Update(1, segment)
+
+	// broker
+	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
+		Return([]*datapb.SegmentInfo{}, nil).Maybe()
+
+	tasks := checker.Check(context.Background())
+	require.Len(t, tasks, 1)
+	require.Len(t, tasks[0].Actions(), 1)
+	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	require.True(t, ok)
+	require.EqualValues(t, 200, tasks[0].ReplicaID())
+	require.Equal(t, task.ActionTypeReopen, action.Type())
+	require.EqualValues(t, 2, action.GetSegmentID())
 }
 
 func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
