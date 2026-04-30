@@ -178,6 +178,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 	case "TestSubscribeChannelTask",
 		"TestUnsubscribeChannelTask",
 		"TestLoadSegmentTask",
+		"TestLoadSegmentReopenTask",
 		"TestLoadSegmentTaskNotIndex",
 		"TestLoadSegmentTaskFailed",
 		"TestTaskCanceled",
@@ -532,6 +533,110 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
 	}
+}
+
+func (suite *TaskSuite) TestLoadSegmentReopenTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segmentID := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestLoadSegmentReopenTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		}, nil
+	})
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+		return req.GetLoadScope() == querypb.LoadScope_Reopen &&
+			req.GetDstNodeID() == targetNode &&
+			len(req.GetInfos()) == 1 &&
+			req.GetInfos()[0].GetSegmentID() == segmentID
+	})).Return(merr.Success(), nil)
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	segment := &datapb.SegmentInfo{
+		ID:            segmentID,
+		CollectionID:  suite.collection,
+		InsertChannel: channel.ChannelName,
+		PartitionID:   1,
+	}
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReopen, channel.GetChannelName(), segmentID),
+	)
+	suite.NoError(err)
+	err = suite.scheduler.Add(task)
+	suite.NoError(err)
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{segment}, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.assertExecutedFlagChan(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Segments: map[int64]*querypb.SegmentDist{
+				segmentID: {NodeID: targetNode, Version: 0},
+			},
+			Channel: channel.ChannelName,
+		},
+	})
+	suite.dist.SegmentDistManager.Update(targetNode, meta.SegmentFromInfo(segment))
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
 }
 
 func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
