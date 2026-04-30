@@ -116,6 +116,10 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				subSearchResultData[0].Scores[k] *= -1
 			}
 		}
+		// Clamp scores to their mathematical bounds (e.g. [-1, 1] for COSINE).
+		// Floating-point arithmetic in Knowhere/Segcore can produce values like
+		// 1.0000001192092896 for identical vectors; see github.com/milvus-io/milvus/issues/49059.
+		metric.ClampCosineScores(subSearchResultData[0].Scores, metricType)
 		return &milvuspb.SearchResults{
 			Status:  merr.Success(),
 			Results: subSearchResultData[0],
@@ -214,6 +218,10 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 			ret.Results.Scores[k] *= -1
 		}
 	}
+	// Clamp scores to their mathematical bounds (e.g. [-1, 1] for COSINE).
+	// Floating-point arithmetic in Knowhere/Segcore can produce values like
+	// 1.0000001192092896 for identical vectors; see github.com/milvus-io/milvus/issues/49059.
+	metric.ClampCosineScores(ret.Results.Scores, metricType)
 	return ret, nil
 }
 
@@ -399,6 +407,10 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			ret.Results.Scores[k] *= -1
 		}
 	}
+	// Clamp scores to their mathematical bounds (e.g. [-1, 1] for COSINE).
+	// Floating-point arithmetic in Knowhere/Segcore can produce values like
+	// 1.0000001192092896 for identical vectors; see github.com/milvus-io/milvus/issues/49059.
+	metric.ClampCosineScores(ret.Results.Scores, metricType)
 	return ret, nil
 }
 
@@ -547,6 +559,10 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			ret.Results.Scores[k] *= -1
 		}
 	}
+	// Clamp scores to their mathematical bounds (e.g. [-1, 1] for COSINE).
+	// Floating-point arithmetic in Knowhere/Segcore can produce values like
+	// 1.0000001192092896 for identical vectors; see github.com/milvus-io/milvus/issues/49059.
+	metric.ClampCosineScores(ret.Results.Scores, metricType)
 	return ret, nil
 }
 
