@@ -6548,10 +6548,11 @@ type dataNodeConfig struct {
 	FileReadConcurrency ParamItem `refreshable:"false"`
 
 	// memory management
-	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
-	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
-	MemoryCheckInterval       ParamItem `refreshable:"true"`
-	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
+	MemoryForceSyncEnable      ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentNum  ParamItem `refreshable:"true"`
+	MemoryCheckInterval        ParamItem `refreshable:"true"`
+	MemoryForceSyncWatermark   ParamItem `refreshable:"true"`
+	SlotProtectFreeMemoryRatio ParamItem `refreshable:"true"`
 
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
@@ -6727,6 +6728,22 @@ Setting this parameter too small causes the system to store a small amount of da
 		Export:       true,
 	}
 	p.MemoryCheckInterval.Init(base.mgr)
+
+	p.SlotProtectFreeMemoryRatio = ParamItem{
+		Key:          "dataNode.memory.slotProtectFreeMemoryRatio",
+		Version:      "2.6.15",
+		DefaultValue: "0.1",
+		Doc:          "When free memory ratio is lower than this threshold, DataNode reports zero available slots to stop accepting new tasks.",
+		Export:       true,
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio <= 0 || ratio >= 1 {
+				ratio = 0.1
+			}
+			return strconv.FormatFloat(ratio, 'f', -1, 64)
+		},
+	}
+	p.SlotProtectFreeMemoryRatio.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		p.MemoryForceSyncWatermark = ParamItem{
