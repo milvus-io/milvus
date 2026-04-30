@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -52,6 +53,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
+	info := &SearchInfo{
+		planInfo: &planpb.QueryInfo{
+			GroupByFieldIds: []int64{101},
+		},
+	}
+
+	assert.Equal(t, internalpb.SearchType_DEFAULT, info.DetermineSearchType(false))
+}
+
+func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "category", DataType: schemapb.DataType_VarChar},
+	}}
+
+	info, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldKey, Value: "brand"},
+		{Key: GroupByFieldsKey, Value: "category"},
+	}, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{101}, info.groupByFieldIds)
+	assert.Equal(t, []string{"brand"}, info.groupByFieldNames)
+
+	info, err = parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldKey, Value: " "},
+		{Key: GroupByFieldsKey, Value: "brand, category"},
+	}, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
+	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
+}
 
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, validateCollectionName("abc"))

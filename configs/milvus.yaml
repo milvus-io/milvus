@@ -342,6 +342,11 @@ proxy:
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
+  # maximum number of SearchAggregation result entries, calculated as Nq * DerivedTopK * DerivedGroupSize.
+  # DerivedTopK is the product of all aggregation level sizes. DerivedGroupSize is the max top_hits size across all levels, or 1 when top_hits is absent.
+  # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
+  # Disabled if the value is less or equal to 0.
+  maxSearchAggregationResultEntries: 10000
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.

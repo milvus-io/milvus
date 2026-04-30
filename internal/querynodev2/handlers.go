@@ -474,8 +474,10 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
 		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
-			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
-			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
+			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).
+			WithGroupSize(req.GetReq().GetGroupSize()).
+			WithGroupByFieldIdsFromProto(req.GetReq().GetGroupByFieldId(), req.GetReq().GetGroupByFieldIds()).
+			WithAdvance(req.GetReq().GetIsAdvanced()))
 
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.
