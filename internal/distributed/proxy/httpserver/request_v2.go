@@ -602,7 +602,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue), zap.Error(err))
 		return nil, merr.WrapErrParameterInvalidMsg("convert defaultValue fail, err: %s", err.Error())
 	}
-	if dataType == schemapb.DataType_Array {
+	if dataType == schemapb.DataType_Array || dataType == schemapb.DataType_ArrayOfVector {
 		if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 			log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
 			return nil, merr.WrapErrParameterInvalidMsg("element data type %s is invalid(case sensitive)", field.ElementDataType)
@@ -617,6 +617,71 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
 	return fieldSchema, nil
+}
+
+// StructArrayFieldSchema describes a struct array field in RESTful v2 API.
+// Each struct array field contains multiple sub-fields; every sub-field must
+// be declared as either Array (scalar element) or ArrayOfVector (vector element).
+type StructArrayFieldSchema struct {
+	FieldName   string                 `json:"fieldName" binding:"required"`
+	Description string                 `json:"description"`
+	Fields      []FieldSchema          `json:"fields" binding:"required"`
+	TypeParams  map[string]interface{} `json:"typeParams"`
+}
+
+// GetProto converts the RESTful StructArrayFieldSchema to its proto counterpart.
+// Only Array / ArrayOfVector data types are allowed for sub-fields.
+func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.StructArrayFieldSchema, error) {
+	if len(sf.Fields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("struct field %s must contain at least one sub-field", sf.FieldName)
+	}
+	proto := &schemapb.StructArrayFieldSchema{
+		Name:        sf.FieldName,
+		Description: sf.Description,
+		TypeParams:  []*commonpb.KeyValuePair{},
+	}
+	subNames := map[string]struct{}{}
+	for i := range sf.Fields {
+		sub := sf.Fields[i]
+		subProto, err := sub.GetProto(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if subProto.DataType != schemapb.DataType_Array && subProto.DataType != schemapb.DataType_ArrayOfVector {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s must be Array or ArrayOfVector, got %s",
+				sub.FieldName, sf.FieldName, sub.DataType)
+		}
+		if subProto.IsPrimaryKey || subProto.IsPartitionKey || subProto.IsClusteringKey {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot be primary / partition / clustering key",
+				sub.FieldName, sf.FieldName)
+		}
+		if subProto.Nullable {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot be nullable",
+				sub.FieldName, sf.FieldName)
+		}
+		if subProto.DefaultValue != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"sub-field %s of struct %s cannot set defaultValue",
+				sub.FieldName, sf.FieldName)
+		}
+		if _, dup := subNames[subProto.Name]; dup {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
+		}
+		subNames[subProto.Name] = struct{}{}
+		proto.Fields = append(proto.Fields, subProto)
+	}
+	for key, param := range sf.TypeParams {
+		value, err := getElementTypeParams(param)
+		if err != nil {
+			return nil, err
+		}
+		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
+	}
+	return proto, nil
 }
 
 type FunctionScore struct {
@@ -634,10 +699,11 @@ type FunctionSchema struct {
 }
 
 type CollectionSchema struct {
-	Fields             []FieldSchema    `json:"fields"`
-	Functions          []FunctionSchema `json:"functions"`
-	AutoId             bool             `json:"autoID"`
-	EnableDynamicField bool             `json:"enableDynamicField"`
+	Fields             []FieldSchema            `json:"fields"`
+	StructFields       []StructArrayFieldSchema `json:"structFields"`
+	Functions          []FunctionSchema         `json:"functions"`
+	AutoId             bool                     `json:"autoID"`
+	EnableDynamicField bool                     `json:"enableDynamicField"`
 }
 
 type CollectionReq struct {

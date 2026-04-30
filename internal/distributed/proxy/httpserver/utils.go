@@ -312,11 +312,40 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 		if field.TypeParams != nil {
 			fieldDetail[Params] = field.TypeParams
 		}
-		if field.DataType == schemapb.DataType_Array {
+		if field.DataType == schemapb.DataType_Array || field.DataType == schemapb.DataType_ArrayOfVector {
 			fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
 		}
 	}
 	return fieldDetail
+}
+
+// printStructArrayFieldsV2 returns the REST-facing representation of a
+// collection's struct array fields. Each struct is exposed as an object with
+// a nested `fields` array describing its sub-fields (Array or ArrayOfVector).
+func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) []gin.H {
+	res := make([]gin.H, 0, len(structFields))
+	for _, sf := range structFields {
+		subs := make([]gin.H, 0, len(sf.GetFields()))
+		for _, sub := range sf.GetFields() {
+			detail := printFieldDetail(sub, false)
+			if short, err := typeutil.ExtractStructFieldName(sub.GetName()); err == nil && short != "" {
+				detail[HTTPReturnFieldName] = short
+			}
+			subs = append(subs, detail)
+		}
+		entry := gin.H{
+			HTTPReturnFieldName:   sf.GetName(),
+			HTTPReturnFieldID:     sf.GetFieldID(),
+			HTTPReturnDescription: sf.GetDescription(),
+			HTTPReturnFieldType:   schemapb.DataType_ArrayOfStruct.String(),
+			"fields":              subs,
+		}
+		if len(sf.GetTypeParams()) > 0 {
+			entry[Params] = sf.GetTypeParams()
+		}
+		res = append(res, entry)
+	}
+	return res
 }
 
 func printFunctionDetails(functions []*schemapb.FunctionSchema) []gin.H {
@@ -369,17 +398,31 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		return reallyDataArray, validDataMap, merr.ErrMissingRequiredParameters
 	}
 
-	fieldNames := make([]string, 0, len(collSchema.Fields))
+	fieldNames := make([]string, 0, len(collSchema.Fields)+len(collSchema.StructArrayFields))
 	for _, field := range collSchema.Fields {
 		if field.IsDynamic {
 			continue
 		}
 		fieldNames = append(fieldNames, field.Name)
 	}
+	for _, structField := range collSchema.StructArrayFields {
+		fieldNames = append(fieldNames, structField.GetName())
+	}
 
 	for _, data := range dataResultArray {
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
+			for _, structField := range collSchema.StructArrayFields {
+				rawValue := gjson.Get(data.Raw, structField.GetName())
+				if partialUpdate && !rawValue.Exists() {
+					continue
+				}
+				structRow, err := parseStructArrayRow(rawValue.Raw, structField)
+				if err != nil {
+					return reallyDataArray, validDataMap, err
+				}
+				reallyData[structField.GetName()] = structRow
+			}
 			for _, field := range collSchema.Fields {
 				if field.IsDynamic {
 					continue
@@ -1027,6 +1070,11 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 
 			delete(set, field.Name)
 		}
+		// Struct array fields are processed separately via sch.StructArrayFields;
+		// drop them from set so they are not duplicated into the dynamic JSON column.
+		for _, structField := range sch.GetStructArrayFields() {
+			delete(set, structField.GetName())
+		}
 		// if is not dynamic, but pass more field, will throw err in /internal/distributed/proxy/httpserver/utils.go@checkAndSetData
 		if isDynamic {
 			m := make(map[string]interface{})
@@ -1299,6 +1347,34 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: true,
 		})
 	}
+	// Aggregate struct array fields (one FieldData per struct field, with sub-field
+	// FieldData nested inside StructArrays).
+	for _, structField := range sch.GetStructArrayFields() {
+		perRow := make([]structArrayRow, 0, rowsLen)
+		for rowIdx, row := range rows {
+			val, ok := row[structField.GetName()]
+			if !ok {
+				if partialUpdate {
+					continue
+				}
+				return nil, fmt.Errorf("row %d does not has struct field %s", rowIdx, structField.GetName())
+			}
+			sr, ok := val.(structArrayRow)
+			if !ok {
+				return nil, fmt.Errorf("row %d struct field %s has unexpected payload type %T",
+					rowIdx, structField.GetName(), val)
+			}
+			perRow = append(perRow, sr)
+		}
+		if len(perRow) == 0 {
+			continue
+		}
+		structFieldData, err := buildStructArrayFieldData(structField, perRow)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, structFieldData)
+	}
 	return columns, nil
 }
 
@@ -1513,6 +1589,16 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetSparseFloatVector().GetContents()))
 			case schemapb.DataType_Int8Vector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetInt8Vector())) / fieldDataList[0].GetVectors().GetDim()
+			case schemapb.DataType_ArrayOfStruct:
+				subs := fieldDataList[0].GetStructArrays().GetFields()
+				if len(subs) > 0 {
+					switch subs[0].GetType() {
+					case schemapb.DataType_Array:
+						rowsNum = int64(len(subs[0].GetScalars().GetArrayData().GetData()))
+					case schemapb.DataType_ArrayOfVector:
+						rowsNum = int64(len(subs[0].GetVectors().GetVectorArray().GetData()))
+					}
+				}
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].GetType(), fieldDataList[0].GetFieldName())
 			}
@@ -1667,6 +1753,12 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						continue
 					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[i]
+				case schemapb.DataType_ArrayOfStruct:
+					structRow, err := extractStructArrayRow(fieldDataList[j], int(i), collectionSchema)
+					if err != nil {
+						return nil, err
+					}
+					row[fieldDataList[j].GetFieldName()] = structRow
 				default:
 					row[fieldDataList[j].GetFieldName()] = ""
 				}

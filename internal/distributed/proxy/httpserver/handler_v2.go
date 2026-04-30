@@ -662,6 +662,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		HTTPReturnDescription: coll.Schema.Description,
 		HTTPReturnFieldAutoID: autoID,
 		"fields":              printFieldsV2(coll.Schema.Fields),
+		"structFields":        printStructArrayFieldsV2(coll.Schema.StructArrayFields),
 		"functions":           printFunctionDetails(coll.Schema.Functions),
 		"aliases":             aliases,
 		"indexes":             indexDesc,
@@ -1442,6 +1443,20 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 				break
 			}
 		}
+		// Fall through to struct array sub-fields if no top-level vector field matched.
+		if vectorField == nil {
+			for _, sf := range collSchema.GetStructArrayFields() {
+				for _, sub := range sf.GetFields() {
+					if sub.GetName() == fieldName && typeutil.IsVectorType(sub.GetDataType()) {
+						vectorField = sub
+						break
+					}
+				}
+				if vectorField != nil {
+					break
+				}
+			}
+		}
 	}
 	if vectorField == nil {
 		return nil, errors.New("cannot find a vector field named: " + fieldName)
@@ -1464,7 +1479,24 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 
-	phv, err := convertQueries2Placeholder(body, dataType, dim)
+	var phv *commonpb.PlaceholderValue
+	if vectorField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		// Struct sub-vector search. The user may supply either:
+		//   - element-level: one query vector per nq (shape matches a normal
+		//     vector search) → use the regular PlaceholderType of the element
+		//     type.
+		//   - embedding list: one list of vectors per nq, packed into a single
+		//     flat byte buffer → use the EmbList* PlaceholderType variant.
+		// We infer the shape from the `data` JSON: a nested-array / nested-
+		// string first element means EmbList, otherwise element-level.
+		if isEmbeddingListData(body) {
+			phv, err = convertEmbListQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		} else {
+			phv, err = convertQueries2Placeholder(body, vectorField.GetElementType(), dim)
+		}
+	} else {
+		phv, err = convertQueries2Placeholder(body, dataType, dim)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1891,6 +1923,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Name:               httpReq.CollectionName,
 			AutoID:             httpReq.Schema.AutoId,
 			Fields:             []*schemapb.FieldSchema{},
+			StructArrayFields:  []*schemapb.StructArrayFieldSchema{},
 			Functions:          []*schemapb.FunctionSchema{},
 			EnableDynamicField: httpReq.Schema.EnableDynamicField,
 			Description:        httpReq.Description,
@@ -1975,6 +2008,40 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
+		}
+		for i := range httpReq.Schema.StructFields {
+			structField := httpReq.Schema.StructFields[i]
+			if _, dup := fieldNames[structField.FieldName]; dup {
+				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
+				log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			structProto, err := structField.GetProto(ctx)
+			if err != nil {
+				log.Ctx(ctx).Warn("high level restful api, convert struct array field fail",
+					zap.String("structField", structField.FieldName), zap.Error(err))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+			collSchema.StructArrayFields = append(collSchema.StructArrayFields, structProto)
+			fieldNames[structField.FieldName] = true
+			// Register sub-field qualified names (structName[subName]) so
+			// indexParams in /collections/create can target a struct sub-vector
+			// directly, matching the pymilvus
+			// `index_params.add_index(field_name="struct[sub]")` convention.
+			// Short sub-field names are intentionally not registered because
+			// they are not globally unique across structs.
+			for _, sub := range structProto.GetFields() {
+				qualified := typeutil.ConcatStructFieldName(structField.FieldName, sub.GetName())
+				fieldNames[qualified] = true
+			}
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}
