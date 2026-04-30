@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -196,7 +198,8 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 
 // TaskScheduler is a scheduler of indexing tasks.
 type TaskScheduler struct {
-	TaskQueue TaskQueue
+	TaskQueue    TaskQueue
+	isStandalone bool
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -207,8 +210,9 @@ type TaskScheduler struct {
 func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:          ctx1,
+		cancel:       cancel,
+		isStandalone: paramtable.GetRole() == typeutil.StandaloneRole,
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
 
@@ -277,7 +281,14 @@ func (sched *TaskScheduler) indexBuildLoop() {
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
 			go func(t Task) {
-				if t.IsVectorIndex() {
+				if sched.isStandalone {
+					// In standalone mode, throttle ALL index builds to avoid resource contention.
+					GetStandaloneIndexBuildPool().Submit(func() (any, error) {
+						sched.processTask(t)
+						return nil, nil
+					})
+				} else if t.IsVectorIndex() {
+					// In cluster mode, only throttle vector index builds.
 					GetVecIndexBuildPool().Submit(func() (any, error) {
 						sched.processTask(t)
 						return nil, nil

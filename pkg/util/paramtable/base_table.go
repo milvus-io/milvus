@@ -53,7 +53,7 @@ const (
 	DefaultRootPath                                      = ""
 	DefaultMinioLogLevel                                 = "fatal"
 	DefaultKnowhereThreadPoolNumRatioInBuild             = 1
-	DefaultKnowhereThreadPoolNumRatioInBuildOfStandalone = 0.75
+	DefaultKnowhereThreadPoolNumRatioInBuildOfStandalone = 0.5
 	DefaultMinioRegion                                   = ""
 	DefaultMinioUseVirtualHost                           = "false"
 	DefaultMinioRequestTimeout                           = "10000"
