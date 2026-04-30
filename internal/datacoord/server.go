@@ -878,7 +878,6 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			if s.fileResourceObserver != nil {
 				s.fileResourceObserver.Notify()
 			}
-			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
