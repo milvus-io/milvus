@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/milvus"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func main() {

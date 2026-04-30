@@ -8,12 +8,12 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // newAssignmentDiscoverClient creates a new assignment discover client.

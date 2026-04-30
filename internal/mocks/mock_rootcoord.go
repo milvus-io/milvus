@@ -5,18 +5,18 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	proxypb "github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 
-	rootcoordpb "github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 

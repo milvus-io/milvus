@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestReOrderByTimeTickBuffer(t *testing.T) {

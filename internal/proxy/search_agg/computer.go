@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // SearchAggregationComputer runs hierarchical aggregation over a single

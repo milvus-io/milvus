@@ -22,7 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type analyzeInspector struct {

@@ -31,7 +31,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
@@ -40,7 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
 const TestModel string = "TestModel"

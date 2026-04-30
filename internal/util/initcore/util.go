@@ -30,8 +30,8 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func UpdateLogLevel(level string) error {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // newConfig creates a new config for the recovery module.

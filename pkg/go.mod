@@ -1,4 +1,4 @@
-module github.com/milvus-io/milvus/pkg/v2
+module github.com/milvus-io/milvus/pkg/v3
 
 go 1.25.9
 
@@ -170,6 +170,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.8 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260428092345-c9f705f3cc7f // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

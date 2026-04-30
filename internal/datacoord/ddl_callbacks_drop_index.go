@@ -19,7 +19,7 @@ package datacoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {

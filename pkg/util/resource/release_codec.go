@@ -24,7 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // releaseCodec is a gRPC CodecV2 that wraps the standard proto codec.

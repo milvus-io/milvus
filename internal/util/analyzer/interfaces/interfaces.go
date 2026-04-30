@@ -1,6 +1,6 @@
 package interfaces
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+import "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 //go:generate mockery --name=TokenStream --with-expecter
 type TokenStream interface {

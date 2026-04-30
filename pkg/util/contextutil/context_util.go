@@ -25,9 +25,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 )
 
 type ctxTenantKey struct{}

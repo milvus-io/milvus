@@ -19,7 +19,7 @@ package segments
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter ...SegmentFilter) ([]Segment, error) {

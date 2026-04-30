@@ -7,7 +7,7 @@ import (
 
 	broadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -72,26 +72,6 @@ func (_c *MockBroadcaster_Ack_Call) RunAndReturn(run func(context.Context, messa
 	return _c
 }
 
-// GetPendingCreateCollectionResources provides a mock function with no fields
-func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int64 {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPendingCreateCollectionResources")
-	}
-
-	var r0 map[int64][]int64
-	if rf, ok := ret.Get(0).(func() map[int64][]int64); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64][]int64)
-		}
-	}
-
-	return r0
-}
-
 // Close provides a mock function with no fields
 func (_m *MockBroadcaster) Close() {
 	_m.Called()
@@ -121,6 +101,53 @@ func (_c *MockBroadcaster_Close_Call) Return() *MockBroadcaster_Close_Call {
 
 func (_c *MockBroadcaster_Close_Call) RunAndReturn(run func()) *MockBroadcaster_Close_Call {
 	_c.Run(run)
+	return _c
+}
+
+// GetPendingCreateCollectionResources provides a mock function with no fields
+func (_m *MockBroadcaster) GetPendingCreateCollectionResources() map[int64][]int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingCreateCollectionResources")
+	}
+
+	var r0 map[int64][]int64
+	if rf, ok := ret.Get(0).(func() map[int64][]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64][]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockBroadcaster_GetPendingCreateCollectionResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingCreateCollectionResources'
+type MockBroadcaster_GetPendingCreateCollectionResources_Call struct {
+	*mock.Call
+}
+
+// GetPendingCreateCollectionResources is a helper method to define mock.On call
+func (_e *MockBroadcaster_Expecter) GetPendingCreateCollectionResources() *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	return &MockBroadcaster_GetPendingCreateCollectionResources_Call{Call: _e.mock.On("GetPendingCreateCollectionResources")}
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Run(run func()) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) Return(_a0 map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingCreateCollectionResources_Call) RunAndReturn(run func() map[int64][]int64) *MockBroadcaster_GetPendingCreateCollectionResources_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

@@ -5,15 +5,15 @@ package mock_streaming
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 )

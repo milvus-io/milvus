@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260422100939-04b6d9ff4644
-	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
+	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
@@ -51,6 +51,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260428092345-c9f705f3cc7f // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -119,3 +120,5 @@ require (
 	k8s.io/apimachinery v0.32.3 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/milvus-io/milvus/pkg/v3 => ../pkg

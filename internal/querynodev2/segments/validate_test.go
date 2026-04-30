@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func newMockSealedSegment(t *testing.T, id, min, max int64, contained []int64) Segment {

@@ -26,7 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo/logging"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var ErrConsumed = errors.New("future is already consumed")

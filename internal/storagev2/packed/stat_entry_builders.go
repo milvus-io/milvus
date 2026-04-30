@@ -17,7 +17,7 @@ package packed
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 // FieldBinlogStatEntry builds a StatEntry from a FieldBinlog with the given key prefix.

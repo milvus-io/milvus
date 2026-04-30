@@ -34,12 +34,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/common"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Client struct {

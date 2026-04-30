@@ -3,13 +3,13 @@
 package mock_shards
 
 import (
-	log "github.com/milvus-io/milvus/pkg/v2/log"
-	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	log "github.com/milvus-io/milvus/pkg/v3/log"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
 	shards "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 
 	utils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 )
@@ -25,98 +25,6 @@ type MockShardManager_Expecter struct {
 
 func (_m *MockShardManager) EXPECT() *MockShardManager_Expecter {
 	return &MockShardManager_Expecter{mock: &_m.Mock}
-}
-
-// AppendNewCollectionSchema provides a mock function with given fields: msg
-func (_m *MockShardManager) AppendNewCollectionSchema(msg message.ImmutableAlterCollectionMessageV2) error {
-	ret := _m.Called(msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AppendNewCollectionSchema")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableAlterCollectionMessageV2) error); ok {
-		r0 = rf(msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_AppendNewCollectionSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendNewCollectionSchema'
-type MockShardManager_AppendNewCollectionSchema_Call struct {
-	*mock.Call
-}
-
-// AppendNewCollectionSchema is a helper method to define mock.On call
-//   - msg message.ImmutableAlterCollectionMessageV2
-func (_e *MockShardManager_Expecter) AppendNewCollectionSchema(msg interface{}) *MockShardManager_AppendNewCollectionSchema_Call {
-	return &MockShardManager_AppendNewCollectionSchema_Call{Call: _e.mock.On("AppendNewCollectionSchema", msg)}
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchema_Call) Run(run func(msg message.ImmutableAlterCollectionMessageV2)) *MockShardManager_AppendNewCollectionSchema_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableAlterCollectionMessageV2))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchema_Call) Return(_a0 error) *MockShardManager_AppendNewCollectionSchema_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchema_Call) RunAndReturn(run func(message.ImmutableAlterCollectionMessageV2) error) *MockShardManager_AppendNewCollectionSchema_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// AppendNewCollectionSchemaFromCreateCollection provides a mock function with given fields: msg
-func (_m *MockShardManager) AppendNewCollectionSchemaFromCreateCollection(msg message.ImmutableCreateCollectionMessageV1) error {
-	ret := _m.Called(msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AppendNewCollectionSchemaFromCreateCollection")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableCreateCollectionMessageV1) error); ok {
-		r0 = rf(msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendNewCollectionSchemaFromCreateCollection'
-type MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call struct {
-	*mock.Call
-}
-
-// AppendNewCollectionSchemaFromCreateCollection is a helper method to define mock.On call
-//   - msg message.ImmutableCreateCollectionMessageV1
-func (_e *MockShardManager_Expecter) AppendNewCollectionSchemaFromCreateCollection(msg interface{}) *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call {
-	return &MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call{Call: _e.mock.On("AppendNewCollectionSchemaFromCreateCollection", msg)}
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call) Run(run func(msg message.ImmutableCreateCollectionMessageV1)) *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableCreateCollectionMessageV1))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call) Return(_a0 error) *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call) RunAndReturn(run func(message.ImmutableCreateCollectionMessageV1) error) *MockShardManager_AppendNewCollectionSchemaFromCreateCollection_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // AlterCollection provides a mock function with given fields: msg
@@ -139,6 +47,7 @@ func (_m *MockShardManager) AlterCollection(msg message.MutableAlterCollectionMe
 			r0 = ret.Get(0).([]int64)
 		}
 	}
+
 	if rf, ok := ret.Get(1).(func(message.MutableAlterCollectionMessageV2) error); ok {
 		r1 = rf(msg)
 	} else {

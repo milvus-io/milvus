@@ -6,7 +6,7 @@ require (
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260422100939-04b6d9ff4644
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
-	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
+    github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/peterstace/simplefeatures v0.54.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
@@ -19,7 +19,7 @@ require (
 	google.golang.org/grpc v1.79.3
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 => ../../client
 
 require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
@@ -67,6 +67,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20240226150601-1dcf7310316a // indirect
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260428092345-c9f705f3cc7f // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
@@ -143,3 +144,5 @@ require (
 	k8s.io/apimachinery v0.32.3 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/milvus-io/milvus/pkg/v3 => ../../pkg

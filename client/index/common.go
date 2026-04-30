@@ -17,7 +17,7 @@
 package index
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
