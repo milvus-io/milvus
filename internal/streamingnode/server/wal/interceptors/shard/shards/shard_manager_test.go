@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -321,7 +322,10 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	}).(*shardManagerImpl)
 
 	// Test 1: CheckIfCollectionSchemaVersionMatch on non-existent collection
-	_, err := m.CheckIfCollectionSchemaVersionMatch(999, 1)
+	_, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  999,
+		SchemaVersion: proto.Int32(1),
+	})
 	assert.ErrorIs(t, err, ErrCollectionNotFound)
 
 	// Test 2: Create collection with schema, then check version match
@@ -344,18 +348,24 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(10))
 	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsg))
 
-	// version match should succeed
-	ver, err := m.CheckIfCollectionSchemaVersionMatch(100, 1)
+	// version match should succeed when header carries explicit schema version
+	ver, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  100,
+		SchemaVersion: proto.Int32(1),
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), ver)
 
-	// version 0 (old proxy) should skip check and succeed
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(100, 0)
+	// legacy insert (no schema_version field): skip schema validation and return current version
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 100})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), ver)
 
 	// version mismatch should fail
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(100, 2)
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  100,
+		SchemaVersion: proto.Int32(2),
+	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(1), ver)
 
@@ -373,13 +383,46 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(11))
 	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgNoSchema))
 
-	// collection exists but has no schema
-	_, err = m.CheckIfCollectionSchemaVersionMatch(101, 1)
+	// collection exists but has no schema — explicit version in header requires schema metadata
+	_, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  101,
+		SchemaVersion: proto.Int32(1),
+	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
 
-	// backward-compat: old proxy sends schemaVersion=0 against a schema-less collection,
-	// must succeed and return the legacy version 0 instead of ErrCollectionSchemaNotFound.
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(101, 0)
+	_, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  101,
+		SchemaVersion: proto.Int32(0),
+	})
+	assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
+
+	// legacy insert while collection schema version is still 0: allow
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 101})
+	assert.NoError(t, err)
+	assert.Equal(t, int32(0), ver)
+
+	createMsgSchemaVersionZero := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("v_schema_zero").
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 103,
+			PartitionIds: []int64{203},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Name:    "test_schema_zero_collection",
+				Version: 0,
+			},
+		}).
+		MustBuildMutable().
+		WithTimeTick(350).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(12))
+	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createMsgSchemaVersionZero))
+
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  103,
+		SchemaVersion: proto.Int32(0),
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), ver)
 
@@ -407,11 +450,17 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.NoError(t, err)
 
 	// now version 2 matches, version 1 doesn't
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(100, 2)
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  100,
+		SchemaVersion: proto.Int32(2),
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(2), ver)
 
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(100, 1)
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  100,
+		SchemaVersion: proto.Int32(1),
+	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaVersionNotMatch)
 	assert.Equal(t, int32(2), ver)
 
@@ -448,11 +497,14 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 		},
 	}
 	m.mu.Unlock()
-	_, err = m.CheckIfCollectionSchemaVersionMatch(102, 1)
+	_, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId:  102,
+		SchemaVersion: proto.Int32(1),
+	})
 	assert.ErrorIs(t, err, ErrCollectionSchemaNotFound)
 
-	// same backward-compat path: schemaVersion=0 must not be rejected by the nil inner schema.
-	ver, err = m.CheckIfCollectionSchemaVersionMatch(102, 0)
+	// legacy insert while effective collection schema version is still 0 (nil inner schema)
+	ver, err = m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 102})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), ver)
 
@@ -565,7 +617,10 @@ func TestAlterCollectionSchemaChange(t *testing.T) {
 		// The growing segment must have been flushed and fenced.
 		assert.Equal(t, []int64{segID}, segmentIDs)
 		// Schema must be updated to v2.
-		ver, err := m.CheckIfCollectionSchemaVersionMatch(collID, 2)
+		ver, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+			CollectionId:  collID,
+			SchemaVersion: proto.Int32(2),
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(2), ver)
 	})
@@ -609,7 +664,10 @@ func TestAlterCollectionSchemaChange(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, segmentIDs)
 		// Schema must remain at v1, not updated to v2.
-		ver, err := m.CheckIfCollectionSchemaVersionMatch(collID, 1)
+		ver, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+			CollectionId:  collID,
+			SchemaVersion: proto.Int32(1),
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(1), ver)
 	})
