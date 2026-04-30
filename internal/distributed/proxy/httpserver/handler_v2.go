@@ -453,7 +453,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
-		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath())
+		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
 	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
@@ -461,7 +461,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
-		hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath())
+		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
 	}
 
@@ -499,7 +499,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
-			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath())
+			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
@@ -522,7 +522,10 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 			return handler(ctx, req)
 		})
 	}
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, forwardHandler)
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	if response != nil {
+		ginCtx.Set(ContextResponse, response)
+	}
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
