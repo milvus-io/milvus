@@ -580,6 +580,7 @@ queryNode:
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
+  standaloneMigrateDataTimeout: 3m # Duration string (e.g. 3m, 180s). In standalone mode, if no other active query node is available to accept migrated data within this duration during graceful stop, the node will stop waiting and proceed with shutdown.
   exprCache:
     enabled: false # enable expression result cache
     capacityBytes: 268435456 # max capacity in bytes for expression result cache
