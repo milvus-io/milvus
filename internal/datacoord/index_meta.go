@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -57,6 +58,18 @@ import (
 )
 
 var errIndexOperationIgnored = errors.New("index operation ignored")
+
+func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if actual > requested {
+		return merr.WrapErrParameterInvalidMsg(
+			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
+			buildID,
+			requested.String(),
+			actual.String(),
+		)
+	}
+	return nil
+}
 
 type indexMeta struct {
 	ctx     context.Context
@@ -1018,6 +1031,16 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return nil
 	}
 
+	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
+		log.Ctx(m.ctx).Warn("invalid index store path version returned by worker",
+			zap.Int64("buildID", taskInfo.GetBuildID()),
+			zap.String("requested", segIdx.IndexStorePathVersion.String()),
+			zap.String("actual", actualPathVersion.String()),
+			zap.Error(err))
+		return err
+	}
+
 	oldSize := segIdx.IndexSerializedSize
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
@@ -1029,6 +1052,7 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+		segIdx.IndexStorePathVersion = actualPathVersion
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 

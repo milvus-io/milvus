@@ -72,6 +72,45 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	}
 }
 
+func TestCreateIndexTaskInitializesIndexStorePathVersion(t *testing.T) {
+	t.Run("CreateJobV2", func(t *testing.T) {
+		ctx := context.Background()
+		paramtable.Init()
+		node := NewDataNode(ctx)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		req := &workerpb.CreateJobRequest{
+			ClusterID:             "cluster-1",
+			BuildID:               1,
+			StorageConfig:         &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}
+		status, err := node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+			ClusterID: "cluster-1",
+			TaskID:    1,
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+			Request: &workerpb.CreateJobV2Request_IndexRequest{
+				IndexRequest: req,
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+
+		resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
+			ClusterID: "cluster-1",
+			TaskIDs:   []int64{1},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetIndexJobResults().GetResults(), 1)
+		assert.Equal(t,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			resp.GetIndexJobResults().GetResults()[0].GetIndexStorePathVersion(),
+		)
+	})
+}
+
 type IndexServiceSuite struct {
 	suite.Suite
 

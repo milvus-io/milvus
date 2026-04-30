@@ -79,7 +79,6 @@ func newIndexEngineVersionManager() IndexEngineVersionManager {
 		indexNonEncoding:    map[int64]bool{},
 		sessionVersion:      map[int64]semver.Version{},
 		indexStorePathVersionByRole: map[string]map[int64]int32{
-			typeutil.DataNodeRole:  {},
 			typeutil.QueryNodeRole: {},
 		},
 	}
@@ -211,7 +210,7 @@ func (m *versionManagerImpl) ensurePathVersionRoleMap(role string) map[int64]int
 }
 
 func isIndexStorePathVersionRole(role string) bool {
-	return role == typeutil.DataNodeRole || role == typeutil.QueryNodeRole
+	return role == typeutil.QueryNodeRole
 }
 
 func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexStorePathVersion {
@@ -220,12 +219,10 @@ func (m *versionManagerImpl) GetClusterMinIndexStorePathVersion() indexpb.IndexS
 
 	minVersion := int32(math.MaxInt32)
 	hasSession := false
-	for _, role := range []string{typeutil.DataNodeRole, typeutil.QueryNodeRole} {
-		for _, version := range m.ensurePathVersionRoleMap(role) {
-			hasSession = true
-			if version < minVersion {
-				minVersion = version
-			}
+	for _, version := range m.ensurePathVersionRoleMap(typeutil.QueryNodeRole) {
+		hasSession = true
+		if version < minVersion {
+			minVersion = version
 		}
 	}
 	if !hasSession {

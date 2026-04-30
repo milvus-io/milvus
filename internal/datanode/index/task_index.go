@@ -393,6 +393,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		uint64(indexStats.MemSize),
 		it.req.GetCurrentIndexVersion(),
 		it.req.GetCurrentScalarIndexVersion(),
+		it.req.GetIndexStorePathVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()
 	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())

@@ -1396,6 +1396,86 @@ func TestMeta_FinishTask(t *testing.T) {
 	})
 }
 
+func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
+	setup := func(t *testing.T, requested indexpb.IndexStorePathVersion, indexFileKeys []string) *indexMeta {
+		t.Helper()
+
+		sc := catalogmocks.NewDataCoordCatalog(t)
+		sc.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		segIdx := &model.SegmentIndex{
+			SegmentID:             segID,
+			CollectionID:          collID,
+			PartitionID:           partID,
+			NumRows:               1025,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			IndexState:            commonpb.IndexState_InProgress,
+			IndexFileKeys:         indexFileKeys,
+			IndexStorePathVersion: requested,
+		}
+
+		indexBuildInfo := newSegmentIndexBuildInfo()
+		indexBuildInfo.Add(model.CloneSegmentIndex(segIdx))
+
+		m := &indexMeta{
+			ctx:              context.Background(),
+			catalog:          sc,
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			segmentBuildInfo: indexBuildInfo,
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						CollectionID: collID,
+						IndexID:      indexID,
+					},
+				},
+			},
+		}
+
+		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdxes.Insert(indexID, model.CloneSegmentIndex(segIdx))
+		m.segmentIndexes.Insert(segID, segIdxes)
+		return m
+	}
+
+	t.Run("actual lower than requested persists actual version", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, []string{"old-file"})
+
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:               buildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"file1", "file2"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		})
+		assert.NoError(t, err)
+
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
+		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
+	})
+
+	t.Run("actual higher than requested returns error and leaves metadata unchanged", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, []string{"old-file"})
+
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:               buildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"file1", "file2"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		})
+		assert.Error(t, err)
+
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
+		assert.Equal(t, []string{"old-file"}, segIdx.IndexFileKeys)
+		assert.Equal(t, commonpb.IndexState_InProgress, segIdx.IndexState)
+	})
+}
+
 func TestMeta_BuildIndex(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 	ec := catalogmocks.NewDataCoordCatalog(t)

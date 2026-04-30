@@ -74,16 +74,22 @@ func Test_IndexEngineVersionManager_IndexStorePathVersionCapability(t *testing.T
 	m.StartupByRole(typeutil.DataNodeRole, map[string]*sessionutil.Session{
 		"dn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 2}},
 	})
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+
+	m = newIndexEngineVersionManager()
+	m.StartupByRole(typeutil.DataNodeRole, map[string]*sessionutil.Session{
+		"dn1": {SessionRaw: sessionutil.SessionRaw{ServerID: 2, MaxIndexStorePathVersion: 1}},
+	})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
 	m.UpdateByRole(typeutil.DataNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 2, MaxIndexStorePathVersion: 1}})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
 	m.AddByRole(typeutil.QueryNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
 	m.RemoveByRole(typeutil.QueryNodeRole, &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
-	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, m.GetClusterMinIndexStorePathVersion())
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, m.GetClusterMinIndexStorePathVersion())
 
 	m = newIndexEngineVersionManager()
 	m.Startup(map[string]*sessionutil.Session{
