@@ -45,6 +45,10 @@ type IndexTaskInfo struct {
 	FailReason                string
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
+	ExecStartMs               int64
+	ExecEndMs                 int64
+	CostTimeMs                int64
+	CostCPUNum                int64
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -60,6 +64,10 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		FailReason:                i.FailReason,
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		ExecStartMs:               i.ExecStartMs,
+		ExecEndMs:                 i.ExecEndMs,
+		CostTimeMs:                i.CostTimeMs,
+		CostCPUNum:                i.CostCPUNum,
 		statistic:                 typeutil.Clone(i.statistic),
 	}
 }
@@ -129,12 +137,42 @@ func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.Uni
 	}
 }
 
+func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typeutil.UniqueID, startMs int64, costCPUNum int64) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		task.ExecStartMs = startMs
+		task.CostCPUNum = costCPUNum
+	}
+}
+
+func (m *TaskManager) StoreIndexTaskExecutionEnd(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64) {
+	key := Key{ClusterID: clusterID, TaskID: buildID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if task, ok := m.indexTasks[key]; ok {
+		task.ExecEndMs = endMs
+		task.CostTimeMs = costTimeMs
+	}
+}
+
 func (m *TaskManager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo)) {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	for key, info := range m.indexTasks {
 		fn(key.ClusterID, key.TaskID, info)
 	}
+}
+
+func (m *TaskManager) GetIndexTaskInfo(clusterID string, buildID typeutil.UniqueID) *IndexTaskInfo {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	if info, ok := m.indexTasks[Key{ClusterID: clusterID, TaskID: buildID}]; ok {
+		return info.Clone()
+	}
+	return nil
 }
 
 func (m *TaskManager) StoreIndexFilesAndStatistic(

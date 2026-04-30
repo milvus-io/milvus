@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -126,4 +127,23 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 
 		s.Nil(s.manager.GetStatsTaskInfo(s.cluster, s.taskID))
 	})
+}
+
+func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
+	buildID := int64(200)
+	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
+
+	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 111, 4)
+	s.manager.StoreIndexTaskExecutionEnd(s.cluster, buildID, 222, 111)
+
+	info := s.manager.GetIndexTaskInfo(s.cluster, buildID)
+	s.Require().NotNil(info)
+	s.Equal(int64(111), info.ExecStartMs)
+	s.Equal(int64(222), info.ExecEndMs)
+	s.Equal(int64(111), info.CostTimeMs)
+	s.Equal(int64(4), info.CostCPUNum)
+
+	info.CostCPUNum = 999
+	reloaded := s.manager.GetIndexTaskInfo(s.cluster, buildID)
+	s.Equal(int64(4), reloaded.CostCPUNum)
 }

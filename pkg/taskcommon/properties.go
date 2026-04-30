@@ -35,8 +35,10 @@ const (
 	TaskVersionKey = "task_version" // optional, only for Index, Stats and Analyze
 
 	// result
-	StateKey  = "task_state"
-	ReasonKey = "task_reason"
+	StateKey      = "task_state"
+	ReasonKey     = "task_reason"
+	CostTimeKey   = "cost_time"
+	CostCPUNumKey = "cost_cpu_num"
 )
 
 type Properties map[string]string
@@ -91,6 +93,14 @@ func (p Properties) AppendReason(reason string) {
 
 func (p Properties) AppendTaskState(state State) {
 	p[StateKey] = state.String()
+}
+
+func (p Properties) AppendCostTime(costTime int64) {
+	p[CostTimeKey] = fmt.Sprintf("%d", costTime)
+}
+
+func (p Properties) AppendCostCPUNum(costCPUNum int64) {
+	p[CostCPUNumKey] = fmt.Sprintf("%d", costCPUNum)
 }
 
 func (p Properties) GetTaskType() (Type, error) {
@@ -182,4 +192,26 @@ func (p Properties) GetTaskVersion() int64 {
 		return 0
 	}
 	return version
+}
+
+func (p Properties) GetCostTime() int64 {
+	if _, ok := p[CostTimeKey]; !ok {
+		return 0
+	}
+	costTime, err := strconv.ParseInt(p[CostTimeKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return costTime
+}
+
+func (p Properties) GetCostCPUNum() int64 {
+	if _, ok := p[CostCPUNumKey]; !ok {
+		return 0
+	}
+	costCPUNum, err := strconv.ParseInt(p[CostCPUNumKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return costCPUNum
 }

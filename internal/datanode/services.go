@@ -874,6 +874,13 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendTaskState(taskcommon.State(results[0].GetState()))
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
+		if taskInfo := node.taskManager.GetIndexTaskInfo(clusterID, taskID); taskInfo != nil {
+			resProperties.AppendCostTime(taskInfo.CostTimeMs)
+			resProperties.AppendCostCPUNum(taskInfo.CostCPUNum)
+		} else {
+			resProperties.AppendCostTime(0)
+			resProperties.AppendCostCPUNum(0)
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Stats:
 		resp, err := node.queryStatsTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})

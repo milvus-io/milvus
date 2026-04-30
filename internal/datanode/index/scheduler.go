@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -243,16 +244,45 @@ func (sched *TaskScheduler) processTask(t Task) {
 	}()
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
-	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()))
+
+	var (
+		indexTask  *indexBuildTask
+		costCPUNum int64
+		startMs    int64
+	)
+	if t, ok := t.(*indexBuildTask); ok {
+		indexTask = t
+		costCPUNum = taskcost.EstimateIndexBuildCPUNum(indexTask.IsVectorIndex())
+		startMs = taskcost.NowMs()
+		indexTask.manager.StoreIndexTaskExecutionStart(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), startMs, costCPUNum)
+	}
+
+	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()), zap.Int64("costCPUNum", costCPUNum))
 	pipelines := []func(context.Context) error{t.PreExecute, t.Execute, t.PostExecute}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
+			if indexTask != nil {
+				endMs := taskcost.NowMs()
+				costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+				indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
+				log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
+			} else {
+				log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
+			}
 			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
 	}
-	t.SetState(indexpb.JobState_JobStateFinished, "")
+	if indexTask != nil {
+		endMs := taskcost.NowMs()
+		costTimeMs := taskcost.CalcCostTimeMs(startMs, endMs)
+		indexTask.manager.StoreIndexTaskExecutionEnd(indexTask.req.GetClusterID(), indexTask.req.GetBuildID(), endMs, costTimeMs)
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		log.Ctx(t.Ctx()).Debug("process task completed", zap.String("task", t.Name()), zap.Int64("costTimeMs", costTimeMs), zap.Int64("costCPUNum", costCPUNum))
+	} else {
+		t.SetState(indexpb.JobState_JobStateFinished, "")
+		log.Ctx(t.Ctx()).Debug("process task completed", zap.String("task", t.Name()))
+	}
 
 	// Publish filesystem metrics after index task completion
 	// Only publish for index build tasks (not stats or analyze tasks)
