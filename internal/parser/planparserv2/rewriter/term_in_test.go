@@ -55,11 +55,11 @@ func buildSchemaHelperForRewriteNullableT(t *testing.T) *typeutil.SchemaHelper {
 	return helper
 }
 
-// --- shouldUseInExpr threshold tests ---
+// --- OR-equals merge tests (all merge to IN, SIMD-optimized) ---
 
 func TestRewrite_OREquals_ToIN_VarChar_AboveThreshold(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// varchar threshold is 3, so 3 values should produce IN
+	// 3 varchar OR-equals should merge to IN
 	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or VarCharField == "b" or VarCharField == "c"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -68,63 +68,54 @@ func TestRewrite_OREquals_ToIN_VarChar_AboveThreshold(t *testing.T) {
 	require.Equal(t, 3, len(term.GetValues()))
 }
 
-func TestRewrite_OREquals_NotMerged_VarChar_BelowThreshold(t *testing.T) {
+func TestRewrite_OREquals_Merged_VarChar_TwoValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// varchar threshold is 3, so 2 values should NOT produce IN
+	// All OR-equals always merge to IN (SIMD-optimized)
 	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or VarCharField == "b"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.Nil(t, expr.GetTermExpr(), "2 varchar OR-equals should not merge to IN")
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be)
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+	term := expr.GetTermExpr()
+	require.NotNil(t, term, "2 varchar OR-equals should merge to IN")
+	require.Equal(t, 2, len(term.GetValues()))
 }
 
-func TestRewrite_OREquals_NotMerged_Int_BelowThreshold(t *testing.T) {
+func TestRewrite_OREquals_Merged_Int_TwoValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// int threshold is 10, so 2 values should NOT merge
+	// All OR-equals always merge to IN (SIMD-optimized)
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.Nil(t, expr.GetTermExpr(), "numeric OR-equals should not merge to IN under threshold")
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be)
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
-	require.NotNil(t, be.GetLeft().GetUnaryRangeExpr())
-	require.NotNil(t, be.GetRight().GetUnaryRangeExpr())
-	require.Equal(t, planpb.OpType_Equal, be.GetLeft().GetUnaryRangeExpr().GetOp())
-	require.Equal(t, planpb.OpType_Equal, be.GetRight().GetUnaryRangeExpr().GetOp())
+	term := expr.GetTermExpr()
+	require.NotNil(t, term, "2 int OR-equals should merge to IN")
+	require.Equal(t, 2, len(term.GetValues()))
 }
 
-func TestRewrite_OREquals_Merged_Int_AtThreshold(t *testing.T) {
+func TestRewrite_OREquals_Merged_Int_TenValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// int threshold is 10, so exactly 10 values should merge
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2 or Int64Field == 3 or Int64Field == 4 or Int64Field == 5 or Int64Field == 6 or Int64Field == 7 or Int64Field == 8 or Int64Field == 9 or Int64Field == 10`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
-	require.NotNil(t, term, "10 int OR-equals should merge to IN (threshold=10)")
+	require.NotNil(t, term, "10 int OR-equals should merge to IN")
 	require.Equal(t, 10, len(term.GetValues()))
 }
 
-// --- in → == or split tests ---
+// --- IN kept tests (no splitting, SIMD-optimized) ---
 
-func TestRewrite_InSplit_Int_BelowThreshold(t *testing.T) {
+func TestRewrite_InKept_Int_SmallCount(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// int in [1,2,3] → 3 values < 10 → split to == or
+	// All IN expressions stay as IN (SIMD-optimized)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.Nil(t, expr.GetTermExpr(), "int in with 3 values should be split to == or")
-	// Should be an OR tree
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be)
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+	term := expr.GetTermExpr()
+	require.NotNil(t, term, "int in with 3 values should stay as IN")
+	require.Equal(t, 3, len(term.GetValues()))
 }
 
-func TestRewrite_InSplit_Int_SingleValue(t *testing.T) {
+func TestRewrite_InSingle_Int_BecomesEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// int in [5] → split to == 5
+	// Single-value IN → == (avoids SIMD overhead)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [5]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -134,7 +125,7 @@ func TestRewrite_InSplit_Int_SingleValue(t *testing.T) {
 	require.Equal(t, int64(5), ure.GetValue().GetInt64Val())
 }
 
-func TestRewrite_InKept_Int_AboveThreshold(t *testing.T) {
+func TestRewrite_InKept_Int_TenValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10]`, nil)
 	require.NoError(t, err)
@@ -144,24 +135,25 @@ func TestRewrite_InKept_Int_AboveThreshold(t *testing.T) {
 	require.Equal(t, 10, len(term.GetValues()))
 }
 
-// --- not in split tests ---
+// --- NOT IN kept tests (no splitting, SIMD-optimized) ---
 
-func TestRewrite_NotInSplit_Int_BelowThreshold(t *testing.T) {
+func TestRewrite_NotInKept_Int_TwoValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// not in [3,4] → 2 values < 10 → split to != 3 AND != 4
+	// All NOT IN stay as NOT(IN) (SIMD-optimized)
 	expr, err := parser.ParseExpr(helper, `Int64Field not in [4,3]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	// Should be AND tree of !=
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "not in with 2 int values should split to != AND !=")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
-	require.Equal(t, planpb.OpType_NotEqual, be.GetLeft().GetUnaryRangeExpr().GetOp())
-	require.Equal(t, planpb.OpType_NotEqual, be.GetRight().GetUnaryRangeExpr().GetOp())
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary, "not in should stay as NOT(IN)")
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	term := unary.GetChild().GetTermExpr()
+	require.NotNil(t, term)
+	require.Equal(t, 2, len(term.GetValues()))
 }
 
-func TestRewrite_NotInSplit_Int_SingleValue(t *testing.T) {
+func TestRewrite_NotInSingle_Int_BecomesNotEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
+	// Single-value NOT IN → != (avoids SIMD overhead)
 	expr, err := parser.ParseExpr(helper, `Int64Field not in [5]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -171,22 +163,25 @@ func TestRewrite_NotInSplit_Int_SingleValue(t *testing.T) {
 	require.Equal(t, int64(5), ure.GetValue().GetInt64Val())
 }
 
-func TestRewrite_NotInSplit_Float_BelowThreshold(t *testing.T) {
+func TestRewrite_NotInKept_Float_TwoValues(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// float threshold is 15, so 2 values → split
+	// Float NOT IN also stays as NOT(IN)
 	expr, err := parser.ParseExpr(helper, `FloatField not in [4.0,3.0]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "not in with 2 float values should split to != AND !=")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary, "float not in should stay as NOT(IN)")
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	term := unary.GetChild().GetTermExpr()
+	require.NotNil(t, term)
+	require.Equal(t, 2, len(term.GetValues()))
 }
 
-// --- sort/dedup tests (use values above threshold) ---
+// --- sort/dedup tests ---
 
 func TestRewrite_Term_SortAndDedup_String(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// varchar threshold is 3, use 3+ unique values
+	// dedup + sort: 5 values with dups → 3 unique sorted
 	expr, err := parser.ParseExpr(helper, `VarCharField in ["c","b","a","b","a"]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -200,7 +195,7 @@ func TestRewrite_Term_SortAndDedup_String(t *testing.T) {
 
 func TestRewrite_Term_SortAndDedup_Int(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// int threshold is 10, use 10+ unique values
+	// dedup + sort: 11 values with one dup → 10 unique sorted
 	expr, err := parser.ParseExpr(helper, `Int64Field in [10,9,4,6,6,7,1,2,3,5,8]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -209,7 +204,10 @@ func TestRewrite_Term_SortAndDedup_Int(t *testing.T) {
 	require.Equal(t, 10, len(term.GetValues()))
 }
 
-func TestRewrite_In_SortAndDedup_Bool(t *testing.T) {
+// Bool IN — no special rewriting, handled by execution layer.
+// Single-value IN still folds to == via the generic single-value optimization.
+
+func TestRewrite_BoolIn_BothValues_StaysAsIn(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	// BoolField in [true, false] covers all possible bool values → AlwaysTrueExpr
 	expr, err := parser.ParseExpr(helper, `BoolField in [true,false,false,true]`, nil)
@@ -324,7 +322,7 @@ func TestRewrite_Bool_NotIn_SingleFalse_ToNotEqual(t *testing.T) {
 
 func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// varchar threshold is 3, so 4 values should merge
+	// nested OR-equals should flatten and merge to IN
 	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or (VarCharField == "b" or VarCharField == "c") or VarCharField == "d"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -340,7 +338,7 @@ func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	require.ElementsMatch(t, []string{"a", "b", "c", "d"}, got)
 }
 
-// --- combine tests (use values above threshold to keep IN form) ---
+// --- combine tests ---
 
 func TestRewrite_And_In_And_Equal_VInSet_ReducesToEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
@@ -507,4 +505,153 @@ func TestRewrite_And_Equal_String_Contradiction_CurrentLimitation(t *testing.T) 
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as AND (not optimized)")
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+}
+
+func buildSchemaWithTimestamptz(t *testing.T) *typeutil.SchemaHelper {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   "timestamptz_test",
+		AutoID: false,
+		Fields: fields,
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+// findTermExpr recursively checks if any node in the plan tree is a TermExpr.
+func findTermExpr(expr *planpb.Expr) *planpb.TermExpr {
+	if expr == nil {
+		return nil
+	}
+	if te := expr.GetTermExpr(); te != nil {
+		return te
+	}
+	if be := expr.GetBinaryExpr(); be != nil {
+		if found := findTermExpr(be.GetLeft()); found != nil {
+			return found
+		}
+		return findTermExpr(be.GetRight())
+	}
+	if ue := expr.GetUnaryExpr(); ue != nil {
+		return findTermExpr(ue.GetChild())
+	}
+	return nil
+}
+
+// TestTimestamptz_NotEqual_InAndContext verifies that a single != on a
+// Timestamptz field inside an AND expression stays as UnaryRangeExpr.
+// combineAndNotEqualsToNotIn requires 2+ values to merge into NOT(IN),
+// so a single != is left as-is.
+func TestTimestamptz_NotEqual_InAndContext(t *testing.T) {
+	helper := buildSchemaWithTimestamptz(t)
+
+	// This is the exact pattern from the failing e2e test:
+	// pk_range AND ts != ISO '...'
+	expr, err := parser.ParseExpr(helper,
+		`id >= 30 and id <= 35 and ts != ISO '9999-12-31T23:46:05Z'`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	// Single != should NOT be merged into TermExpr.
+	te := findTermExpr(expr)
+	require.Nil(t, te,
+		"single Timestamptz != should remain as UnaryRangeExpr, not be merged into TermExpr")
+}
+
+// TestTimestamptz_NotEqual_Standalone verifies a standalone != on Timestamptz
+// stays as UnaryRangeExpr (no AND context means combineAndNotEqualsToNotIn
+// is not triggered).
+func TestTimestamptz_NotEqual_Standalone(t *testing.T) {
+	helper := buildSchemaWithTimestamptz(t)
+
+	expr, err := parser.ParseExpr(helper,
+		`ts != ISO '2025-01-01T00:00:00Z'`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "standalone != should be UnaryRangeExpr")
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.Equal(t, schemapb.DataType_Timestamptz, ure.GetColumnInfo().GetDataType())
+}
+
+// TestTimestamptz_MultipleNotEquals_BecomesTermExpr verifies that multiple
+// != on the same Timestamptz field in an AND context are merged into a
+// single NOT(TermExpr). This confirms that C++ TermExpr.cpp must support
+// TIMESTAMPTZ (which we added in this PR).
+func TestTimestamptz_MultipleNotEquals_BecomesTermExpr(t *testing.T) {
+	helper := buildSchemaWithTimestamptz(t)
+
+	// Use 2 != on ts (same field) in an AND.
+	// Both != should be merged into NOT(IN [v1, v2]).
+	expr, err := parser.ParseExpr(helper,
+		`ts != ISO '2025-01-01T00:00:00Z' and ts != ISO '2025-06-01T00:00:00Z'`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	// Should be rewritten to NOT(TermExpr) — which requires C++ TIMESTAMPTZ support.
+	te := findTermExpr(expr)
+	require.NotNil(t, te,
+		"Timestamptz != should be merged into NOT(TermExpr); "+
+			"C++ TermExpr.cpp TIMESTAMPTZ case is required for this to work")
+	require.Equal(t, schemapb.DataType_Timestamptz, te.GetColumnInfo().GetDataType())
+	require.Len(t, te.GetValues(), 2)
+}
+
+// TestTimestamptz_InExpr_ProducesTermExpr verifies that an explicit IN
+// expression on a Timestamptz field produces a TermExpr. Before the C++
+// TIMESTAMPTZ fix, this would have crashed at query time even on master —
+// it was just never tested because no e2e test used IN on Timestamptz
+// and the parser doesn't support `IN [ISO '...']` syntax directly.
+// Instead we test via multiple == OR that get merged into IN by the rewriter.
+func TestTimestamptz_InExpr_ProducesTermExpr(t *testing.T) {
+	helper := buildSchemaWithTimestamptz(t)
+
+	// 2 == on the same Timestamptz field in OR -> merged to IN by combineOrEqualsToIn
+	expr, err := parser.ParseExpr(helper,
+		`ts == ISO '2025-01-01T00:00:00Z' or ts == ISO '2025-06-01T00:00:00Z'`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	te := findTermExpr(expr)
+	require.NotNil(t, te,
+		"OR of Timestamptz == should be merged into TermExpr (IN)")
+	require.Equal(t, schemapb.DataType_Timestamptz, te.GetColumnInfo().GetDataType())
+	require.Len(t, te.GetValues(), 2,
+		"IN should contain both timestamp values")
+}
+
+// TestGeometryAndText_BlockedAtParser verifies that Geometry and Text fields
+// cannot be used in term/comparison expressions. These types have no case in
+// C++ TermExpr.cpp or UnaryExpr.cpp, so the parser must reject them.
+func TestGeometryAndText_BlockedAtParser(t *testing.T) {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 102, Name: "geo", DataType: schemapb.DataType_Geometry},
+		{FieldID: 103, Name: "txt", DataType: schemapb.DataType_Text},
+	}
+	schema := &schemapb.CollectionSchema{Name: "block_test", Fields: fields}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	// Geometry: == and IN should be rejected at parser level
+	_, err = parser.ParseExpr(helper, `geo == "POINT(1 2)"`, nil)
+	require.Error(t, err, "Geometry == should be rejected by parser")
+
+	_, err = parser.ParseExpr(helper, `geo in ["POINT(1 2)", "POINT(3 4)"]`, nil)
+	require.Error(t, err, "Geometry IN should be rejected by parser")
+
+	// Text: any filter expression should be rejected at parser level
+	_, err = parser.ParseExpr(helper, `txt == "hello"`, nil)
+	require.Error(t, err, "Text == should be rejected by parser")
+
+	_, err = parser.ParseExpr(helper, `txt in ["hello", "world"]`, nil)
+	require.Error(t, err, "Text IN should be rejected by parser")
+
+	_, err = parser.ParseExpr(helper, `txt != "hello"`, nil)
+	require.Error(t, err, "Text != should be rejected by parser")
 }
