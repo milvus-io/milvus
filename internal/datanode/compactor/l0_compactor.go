@@ -310,7 +310,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			// Check if this is a V2 segment (has manifest)
 			if segment.GetManifest() != "" {
 				// V2: Update manifest with new deltalog
-				newManifest, err := packed.AddDeltaLogsToManifest(
+				newManifest, err := packed.AddDeltaLogsToManifestOverwrite(
 					segment.GetManifest(),
 					t.compactionParams.StorageConfig,
 					[]packed.DeltaLogEntry{{Path: path, NumEntries: int64(len(deletes.pks))}},
