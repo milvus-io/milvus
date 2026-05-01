@@ -2,7 +2,7 @@ package lock
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
 // NewInterceptorBuilder creates a new redo interceptor builder.

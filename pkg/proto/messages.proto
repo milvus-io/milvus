@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.messages;
 
-option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/messagespb";
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/messagespb";
 
 import "common.proto";
 import "schema.proto";

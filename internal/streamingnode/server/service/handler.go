@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/producer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 var _ HandlerService = (*handlerServiceImpl)(nil)

@@ -19,7 +19,7 @@ package msgstream
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 // UnmarshalFunc is an interface that has been implemented by each Msg

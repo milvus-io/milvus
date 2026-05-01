@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 // collectTextMatchLiterals walks the provided expr and collects all OpType_TextMatch literals (grouped by fieldId) into the returned map.

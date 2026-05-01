@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
 func Test_translatePatternMatch(t *testing.T) {

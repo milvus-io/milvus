@@ -19,7 +19,7 @@ package ratelimit
 import (
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 // NewMuxRateLimitObserverRegistry creates a new MuxRateLimitObserverRegistryImpl.

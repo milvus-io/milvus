@@ -3,7 +3,7 @@
 package function
 
 import (
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mock "github.com/stretchr/testify/mock"
 )
 

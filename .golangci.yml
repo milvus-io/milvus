@@ -46,7 +46,7 @@ linters:
             - pkg: github.com/golang/protobuf/proto
               desc: not allowed, protobuf v1 is deprecated, use google.golang.org/protobuf/proto instead
             - pkg: github.com/pingcap/log
-              desc: not allowed, use github.com/milvus-io/milvus/pkg/v2/log
+              desc: not allowed, use github.com/milvus-io/milvus/pkg/v3/log
     forbidigo:
       forbid:
         - pattern: ^time\.Tick$

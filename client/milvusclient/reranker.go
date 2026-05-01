@@ -3,7 +3,7 @@ package milvusclient
 import (
 	"encoding/json"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 )
 
 const (

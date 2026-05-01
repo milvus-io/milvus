@@ -5,7 +5,7 @@ package syncmgr
 import (
 	context "context"
 
-	conc "github.com/milvus-io/milvus/pkg/v2/util/conc"
+	conc "github.com/milvus-io/milvus/pkg/v3/util/conc"
 
 	mock "github.com/stretchr/testify/mock"
 
