@@ -97,11 +97,10 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			}
 			err := meta.GlobalFailedLoadCache.Get(collectionID)
 			if err != nil {
-				msg := "show collection failed"
-				log.Warn(msg, zap.Error(err))
-				status := merr.Status(errors.Wrap(err, msg))
+				err = merr.WrapErrCollectionNotLoaded(collectionID, err.Error())
+				log.Warn("show collection failed", zap.Error(err))
 				return &querypb.ShowCollectionsResponse{
-					Status: status,
+					Status: merr.Status(err),
 				}, nil
 			}
 
