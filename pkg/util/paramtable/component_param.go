@@ -3517,7 +3517,6 @@ type queryNodeConfig struct {
 	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
-	IoPoolSize                  ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
 	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
 	TextIndexExpansionFactor    ParamItem `refreshable:"true"`
@@ -4554,14 +4553,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.ForwardBatchSize.Init(base.mgr)
-
-	p.IoPoolSize = ParamItem{
-		Key:          "queryNode.ioPoolSize",
-		Version:      "2.3.0",
-		DefaultValue: "0",
-		Doc:          "Control how many goroutines will the loader use to pull files, if the given value is non-positive, the value will be set to CpuNum * 8, at least 32, and at most 256",
-	}
-	p.IoPoolSize.Init(base.mgr)
 
 	p.DeltaDataExpansionRate = ParamItem{
 		Key:          "querynode.deltaDataExpansionRate",
