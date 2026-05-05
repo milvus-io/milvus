@@ -264,12 +264,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         milvus::tracer::CloseRootSpan();
 
         LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}] load index "
+            "[collection={}][segment={}][field={}][enable_mmap={}][index_mem_"
+            "size={}] load index "
             "{} done, mmap_dir_path={}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
+            load_index_info->index_mem_size,
             load_index_info->index_id,
             load_index_info->mmap_dir_path);
 

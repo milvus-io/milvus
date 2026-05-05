@@ -720,6 +720,7 @@ message SegmentVersionInfo {
     // optional so QueryCoord can distinguish "not reported" (old QueryNode)
     // from an explicit zero value during a mixed-version rollout.
     optional int32 data_version = 13;
+    int64 mem_size = 14;
 }
 
 message ChannelVersionInfo {

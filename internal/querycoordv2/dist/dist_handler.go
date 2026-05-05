@@ -210,7 +210,10 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 				InsertChannel: s.GetChannel(),
 				Level:         s.GetLevel(),
 				IsSorted:      s.GetIsSorted(),
+				MemSize:       s.GetMemSize(),
 			}
+		} else {
+			segmentInfo.MemSize = s.GetMemSize()
 		}
 		updates = append(updates, &meta.Segment{
 			SegmentInfo:        segmentInfo,

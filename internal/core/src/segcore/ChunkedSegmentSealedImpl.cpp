@@ -557,7 +557,10 @@ ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     target_runtime->timestamp_index_slot.reset();
 
     stats_.mem_size += sizeof(Timestamp) * num_rows;
-
+    LOG_INFO("Adding timestamps raw with size {} for segment {} , mem_size= {}",
+             timestamps.size() * sizeof(Timestamp),
+             id_,
+             stats_.mem_size.load());
     if (owned_runtime != nullptr) {
         PublishRuntimeStateLocked(
             ToConstRuntimeState(std::move(owned_runtime)));
@@ -726,9 +729,12 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
         }
         next_runtime->vector_indexings[field_id] =
             BuildVectorIndexEntry(metric_type, std::move(info.cache_index));
-        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
+        LOG_INFO("index_mem_size: {}", info.index_mem_size);
+        stats_.mem_size += info.index_mem_size;
+        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, mem_size: {}",
                  info.field_id,
-                 id_);
+                 id_,
+                 stats_.mem_size.load());
         PublishIndexReadyLocked(field_id,
                                 request.has_raw_data,
                                 ToConstRuntimeState(std::move(next_runtime)));
@@ -2579,6 +2585,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            LOG_INFO("chunked_column_group->memory_size(): {}",
+                     chunked_column_group->memory_size());
             stats_.mem_size += chunked_column_group->memory_size();
         }
     }
